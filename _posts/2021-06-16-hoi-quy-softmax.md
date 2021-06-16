@@ -111,7 +111,7 @@ $$
     \right]
 $$
 
-Vì $z^{(n)}_k = \sum_{t=1}^{D} w_{k, t} x^{(n)}_t$ nên
+Vì $z^{(n)}\_k = \sum_{t=1}^{D} w_{k, t} x^{(n)}_t$ nên
 
 $$
     \dfrac{\partial}{\partial w_{i,j}} \mathcal{L}(\mathcal{D}, \mathbf{W})
