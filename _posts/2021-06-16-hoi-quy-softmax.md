@@ -153,7 +153,7 @@ Thêm giá trị hằng
 
 ```python
 X_ = np.ones((D+1, N))    # X_: (D+1, N)
-X_[:, 1:] = X
+X_[1:] = X
 ```
 
 Đưa ra dự đoán
@@ -166,6 +166,7 @@ h = softmax(z, axis=0)    # h: (C, N)
 ### Hướng ngược (backward)
 
 Ta muốn tìm ma trận `dW` bằng numpy sao cho phần tử tại vị trí $(i, j)$ của ma trận này bằng giá trị đạo hàm của hàm lỗi so với $w_{i, j}$, dựa trên công thức
+
 $$
     \dfrac{\partial}{\partial w_{i,j}} \mathcal{L}(\mathcal{D}, \mathbf{W})
     = \dfrac{1}{N}
