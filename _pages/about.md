@@ -16,7 +16,7 @@ selected_papers: true # includes a list of papers marked as "selected={true}"
 social: true  # includes social icons at the bottom of the page
 ---
 
-Greetings. :sparkle:
+Greetings. :heart_eyes:
 
 I am a first-year Ph.D student at the [University of Illinois at Urbana-Champaign](https://illinois.edu/) (UIUC). I received my Bacherlor degree from the Honors Program of the [Department of Information Technology](https://www.fit.hcmus.edu.vn/vn/), [University of Science](https://hcmus.edu.vn/), [Vietnam National University, Ho Chi Minh City](https://vnuhcm.edu.vn/) (VNU-HCMUS) in Nov 2020. In 2021-2022, I took graduate-level courses from a Master program at the [John Von Neumann Institute](http://www.jvn.edu.vn/), [Vietnam National University, Ho Chi Minh City](https://vnuhcm.edu.vn/) (JVN) but did not finish the degree.
 

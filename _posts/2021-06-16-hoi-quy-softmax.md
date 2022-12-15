@@ -1,10 +1,23 @@
 ---
-layout: post
+layout: distill
 title: Hồi quy Softmax hay Tôi đã tốn một buổi chiều thứ Tư như thế nào?
 date: 2021-06-16
 description:
-tags: 
+tags: math
 categories: 
+
+authors:
+  - name: The-Anh Vu-Le
+    affiliations:
+      name: 
+toc:
+  - name: Bài toán Phân lớp Đơn nhãn
+  - name: Mô hình Hồi quy Softmax
+  - name: Áp dụng
+  - name: Cài đặt
+    subsections:
+        - name: Hướng xuôi
+        - name: Hướng ngược
 ---
 
 ```
@@ -33,7 +46,7 @@ Hàm $$\sigma$$ được gọi là **hàm softmax**. Có thể thấy, ở đây
 
 Ta mong muốn tìm được $$\mathbf{W}$$ để $$h_c$$ xấp xỉ xác suất đầu vào $$\mathbf{x}$$ thuộc vào lớp $$c$$.
 
-## Áp dụng mô hình hồi quy softmax cho bài toán phân lớp đơn nhãn
+## Áp dụng
 
 Để làm được điều này, ta đưa nó về bài toán tìm $$\mathbf{W}$$ để tối thiểu hàm lỗi $$\mathcal{L}(\mathcal{D}, \mathbf{W})$$. Hàm lỗi được chọn ở đây là
 
@@ -141,9 +154,9 @@ $$
          x^{(n)}_j
 $$
 
-## Cài đặt (hay thứ tốn nhiều thời gian nghĩ nhất)
+## Cài đặt
 
-### Hướng xuôi (forward)
+### Hướng xuôi
 
 Có:
 
@@ -167,7 +180,7 @@ z = W @ X_                # z: (C, N)
 h = softmax(z, axis=0)    # h: (C, N)  
 ```
 
-### Hướng ngược (backward)
+### Hướng ngược
 
 Ta muốn tìm ma trận `dW` bằng numpy sao cho phần tử tại vị trí $$(i, j)$$ của ma trận này bằng giá trị đạo hàm của hàm lỗi so với $$w_{i, j}$$, dựa trên công thức
 

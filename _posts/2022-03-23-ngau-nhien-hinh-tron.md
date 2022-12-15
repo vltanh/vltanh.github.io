@@ -1,10 +1,22 @@
 ---
-layout: post
+layout: distill
 title:  Chọn ngẫu nhiên điểm trong hình tròn
 date: 2022-03-23
 description:
-tags: 
+tags: math
 categories: 
+
+authors:
+  - name: The-Anh Vu-Le
+    affiliations:
+      name: 
+toc:
+  - name: Câu hỏi
+  - name: Tiếp cận
+    subsections:
+        - name: Cách không đúng
+        - name: Lấy mẫu nghịch đảo
+        - name: Lấy mẫu từ chối
 ---
 
 ## Câu hỏi
@@ -15,7 +27,7 @@ Làm thế nào để chọn ngẫu nhiêu đều một điểm trong hình trò
   
 Không mất tính tổng quát, xét hình tròn tâm $$O(0, 0)$$, bán kính $$R = 1$$. Ta cần sinh điểm ngẫu nhiên thỏa yêu cầu đề bài.
 
-### Cách 1 (không đúng)
+### Cách không đúng
   
 Một cách ngây thơ, sẽ có người nghĩ đến việc sinh ngẫu nhiên trong hệ tọa độ cực trước bằng cách xét hai biến ngẫu nhiên
 
@@ -95,7 +107,7 @@ $$
 
 Có thể thấy mật độ điểm được chọn sẽ giảm đi khi càng ra xa tâm hình tròn ($$x^2 + y^2$$ càng lớn). Ngoài ra, cũng có thể thấy rõ là cách tiếp cận này không thỏa yêu cầu bài toán, vốn yêu cầu hàm mật độ phải là $$\pi^{-1}$$ bên trong hình tròn.
 
-### Cách 2
+### Lấy mẫu nghịch đảo
 
 Đến đây, có thể mọi người đã định hình một số cách tiếp cận trong đầu rồi. Mấu chốt ở đây là chúng ta không thể lấy phân bố $$R$$, hay khoảng cách đến tâm, một cách đều trên $$[0, 1]$$ được, mà những điểm ở xa tâm sẽ phải được "ưu ái" hơn để cân bằng với phần diện tích.
 
@@ -186,7 +198,7 @@ Kết quả thu được như hình bên dưới ($$N = 5000$$).
 
 {% include figure.html path="assets/img/2022-03-24_images/gen2.png" class="img-fluid" zoomable=true %}
   
-### Cách 3
+### Lấy mẫu từ chối
   
 Phần này xin chỉ ra một cách tiếp cận theo tư tưởng lấy mẫu từ chối (rejection sampling). Ý tưởng ở đây rất đơn giản:
 
