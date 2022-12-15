@@ -2,24 +2,24 @@
 layout: about
 title: about
 permalink: /
-subtitle: <a href='#'>Affiliations</a>. Address. Contacts. Moto. Etc.
+subtitle:
 
 profile:
   align: right
   image: prof_pic.jpg
   image_circular: false # crops the image to make it circular
   address: >
-    <p>555 your office number</p>
-    <p>123 your address street</p>
-    <p>Your City, State 12345</p>
+    <p>Urbana, Illinois, 61801</p>
 
 news: true  # includes a list of news items
 selected_papers: true # includes a list of papers marked as "selected={true}"
 social: true  # includes social icons at the bottom of the page
 ---
 
-Write your biography here. Tell the world about yourself. Link to your favorite [subreddit](http://reddit.com). You can put a picture in, too. The code is already in, just name your picture `prof_pic.jpg` and put it in the `img/` folder.
+Greetings. :sparkle:
 
-Put your address / P.O. box / other info right below your picture. You can also disable any these elements by editing `profile` property of the YAML header of your `_pages/about.md`. Edit `_bibliography/papers.bib` and Jekyll will render your [publications page](/al-folio/publications/) automatically.
+I am a first-year Ph.D student at the [University of Illinois at Urbana-Champaign](https://illinois.edu/) (UIUC). I received my Bacherlor degree from the Honors Program of the [Department of Information Technology](https://www.fit.hcmus.edu.vn/vn/), [University of Science](https://hcmus.edu.vn/), [Vietnam National University, Ho Chi Minh City](https://vnuhcm.edu.vn/) (VNU-HCMUS) in Nov 2020. In 2021-2022, I took graduate-level courses from a Master program at the [John Von Neumann Institute](http://www.jvn.edu.vn/), [Vietnam National University, Ho Chi Minh City](https://vnuhcm.edu.vn/) (JVN) but did not finish the degree.
 
-Link to your social media connections, too. This theme is set up to use [Font Awesome icons](http://fortawesome.github.io/Font-Awesome/) and [Academicons](https://jpswalsh.github.io/academicons/), like the ones below. Add your Facebook, Twitter, LinkedIn, Google Scholar, or just disable all of them.
+In my undergraduate years, I was a research assistant at the [Software Engineering Lab](https://www.selab.hcmus.edu.vn/), advised by Professor [Minh-Triet Tran](https://www.fit.hcmus.edu.vn/~tmtriet/). After graduation and before joing UIUC, I was a intern/resident at [VinAI Research](https://www.vinai.io/), advised by [Minh-Hoai Nguyen](https://www3.cs.stonybrook.edu/~minhhoai/), Tung Pham, [Viet-Anh Nguyen](http://www.vietanhnguyen.net/), [Nhat Ho](nhatptnk8912.github.io). All of the people mentioned are those to whom I owe a debt of gratitude.
+
+**Research** My main interest is the theoretical aspect of machine learning, especially of deep learning, generative models, reinforcement learning, etc.
