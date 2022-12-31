@@ -3,7 +3,7 @@ layout: distill
 title: Write-up for HCMUS-CTF Warm-Up Stage
 date: 2020-06-11
 description:
-tags: math
+tags: ctf
 categories:
 giscus_comments: true 
 ---
