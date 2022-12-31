@@ -111,7 +111,7 @@ $$
 
 Như vậy, các bô lão có thể đề xuất một **chiến thuật ngẫu nhiên** như sau: tìm phân phối xác suất của $T$ như trên và chọn ngẫu nhiên $t$ từ phân phối đó, cấp lương thực hàng ngày cho $t-1$ ngày đầu và cấp lương thực để tổng tấn công vào ngày thứ $t$. Chiến thuật này cho **tỉ lệ cạnh tranh là 1.535**, tốt hơn cả cho chiến thuật đơn định.
 
-# Tham khảo
+## Tham khảo
 
 1. [Online algorithms](http://cs.brown.edu/~claire/Talks/skirental.pdf): Ski rental, Brown University
 
