@@ -234,6 +234,9 @@ import random as rd
 g = 10.0
 v_max = 10.0 * np.sqrt(2)
 
+L_max = v_max**2 / g
+H_max = v_max**2 / (2 * g)
+
 num_throws = 50000
 
 def f(x, v, alpha): 
@@ -247,6 +250,8 @@ for _ in range(num_throws):
     Y = f(X, v_0, alpha)
     plt.plot(X, Y)
 
+plt.xlim(0, L_max)
+plt.ylim(0, H_max)
 plt.xticks([])
 plt.yticks([])
 plt.tight_layout()
