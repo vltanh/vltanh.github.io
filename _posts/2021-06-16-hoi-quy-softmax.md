@@ -4,7 +4,8 @@ title: Hồi quy Softmax hay Tôi đã tốn một buổi chiều thứ Tư như
 date: 2021-06-16
 description:
 tags: math
-categories: 
+categories:
+giscus_comments: true 
 
 authors:
   - name: The-Anh Vu-Le
