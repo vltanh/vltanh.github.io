@@ -52,13 +52,13 @@ Một chiến thuật trực tuyến tất định sẽ **chọn một ngày $t$
 Khi $D \geq t$, tỷ lệ sẽ là $(t-1+b)/\min(D,b)$ là một hàm giảm theo $D$. Như vậy, trường hợp xấu nhất xảy ra khi $D = t$ với tỷ lệ là
 
 $$
-    \dfrac{t-1+b}{\min(t,b)} = 1 + \dfrac{\max(t+b)}{\min(t,b)} - \dfrac{1}{\min(t,b)}
+    \dfrac{t-1+b}{\min(t,b)} = 1 + \dfrac{\max(t,b)}{\min(t,b)} - \dfrac{1}{\min(t,b)}
 $$
 
 Khi **$D < t$**, tỷ lệ sẽ là **$D/\min(D,b)$** là một hàm tăng theo $D$. Như vậy, **trường hợp xấu nhất** xảy ra khi **$D = t-1$** với tỷ lệ là
 
 $$
-    \dfrac{t-1}{\min(t-1,b)} \leq \dfrac{t}{\min(t-b)} < \dfrac{t-1+b}{\min(t,b)}
+    \dfrac{t-1}{\min(t-1,b)} \leq \dfrac{t}{\min(t,b)} < \dfrac{t-1+b}{\min(t,b)}
 $$
 
 Như vậy, trường hợp xấu nhất là khi **$D = t$** (nói cách khác, chiến dịch kết thúc ngay khi ta cấp lương thực cho một cuộc tổng tấn công). Vậy **tỷ lệ cạnh tranh** chính bằng
