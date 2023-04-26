@@ -1,7 +1,7 @@
 ---
 layout: distill
 title:  Máy Boltzmann (Phần 1)
-date: 2022-04-26
+date: 2023-04-26
 description:
 tags: math
 categories: 
