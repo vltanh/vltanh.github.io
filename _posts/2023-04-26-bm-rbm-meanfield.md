@@ -112,7 +112,7 @@ $$
 
 với $$H(q(h \\| v; \phi)) = - \mathbb{E}_{h \sim q(h \\| v; \phi)} \log q(h \\| v; \phi)$$ là entropy của $$q(h \\| v; \phi)$$.
 
-Việc tìm tham số $$\theta$$ để tối ưu log-likelihood trở thành việc tìm cặp tham số $$(\theta, \phi)$$ để tối ưu chặn dưới này.
+Việc tìm tham số $$\theta$$ để tối ưu log-likelihood trở thành việc tìm tham số $$\phi$$ để tối ưu chặn dưới này. Do $$q$$ nằm trong quyền kiểm soát của chúng ta nên việc này trở nên khả thi. Ngoài ra, có thể chứng minh được việc tìm $$\phi$$ để tối ưu chặn dưới này tương đương với việc tìm $$\phi$$ để xấp xỉ tốt nhất $$p(\cdot; \theta)$$ (theo phân kỳ Kullback-Leibler). Điều này cũng giải thích tại sao phương pháp này được gọi là suy diễn biến phân (variational inference). Phần tiếp theo sẽ trình bày cách tối ưu hàm chặn dưới này cho một trường hợp cụ thể.
 
 ### Xấp xỉ mean-field
 
