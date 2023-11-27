@@ -5,4 +5,4 @@ inline: true
 related_posts: false
 ---
 
-01 paper accepted to ACM MM 2023!
+1 paper accepted to ACM MM 2023!
