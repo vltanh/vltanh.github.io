@@ -7,5 +7,5 @@ nav_order: 4
 cv_pdf: The-Anh_Vu-Le_Resume.pdf
 description:
 toc:
-  sidebar: left
+  # sidebar: right
 ---
