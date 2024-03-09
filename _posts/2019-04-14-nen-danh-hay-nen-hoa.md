@@ -5,18 +5,18 @@ date: 2019-04-14
 description:
 tags: math
 categories:
-giscus_comments: true 
+giscus_comments: true
 
 authors:
   - name: The-Anh Vu-Le
     affiliations:
-      name: 
+      name:
 toc:
   - name: Bối cảnh
   - name: Tiếp cận
     subsections:
-        - name: Chiến thuật đơn định
-        - name: Chiến thuật ngẫu nhiên
+      - name: Chiến thuật đơn định
+      - name: Chiến thuật ngẫu nhiên
 ---
 
 ## Bối cảnh

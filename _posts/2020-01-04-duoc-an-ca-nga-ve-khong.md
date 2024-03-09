@@ -5,19 +5,19 @@ date: 2020-01-04
 description:
 tags: math
 categories:
-giscus_comments: true 
+giscus_comments: true
 
 authors:
   - name: The-Anh Vu-Le
     affiliations:
-      name: 
+      name:
 toc:
   - name: Bối cảnh
   - name: Tiếp cận
     subsections:
-        - name: Chiến thuật của Uyên
-        - name: Chiến thuật của Thức
-        - name: Nhận xét
+      - name: Chiến thuật của Uyên
+      - name: Chiến thuật của Thức
+      - name: Nhận xét
 ---
 
 ## Bối cảnh
@@ -52,9 +52,9 @@ Gọi $\mu(x)$ là xác suất để Uyên và Thức đạt mục tiêu trướ
 
 Một số điều ta biết về chiến thuật này:
 
-+ Do trò chơi kết thúc khi phá sản: $P(0, 0) = 1$
-+ Do trò chơi kết thúc khi đạt mục tiêu: $P(16, 16) = 1$
-+ Do mỗi lần chỉ đặt cược 1 đồng với xác suất thắng $p = 0.4$: $p_x = P(x, x+1) = 0.4, q_x = P(x, x-1) = 0.6, \forall x \in [1, 15]$
+- Do trò chơi kết thúc khi phá sản: $P(0, 0) = 1$
+- Do trò chơi kết thúc khi đạt mục tiêu: $P(16, 16) = 1$
+- Do mỗi lần chỉ đặt cược 1 đồng với xác suất thắng $p = 0.4$: $p_x = P(x, x+1) = 0.4, q_x = P(x, x-1) = 0.6, \forall x \in [1, 15]$
 
 Các xác suất chuyển trạng thái khác (không được nêu ở trên) đều bằng 0.
 
@@ -136,25 +136,25 @@ Với $p = 0.4$ ta tính được $\mu(5) \approx 0.01 = 1\%$.
 
 Theo chiến thuật của Thức, diễn tiến trò chơi sẽ như sau:
 
-+ Lượt 1: đặt 5 đồng
-  + Thắng: có 10 đồng
-  + Thua: phá sản
-+ Lượt 2 (chỉ khi thắng 1): đặt 6 đồng
-  + Thắng: đạt mục tiêu
-  + Thua: có 4 đồng
-+ Lượt 3 (chỉ khi thắng 1, thua 2): đặt 4 đồng
-  + Thắng: có 8 đồng
-  + Thua: phá sản
-+ Lượt 4 (chỉ khi thắng 1, thua 2, thắng 3): đặt 8 đồng
-  + Thắng: đạt mục tiêu
-  + Thua: phá sản
+- Lượt 1: đặt 5 đồng
+  - Thắng: có 10 đồng
+  - Thua: phá sản
+- Lượt 2 (chỉ khi thắng 1): đặt 6 đồng
+  - Thắng: đạt mục tiêu
+  - Thua: có 4 đồng
+- Lượt 3 (chỉ khi thắng 1, thua 2): đặt 4 đồng
+  - Thắng: có 8 đồng
+  - Thua: phá sản
+- Lượt 4 (chỉ khi thắng 1, thua 2, thắng 3): đặt 8 đồng
+  - Thắng: đạt mục tiêu
+  - Thua: phá sản
 
 Trò chơi chỉ có thể kéo dài tối đa 4 lượt như thế.
 
 Xác suất đạt mục tiêu lúc này là tổng xác suất các trường hợp:
 
-+ Thắng 1, thắng 2
-+ Thắng 1, thua 2, thắng 3, thắng 4
+- Thắng 1, thắng 2
+- Thắng 1, thua 2, thắng 3, thắng 4
 
 Như vậy xác suất đó là:
 

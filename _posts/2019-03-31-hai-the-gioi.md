@@ -5,20 +5,20 @@ date: 2019-03-31
 description:
 tags: math
 categories:
-giscus_comments: true 
+giscus_comments: true
 
 authors:
   - name: The-Anh Vu-Le
     affiliations:
-      name: 
+      name:
 toc:
   - name: Bối cảnh
   - name: Tiếp cận
     subsections:
-        - name: Phương trình quỹ đạo
-        - name: Tầm bay xa
-        - name: Tầm bay cao
-        - name: Tầm với/Phạm vi
+      - name: Phương trình quỹ đạo
+      - name: Tầm bay xa
+      - name: Tầm bay cao
+      - name: Tầm với/Phạm vi
   - name: Lời kết
   - name: Phụ lục
 ---
@@ -227,9 +227,9 @@ Nhân dịp làm đề Big Bang Online 2019, mình thấy câu này thú vị (v
 Đoạn mã nguồn để tạo ra bức tranh như trên:
 
 ```python
-import matplotlib.pyplot as plt 
-import numpy as np 
-import random as rd 
+import matplotlib.pyplot as plt
+import numpy as np
+import random as rd
 
 g = 10.0
 v_max = 10.0 * np.sqrt(2)
@@ -239,12 +239,12 @@ H_max = v_max**2 / (2 * g)
 
 num_throws = 50000
 
-def f(x, v, alpha): 
+def f(x, v, alpha):
     return -g / (2 * v**2 * np.cos(alpha)**2) * x**2 + np.tan(alpha) * x
-    
-for _ in range(num_throws): 
-    alpha = np.pi / 2.0 * rd.random() 
-    v_0 = v_max * rd.random() 
+
+for _ in range(num_throws):
+    alpha = np.pi / 2.0 * rd.random()
+    v_0 = v_max * rd.random()
     L = v_0**2 * np.sin(2 * alpha) / g
     X = np.linspace(0, L, 100)
     Y = f(X, v_0, alpha)

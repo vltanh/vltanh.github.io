@@ -1,35 +1,35 @@
 ---
 layout: distill
-title:  Chọn ngẫu nhiên điểm trong hình tròn
+title: Chọn ngẫu nhiên điểm trong hình tròn
 date: 2022-03-23
 description:
 tags: math
-categories: 
+categories:
 giscus_comments: true
 
 authors:
   - name: The-Anh Vu-Le
     affiliations:
-      name: 
+      name:
 toc:
   - name: Câu hỏi
   - name: Tiếp cận
     subsections:
-        - name: Cách không đúng
-        - name: Lấy mẫu nghịch đảo
-        - name: Lấy mẫu từ chối
+      - name: Cách không đúng
+      - name: Lấy mẫu nghịch đảo
+      - name: Lấy mẫu từ chối
 ---
 
 ## Câu hỏi
-  
+
 Làm thế nào để chọn ngẫu nhiêu đều một điểm trong hình tròn?
 
 ## Tiếp cận
-  
+
 Không mất tính tổng quát, xét hình tròn tâm $$O(0, 0)$$, bán kính $$R = 1$$. Ta cần sinh điểm ngẫu nhiên thỏa yêu cầu đề bài.
 
 ### Cách không đúng
-  
+
 Một cách ngây thơ, sẽ có người nghĩ đến việc sinh ngẫu nhiên trong hệ tọa độ cực trước bằng cách xét hai biến ngẫu nhiên
 
 - $$D$$: khoảng cách đến tâm hình tròn, phân bố đều trên $$[0, 1]$$, hay $$D \sim U(0, 1)$$,
@@ -47,10 +47,10 @@ Mã nguồn Python cho phương pháp này là như sau
 def gen1(N):
     # Random samples d's from U(0, 1)
     D = np.random.rand(N)
-    
+
     # Random samples theta's from U(0, 2 * pi)
     Theta = np.random.rand(N) * 2 * np.pi
-    
+
     # Transformation from polar to Cartesian coordinates
     X = D * np.cos(Theta)
     Y = D * np.sin(Theta)
@@ -185,10 +185,10 @@ def gen2(N):
     V = np.random.rand(N)
     # Calculate F_D^{-1}(v)
     D = np.sqrt(V)
-    
+
     # Random samples theta's from U(0, 2 * pi)
     Theta = np.random.rand(N) * 2 * np.pi
-    
+
     # Transformation from polar to Cartesian coordinates
     X = D * np.cos(Theta)
     Y = D * np.sin(Theta)
@@ -198,9 +198,9 @@ def gen2(N):
 Kết quả thu được như hình bên dưới ($$N = 5000$$).
 
 {% include figure.liquid path="assets/img/2022-03-24_images/gen2.png" class="img-fluid" zoomable=true %}
-  
+
 ### Lấy mẫu từ chối
-  
+
 Phần này xin chỉ ra một cách tiếp cận theo tư tưởng lấy mẫu từ chối (rejection sampling). Ý tưởng ở đây rất đơn giản:
 
 1. Lấy ngẫu nhiên $$x, y$$ từ $$U(-1, 1)$$

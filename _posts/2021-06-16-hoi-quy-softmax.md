@@ -5,20 +5,20 @@ date: 2021-06-16
 description:
 tags: math
 categories:
-giscus_comments: true 
+giscus_comments: true
 
 authors:
   - name: The-Anh Vu-Le
     affiliations:
-      name: 
+      name:
 toc:
   - name: Bài toán Phân lớp Đơn nhãn
   - name: Mô hình Hồi quy Softmax
   - name: Áp dụng
   - name: Cài đặt
     subsections:
-        - name: Hướng xuôi
-        - name: Hướng ngược
+      - name: Hướng xuôi
+      - name: Hướng ngược
 ---
 
 ```
@@ -178,7 +178,7 @@ X_[1:] = X
 
 ```python
 z = W @ X_                # z: (C, N)
-h = softmax(z, axis=0)    # h: (C, N)  
+h = softmax(z, axis=0)    # h: (C, N)
 ```
 
 ### Hướng ngược
