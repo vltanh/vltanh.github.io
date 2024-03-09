@@ -59,7 +59,7 @@ def gen1(N):
 
 Làm theo cách này, kết quả thu được sẽ như hình dưới ($$N = 5000$$).
 
-{% include figure.html path="assets/img/2022-03-24_images/gen1.png" class="img-fluid" zoomable=true %}
+{% include figure.liquid path="assets/img/2022-03-24_images/gen1.png" class="img-fluid" zoomable=true %}
 
 Nếu để ý kỹ, mọi người sẽ nhận ra có một vấn đề với cách tiếp cận này: Có vẻ như là các điểm được chọn co cụm về tâm nhiều hơn.
 
@@ -197,7 +197,7 @@ def gen2(N):
 
 Kết quả thu được như hình bên dưới ($$N = 5000$$).
 
-{% include figure.html path="assets/img/2022-03-24_images/gen2.png" class="img-fluid" zoomable=true %}
+{% include figure.liquid path="assets/img/2022-03-24_images/gen2.png" class="img-fluid" zoomable=true %}
   
 ### Lấy mẫu từ chối
   
