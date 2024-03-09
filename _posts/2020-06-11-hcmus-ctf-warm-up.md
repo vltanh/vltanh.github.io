@@ -40,7 +40,7 @@ As the title suggests, check the [logo](https://ctf.hcmus.edu.vn/files/5cb899f19
 
 Like this:
 
-{% include figure.html path="assets/img/2020-06-11_images/Logo.png" class="img-fluid" zoomable=true %}
+{% include figure.liquid path="assets/img/2020-06-11_images/Logo.png" class="img-fluid" zoomable=true %}
 
 **==>** `HCMUS-CTF{this_is_a_function_not_a_bug_at_all}` **<==**
 
@@ -107,7 +107,7 @@ https://drive.google.com/open?id=1tfJYN6wwd-yoAfnfVl-eNBKbbh6HQBxa
 
 Use `audacity` to load the WAV file. It is common to hide the message in the Spectrogram format so we switch to that view. Check 1:41 to 1:47. Voila?
 
-{% include figure.html path="assets/img/2020-06-11_images/galaxy.png" class="img-fluid" zoomable=true %}
+{% include figure.liquid path="assets/img/2020-06-11_images/galaxy.png" class="img-fluid" zoomable=true %}
 
 **==>** `HCMUS-CTF{sound_likes_Outer_Space}` **<==**
 
@@ -138,7 +138,7 @@ File: unknown
 
 Now this one is real funny. `hexdump -C unknown` shows that it is a PNG image. However it is corrupted somehow. Normal people might use [PCRT](https://github.com/sherlly/PCRT) for this b...but... I used [this non-free service](https://online.officerecovery.com/pixrecovery/) instead. And it gave me a watermarked version. Luckily I was able to make out the flag (can you?).
 
-{% include figure.html path="assets/img/2020-06-11_images/unknown.png" class="img-fluid" zoomable=true %}
+{% include figure.liquid path="assets/img/2020-06-11_images/unknown.png" class="img-fluid" zoomable=true %}
 
 **==>** `HCMUS-CTF{l0l_CMU_da_b3s}` **<==**
 
