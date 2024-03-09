@@ -5,12 +5,12 @@ date: 2019-03-29
 description:
 tags: math
 categories:
-giscus_comments: true 
+giscus_comments: true
 
 authors:
   - name: The-Anh Vu-Le
     affiliations:
-      name: 
+      name:
 toc:
   - name: Bối cảnh
   - name: Phân tích
@@ -58,17 +58,20 @@ Ta tính các xác suất thắng khi chỉ còn hai người chơi, tức các 
   - $P(D \mid DV) = 0.8 \times 1 + 0.2  P(D \mid VD) = 0.8$;
   - $P(L \mid DV) = 0$.
 - DL: Đỏ nhắm bắn Lam. Tương tự, 0.8 khả năng Đỏ thắng và 0.2 khả năng thứ tự trở thành LD. Lúc này, Lam sẽ nhắm Đỏ, với 0.5 khả năng Lam thắng và 0.5 khả năng thứ tự quay lại DL.
+
   - $P(V \mid DL) = 0$;
   - $P(D \mid DL) = 0.8 \times 1 + 0.2  P(D \mid LD)$
 
   $= 0.8 + 0.2 [0.5 \times 0 + 0.5  P(D \mid DL)]$
 
   $\Rightarrow P(D \mid DL) = 8/9$;
+
   - $P(L \mid DL) = 0.8 \times 0 + 0.2  P(L \mid LD)$
-  
+
   $= 0.2 [0.5 \times 1 + 0.5  P(L \mid DL)]$
-  
+
   $\Rightarrow P(L \mid DL) = 1/9$.
+
 - LD: Lam sẽ bắn Đỏ, với 0.5 khả năng Lam thắng và 0.5 khả năng thứ tự trở thành DL.
   - \$P(V \mid LD) = 0\$;
   - $P(D \mid LD) = 0.5 \times 0 + 0.5 P(D \mid DL) = 4/9$;
@@ -81,13 +84,13 @@ Ta tính các xác suất thắng khi chỉ còn hai người chơi, tức các 
 Ta tổng kết lại thành bảng sau:
 
 |        | **V** | **D** | **L** |
-|--------|-------|-------|-------|
-| **VL** |   1   |   0   |   0   |
-| **VD** |   1   |   0   |   0   |
-| **DV** |  1/5  |  4/5  |   0   |
-| **DL** |   0   |  8/9  |  1/9  |
-| **LD** |   0   |  4/9  |  5/9  |
-| **LV** |  1/2  |   0   |  1/2  |
+| ------ | ----- | ----- | ----- |
+| **VL** | 1     | 0     | 0     |
+| **VD** | 1     | 0     | 0     |
+| **DV** | 1/5   | 4/5   | 0     |
+| **DL** | 0     | 8/9   | 1/9   |
+| **LD** | 0     | 4/9   | 5/9   |
+| **LV** | 1/2   | 0     | 1/2   |
 
 Dựa vào kết quả trên, ta tính xác suất thắng cho ba người bằng cách tính xác suất thắng cho xạ thủ đầu tiên trong thứ tự bắn, với mỗi xạ thủ có 3 lựa chọn là bắn 1 trong 2 người còn lại hoặc bỏ lượt. Có $3! = 6$ thứ tự bắn có thể VDL, VLD, DVL, LVD, DLV, LDV.
 
@@ -146,9 +149,9 @@ $$
 Ta tổng kết lại thành bảng:
 
 |                   | **V** | **D** | **L** |
-|-------------------|-------|-------|-------|
-| **VDL, VLD, LVD** |  1/2  |   0   |  1/2  |
-| **DVL, DLV, LDV** |  1/10 | 16/45 | 49/90 |
+| ----------------- | ----- | ----- | ----- |
+| **VDL, VLD, LVD** | 1/2   | 0     | 1/2   |
+| **DVL, DLV, LDV** | 1/10  | 16/45 | 49/90 |
 
 Với việc gieo xúc xắc để quyết định 1 trong 6 thứ tự trên, ta có xác suất thắng của xạ thủ là:
 
