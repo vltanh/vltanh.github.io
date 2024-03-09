@@ -36,7 +36,7 @@ Just check the posts on the fanpage (you need not actually follow it). [This one
 Hmmm, a client has complained that our website is f*cking ugly. Hey, we are hackers, not developers. There is no formal at all. The only thing you need to know is ETHICAL.
 ```
 
-As the title suggests, check the [logo](assets/img/2020-06-11_images/Logo.png) but on a light-colored background to see the hidden flag blended in the website color.
+As the title suggests, check the logo but on a light-colored background to see the hidden flag blended in the website color.
 
 Like this:
 
