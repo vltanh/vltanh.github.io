@@ -36,7 +36,7 @@ Just check the posts on the fanpage (you need not actually follow it). [This one
 Hmmm, a client has complained that our website is f*cking ugly. Hey, we are hackers, not developers. There is no formal at all. The only thing you need to know is ETHICAL.
 ```
 
-As the title suggests, check the [logo](https://ctf.hcmus.edu.vn/files/5cb899f198c05639132f5da2061aedde/Logo.png) but on a light-colored background to see the hidden flag blended in the website color.
+As the title suggests, check the [logo](assets/img/2020-06-11_images/Logo.png) but on a light-colored background to see the hidden flag blended in the website color.
 
 Like this:
 
@@ -316,7 +316,7 @@ File: pub_gen.py
 File: publickey.pem
 ```
 
-Yeah, small prime. I actually followed [this process](https://www.cryptool.org/en/cto-highlights/rsa-step-by-step) for this RSA problem. Also, I used [this](https://www.alpertron.com.ar/ECM.HTM) for factorization and [this](https://www.dcode.fr/modular-inverse) for finding modular inverse.
+Yeah, small prime. I actually followed [this process](https://www.cryptool.org/en/cto/rsa-step-by-step) for this RSA problem. Also, I used [this](https://www.alpertron.com.ar/ECM.HTM) for factorization and [this](https://www.dcode.fr/modular-inverse) for finding modular inverse.
 
 **==>** `HCMUS-CTF{smaLL_NumbeR}` **<==**
 
