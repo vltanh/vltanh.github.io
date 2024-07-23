@@ -18,7 +18,7 @@ social: true # includes social icons at the bottom of the page
 
 Greetings. :heart_eyes:
 
-I am a third-year Ph.D. student at the [University of Illinois at Urbana-Champaign](https://illinois.edu/) (UIUC). 
+I am a third-year Ph.D. student at the [University of Illinois at Urbana-Champaign](https://illinois.edu/) (UIUC).
 
 I recently found myself thrown into the world of network science, particularly in modeling and community detection in complex networks. I am blessed to be advised by Professor [Tandy Warnow](https://tandy.cs.illinois.edu/), who is both a great mentor and scientist.
 
