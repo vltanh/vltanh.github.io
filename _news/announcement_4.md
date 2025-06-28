@@ -1,8 +1,8 @@
 ---
 layout: post
-date: 2025-02-05 09:00:00-0000
+date: 2024-12-11 16:49:00-0000
 inline: true
 related_posts: false
 ---
 
-Submitted 3 manuscripts to different journals! Fingers crossed! 🤞
+Passed the PhD Qualifying Exam! 🎉

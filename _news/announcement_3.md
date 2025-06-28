@@ -5,4 +5,4 @@ inline: true
 related_posts: false
 ---
 
-2 papers accepted to CNA 2024!
+2 papers (SBM+WCC, RECCS) accepted to [Complex Networks & Their Applications](https://complexnetworks.org/) 2024
