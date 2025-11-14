@@ -35,7 +35,7 @@ Cho một góc bất kỳ, làm thế nào để chia đôi góc đó chỉ sử
 
 ### Phát biểu chi tiết
 
-Giả sử ta có ba điểm $$O$$, $$A$$ và $$B$$ không thẳng hàng trên mặt phẳng Euclid. Ba điểm này xác định một góc $$x = \angle AOB$$. Bài toán đặt ra là tìm điểm $$C$$ sao cho tia $$OC$$ chia đôi góc $$\angle AOB$$, tức
+Giả sử ta có ba điểm $$O$$, $$A$$ và $$B$$ không thẳng hàng trên mặt phẳng Euclid. Ba điểm này xác định một góc $$x = \angle AOB$$. Bài toán đặt ra là tìm điểm $$C$$ sao cho tia $$OC$$ chia đôi góc giữa tia $$OA$$ và $$OB$$, hay nói cách khác là sao cho
 
 $$
     \angle AOC = \angle BOC = \frac{\angle AOB}{2} = \frac{x}{2}.
