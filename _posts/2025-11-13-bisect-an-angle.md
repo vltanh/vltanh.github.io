@@ -46,7 +46,7 @@ $$
 Để tìm được điểm $$C$$, ta chỉ được sử dụng hai công cụ là thước thẳng và compa. Cụ thể, ta chỉ có thể thực hiện các thao tác dựng hình cơ bản sau:
 
 1. Chọn hai điểm $$A$$ và $$B$$ khác nhau bất kì. Vẽ một đường thẳng đi qua hai điểm bất kỳ $$A$$ và $$B$$. Đường thẳng này có thể kéo dài vô hạn về hai phía. Hãy hình dung việc đặt thước thẳng qua hai điểm $$A$$ và $$B$$, sau đó vẽ đường thẳng dọc theo cạnh thước.
-2. Chọn ba điểm $$A$$, $$B$$ và $$C$$ không nhất thiết khác nhau bất kì. Vẽ một đường tròn với tâm tại điểm $$C$$ và bán kính là khoảng cách giữa hai điểm $$A$$ và $$B$$. Hãy hình dung việc mở rộng compa bằng khoảng cách giữa hai điểm $$A$$ và $$B$$, sau đó vẽ đường tròn với tâm tại $$C$$.
+2. Chọn ba điểm $$A$$, $$B$$ và $$C$$ không nhất thiết khác nhau bất kì. Vẽ một đường tròn với tâm tại điểm $$C$$ và bán kính là khoảng cách giữa hai điểm $$A$$ và $$B$$. Hãy hình dung việc mở rộng compa cho đến ngang bằng khoảng cách giữa hai điểm $$A$$ và $$B$$, sau đó vẽ đường tròn với tâm tại $$C$$.
 3. Thêm giao điểm giữa hai đường thẳng, hoặc giữa hai đường tròn, hoặc giữa một đường thẳng và một đường tròn vào tập hợp các điểm mà ta có thể sử dụng trong các bước tiếp theo.
 
 {% include figure.liquid path="assets/img/2025-11-13_images/bai-toan.png" class="img-fluid" zoomable=true %}
