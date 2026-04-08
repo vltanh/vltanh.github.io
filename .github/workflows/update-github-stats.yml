@@ -1,0 +1,65 @@
+name: Update GitHub Stats Cards
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-cards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate GitHub stats cards
+        run: |
+          python3 - <<'EOF'
+          import yaml, subprocess, os, sys
+
+          with open("_data/repositories.yml") as f:
+              data = yaml.safe_load(f)
+
+          os.makedirs("assets/img/github-stats", exist_ok=True)
+          BASE = "https://github-readme-stats.vercel.app"
+
+          users = data.get("github_users", [])
+          repos = data.get("github_repos", [])
+          themes = [("default", "light"), ("dark", "dark")]
+
+          # User stats cards
+          for user in users:
+              for theme, suffix in themes:
+                  url = f"{BASE}/api/?username={user}&show_icons=true&theme={theme}&locale=en"
+                  path = f"assets/img/github-stats/{user}-stats-{suffix}.svg"
+                  r = subprocess.run(["curl", "-sf", url, "-o", path])
+                  if r.returncode != 0:
+                      print(f"Warning: failed to fetch {path}", file=sys.stderr)
+
+          # Repo pin cards
+          for full_repo in repos:
+              owner, repo = full_repo.split("/")
+              show_owner = "false" if owner in users else "true"
+              slug = f"{owner}-{repo}"
+              for theme, suffix in themes:
+                  url = (
+                      f"{BASE}/api/pin/?username={owner}&repo={repo}"
+                      f"&theme={theme}&locale=en"
+                      f"&show_owner={show_owner}&description_lines_count=2"
+                  )
+                  path = f"assets/img/github-stats/{slug}-{suffix}.svg"
+                  r = subprocess.run(["curl", "-sf", url, "-o", path])
+                  if r.returncode != 0:
+                      print(f"Warning: failed to fetch {path}", file=sys.stderr)
+
+          EOF
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add assets/img/github-stats/
+          git commit -m "Update GitHub stats cards" || exit 0
+          git push
