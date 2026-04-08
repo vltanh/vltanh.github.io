@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>2026 FIDE Candidates — Monte Carlo Predictions</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d0f1a;
+      color: #dde3ef;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+
+    a { color: #7ec8e3; }
+
+    /* ── layout ── */
+    .page { max-width: 1080px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+
+    .header {
+      text-align: center;
+      margin-bottom: 2.5rem;
+      padding-bottom: 1.5rem;
+      border-bottom: 1px solid #2a2f45;
+    }
+    .header h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: #f5e27a;
+    }
+    .header .subtitle {
+      color: #8a93b2;
+      margin-top: 0.35rem;
+      font-size: 0.93rem;
+    }
+    .badge {
+      display: inline-block;
+      background: #1f2640;
+      border: 1px solid #3a4260;
+      color: #a0aec0;
+      padding: 0.15rem 0.6rem;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      margin-top: 0.5rem;
+    }
+
+    section { margin-bottom: 2.5rem; }
+    section h2 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: #c8d0e7;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 1rem;
+      padding-bottom: 0.4rem;
+      border-bottom: 1px solid #1e2438;
+    }
+
+    .card {
+      background: #131728;
+      border: 1px solid #1e2438;
+      border-radius: 10px;
+      padding: 1.25rem;
+    }
+
+    /* ── chart containers ── */
+    .chart-wrap { position: relative; }
+    .chart-wrap.tall { height: 380px; }
+    .chart-wrap.medium { height: 280px; }
+
+    /* ── standings table ── */
+    .standings-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+    @media (max-width: 680px) { .standings-grid { grid-template-columns: 1fr; } }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    thead th {
+      text-align: left;
+      color: #6b7494;
+      font-weight: 600;
+      font-size: 0.76rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 0.4rem 0.5rem;
+      border-bottom: 1px solid #1e2438;
+    }
+    tbody tr { border-bottom: 1px solid #191d30; }
+    tbody tr:last-child { border-bottom: none; }
+    tbody td { padding: 0.55rem 0.5rem; vertical-align: middle; }
+    tbody tr:hover { background: #191e35; }
+
+    .rank-num { color: #6b7494; font-size: 0.82rem; min-width: 1.4rem; }
+    .rank-num.top { color: #f5e27a; font-weight: 700; }
+
+    .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; flex-shrink: 0; }
+    .player-cell { display: flex; align-items: center; }
+    .player-name { font-weight: 500; }
+
+    .score-cell { font-weight: 700; font-size: 1rem; color: #e8eaf6; }
+    .win-pct { color: #a0aec0; font-size: 0.83rem; }
+    .win-pct.high { color: #f5e27a; font-weight: 600; }
+
+    .bar-mini {
+      height: 5px;
+      border-radius: 3px;
+      background: #1e2438;
+      margin-top: 3px;
+      overflow: hidden;
+    }
+    .bar-mini-fill { height: 100%; border-radius: 3px; }
+
+    /* ── game cards ── */
+    .games-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+      gap: 0.75rem;
+    }
+    .game-card {
+      background: #131728;
+      border: 1px solid #1e2438;
+      border-radius: 8px;
+      padding: 0.9rem 1rem;
+    }
+    .game-vs {
+      font-size: 0.82rem;
+      color: #6b7494;
+      margin-bottom: 0.4rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .game-players {
+      font-weight: 600;
+      font-size: 0.95rem;
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .game-players .sep { color: #6b7494; font-weight: 400; font-size: 0.8rem; }
+    .prob-row {
+      display: flex;
+      font-size: 0.8rem;
+      gap: 0.25rem;
+      margin-bottom: 0.35rem;
+    }
+    .prob-bar {
+      height: 28px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 0.78rem;
+      color: #0d0f1a;
+      transition: flex 0.3s;
+    }
+    .prob-bar.win  { background: #4fc3f7; }
+    .prob-bar.draw { background: #8a93b2; color: #e8eaf6; }
+    .prob-bar.loss { background: #ff6b6b; }
+    .prob-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.75rem;
+      color: #6b7494;
+      margin-top: 0.2rem;
+    }
+    .prob-labels span:nth-child(2) { color: #8a93b2; }
+
+    /* ── rank heatmap ── */
+    .heatmap-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    .heatmap-table th {
+      text-align: center;
+      color: #6b7494;
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 0.3rem 0.4rem;
+      border-bottom: 1px solid #1e2438;
+    }
+    .heatmap-table th:first-child { text-align: left; }
+    .heatmap-table td {
+      text-align: center;
+      padding: 0.3rem 0.4rem;
+      border-bottom: 1px solid #191d30;
+    }
+    .heatmap-table td:first-child { text-align: left; }
+    .heatmap-cell {
+      display: inline-block;
+      width: 100%;
+      padding: 0.2rem 0.3rem;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+
+    /* ── note ── */
+    .note {
+      font-size: 0.78rem;
+      color: #4a5278;
+      margin-top: 0.75rem;
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ── Header ── -->
+  <div class="header">
+    <h1>2026 FIDE Candidates Tournament</h1>
+    <div class="subtitle">Monte Carlo win probability tracker &nbsp;·&nbsp; 1,000,000 simulations per round</div>
+    <span class="badge">Updated through Round 8 &nbsp;·&nbsp; Round 9 upcoming</span>
+  </div>
+
+  <!-- ── Win Probability Timeline ── -->
+  <section>
+    <h2>Win Probability Over Time</h2>
+    <div class="card">
+      <div class="chart-wrap tall">
+        <canvas id="timelineChart"></canvas>
+      </div>
+      <p class="note">Each data point is recomputed from 1M simulations after the respective round's games are known.</p>
+    </div>
+  </section>
+
+  <!-- ── Standings + Win % ── -->
+  <section>
+    <h2>Current Standings — After Round 8</h2>
+    <div class="standings-grid">
+      <div class="card">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Player</th>
+              <th>Score</th>
+              <th>Win %</th>
+            </tr>
+          </thead>
+          <tbody id="standingsBody"></tbody>
+        </table>
+      </div>
+      <div class="card">
+        <div class="chart-wrap medium">
+          <canvas id="winPctChart"></canvas>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Round 9 Predictions ── -->
+  <section>
+    <h2>Round 9 — Game Predictions</h2>
+    <div class="games-grid" id="gamesGrid"></div>
+  </section>
+
+  <!-- ── Rank Distribution ── -->
+  <section>
+    <h2>Final Rank Distribution — After Round 8</h2>
+    <div class="card">
+      <table class="heatmap-table" id="rankTable"></table>
+      <p class="note">Cell color intensity = probability of finishing in that rank position. Darker = higher probability.</p>
+    </div>
+  </section>
+
+  <!-- ── Expected Score Timeline ── -->
+  <section>
+    <h2>Expected Final Score Over Time</h2>
+    <div class="card">
+      <div class="chart-wrap tall">
+        <canvas id="expScoreChart"></canvas>
+      </div>
+      <p class="note">Expected total score (out of 14) via simulation. Actual score is included once rounds are played.</p>
+    </div>
+  </section>
+
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+// DATA
+// ═══════════════════════════════════════════════════════
+
+const PLAYERS = [
+  { key: "Sindarov, Javokhir",  short: "Sindarov",   color: "#f5e27a" },
+  { key: "Caruana, Fabiano",    short: "Caruana",    color: "#4fc3f7" },
+  { key: "Giri, Anish",         short: "Giri",       color: "#81c784" },
+  { key: "Nakamura, Hikaru",    short: "Nakamura",   color: "#ff8a65" },
+  { key: "Wei, Yi",             short: "Wei Yi",     color: "#ce93d8" },
+  { key: "Praggnanandhaa R",    short: "Pragg",      color: "#80deea" },
+  { key: "Bluebaum, Matthias",  short: "Bluebaum",  color: "#ffb74d" },
+  { key: "Esipenko, Andrey",    short: "Esipenko",   color: "#ef9a9a" },
+];
+
+// Win probabilities entering each round (roundN.json = predictions entering round N)
+// Index 0 = before R1, index 1 = after R1, …, index 8 = after R8
+const WIN_PROBS = {
+  "Sindarov, Javokhir":  [0.16149, 0.235446, 0.229989, 0.320034, 0.511483, 0.6224,   0.787907, 0.805573, 0.858495],
+  "Caruana, Fabiano":    [0.215471, 0.324087, 0.333416, 0.44113, 0.24882,  0.281467, 0.168064, 0.158627, 0.083021],
+  "Giri, Anish":         [0.112538, 0.047991, 0.045511, 0.034274, 0.066904, 0.036421, 0.020779, 0.014505, 0.039694],
+  "Nakamura, Hikaru":    [0.18732,  0.091112, 0.086984, 0.059239, 0.054863, 0.009834, 0.003792, 0.002426, 0.007515],
+  "Wei, Yi":             [0.126208, 0.10944,  0.100832, 0.038715, 0.034521, 0.019813, 0.002744, 0.006499, 0.005592],
+  "Praggnanandhaa R":    [0.056778, 0.097011, 0.106079, 0.039663, 0.035783, 0.018795, 0.01095,  0.008658, 0.00242],
+  "Bluebaum, Matthias":  [0.085175, 0.071578, 0.074211, 0.050366, 0.042628, 0.009022, 0.004719, 0.003587, 0.00322],
+  "Esipenko, Andrey":    [0.05502,  0.023335, 0.022978, 0.016579, 0.004998, 0.002248, 0.001045, 0.000125, 0.000043],
+};
+
+// Expected final scores (out of 14) entering each round
+const EXP_SCORES = {
+  "Sindarov, Javokhir":  [7.3277875, 7.82861,  7.7582055, 8.2950635, 8.846418,  9.40213,   9.921974,  9.8599625, 9.738559],
+  "Caruana, Fabiano":    [7.5951145, 8.1542025, 8.122661, 8.617286,  8.069521,  8.530188,  8.367682,  8.326161,  7.8095695],
+  "Giri, Anish":         [7.000616, 6.394609,  6.41707,  6.4642935, 6.982169,  6.9377145, 6.8928425, 6.9601115, 7.45063],
+  "Nakamura, Hikaru":    [7.410054, 6.8658275, 6.8209725, 6.7649805, 6.765249,  6.2133035, 6.1358435, 6.1127375, 6.6359325],
+  "Wei, Yi":             [7.0691725, 7.067412, 6.996778,  6.506518,  6.496515,  6.5259565, 6.014196,  6.5133495, 6.488555],
+  "Praggnanandhaa R":    [6.398226, 6.9955945, 7.0722585, 6.5472765, 6.6013365, 6.5850005, 6.6650715, 6.72114,   6.2275455],
+  "Bluebaum, Matthias":  [6.8079755, 6.8081715, 6.8796295, 6.8090475, 6.789101,  6.3227055, 6.3632365, 6.3868445, 6.406995],
+  "Esipenko, Andrey":    [6.391054, 5.885573,  5.932425,  5.9955345, 5.4496905, 5.4830015, 5.6391540, 5.1196935, 5.2422135],
+};
+
+// Actual cumulative scores after each round (computed from results)
+const ACTUAL_SCORES = {
+  "Sindarov, Javokhir":  [0, 1, 1.5, 2.5, 3.5, 4.5, 5.5, 6, 6.5],
+  "Caruana, Fabiano":    [0, 1, 1.5, 2.5, 2.5, 3.5, 4,   4.5, 4.5],
+  "Giri, Anish":         [0, 0, 0.5, 1,   2,   2.5, 3,   3.5, 4.5],
+  "Nakamura, Hikaru":    [0, 0, 0.5, 1,   1.5, 1.5, 2,   2.5, 3.5],
+  "Wei, Yi":             [0, 0.5, 1, 1,   1.5, 2,   2,   3,   3.5],
+  "Praggnanandhaa R":    [0, 1, 1.5, 1.5, 2,   2.5, 3,   3.5, 3.5],
+  "Bluebaum, Matthias":  [0, 0.5, 1, 1.5, 2,   2,   2.5, 3,   3.5],
+  "Esipenko, Andrey":    [0, 0, 0.5, 1,   1,   1.5, 2,   2,   2.5],
+};
+
+// Rank matrix from round9.json (after round 8)
+const RANK_MATRIX = {
+  "Sindarov, Javokhir":  [0.858495, 0.105552, 0.026314, 0.007128, 0.001963, 0.000470, 0.000077, 0.000001],
+  "Caruana, Fabiano":    [0.083021, 0.380347, 0.238045, 0.138789, 0.082349, 0.047482, 0.023165, 0.006802],
+  "Giri, Anish":         [0.039694, 0.281726, 0.259978, 0.179006, 0.117996, 0.073523, 0.037305, 0.010772],
+  "Nakamura, Hikaru":    [0.007515, 0.071955, 0.150309, 0.189876, 0.187160, 0.173103, 0.145013, 0.075069],
+  "Wei, Yi":             [0.005592, 0.054218, 0.107685, 0.151467, 0.181432, 0.194142, 0.187822, 0.117642],
+  "Praggnanandhaa R":    [0.002420, 0.036671, 0.083120, 0.133836, 0.171667, 0.199670, 0.222331, 0.150285],
+  "Bluebaum, Matthias":  [0.003220, 0.065741, 0.119843, 0.164864, 0.190951, 0.193729, 0.169954, 0.091698],
+  "Esipenko, Andrey":    [0.000043, 0.003790, 0.014706, 0.035034, 0.066482, 0.117881, 0.214333, 0.547731],
+};
+
+// Round 9 game predictions [white_win, draw, black_win]
+const R9_GAMES = [
+  { white: "Nakamura, Hikaru",   black: "Esipenko, Andrey",  probs: [0.34865, 0.455013, 0.196337] },
+  { white: "Caruana, Fabiano",   black: "Giri, Anish",       probs: [0.384555, 0.405151, 0.210294] },
+  { white: "Praggnanandhaa R",   black: "Wei, Yi",           probs: [0.252905, 0.438562, 0.308533] },
+  { white: "Bluebaum, Matthias", black: "Sindarov, Javokhir",probs: [0.210231, 0.462983, 0.326786] },
+];
+
+const LABELS = ["Before R1","After R1","After R2","After R3","After R4","After R5","After R6","After R7","After R8"];
+
+// ═══════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════
+
+function getColor(key) {
+  return PLAYERS.find(p => p.key === key)?.color ?? "#888";
+}
+function getShort(key) {
+  return PLAYERS.find(p => p.key === key)?.short ?? key;
+}
+
+function pct(v, decimals = 1) {
+  return (v * 100).toFixed(decimals) + "%";
+}
+
+// Heatmap cell background color based on value (0..1)
+function heatColor(v, playerKey) {
+  const base = getColor(playerKey);
+  // parse hex -> rgba with alpha
+  const hex = base.replace("#","");
+  const r = parseInt(hex.slice(0,2),16);
+  const g = parseInt(hex.slice(2,4),16);
+  const b = parseInt(hex.slice(4,6),16);
+  const alpha = Math.min(1, v * 2.5 + 0.05);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function hexToRgb(hex) {
+  hex = hex.replace("#","");
+  return [parseInt(hex.slice(0,2),16), parseInt(hex.slice(2,4),16), parseInt(hex.slice(4,6),16)];
+}
+
+// ═══════════════════════════════════════════════════════
+// CHART.JS DEFAULTS
+// ═══════════════════════════════════════════════════════
+
+Chart.defaults.color = "#8a93b2";
+Chart.defaults.borderColor = "#1e2438";
+Chart.defaults.font.family = "'Segoe UI', system-ui, sans-serif";
+
+// ═══════════════════════════════════════════════════════
+// 1. WIN PROBABILITY TIMELINE
+// ═══════════════════════════════════════════════════════
+
+const timelineCtx = document.getElementById("timelineChart").getContext("2d");
+
+// Sort players by latest win prob descending
+const sortedPlayers = [...PLAYERS].sort((a,b) => WIN_PROBS[b.key][8] - WIN_PROBS[a.key][8]);
+
+new Chart(timelineCtx, {
+  type: "line",
+  data: {
+    labels: LABELS,
+    datasets: sortedPlayers.map(p => ({
+      label: p.short,
+      data: WIN_PROBS[p.key].map(v => +(v * 100).toFixed(2)),
+      borderColor: p.color,
+      backgroundColor: p.color + "18",
+      borderWidth: 2.5,
+      pointRadius: 4,
+      pointHoverRadius: 6,
+      pointBackgroundColor: p.color,
+      tension: 0.35,
+      fill: false,
+    }))
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: "index", intersect: false },
+    scales: {
+      x: {
+        grid: { color: "#1a1f35" },
+        ticks: { font: { size: 11 } }
+      },
+      y: {
+        grid: { color: "#1a1f35" },
+        ticks: {
+          callback: v => v + "%",
+          font: { size: 11 }
+        },
+        title: { display: true, text: "Win Probability (%)", color: "#6b7494" }
+      }
+    },
+    plugins: {
+      legend: {
+        position: "bottom",
+        labels: { boxWidth: 12, padding: 14, font: { size: 12 } }
+      },
+      tooltip: {
+        callbacks: {
+          label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}%`
+        }
+      }
+    }
+  }
+});
+
+// ═══════════════════════════════════════════════════════
+// 2. STANDINGS TABLE + WIN% BAR CHART
+// ═══════════════════════════════════════════════════════
+
+// Sort by: actual score desc, then win prob desc
+const standingsList = [...PLAYERS].sort((a,b) => {
+  const sa = ACTUAL_SCORES[a.key][8], sb = ACTUAL_SCORES[b.key][8];
+  if (sb !== sa) return sb - sa;
+  return WIN_PROBS[b.key][8] - WIN_PROBS[a.key][8];
+});
+
+const tbody = document.getElementById("standingsBody");
+standingsList.forEach((p, i) => {
+  const score = ACTUAL_SCORES[p.key][8];
+  const wp = WIN_PROBS[p.key][8];
+  const isTop = i === 0;
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td class="rank-num ${isTop?"top":""}">${i+1}</td>
+    <td>
+      <div class="player-cell">
+        <span class="dot" style="background:${p.color}"></span>
+        <span class="player-name">${p.short}</span>
+      </div>
+    </td>
+    <td class="score-cell">${score}</td>
+    <td>
+      <span class="win-pct ${wp>0.2?"high":""}">${pct(wp)}</span>
+      <div class="bar-mini">
+        <div class="bar-mini-fill" style="width:${Math.min(100,wp*100)}%;background:${p.color}"></div>
+      </div>
+    </td>
+  `;
+  tbody.appendChild(tr);
+});
+
+// Win % horizontal bar chart
+const winPctCtx = document.getElementById("winPctChart").getContext("2d");
+new Chart(winPctCtx, {
+  type: "bar",
+  data: {
+    labels: standingsList.map(p => p.short),
+    datasets: [{
+      label: "Win Probability",
+      data: standingsList.map(p => +(WIN_PROBS[p.key][8] * 100).toFixed(2)),
+      backgroundColor: standingsList.map(p => p.color + "cc"),
+      borderColor: standingsList.map(p => p.color),
+      borderWidth: 1,
+      borderRadius: 4,
+    }]
+  },
+  options: {
+    indexAxis: "y",
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: { label: ctx => ` ${ctx.parsed.x.toFixed(1)}%` }
+      }
+    },
+    scales: {
+      x: {
+        grid: { color: "#1a1f35" },
+        ticks: { callback: v => v + "%", font: { size: 11 } },
+        max: 95
+      },
+      y: {
+        grid: { display: false },
+        ticks: { font: { size: 12 } }
+      }
+    }
+  }
+});
+
+// ═══════════════════════════════════════════════════════
+// 3. ROUND 9 GAME PREDICTIONS
+// ═══════════════════════════════════════════════════════
+
+const gamesGrid = document.getElementById("gamesGrid");
+R9_GAMES.forEach(game => {
+  const [ww, dd, bw] = game.probs;
+  const total = ww + dd + bw; // should be ~1
+  const wp = (ww/total * 100).toFixed(0);
+  const dp = (dd/total * 100).toFixed(0);
+  const bp = (bw/total * 100).toFixed(0);
+  const wCol = getColor(game.white);
+  const bCol = getColor(game.black);
+
+  const card = document.createElement("div");
+  card.className = "game-card";
+  card.innerHTML = `
+    <div class="game-vs">Round 9</div>
+    <div class="game-players">
+      <span class="dot" style="background:${wCol}"></span>
+      <span>${getShort(game.white)}</span>
+      <span class="sep">vs</span>
+      <span class="dot" style="background:${bCol}"></span>
+      <span>${getShort(game.black)}</span>
+    </div>
+    <div style="display:flex;gap:2px;height:28px;border-radius:4px;overflow:hidden">
+      <div style="flex:${ww};background:${wCol}cc;display:flex;align-items:center;justify-content:center;font-size:0.78rem;font-weight:700;color:#0d0f1a">${wp}%</div>
+      <div style="flex:${dd};background:#4a5278;display:flex;align-items:center;justify-content:center;font-size:0.78rem;font-weight:600;color:#c8d0e7">${dp}%</div>
+      <div style="flex:${bw};background:${bCol}cc;display:flex;align-items:center;justify-content:center;font-size:0.78rem;font-weight:700;color:#0d0f1a">${bp}%</div>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:0.74rem;color:#4a5278;margin-top:4px">
+      <span>${getShort(game.white)} wins</span>
+      <span>Draw</span>
+      <span>${getShort(game.black)} wins</span>
+    </div>
+  `;
+  gamesGrid.appendChild(card);
+});
+
+// ═══════════════════════════════════════════════════════
+// 4. RANK DISTRIBUTION HEATMAP TABLE
+// ═══════════════════════════════════════════════════════
+
+const rankTable = document.getElementById("rankTable");
+const rankHeader = document.createElement("thead");
+rankHeader.innerHTML = `<tr>
+  <th>Player</th>
+  ${[1,2,3,4,5,6,7,8].map(r => `<th>${r}${r===1?"st":r===2?"nd":r===3?"rd":"th"}</th>`).join("")}
+</tr>`;
+rankTable.appendChild(rankHeader);
+
+const rankBody = document.createElement("tbody");
+// Sort by rank 1 prob desc
+const rankSorted = [...PLAYERS].sort((a,b) => RANK_MATRIX[b.key][0] - RANK_MATRIX[a.key][0]);
+rankSorted.forEach(p => {
+  const tr = document.createElement("tr");
+  const cells = RANK_MATRIX[p.key].map((v, ri) => {
+    const bg = heatColor(v, p.key);
+    const [r,g,b_] = hexToRgb(p.color);
+    const textColor = v > 0.35 ? "#0d0f1a" : "#dde3ef";
+    return `<td><span class="heatmap-cell" style="background:${bg};color:${textColor}">${pct(v,0)}</span></td>`;
+  }).join("");
+  tr.innerHTML = `
+    <td><div class="player-cell"><span class="dot" style="background:${p.color}"></span>${p.short}</div></td>
+    ${cells}
+  `;
+  rankBody.appendChild(tr);
+});
+rankTable.appendChild(rankBody);
+
+// ═══════════════════════════════════════════════════════
+// 5. EXPECTED SCORE TIMELINE
+// ═══════════════════════════════════════════════════════
+
+const expScoreCtx = document.getElementById("expScoreChart").getContext("2d");
+
+new Chart(expScoreCtx, {
+  type: "line",
+  data: {
+    labels: LABELS,
+    datasets: sortedPlayers.map(p => {
+      // Blend: actual score + expected remainder
+      const blended = ACTUAL_SCORES[p.key].map((actual, i) => {
+        // exp_score from the JSON is the expected TOTAL final score (including future rounds)
+        return +EXP_SCORES[p.key][i].toFixed(2);
+      });
+      return {
+        label: p.short,
+        data: blended,
+        borderColor: p.color,
+        backgroundColor: p.color + "14",
+        borderWidth: 2.5,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        pointBackgroundColor: p.color,
+        tension: 0.35,
+        fill: false,
+      };
+    })
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: "index", intersect: false },
+    scales: {
+      x: {
+        grid: { color: "#1a1f35" },
+        ticks: { font: { size: 11 } }
+      },
+      y: {
+        grid: { color: "#1a1f35" },
+        min: 4,
+        max: 11,
+        ticks: { font: { size: 11 }, stepSize: 1 },
+        title: { display: true, text: "Expected Final Score (out of 14)", color: "#6b7494" }
+      }
+    },
+    plugins: {
+      legend: {
+        position: "bottom",
+        labels: { boxWidth: 12, padding: 14, font: { size: 12 } }
+      },
+      tooltip: {
+        callbacks: {
+          label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)} pts`
+        }
+      }
+    }
+  }
+});
+</script>
+</body>
+</html>
