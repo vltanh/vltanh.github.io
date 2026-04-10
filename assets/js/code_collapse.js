@@ -23,16 +23,12 @@
     btn.type = "button";
     btn.className = "code-collapse-toggle";
     btn.setAttribute("aria-expanded", "false");
-    btn.innerHTML =
-      '<span class="code-collapse-label">Show more</span>' +
-      '<span class="code-collapse-caret" aria-hidden="true">▾</span>';
+    btn.innerHTML = '<span class="code-collapse-label">Show more</span>' + '<span class="code-collapse-caret" aria-hidden="true">▾</span>';
 
     btn.addEventListener("click", function () {
       var expanded = block.classList.toggle("expanded");
       btn.setAttribute("aria-expanded", expanded ? "true" : "false");
-      btn.querySelector(".code-collapse-label").textContent = expanded
-        ? "Show less"
-        : "Show more";
+      btn.querySelector(".code-collapse-label").textContent = expanded ? "Show less" : "Show more";
       btn.querySelector(".code-collapse-caret").textContent = expanded ? "▴" : "▾";
     });
 

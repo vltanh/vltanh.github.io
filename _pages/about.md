@@ -3,6 +3,8 @@ layout: about
 title: about
 permalink: /
 subtitle:
+description: The-Anh Vu-Le (Nah) — fourth-year Ph.D. student at the University of Illinois Urbana-Champaign, advised by Professor Tandy Warnow. Research on network science, community detection, and graph algorithms.
+keywords: The-Anh Vu-Le, vltanh, UIUC, Tandy Warnow, network science, community detection, graph algorithms, machine learning, PhD student
 # subtitle: <a href='#'>Affiliations</a>. Address. Contacts. Motto. Etc.
 
 profile:
