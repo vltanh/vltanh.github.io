@@ -25,8 +25,8 @@ let setThemeSetting = (themeSetting) => {
 let applyTheme = () => {
   let theme = determineComputedTheme();
 
-  transTheme();
   setHighlight(theme);
+  transTheme();
   setGiscusTheme(theme);
   setSearchTheme(theme);
   setCookieConsentTheme(theme);
@@ -262,7 +262,7 @@ let transTheme = () => {
   document.documentElement.classList.add("transition");
   window.setTimeout(() => {
     document.documentElement.classList.remove("transition");
-  }, 500);
+  }, 550);
 };
 
 // Determine the expected state of the theme toggle, which can be "dark", "light", or
