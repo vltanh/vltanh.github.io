@@ -58,14 +58,12 @@ Ta tính các xác suất thắng khi chỉ còn hai người chơi, tức các 
   - $P(D \mid DV) = 0.8 \times 1 + 0.2  P(D \mid VD) = 0.8$;
   - $P(L \mid DV) = 0$.
 - DL: Đỏ nhắm bắn Lam. Tương tự, 0.8 khả năng Đỏ thắng và 0.2 khả năng thứ tự trở thành LD. Lúc này, Lam sẽ nhắm Đỏ, với 0.5 khả năng Lam thắng và 0.5 khả năng thứ tự quay lại DL.
-
   - $P(V \mid DL) = 0$;
   - $P(D \mid DL) = 0.8 \times 1 + 0.2  P(D \mid LD)$
 
   $= 0.8 + 0.2 [0.5 \times 0 + 0.5  P(D \mid DL)]$
 
   $\Rightarrow P(D \mid DL) = 8/9$;
-
   - $P(L \mid DL) = 0.8 \times 0 + 0.2  P(L \mid LD)$
 
   $= 0.2 [0.5 \times 1 + 0.5  P(L \mid DL)]$
@@ -95,7 +93,6 @@ Ta tổng kết lại thành bảng sau:
 Dựa vào kết quả trên, ta tính xác suất thắng cho ba người bằng cách tính xác suất thắng cho xạ thủ đầu tiên trong thứ tự bắn, với mỗi xạ thủ có 3 lựa chọn là bắn 1 trong 2 người còn lại hoặc bỏ lượt. Có $3! = 6$ thứ tự bắn có thể VDL, VLD, DVL, LVD, DLV, LDV.
 
 - VDL:
-
   - Nếu Vàng bắn Đỏ, chắc chắn Đỏ bị loại, thứ tự trở thành LV. $P(V \mid VDL) = P(V \mid LV) = 0.5$;
   - Nếu Vàng bắn Lam, chắc chắn Lam bị loại, thứ tự trở thành DV. $P(V \mid VDL) = P(V \mid DV) = 0.2$;
   - Nếu Vàng bỏ lượt, thứ tự trở thành DLV. Đỏ có 3 lựa chọn lúc này: hoặc bắn Vàng, hoặc bắn Lam, hoặc bỏ lượt. Nếu bắn trật hoặc bỏ lượt, thự tự đều chuyển thành LVD. Nếu bắn trúng Lam, thứ tự chuyển thành VD và khi đó Đỏ chắc chắn thua. Nếu bắn trúng Vàng, thứ tự chuyển thành LD, chỉ có 50% khả năng là bị Lam bắn trúng. Như vậy, Đỏ sẽ bắn Vàng và khi đó
@@ -103,7 +100,6 @@ Dựa vào kết quả trên, ta tính xác suất thắng cho ba người bằn
   $$
     P(V \mid VDL) = P(V \mid DLV) = 0.2 P(V \mid LVD) < 0.5.
   $$
-
   - Như vậy chiến thuật tốt nhất của Vàng là bắn Đỏ, khi đó:
     - $P(V \mid VDL) = P(V \mid LV) = 0.5$;
     - $P(D \mid VDL) = P(D \mid LV) = 0$;
@@ -116,7 +112,6 @@ $$
 $$
 
 - DVL:
-
   - Nếu Đỏ bắn Vàng,
 
     $$
