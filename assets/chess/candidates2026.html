@@ -2811,7 +2811,7 @@
       let futureVisible = false;
 
       let standingsSort = { col: "score", dir: -1 };
-      let heatmapSort = { col: 0, dir: -1 }; // 0 = first rank column
+      let heatmapSort = { col: "cascade", dir: -1 };
       let playersSort = { col: "rating", dir: -1 };
       let paretoSort = { col: "brier", dir: 1 };
 
@@ -3313,18 +3313,24 @@
         tbl.appendChild(thead);
         markSortHeaders(tbl, heatmapSort);
 
-        const valFn = (p) => {
-          if (heatmapSort.col === "player") return p.short.toLowerCase();
-          const rm = round.rank_matrix[p.key] ?? [];
-          return rm[heatmapSort.col] ?? 0;
-        };
         const sorted = [...DATA.players]
           .filter((p) => !hiddenPlayers.has(p.key))
           .sort((a, b) => {
-            const va = valFn(a),
-              vb = valFn(b);
-            if (typeof va === "string") return heatmapSort.dir * va.localeCompare(vb);
-            return heatmapSort.dir * (va - vb);
+            if (heatmapSort.col === "player") {
+              return heatmapSort.dir * a.short.toLowerCase().localeCompare(b.short.toLowerCase());
+            }
+            if (heatmapSort.col === "cascade") {
+              const rmA = round.rank_matrix[a.key] ?? [];
+              const rmB = round.rank_matrix[b.key] ?? [];
+              for (let i = 0; i < n; i++) {
+                const d = (rmB[i] ?? 0) - (rmA[i] ?? 0);
+                if (d !== 0) return heatmapSort.dir * d;
+              }
+              return 0;
+            }
+            const rmA = round.rank_matrix[a.key] ?? [];
+            const rmB = round.rank_matrix[b.key] ?? [];
+            return heatmapSort.dir * ((rmA[heatmapSort.col] ?? 0) - (rmB[heatmapSort.col] ?? 0));
           });
 
         const tbody = document.createElement("tbody");
