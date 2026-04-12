@@ -4110,7 +4110,6 @@
           if (gi < groups.length - 1) totalChildH += VS_OUT;
         });
 
-        // Account for past column height (stacked items + round label)
         let maxPastColH = 0;
         visRoundGroups.forEach(function (rg) {
           const h = rg.steps.length * PAST_ITEM_H + (rg.steps.length - 1) * PAST_ITEM_VS + 15;
@@ -4123,7 +4122,7 @@
         svg.setAttribute("viewBox", "0 0 " + svgW + " " + svgH);
         svg.setAttribute("width", "100%");
         svg.style.maxWidth = svgW + "px";
-        svg.style.minWidth = Math.min(svgW, 400) + "px";
+        svg.style.overflow = "hidden";
         svg.style.animation = animName + " .3s ease-out both";
 
         const fx = PAD + pastAreaW,
@@ -4135,9 +4134,6 @@
         if (visRoundGroups.length > 0) {
           const eClr2 = { W: "#00e676", D: "#8494be", L: "#ff5252" };
           let px = PAD + (hasTrunc ? TRUNC_W + 10 : 0);
-          const totalVisSteps = visRoundGroups.reduce(function (s, g) {
-            return s + g.steps.length;
-          }, 0);
 
           // Truncation indicator
           if (hasTrunc) {
@@ -4154,7 +4150,6 @@
           }
 
           const GOLD_PAST = "#ffd54f";
-          let stepIdx = 0;
           visRoundGroups.forEach(function (rg, rgi) {
             const nItems = rg.steps.length;
             const colH = nItems * PAST_ITEM_H + (nItems - 1) * PAST_ITEM_VS;
@@ -4197,7 +4192,7 @@
               // Result text
               const rt = document.createElementNS(SE_NS, "text");
               rt.setAttribute("x", px + PAST_W / 2);
-              rt.setAttribute("y", iy + PAST_ITEM_H / 2 + 1);
+              rt.setAttribute("y", iy + PAST_ITEM_H / 2 + 3);
               rt.setAttribute("text-anchor", "middle");
               rt.setAttribute("fill", nodeClr);
               rt.setAttribute("font-family", "'JetBrains Mono',monospace");
@@ -4206,18 +4201,6 @@
               rt.setAttribute("opacity", baseOp.toFixed(2));
               rt.textContent = (isActual ? "\u2713 " : "") + step.game.ws + " " + rl + " " + step.game.bs;
               svg.appendChild(rt);
-
-              // Percentage
-              const pt = document.createElementNS(SE_NS, "text");
-              pt.setAttribute("x", px + PAST_W - 4);
-              pt.setAttribute("y", iy + PAST_ITEM_H / 2 + 1);
-              pt.setAttribute("text-anchor", "end");
-              pt.setAttribute("fill", nodeClr);
-              pt.setAttribute("font-family", "'JetBrains Mono',monospace");
-              pt.setAttribute("font-size", "6.5");
-              pt.setAttribute("opacity", (baseOp * 0.7).toFixed(2));
-              pt.textContent = (step.edge.p * 100).toFixed(0) + "%";
-              svg.appendChild(pt);
 
               // Click overlay
               const click = document.createElementNS(SE_NS, "rect");
@@ -4240,17 +4223,14 @@
                 rect.setAttribute("opacity", baseOp.toFixed(2));
               });
               svg.appendChild(click);
-
-              stepIdx++;
             });
 
             // Edge from this round column to next column or focus
-            const edgeY = fy;
             const nextX = px + PAST_W;
             const toX = rgi < visRoundGroups.length - 1 ? px + PAST_W + PAST_HS : fx;
             const mx = (nextX + toX) / 2;
             const edge = document.createElementNS(SE_NS, "path");
-            edge.setAttribute("d", "M" + nextX + "," + edgeY + " C" + mx + "," + edgeY + " " + mx + "," + edgeY + " " + toX + "," + edgeY);
+            edge.setAttribute("d", "M" + nextX + "," + fy + " C" + mx + "," + fy + " " + mx + "," + fy + " " + toX + "," + fy);
             edge.setAttribute("fill", "none");
             edge.setAttribute("stroke", "#263764");
             edge.setAttribute("stroke-width", "1");
@@ -4601,26 +4581,55 @@
                 svg.appendChild(accent);
 
                 const rl2 = gc.k === "W" ? "W" : gc.k === "D" ? "D" : "L";
-                const pct2 = (gc.p * 100).toFixed(0) + "%";
                 const leaderSc = gc.child.scores[gsorted[0].key];
-                let lbl = rl2 + " " + pct2;
+                const leaders = gsorted.filter(function (p) {
+                  return gc.child.scores[p.key] === leaderSc;
+                });
+                // Build label: truncate names part, always show score suffix
+                const pct2 = (gc.p * 100).toFixed(0) + "%";
+                let lbl, lblDisplay;
                 if (gc.child.leaf) {
-                  if (gc.child.winner) lbl += " \u2605" + gc.child.winner.short;
-                  else lbl += " TIE";
+                  if (gc.child.winner) lbl = rl2 + " " + pct2 + " \u2605" + gc.child.winner.short;
+                  else lbl = rl2 + " " + pct2 + " TIE";
+                  lblDisplay = lbl;
                 } else {
-                  lbl += " " + gsorted[0].short + " " + leaderSc;
+                  const names = leaders
+                    .map(function (p) {
+                      return p.short;
+                    })
+                    .join(", ");
+                  const suffix = " " + leaderSc;
+                  lbl = rl2 + " " + pct2 + " " + names + suffix;
+                  // Truncate names if full label is too long (~18 chars at font-size 8.5)
+                  const maxChars = 18;
+                  const prefixLen = rl2.length + 1 + pct2.length + 1; // "W 31% "
+                  const suffixLen = suffix.length;
+                  const namesBudget = maxChars - prefixLen - suffixLen;
+                  if (names.length > namesBudget && namesBudget > 2) {
+                    lblDisplay = rl2 + " " + pct2 + " " + names.slice(0, namesBudget - 1) + "\u2026" + suffix;
+                  } else {
+                    lblDisplay = lbl;
+                  }
                 }
 
+                const gcGrp = document.createElementNS(SE_NS, "g");
                 const gt = document.createElementNS(SE_NS, "text");
                 gt.setAttribute("x", gx + 7);
                 gt.setAttribute("y", gy + GC_H * 0.3);
-                gt.setAttribute("fill", gc.child.leaf ? (gc.child.winner ? gc.child.winner.color : "#ffee58") : glc);
+                gt.setAttribute("fill", gc.child.leaf ? (gc.child.winner ? gc.child.winner.color : "#ffee58") : leaders.length > 1 ? "#ffee58" : glc);
                 gt.setAttribute("font-family", "'JetBrains Mono',monospace");
                 gt.setAttribute("font-size", "8.5");
                 gt.setAttribute("font-weight", gc.child.leaf ? "700" : "400");
                 gt.setAttribute("opacity", "0.85");
-                gt.textContent = lbl;
-                svg.appendChild(gt);
+                gt.textContent = lblDisplay;
+                gcGrp.appendChild(gt);
+                // SVG tooltip via <title> child element
+                if (lblDisplay !== lbl) {
+                  const tt = document.createElementNS(SE_NS, "title");
+                  tt.textContent = lbl;
+                  gcGrp.appendChild(tt);
+                }
+                svg.appendChild(gcGrp);
               });
             });
           });
