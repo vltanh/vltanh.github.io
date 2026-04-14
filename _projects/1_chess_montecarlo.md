@@ -81,7 +81,7 @@ The centerpiece of the dashboard is the Scenario Explorer: an interactive decisi
 
 <div class="row justify-content-center">
     <div class="col-sm-10 mt-3 mt-md-0">
-        {% include figure.liquid path="assets/img/chess/scenario_explorer.png" title="Scenario explorer: decision tree with hypothetical results" class="img-fluid rounded z-depth-1" caption="Branching tree for a single pairing with two rounds remaining. Each outcome (1-0, 1/2-1/2, 0-1) forks into updated per-player win probabilities, letting you walk the tree to see exactly which results keep a contender alive." %}
+        {% include figure.liquid path="assets/img/chess/scenario_explorer.png" title="Scenario explorer: decision tree with hypothetical results" class="img-fluid rounded z-depth-1" caption="Branching tree for a single pairing with two rounds remaining. Each outcome (1-0, 1/2-1/2, 0-1) forks into updated scenarios, letting you walk the tree to see exactly the winning path for each player." %}
     </div>
 </div>
 
