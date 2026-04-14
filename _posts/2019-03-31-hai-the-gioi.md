@@ -3,6 +3,7 @@ layout: distill
 title: Hai thế giới
 date: 2019-03-31
 description:
+og_image: /assets/img/2019-03-31_images/two-worlds.png
 tags: math
 categories:
 giscus_comments: true

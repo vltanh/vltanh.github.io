@@ -4,6 +4,7 @@ title: Chess Monte Carlo Simulation
 permalink: /projects/chess-monte-carlo-simulation/
 description: Tracking the 2026 Candidates with dynamic player strength, one million simulated tournaments per round.
 img: assets/img/chess/title.png
+og_image: /assets/img/chess/title.png
 importance: 1
 category: fun
 project_intro: true

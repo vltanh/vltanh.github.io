@@ -7,10 +7,17 @@ description: The-Anh Vu-Le (Nah) — fourth-year Ph.D. student at the University
 keywords: The-Anh Vu-Le, vltanh, UIUC, Tandy Warnow, network science, community detection, graph algorithms, machine learning, PhD student
 # subtitle: <a href='#'>Affiliations</a>. Address. Contacts. Motto. Etc.
 
+og_image: /assets/img/prof_pic.jpg
+
 profile:
   align: right
   image: prof_pic.jpg
   image_circular: true # crops the image to make it circular
+  gallery:
+    - image: prof_pic.jpg
+      alt: prof_pic
+    - image: engaged_cropped.jpg
+      alt: happily married
   address: >
     <p>Urbana, Illinois, 61801</p>
 

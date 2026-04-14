@@ -3,6 +3,7 @@ layout: distill
 title: Chia đôi một góc
 date: 2025-11-13
 description:
+og_image: /assets/img/2025-11-13_images/bai-toan.png
 tags: math
 categories:
 giscus_comments: true

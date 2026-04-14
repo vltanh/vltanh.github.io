@@ -3,6 +3,7 @@ layout: distill
 title: Chọn ngẫu nhiên điểm trong hình tròn
 date: 2022-03-23
 description:
+og_image: /assets/img/2022-03-24_images/gen1.png
 tags: math
 categories:
 giscus_comments: true

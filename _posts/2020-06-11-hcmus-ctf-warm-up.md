@@ -3,6 +3,7 @@ layout: distill
 title: Write-up for HCMUS-CTF Warm-Up Stage
 date: 2020-06-11
 description:
+og_image: /assets/img/2020-06-11_images/Logo.png
 tags: ctf
 categories:
 giscus_comments: true
