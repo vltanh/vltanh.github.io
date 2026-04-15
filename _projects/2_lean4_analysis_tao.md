@@ -16,6 +16,8 @@ repository:
 
 This project is an ongoing attempt to formalize Terence Tao's [*Analysis I*](https://terrytao.wordpress.com/books/analysis-i/) in [Lean 4](https://lean-lang.org/), following the book's development as faithfully as possible. Both the main text (definitions, lemmas, theorems) and the end-of-section exercises are in scope.
 
+The guiding aim is to **paraphrase the book, not rewrite it**. Definitions appear in the order Tao introduces them, lemmas and theorems keep his numbering, and proofs in the main-text files reproduce the argument Tao gives rather than a slicker alternative. A reader should be able to open the book in one hand and the corresponding file in the other, and follow them line by line.
+
 Lean is a *proof assistant*: a programming language in which mathematical proofs can be written down so precisely that a computer can check every step. If the computer accepts the proof, you know the argument is airtight, with no hand-waving and no hidden gaps.
 
 ## Tao's own version
@@ -28,15 +30,13 @@ Two main differences in scope. First, Tao's companion uses textbook definitions 
 
 Lean comes with a large library called [Mathlib](https://leanprover-community.github.io/) that already contains most of undergraduate mathematics, including the very results Tao spends his book building up. The project deliberately does not use it.
 
-Tao constructs everything from the axioms up, so the project does the same: each piece is built from scratch, in the same order the book introduces it. A reader should be able to open a section of the book and the matching file side by side, and find them walking in step.
+Tao constructs everything from the axioms up, so the project does the same: each piece is built from scratch, in the same order the book introduces it.
 
-## Style rules
+## Rules
 
-Proofs in this repo follow a few deliberate constraints.
+One idea runs through the whole project: **everything is explicit**. No silent inference, no dot-projection shortcuts, no automation tactics that discharge goals in one opaque step, no unnamed intermediate facts, no inline proof blocks buried inside larger expressions. The rules fall into a handful of buckets (scope and faithfulness to the book, a tight tactic whitelist, explicitness in every application, naming, the shape of each proof step, and formatting), but the spirit is always the same: every move is visible, named, and canonical.
 
-- **Paraphrase, don't replace.** When the book gives a proof, the Lean version uses the same argument, even if a shorter one exists. Exercise solutions are free to prove the result any way, but should reach first for the tools the book has already introduced.
-- **No silent shortcuts.** Lean can infer missing pieces from the surrounding hypotheses, but the proofs here spell everything out anyway. It is more typing, but a reader can follow each step without having to reconstruct what Lean inferred on their behalf.
-- **Name every fact.** Every intermediate result gets a descriptive label, which makes longer proofs easier to follow and keeps nested steps from blurring together.
+The cost is verbosity. The payoff is twofold. A reader can walk any proof top to bottom without running type inference in their head. And because every step takes one of a small number of canonical forms, the whole corpus is usable as structured training data. The full rulebook lives in the [repository README](https://github.com/vltanh/lean4-analysis-tao#style).
 
 ## Progress
 
