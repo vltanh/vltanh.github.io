@@ -22,7 +22,7 @@ Lean is a *proof assistant*: a programming language in which mathematical proofs
 
 Tao himself has since started [a Lean companion to *Analysis I*](https://github.com/teorth/analysis), which began later than this project but is far more advanced and is the canonical reference. This project is mostly a personal learning exercise, kept around as an alternative take rather than a competitor.
 
-The main difference is scope. Tao's companion uses textbook definitions only at the start, then transitions to Mathlib's standard definitions from Chapter 3 onward, so it doubles as an introduction to Mathlib. This project keeps the from-scratch rule in force throughout: nothing outside Lean's core is ever imported, all the way through.
+Two main differences in scope. First, Tao's companion uses textbook definitions only at the start, then transitions to Mathlib's standard definitions from Chapter 3 onward, so it doubles as an introduction to Mathlib. This project keeps the from-scratch rule in force throughout: nothing outside Lean's core is ever imported, all the way through, which naturally leads to different design choices from Tao's. Second, Tao deliberately leaves the end-of-section exercises as `sorry` for readers to fill in, whereas this project also formalizes the exercise solutions.
 
 ## No outside libraries
 
