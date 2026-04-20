@@ -14,7 +14,7 @@ icons:
   - file: python/python-original.svg
     site: devicons
 repository:
-  - vltanh/chess-monte-carlo-simulation
+  - vltanh/chess-monte-carlo
 ---
 
 Inspired by a Reddit post on tournament modeling, I built a Chess Monte Carlo simulation engine to track the 2026 Candidates. The goal was to move beyond the limitations of static pre-tournament ratings, which can quickly become outdated in a high-pressure, three-week event. Instead, the model treats player strength as **dynamic**, letting ratings update in real time as games are played.
@@ -27,8 +27,8 @@ Inspired by a Reddit post on tournament modeling, I built a Chess Monte Carlo si
 
 ## Live Dashboards
 
-- [FIDE Candidates 2026 - Open](/assets/chess/candidates2026.html)
-- [FIDE Candidates 2026 - Women](/assets/chess/candidateswomen2026.html)
+- [FIDE Candidates 2026 - Open](/chess-mc/candidates2026.html)
+- [FIDE Candidates 2026 - Women](/chess-mc/candidateswomen2026.html)
 
 ## The Simulation Engine
 
