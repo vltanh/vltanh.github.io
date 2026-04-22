@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Synthetic Network Generators</title>
+<meta name="description" content="Interactive step-by-step visualizations for seven synthetic-network generators (SBM, EC-SBM v1/v2, ABCD, ABCD+o, LFR, nPSO).">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=Figtree:ital,wght@0,300..900;1,300..900&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root{
+  --ink:#0b1120;
+  --ink-2:#121a36;
+  --ink-3:#1a2448;
+  --paper:#f4f6fb;
+  --paper-2:#c0cceb;
+  --paper-3:#8494be;
+  --paper-4:#4e5f8a;
+  --rule:#263764;
+  --rule-2:#354d80;
+  --azure:#78b4ff;
+  --azure-2:#a0ccff;
+  --azure-3:#5090ff;
+  --cobalt:#3a66cc;
+  --signal:#ff6b7a;
+  --amber:#ffc66b;
+  --mint:#6bffc9;
+  --orchid:#c38bff;
+}
+
+html{scroll-behavior:smooth}
+
+body{
+  background:var(--ink);
+  color:var(--paper);
+  font-family:'Figtree',system-ui,-apple-system,sans-serif;
+  font-feature-settings:"ss01","kern","liga","cv11";
+  font-size:17px;
+  line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+  min-height:100vh;
+  background-image:
+    radial-gradient(ellipse 80% 60% at 20% 10%, rgba(58,102,204,.08) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 50% at 80% 85%, rgba(120,180,255,.05) 0%, transparent 55%);
+  background-attachment:fixed;
+}
+
+a{color:var(--azure);text-decoration:none;border-bottom:1px solid rgba(120,180,255,.3);transition:all .18s ease}
+a:hover{color:var(--paper);border-bottom-color:var(--paper)}
+
+.page{max-width:960px;margin:0 auto;padding:3.5rem 1.5rem 5rem}
+
+.hdr{text-align:center;margin-bottom:3rem;padding-bottom:2rem;border-bottom:1px solid var(--rule)}
+.hdr .kicker{
+  font-family:'JetBrains Mono',ui-monospace,monospace;
+  font-size:.72rem;letter-spacing:.25em;color:var(--paper-3);text-transform:uppercase;
+  margin-bottom:1.2rem;
+}
+.hdr h1{
+  font-family:'Fraunces',serif;
+  font-optical-sizing:auto;
+  font-variation-settings:"opsz" 144,"SOFT" 30;
+  font-weight:800;
+  font-size:clamp(2.2rem,5.2vw,3.6rem);
+  line-height:1.05;
+  letter-spacing:-.02em;
+  color:var(--paper);
+  margin-bottom:.8rem;
+}
+.hdr .subtitle{
+  font-family:'Figtree',sans-serif;
+  font-size:1.05rem;
+  color:var(--paper-2);
+  max-width:38rem;
+  margin:0 auto;
+}
+
+.intro{
+  max-width:38rem;margin:0 auto 3rem;
+  color:var(--paper-2);
+  font-size:1rem;line-height:1.7;
+}
+.intro p+p{margin-top:1rem}
+.intro code{
+  font-family:'JetBrains Mono',ui-monospace,monospace;
+  font-size:.85em;color:var(--azure-2);
+  background:rgba(120,180,255,.08);
+  padding:.1em .4em;border-radius:3px;
+}
+
+.shared-graph{
+  max-width:400px;margin:0 auto 3rem;
+  background:var(--ink-2);
+  border:1px solid var(--rule);
+  border-radius:6px;
+  padding:1.5rem;
+}
+.shared-graph svg{display:block;width:100%;height:auto}
+.shared-graph .caption{
+  font-family:'JetBrains Mono',ui-monospace,monospace;
+  font-size:.7rem;letter-spacing:.12em;color:var(--paper-3);
+  text-align:center;text-transform:uppercase;margin-top:.8rem;
+}
+
+.section-title{
+  font-family:'Fraunces',serif;
+  font-size:1.35rem;font-weight:700;
+  color:var(--paper);
+  margin:0 0 1.25rem;
+}
+
+.gen-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+  gap:1rem;
+  margin-bottom:3rem;
+}
+
+.gen-card{
+  display:block;
+  background:var(--ink-2);
+  border:1px solid var(--rule);
+  border-radius:6px;
+  padding:1.25rem 1.4rem;
+  color:inherit;
+  border-bottom:1px solid var(--rule);
+  transition:border-color .2s ease,background .2s ease,transform .15s ease;
+}
+.gen-card:hover{
+  background:var(--ink-3);
+  border-color:var(--paper-3);
+  color:inherit;
+  transform:translateY(-1px);
+}
+
+.gen-card .name{
+  font-family:'JetBrains Mono',ui-monospace,monospace;
+  font-size:1.05rem;font-weight:600;
+  color:var(--azure);
+  margin-bottom:.4rem;
+}
+.gen-card:hover .name{color:var(--paper)}
+
+.gen-card .model{
+  font-size:.92rem;color:var(--paper-2);line-height:1.45;
+  margin-bottom:.5rem;
+}
+.gen-card .steps{
+  font-family:'JetBrains Mono',ui-monospace,monospace;
+  font-size:.72rem;letter-spacing:.06em;color:var(--paper-3);
+  text-transform:uppercase;
+}
+
+.tag{display:inline-block;padding:.15rem .55rem;border-radius:3px;font-size:.7rem;font-family:'JetBrains Mono',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase}
+.tag-sbm{background:rgba(120,180,255,.15);color:var(--azure)}
+.tag-ec{background:rgba(195,139,255,.15);color:var(--orchid)}
+.tag-config{background:rgba(255,198,107,.15);color:var(--amber)}
+.tag-geom{background:rgba(107,255,201,.15);color:var(--mint)}
+
+.legend{
+  display:flex;flex-wrap:wrap;gap:.8rem 1.8rem;
+  font-family:'JetBrains Mono',ui-monospace,monospace;
+  font-size:.78rem;color:var(--paper-3);
+  margin:1.6rem auto 0;max-width:38rem;justify-content:center;
+}
+.legend-dot{
+  display:inline-block;width:.7rem;height:.7rem;border-radius:50%;
+  vertical-align:middle;margin-right:.35rem;
+}
+
+.footer{
+  margin-top:3rem;padding-top:2rem;
+  border-top:1px solid var(--rule);
+  font-size:.9rem;color:var(--paper-3);
+  text-align:center;
+}
+.footer a{color:var(--paper-2)}
+
+@media(max-width:640px){
+  .page{padding:2rem 1rem 3rem}
+  .hdr{margin-bottom:2rem}
+  .gen-grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<main class="page">
+
+<header class="hdr">
+  <div class="kicker">project · network-generation</div>
+  <h1>Synthetic Network Generators</h1>
+  <p class="subtitle">
+    Seven algorithms for sampling graphs that match an empirical network in targeted ways. Each page animates the default-settings algorithm step by step.
+  </p>
+</header>
+
+<section class="intro">
+  <p>
+    Every generator takes the same inputs at the repo boundary: an undirected edge list and a reference clustering. Stage 1 extracts a small statistical profile (degrees, cluster sizes, mixing parameters, block matrices, mincuts); stage 2 hands the profile to a parametric sampler.
+  </p>
+  <p>
+    The question each generator answers: <em>given an empirical network G, what does the synthetic G' guarantee to look like?</em> Some stats are exact matches (node count, block structure); some hold only in expectation (global ξ, degree distribution); one is pursued via a search that does not always converge (nPSO's clustering coefficient).
+  </p>
+  <p>
+    All seven visualizations below use the same small 20-node synthetic input, so differences in what each generator preserves become visible side by side.
+  </p>
+</section>
+
+<figure class="shared-graph">
+  <svg viewBox="0 0 400 260" aria-label="Shared 20-node synthetic input network">
+    <rect width="400" height="260" fill="transparent"/>
+    <g fill="none" stroke-linecap="round">
+      <g stroke="#78b4ff" stroke-width="1.4" opacity="0.85">
+        <line x1="70" y1="80" x2="110" y2="60"/>
+        <line x1="70" y1="80" x2="120" y2="105"/>
+        <line x1="110" y1="60" x2="120" y2="105"/>
+        <line x1="110" y1="60" x2="160" y2="75"/>
+        <line x1="120" y1="105" x2="160" y2="75"/>
+        <line x1="120" y1="105" x2="95" y2="135"/>
+        <line x1="95" y1="135" x2="70" y2="80"/>
+      </g>
+      <g stroke="#ffc66b" stroke-width="1.4" opacity="0.85">
+        <line x1="260" y1="70" x2="300" y2="95"/>
+        <line x1="260" y1="70" x2="320" y2="55"/>
+        <line x1="300" y1="95" x2="320" y2="55"/>
+        <line x1="300" y1="95" x2="280" y2="130"/>
+        <line x1="280" y1="130" x2="320" y2="55"/>
+      </g>
+      <g stroke="#6bffc9" stroke-width="1.4" opacity="0.85">
+        <line x1="175" y1="195" x2="210" y2="210"/>
+        <line x1="175" y1="195" x2="200" y2="170"/>
+        <line x1="210" y1="210" x2="200" y2="170"/>
+      </g>
+      <g stroke="#3a66cc" stroke-width="1.2" opacity="0.65">
+        <line x1="160" y1="75" x2="260" y2="70"/>
+        <line x1="120" y1="105" x2="200" y2="170"/>
+        <line x1="280" y1="130" x2="210" y2="210"/>
+        <line x1="320" y1="55" x2="200" y2="170"/>
+      </g>
+      <g stroke="#ff6b7a" stroke-width="1.2" opacity="0.7">
+        <line x1="35" y1="185" x2="95" y2="135"/>
+        <line x1="35" y1="185" x2="175" y2="195"/>
+        <line x1="365" y1="185" x2="280" y2="130"/>
+        <line x1="365" y1="185" x2="210" y2="210"/>
+      </g>
+    </g>
+    <g>
+      <g fill="#78b4ff">
+        <circle cx="70" cy="80" r="7"/><circle cx="110" cy="60" r="7"/>
+        <circle cx="120" cy="105" r="7"/><circle cx="160" cy="75" r="5"/>
+        <circle cx="95" cy="135" r="5"/>
+      </g>
+      <g fill="#ffc66b">
+        <circle cx="260" cy="70" r="7"/><circle cx="300" cy="95" r="7"/>
+        <circle cx="320" cy="55" r="7"/><circle cx="280" cy="130" r="5"/>
+      </g>
+      <g fill="#6bffc9">
+        <circle cx="175" cy="195" r="6"/><circle cx="210" cy="210" r="6"/>
+        <circle cx="200" cy="170" r="5"/>
+      </g>
+      <g fill="#ff6b7a">
+        <circle cx="35" cy="185" r="6"/><circle cx="365" cy="185" r="6"/>
+      </g>
+    </g>
+  </svg>
+  <div class="caption">20 nodes · 3 clusters · 2 outliers · 33 edges</div>
+</figure>
+
+<div class="legend">
+  <span><span class="legend-dot" style="background:#78b4ff"></span>Cluster C1 (8)</span>
+  <span><span class="legend-dot" style="background:#ffc66b"></span>Cluster C2 (6)</span>
+  <span><span class="legend-dot" style="background:#6bffc9"></span>Cluster C3 (4)</span>
+  <span><span class="legend-dot" style="background:#ff6b7a"></span>Outliers (2)</span>
+</div>
+
+<h2 class="section-title" style="margin-top:3rem">Interactive visualizations</h2>
+
+<div class="gen-grid">
+
+  <a class="gen-card" href="./sbm.html">
+    <div class="name">sbm</div>
+    <div class="model">Degree-corrected micro-SBM via graph-tool. Thinnest wrapper: one function call plus self-loop and parallel-edge cleanup.</div>
+    <div class="steps"><span class="tag tag-sbm">block model</span> · 7 steps</div>
+  </a>
+
+  <a class="gen-card" href="./ec-sbm-v1.html">
+    <div class="name">ec-sbm-v1</div>
+    <div class="model">SBM with per-cluster edge-connectivity guarantee: K<sub>k+1</sub> cores, SBM overlay on mutated probs, outlier-only SBM, heap-greedy degree matcher.</div>
+    <div class="steps"><span class="tag tag-ec">ec-sbm</span> · 12 steps</div>
+  </a>
+
+  <a class="gen-card" href="./ec-sbm-v2.html">
+    <div class="name">ec-sbm-v2</div>
+    <div class="model">Architectural cleanup of v1: constructive cores only, residual SBM over all blocks, block-preserving 2-opt rewire, hybrid degree matcher.</div>
+    <div class="steps"><span class="tag tag-ec">ec-sbm</span> · 13 steps</div>
+  </a>
+
+  <a class="gen-card" href="./abcd.html">
+    <div class="name">abcd</div>
+    <div class="model">Artificial Benchmark for Community Detection. Configuration-model hybrid with per-node split by global mixing ξ. Julia sampler.</div>
+    <div class="steps"><span class="tag tag-config">config model</span> · 10 steps</div>
+  </a>
+
+  <a class="gen-card" href="./abcd+o.html">
+    <div class="name">abcd+o</div>
+    <div class="model">ABCD with explicit outlier mega-cluster (cluster_id=1). Outliers have d<sub>int</sub>=0 and cannot pair with each other in the external config model.</div>
+    <div class="steps"><span class="tag tag-config">config model</span> · 12 steps</div>
+  </a>
+
+  <a class="gen-card" href="./lfr.html">
+    <div class="name">lfr</div>
+    <div class="model">Lancichinetti-Fortunato-Radicchi benchmark. Fits power laws to degrees and cluster sizes, resamples both, then runs a config-model hybrid with mean-μ split.</div>
+    <div class="steps"><span class="tag tag-config">config model</span> · 12 steps</div>
+  </a>
+
+  <a class="gen-card" href="./npso.html">
+    <div class="name">npso</div>
+    <div class="model">Non-uniform Popularity-Similarity Optimisation. Embeds nodes in a hyperbolic disk and runs a secant-over-midpoint search on temperature to hit a target global clustering coefficient.</div>
+    <div class="steps"><span class="tag tag-geom">geometric</span> · 11 steps</div>
+  </a>
+
+</div>
+
+<footer class="footer">
+  <p>
+    <a href="/projects/network-generation/">Project page</a> ·
+    <a href="https://github.com/vltanh/network-generation">Source on GitHub</a> ·
+    <a href="/">Home</a>
+  </p>
+</footer>
+
+</main>
+</body>
+</html>
