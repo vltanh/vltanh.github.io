@@ -3,727 +3,476 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>EC-SBM v1: four-stage walkthrough</title>
+<title>EC-SBM v1: holding clusters together</title>
+<meta name="description" content="EC-SBM v1 walks the four-stage pipeline on a small synthetic graph. Interactive step-through for the K_(k+1) construction, toggles for overlay and dedup.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=Figtree:ital,wght@0,300..900;1,300..900&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://unpkg.com/d3@7/dist/d3.min.js"></script>
+<link rel="stylesheet" href="./_shared.css">
 <style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{
-  --ink:#0b1120; --ink-2:#121a36; --ink-3:#1a2448;
-  --paper:#f4f6fb; --paper-2:#c0cceb; --paper-3:#8494be; --paper-4:#4e5f8a;
-  --rule:#263764; --rule-2:#354d80;
-  --azure:#78b4ff; --azure-2:#a0ccff; --azure-3:#5090ff; --cobalt:#3a66cc;
-  --signal:#ff6b7a; --amber:#ffc66b; --mint:#6bffc9; --orchid:#c38bff;
+.mincut-legend{
+  display:flex; gap:1.5rem; flex-wrap:wrap;
+  font-family:'JetBrains Mono',ui-monospace,monospace;
+  font-size:.78rem; color:var(--paper-2);
+  margin-top:.6rem; justify-content:center;
 }
-html{scroll-behavior:smooth}
-body{
-  background:var(--ink); color:var(--paper);
-  font-family:'Figtree',system-ui,-apple-system,sans-serif;
-  font-size:17px; line-height:1.55;
-  -webkit-font-smoothing:antialiased;
-  background-image:
-    radial-gradient(ellipse 80% 60% at 20% 10%, rgba(58,102,204,.08) 0%, transparent 60%),
-    radial-gradient(ellipse 60% 50% at 80% 85%, rgba(120,180,255,.05) 0%, transparent 55%);
-  background-attachment:fixed;
-  min-height:100vh;
+.mincut-legend b{ color:var(--azure); font-variant-numeric:tabular-nums; }
+.step-desc{
+  font-family:'JetBrains Mono',ui-monospace,monospace;
+  font-size:.78rem; color:var(--paper-2);
+  margin-top:.6rem;
 }
-a{color:var(--azure);text-decoration-thickness:1px;text-underline-offset:3px}
-a:hover{color:var(--paper)}
-.page{max-width:1180px;margin:0 auto;padding:2.5rem 1.5rem 4rem}
-
-header{margin-bottom:1.75rem;border-bottom:1px solid var(--rule);padding-bottom:1.25rem}
-header .back{font-family:'JetBrains Mono',monospace;font-size:.72rem;letter-spacing:.15em;
-  text-transform:uppercase;color:var(--paper-3);text-decoration:none}
-header .back:hover{color:var(--azure)}
-header h1{font-family:'Fraunces',serif;font-weight:700;font-size:clamp(2rem,4.5vw,3rem);
-  line-height:1.05;letter-spacing:-.02em;margin:.9rem 0 .35rem;color:var(--paper);
-  font-variation-settings:"opsz" 96,"SOFT" 30}
-header .subtitle{font-family:'Fraunces',serif;font-style:italic;font-weight:400;
-  font-size:1.05rem;color:var(--paper-2);max-width:60ch}
-
-.intro{margin-bottom:2rem}
-.intro p{color:var(--paper-2);max-width:68ch}
-
-.controls{
-  display:flex;align-items:center;flex-wrap:wrap;gap:.55rem;
-  padding:.85rem 1rem;margin-bottom:1.25rem;
-  background:var(--ink-2);border:1px solid var(--rule);border-radius:3px;
-}
-.controls button{
-  font-family:'JetBrains Mono',monospace;font-size:.72rem;letter-spacing:.1em;
-  text-transform:uppercase;color:var(--paper);
-  background:var(--ink-3);border:1px solid var(--rule-2);
-  padding:.45rem .9rem;cursor:pointer;border-radius:3px;
-  transition:background .18s,border-color .18s,color .18s;
-}
-.controls button:hover{background:var(--cobalt);border-color:var(--azure-3)}
-.controls button:disabled{opacity:.4;cursor:not-allowed}
-.controls button.primary{background:var(--cobalt);border-color:var(--cobalt)}
-.controls button.primary:hover{background:var(--azure-3);border-color:var(--azure-3)}
-.step-indicator{
-  font-family:'JetBrains Mono',monospace;font-size:.72rem;letter-spacing:.12em;
-  text-transform:uppercase;color:var(--paper-3);margin-left:.4rem;
-}
-.step-indicator span{color:var(--paper)}
-.step-title{
-  font-family:'Fraunces',serif;font-style:italic;font-size:1rem;
-  color:var(--paper-2);margin-left:auto;
-}
-
-.viz-grid{display:grid;grid-template-columns:1.35fr 1fr;gap:1.25rem}
-@media(max-width:900px){.viz-grid{grid-template-columns:1fr}}
-
-.viz-main{
-  background:var(--ink-2);border:1px solid var(--rule);border-radius:3px;
-  padding:.75rem;position:relative;
-}
-.viz-main svg{display:block;width:100%;height:auto;max-height:520px}
-.viz-side{display:flex;flex-direction:column;gap:1rem}
-
-.panel{
-  background:var(--ink-2);border:1px solid var(--rule);border-radius:3px;
-  padding:1rem 1.1rem;
-}
-.panel h3{
-  font-family:'JetBrains Mono',monospace;font-size:.7rem;letter-spacing:.16em;
-  text-transform:uppercase;color:var(--paper-3);font-weight:600;margin-bottom:.65rem;
-}
-.panel p{font-size:.93rem;color:var(--paper-2)}
-.panel code{
-  font-family:'JetBrains Mono',monospace;font-size:.84rem;
-  color:var(--azure-2);background:rgba(120,180,255,.06);
-  padding:.05rem .3rem;border-radius:2px;
-}
-.panel pre{
-  font-family:'JetBrains Mono',monospace;font-size:.78rem;line-height:1.45;
-  color:var(--paper-2);background:var(--ink);
-  border:1px solid var(--rule);border-radius:3px;
-  padding:.65rem .8rem;margin-top:.55rem;overflow-x:auto;
-  white-space:pre-wrap;word-break:break-word;
-}
-.panel .kv{display:grid;grid-template-columns:auto 1fr;gap:.35rem .85rem;
-  font-family:'JetBrains Mono',monospace;font-size:.82rem;margin-top:.4rem}
-.panel .kv .k{color:var(--paper-3)}
-.panel .kv .v{color:var(--paper)}
-.panel .badge-row{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.55rem}
-.panel .mc-badge{
-  font-family:'JetBrains Mono',monospace;font-size:.7rem;letter-spacing:.05em;
-  padding:.25rem .55rem;border-radius:2px;border:1px solid;
-}
-.panel .mc-badge.c1{color:var(--azure);border-color:var(--azure)}
-.panel .mc-badge.c2{color:var(--amber);border-color:var(--amber)}
-.panel .mc-badge.c3{color:var(--mint);border-color:var(--mint)}
-
-.legend{display:flex;flex-wrap:wrap;gap:.6rem 1rem;margin-top:.55rem;
-  font-family:'JetBrains Mono',monospace;font-size:.72rem;color:var(--paper-3)}
-.legend .sw{display:inline-block;width:22px;height:2px;vertical-align:middle;margin-right:.4rem}
-
-footer{margin-top:3rem;padding-top:1.25rem;border-top:1px solid var(--rule);
-  color:var(--paper-3);font-size:.88rem;text-align:center}
-
-.node-label{
-  font-family:'JetBrains Mono',monospace;font-size:9px;fill:var(--ink);
-  font-weight:600;text-anchor:middle;dominant-baseline:central;pointer-events:none;
-}
-.collide-x{fill:var(--signal);font-family:'JetBrains Mono',monospace;
-  font-size:12px;font-weight:700;text-anchor:middle;dominant-baseline:central}
-.inflate-label{font-family:'JetBrains Mono',monospace;font-size:10px;
-  fill:var(--signal);text-anchor:middle}
-
-.site-links{
-  display:flex;flex-wrap:wrap;gap:.55rem;
-  justify-content:center;align-items:center;
-  margin:1rem auto 2rem;
-  max-width:44rem;
-}
-.site-link{
-  display:inline-flex;align-items:center;gap:.55rem;
-  padding:.52rem 1.1rem;
-  font-family:'JetBrains Mono',ui-monospace,monospace;font-size:.7rem;
-  letter-spacing:.1em;text-transform:uppercase;text-decoration:none;
-  color:var(--paper);
-  background:var(--cobalt,#3a66cc);
-  border:1px solid var(--cobalt,#3a66cc);
-  border-radius:3px;
-  transition:all .25s ease;
-}
-.site-link:hover{
-  color:var(--paper);
-  background:var(--azure-3,#5090ff);
-  border-color:var(--azure-3,#5090ff);
-  transform:translateY(-1px);
-  box-shadow:0 3px 12px rgba(58,102,204,.25);
-}
-.site-link:active{transform:translateY(0);transition:transform .08s}
-.site-link.ghost{
-  background:transparent;
-  color:var(--paper-2,#c0cceb);
-  border:1px solid var(--rule-2,#354d80);
-}
-.site-link.ghost:hover{
-  color:var(--paper);
-  border-color:var(--paper-3,#8494be);
-  background:rgba(120,180,255,.06);
-}
-.site-link svg{flex-shrink:0}
-
+.step-desc .st{ color:var(--azure); letter-spacing:.1em; text-transform:uppercase; }
 </style>
 </head>
 <body>
-<div class="page">
+<main class="page">
 
-<header>
-  <a class="back" href="./">&larr; all generators</a>
-  <h1>EC-SBM v1</h1>
-  <p class="subtitle">A four-stage walkthrough at default settings: outlier mode forced to excluded, match-degree algorithm greedy.</p>
+<header class="hdr">
+  <div class="kicker">netgen · ec-sbm-v1</div>
+  <h1>Holding clusters <em>together</em>.</h1>
+  <p class="sub">SBM plus an edge-connectivity guarantee. Build each cluster's k-edge-connected skeleton by hand, then let the sampler fill in what remains.</p>
 </header>
-<nav class="site-links" aria-label="site links">
-  <a class="site-link" href="https://github.com/vltanh/network-generation/blob/main/docs/algorithms/ec-sbm-v1.md" target="_blank" rel="noopener">algorithm notes</a>
-  <a class="site-link ghost" href="./">all generators</a>
-  <a class="site-link" href="https://vltanh.me/projects/network-generation/">project page</a>
-  <a class="site-link ghost" href="https://github.com/vltanh/network-generation" target="_blank" rel="noopener"><svg height="12" width="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13 -.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66 .07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15 -.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27 .68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12 .51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>source</a>
-</nav>
 
+<div id="links"></div>
 
-<section class="intro">
-  <p>EC-SBM v1 lifts plain SBM so every output cluster stays at least as edge-connected as the input. It runs four stages with seed offsets <code>seed</code> / <code>seed+1</code> / <code>seed+2</code>: a profile that forces the excluded outlier transform, a clustered SBM with a K_{k+1} core, a separate outlier SBM, and a heap-greedy match-degree pass. The stepper below walks through a 20-node synthetic at default settings.</p>
+<section class="hook">
+  <p>Plain SBM has a quiet flaw. It will happily produce a cluster that is <em>technically connected</em> but one snip away from breaking apart. For work on robustness or min-cut attacks, that is a deal-breaker.</p>
+  <p>EC-SBM adds a promise: the output cluster's edge-connectivity is at least as high as the input's. The way it delivers that promise is blunt: before the SBM runs, hand-build a dense skeleton in each cluster that is guaranteed $$k$$-edge-connected, then let the sampler fill in everything else on top.</p>
+  <p>This is v1, the first cut. It runs four stages, uses two separate SBM calls, and drops a few residual stubs silently. <a href="./ec-sbm-v2.html">v2</a> is the cleanup.</p>
 </section>
 
-<section class="controls">
-  <button id="btn-prev">&larr; back</button>
-  <button id="btn-play" class="primary">play</button>
-  <button id="btn-next">next &rarr;</button>
-  <button id="btn-reset">reset</button>
-  <div class="step-indicator">step <span id="step-num">0</span> / <span id="step-total">11</span></div>
-  <div class="step-title" id="step-title">input network</div>
+<!-- ─────────── Stage 0 ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 0 · the question</div>
+  <h2>How many edges would you have to remove to break this cluster?</h2>
+  <p>Pick a cluster $$C$$ in the input. Count the minimum number of edges you would need to remove from $$C$$'s induced subgraph to disconnect it. Call that number $$k(C)$$, the mincut.</p>
+  <p>In our synthetic, C1 has $$k=3$$, C2 has $$k=2$$, C3 has $$k=1$$. The promise we want: whatever SBM emits for cluster $$C$$, its mincut must be at least $$k(C)$$.</p>
 </section>
 
-<section class="viz-grid">
-  <div class="viz-main">
-    <svg id="graph" viewBox="-380 -140 760 400" preserveAspectRatio="xMidYMid meet"></svg>
-    <div class="legend">
-      <span><span class="sw" style="background:var(--azure-2)"></span>stage 2 (clustered)</span>
-      <span><span class="sw" style="background:var(--orchid)"></span>stage 3 (outlier SBM)</span>
-      <span><span class="sw" style="background:var(--paper-3)"></span>stage 4 (match_degree)</span>
-      <span><span class="sw" style="background:var(--paper-4)"></span>input / faded</span>
+<!-- ─────────── Stage 1 ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 1 · profile</div>
+  <h2>Strip the outliers, compute the mincuts.</h2>
+  <p>v1 forces outlier mode <code>excluded</code>: outliers 19 and 20 are dropped along with all their edges before the clustered pass runs. They will come back later (stage 3) through a separate SBM. The clustered pass sees only the three real clusters.</p>
+  <div class="graph" id="g1">
+    <div class="graph-chrome">
+      <span>after outlier exclusion &middot; 18 nodes</span>
+      <span class="right">hover a node</span>
+    </div>
+    <div class="graph-canvas" id="g1-cy"></div>
+    <div class="mincut-legend">
+      <span>C1 mincut <b>k = 3</b></span>
+      <span>C2 mincut <b>k = 2</b></span>
+      <span>C3 mincut <b>k = 1</b></span>
     </div>
   </div>
-  <aside class="viz-side">
-    <div class="panel" id="step-description">
-      <h3>what's happening</h3>
-      <p id="step-description-body">Input network with 20 nodes and 33 edges.</p>
-    </div>
-    <div class="panel" id="state-panel">
-      <h3>state</h3>
-      <div id="state-panel-body"></div>
-    </div>
-  </aside>
+  <div class="callout">
+    <div class="tag">the mincuts are the target</div>
+    <p>Computed at profile time via the Nagamochi-Ibaraki algorithm on each cluster's induced subgraph. Singleton clusters get $$k=0$$ by definition.</p>
+  </div>
 </section>
 
-<footer>
+<!-- ─────────── Stage 2 ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 2 · the k+1 clique</div>
+  <h2>Build a $$K_{k+1}$$ core in every cluster, vertex by vertex.</h2>
+  <p>Sort each cluster's nodes by degree, descending. Take the top $$k+1$$ and wire them into a complete subgraph. That is $$\binom{k+1}{2}$$ edges. The theorem: a complete graph on $$k+1$$ vertices is $$k$$-edge-connected. So every cluster that contains this clique is automatically at least $$k$$-edge-connected, regardless of what happens after.</p>
+  <p>Then the rest of the cluster attaches vertex by vertex. Each new vertex wires to the $$k$$ top-degree already-processed nodes. When a required edge's budget is exhausted, the code inflates the budget rather than drop the edge. That is the knob that makes the degree sequence approximate rather than exact.</p>
+  <div class="graph" id="g2">
+    <div class="graph-chrome">
+      <span id="g2-stage">step 0 · nodes only</span>
+      <span class="right step-label">step <b id="g2-cur">0</b> / <span id="g2-total">6</span></span>
+    </div>
+    <div class="graph-canvas" id="g2-cy"></div>
+    <div class="widget-row">
+      <button class="btn" id="g2-prev">← back</button>
+      <button class="btn primary" id="g2-next">next →</button>
+      <button class="btn" id="g2-reset">reset</button>
+    </div>
+    <div class="step-desc" id="g2-desc"></div>
+  </div>
+  <div class="callout">
+    <div class="tag">why this works</div>
+    <p>$$K_{k+1}$$ is the tightest k-edge-connected subgraph you can write down. Adding more vertices and edges on top can only <em>increase</em> connectivity, never decrease it. The construction bakes the guarantee in as a structural invariant.</p>
+  </div>
+</section>
+
+<!-- ─────────── Stage 3 ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 3 · sbm overlay</div>
+  <h2>Let the sampler fill in the residual on the mutated probs.</h2>
+  <p>After the constructive phase, the block matrix and the degree sequence have been <em>mutated</em>: decremented each time an edge was applied, inflated when <code>ensure_edge_capacity</code> fired. Stage 2 of v1 then calls <code>gt.generate_sbm</code> on those mutated arrays, overlays the constructive edges on top, and simplifies.</p>
+  <p>If an SBM-sampled edge lands on the same pair as a constructive edge, <code>remove_parallel_edges</code> drops one. This double-accounting is the reason v2 was written: it is cleaner to let one SBM call do all the sampling on a proper residual.</p>
+  <div class="graph" id="g3">
+    <div class="graph-chrome">
+      <span id="g3-label">constructive only</span>
+      <span class="right">azure = stage 2</span>
+    </div>
+    <div class="graph-canvas" id="g3-cy"></div>
+    <div class="widget-row">
+      <label class="toggle">
+        <input type="checkbox" id="g3-toggle">
+        <span class="toggle-track"></span>
+        <span>apply SBM overlay</span>
+      </label>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────── Stage 4 ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 4 · outlier rescue</div>
+  <h2>Bring the outliers back through a separate SBM.</h2>
+  <p>Because v1 forced outlier mode <code>excluded</code>, the clustered SBM never saw nodes 19 and 20. Stage 3a re-reads the original edgelist, identifies outliers as nodes present in the edgelist but absent from the clustering, and samples an SBM on just the outlier-incident edges. Each outlier is its own size-1 block.</p>
+  <p>The result is combined with stage-2 output via an undirected dedup, first-seen-wins. Stage-2 edges take priority over stage-3 on any collision.</p>
+  <div class="graph" id="g4">
+    <div class="graph-chrome">
+      <span>stage 2 + stage 3a (outlier SBM)</span>
+      <span class="right">orchid = stage 3</span>
+    </div>
+    <div class="graph-canvas" id="g4-cy"></div>
+  </div>
+</section>
+
+<!-- ─────────── Stage 5 ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 5 · match degree</div>
+  <h2>Top up the residual degree deficit.</h2>
+  <p>After the dedup in stage 2 and the outlier pass in stage 3, some nodes are still short of their target degree from the input. Stage 4a tops them off with a heap-based greedy: pop the node with the largest residual, connect it to up to <code>min(residual, non-neighbors)</code> partners, decrement both sides.</p>
+  <p>If a node runs out of valid partners before its residual hits zero, the remaining stubs are silently dropped. v1 does not log this. v2 does, and gives you a choice of five matcher algorithms.</p>
+  <div class="graph" id="g5">
+    <div class="graph-chrome">
+      <span>after match_degree top-up</span>
+      <span class="right">grey = stage 4</span>
+    </div>
+    <div class="graph-canvas" id="g5-cy"></div>
+  </div>
+  <div class="callout warn">
+    <div class="tag">the silent drop</div>
+    <p>A node with residual 3 and only one valid partner exits the heap with residual 2. Those two stubs vanish. On small graphs the effect is invisible; on dense graphs with heavy tails, gridlock accumulates. v2's <code>--algorithm hybrid</code> (rewire + true-greedy fallback) pushes this near zero.</p>
+  </div>
+</section>
+
+<!-- ─────────── Honesty ─────────── -->
+<section class="honesty">
+  <h2>Achieved vs asked</h2>
+  <p style="color:var(--paper-2);font-size:.95rem;margin-bottom:1rem">
+    On the shipped <em>dnc</em> example at <code>--seed 1</code>:
+  </p>
+  <table>
+    <thead><tr><th>stat</th><th>input</th><th>v1 out</th><th>note</th></tr></thead>
+    <tbody>
+      <tr><td>nodes</td><td class="num">906</td><td class="num">906</td><td>exact</td></tr>
+      <tr><td>edges</td><td class="num">10429</td><td class="num">10422</td><td>0.07% off (match_degree tops up)</td></tr>
+      <tr><td>mean deg</td><td class="num">23.02</td><td class="num">23.01</td><td>near-exact</td></tr>
+      <tr><td>global ccoeff</td><td class="num">0.548</td><td class="num">0.424</td><td>higher than plain SBM, thanks to K<sub>k+1</sub> cores</td></tr>
+      <tr><td>mean k-core</td><td class="num">15.99</td><td class="num">13.84</td><td>&mdash;</td></tr>
+      <tr><td>clusters</td><td class="num">42</td><td class="num">42</td><td>exact passthrough</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<div id="kin"></div>
+
+<footer class="footer">
   <p>
-    <a href="https://github.com/vltanh/network-generation/blob/main/docs/algorithms/ec-sbm-v1.md">read the algorithm notes</a> &middot;
-    <a href="./">back to index</a>
+    <a href="./">all generators</a> &middot;
+    <a href="https://vltanh.me/projects/network-generation/">project page</a> &middot;
+    <a href="https://github.com/vltanh/network-generation/blob/main/docs/algorithms/ec-sbm-v1.md" target="_blank" rel="noopener">algorithm notes</a>
   </p>
 </footer>
 
-</div>
+</main>
 
+<script src="https://unpkg.com/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
+<script src="./_shared.js"></script>
 <script>
-// ────────────────────────────────────────────────────────────────────────────
-// Shared synthetic data
-// ────────────────────────────────────────────────────────────────────────────
-const POSITIONS = {
-  // C1 cluster (top, 8 nodes orbiting)
-  1:{x:0,y:-145}, 2:{x:-32,y:-130}, 3:{x:30,y:-125}, 4:{x:-12,y:-175},
-  5:{x:-58,y:-160}, 6:{x:50,y:-165}, 7:{x:28,y:-200}, 8:{x:-40,y:-205},
-  // C2 cluster (bottom-right, 6 nodes)
-  9:{x:155,y:90}, 10:{x:190,y:115}, 11:{x:130,y:120}, 12:{x:185,y:65},
-  13:{x:215,y:140}, 14:{x:125,y:75},
-  // C3 cluster (bottom-left, 4 nodes)
-  15:{x:-155,y:90}, 16:{x:-195,y:115}, 17:{x:-125,y:120}, 18:{x:-140,y:65},
-  // Outliers at center
-  19:{x:-25,y:-5}, 20:{x:25,y:5},
-};
-const CLUSTER_OF = {
-  1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,
-  9:2,10:2,11:2,12:2,13:2,14:2,
-  15:3,16:3,17:3,18:3,
-  19:0,20:0,
-};
-const CLUSTER_COLOR = {0:'var(--signal)', 1:'var(--azure)', 2:'var(--amber)', 3:'var(--mint)'};
-const INPUT_EDGES = [
-  [1,2],[1,3],[1,4],[2,3],[2,4],[3,4],[1,5],[2,6],[3,7],[4,8],[5,6],[7,8],
-  [9,10],[9,11],[10,11],[9,12],[10,13],[11,14],[12,14],
-  [15,16],[15,17],[16,18],
-  [1,9],[2,10],[5,12],
-  [9,15],[11,16],
-  [1,15],[4,17],
-  [19,3],[19,10],[20,16],[20,5],
-];
-const OUTLIER_NODES = new Set([19,20]);
-const OUTLIER_EDGES_SET = new Set(['3-19','10-19','5-20','16-20']);
-const key = (u,v) => u<v ? `${u}-${v}` : `${v}-${u}`;
-
-// ────────────────────────────────────────────────────────────────────────────
-// Authored stage 2 constructive edges: K_{k+1} cores + phase-2 attachments.
-// The budget-inflation marker fires once, on node 6 attaching inside C1.
-// ────────────────────────────────────────────────────────────────────────────
-const C1_CORE = [[1,2],[1,3],[1,4],[2,3],[2,4],[3,4]];
-const C2_CORE = [[9,10],[9,11],[10,11]];
-const C3_CORE = [[15,16]];
-const C1_ATTACH = [[5,1],[6,1],[7,1],[8,1]];
-const C2_ATTACH = [[12,9],[13,9],[14,9]];
-const C3_ATTACH = [[17,15],[18,16]];
-const STAGE2_CONSTRUCTIVE = [...C1_CORE, ...C2_CORE, ...C3_CORE,
-                             ...C1_ATTACH, ...C2_ATTACH, ...C3_ATTACH];
-// Authored SBM overlay additions (new, non-constructive cells, residual-driven).
-const STAGE2_OVERLAY_NEW = [[2,5],[3,8],[4,6],[7,2],[10,12],[11,13],[2,9],[3,10]];
-// Authored overlay collisions (get dropped by remove_parallel_edges).
-const STAGE2_OVERLAY_COLLIDE = [[1,2],[9,11]];
-// Stage-2 final set = constructive + non-colliding overlay.
-const STAGE2_FINAL = [...STAGE2_CONSTRUCTIVE, ...STAGE2_OVERLAY_NEW];
-
-// Stage 3a: outlier SBM. Size-1 blocks for 19 and 20; sampled on the 4
-// outlier-incident input edges' block-pair cells. Authored result re-samples
-// 3 of 4 input-like incidences plus one relocation.
-const STAGE3_OUTLIER = [[19,3],[19,10],[20,16],[20,1]];
-
-// Stage 4a: heap-greedy match_degree. Residual targets = input degree minus
-// stage-2+3 outcome. Authored pick of two top-ups filling the biggest gaps.
-const STAGE4_MATCH = [[5,8],[6,7]];
-
-// ────────────────────────────────────────────────────────────────────────────
-// Step script. Each step lists which edges to show + how to render them.
-// ────────────────────────────────────────────────────────────────────────────
-const STEPS = [];
-
-function mkEdges(spec){ return spec.map(([u,v,stage,extra]) => ({u,v,stage,...(extra||{})})); }
-
-// Step 0: input
-STEPS.push({
-  title:'input network',
-  desc:`20 nodes, 33 edges, three clusters plus two outliers. C1 is the azure cluster on the left, C2 amber on the right, C3 mint at the bottom, and nodes 19 and 20 are outliers in signal red.`,
-  nodes: id => ({opacity:1, outline:OUTLIER_NODES.has(id)?'dashed':'solid'}),
-  edges: INPUT_EDGES.map(([u,v])=>({u,v,stage:'input'})),
-  side: `<div class="kv">
-    <span class="k">N</span><span class="v">20</span>
-    <span class="k">|E|</span><span class="v">33</span>
-    <span class="k">clusters</span><span class="v">C1(8) C2(6) C3(4)</span>
-    <span class="k">outliers</span><span class="v">{19, 20}</span>
-    <span class="k">mean degree</span><span class="v">3.3</span>
-  </div>`,
-});
-
-// Step 1: profile excluded
-STEPS.push({
-  title:'stage 1 profile: excluded transform',
-  desc:`v1 forces --outlier-mode excluded. Outliers 19 and 20 and the four edges incident to them fade out entirely. Per-cluster mincut is computed by pymincut's Nagamochi-Ibaraki: C1 is 3-edge-connected, C2 is 2-edge-connected, C3 is 1-edge-connected.`,
-  nodes: id => OUTLIER_NODES.has(id) ? {opacity:.15} : {opacity:1},
-  edges: INPUT_EDGES.map(([u,v])=>{
-    const isOut = OUTLIER_EDGES_SET.has(key(u,v));
-    return {u,v,stage:'input',faded:isOut};
-  }),
-  side: `<p>Per-cluster edge-connectivity on the induced subgraph:</p>
-    <div class="badge-row">
-      <span class="mc-badge c1">C1 k=3</span>
-      <span class="mc-badge c2">C2 k=2</span>
-      <span class="mc-badge c3">C3 k=1</span>
-    </div>
-    <pre>profile/
-  assignment.csv
-  degree.csv
-  mincut.csv  (k per cluster)
-  edge_counts.csv  (probs matrix)
-  com.csv     (outliers dropped)</pre>`,
-});
-
-// Step 2: stage 2a, K4 for C1
-STEPS.push({
-  title:'stage 2a: K_{k+1} core for C1 (k=3)',
-  desc:`Take the top four nodes by degree in C1, which are 1, 2, 3, 4 with degrees 6, 5, 5, 5. Wire them into K_4, a 3-edge-connected graph. Those 6 edges guarantee C1's output is at least 3-edge-connected.`,
-  nodes: id => {
-    if (OUTLIER_NODES.has(id)) return {opacity:.1};
-    if ([1,2,3,4].includes(id)) return {opacity:1, halo:'var(--azure)'};
-    return {opacity:.55};
-  },
-  edges: [
-    ...INPUT_EDGES.map(([u,v])=>({u,v,stage:'input',faded:true,hidden:OUTLIER_EDGES_SET.has(key(u,v))})),
-    ...C1_CORE.map(([u,v])=>({u,v,stage:'stage2',highlight:true})),
-  ],
-  side: `<p>K_4 is 3-edge-connected. After this pass, cluster C1 has edge-connectivity at least 3.</p>
-    <div class="kv">
-      <span class="k">top-4 by deg</span><span class="v">1(6) 2(5) 3(5) 4(5)</span>
-      <span class="k">edges added</span><span class="v">6</span>
-      <span class="k">formula</span><span class="v">k(k+1)/2 = 6</span>
-    </div>`,
-});
-
-// Step 3: stage 2b, K3 for C2
-STEPS.push({
-  title:'stage 2b: K_{k+1} core for C2 (k=2)',
-  desc:`Top three nodes in C2 are 9, 10, 11 at degrees 5, 5, 4. Wire them into K_3 for 3 edges. K_3 is 2-edge-connected so C2's output is at least 2-edge-connected.`,
-  nodes: id => {
-    if (OUTLIER_NODES.has(id)) return {opacity:.1};
-    if ([9,10,11].includes(id)) return {opacity:1, halo:'var(--amber)'};
-    if ([1,2,3,4].includes(id)) return {opacity:.65};
-    return {opacity:.55};
-  },
-  edges: [
-    ...INPUT_EDGES.map(([u,v])=>({u,v,stage:'input',faded:true,hidden:OUTLIER_EDGES_SET.has(key(u,v))})),
-    ...C1_CORE.map(([u,v])=>({u,v,stage:'stage2'})),
-    ...C2_CORE.map(([u,v])=>({u,v,stage:'stage2',highlight:true})),
-  ],
-  side: `<p>K_3 is 2-edge-connected. C2 now has edge-connectivity at least 2.</p>
-    <div class="kv">
-      <span class="k">top-3 by deg</span><span class="v">9(5) 10(5) 11(4)</span>
-      <span class="k">edges added</span><span class="v">3</span>
-    </div>`,
-});
-
-// Step 4: stage 2c, K2 for C3
-STEPS.push({
-  title:'stage 2c: K_{k+1} core for C3 (k=1)',
-  desc:`Top two in C3 are 15 and 16, both at degree 4. K_2 is a single edge and is 1-edge-connected, which meets the cluster's edge-connectivity floor.`,
-  nodes: id => {
-    if (OUTLIER_NODES.has(id)) return {opacity:.1};
-    if ([15,16].includes(id)) return {opacity:1, halo:'var(--mint)'};
-    if ([1,2,3,4,9,10,11].includes(id)) return {opacity:.65};
-    return {opacity:.55};
-  },
-  edges: [
-    ...INPUT_EDGES.map(([u,v])=>({u,v,stage:'input',faded:true,hidden:OUTLIER_EDGES_SET.has(key(u,v))})),
-    ...C1_CORE.map(([u,v])=>({u,v,stage:'stage2'})),
-    ...C2_CORE.map(([u,v])=>({u,v,stage:'stage2'})),
-    ...C3_CORE.map(([u,v])=>({u,v,stage:'stage2',highlight:true})),
-  ],
-  side: `<p>K_2 is 1-edge-connected. C3's floor is the lowest of the three clusters, so the core is a single edge.</p>
-    <div class="kv">
-      <span class="k">top-2 by deg</span><span class="v">15(4) 16(4)</span>
-      <span class="k">edges added</span><span class="v">1</span>
-    </div>`,
-});
-
-// Step 5: stage 2d, phase 2 attach
-STEPS.push({
-  title:'stage 2d: phase 2, attach remaining nodes',
-  desc:`Walk the non-core nodes in descending-degree order. For each new node u, wire it to the top-k already-processed partners, skipping any whose residual degree is zero. When the block-pair budget or a partner's residual would block a required edge, ensure_edge_capacity fires and inflates the budget by 1. Here the inflation shows up once, when node 6 attaches in C1.`,
-  nodes: id => {
-    if (OUTLIER_NODES.has(id)) return {opacity:.1};
-    return {opacity:1};
-  },
-  edges: [
-    ...INPUT_EDGES.map(([u,v])=>({u,v,stage:'input',faded:true,hidden:OUTLIER_EDGES_SET.has(key(u,v))})),
-    ...STAGE2_CONSTRUCTIVE.map(([u,v])=>({u,v,stage:'stage2',highlight:true})),
-  ],
-  marker: 'inflate',
-  side: `<p>Residual degree tracks stubs left after each attachment. Probs keeps the block-pair budget.</p>
-    <div class="kv">
-      <span class="k">C1 attach</span><span class="v">5 &rarr; 1, 6 &rarr; 1*, 7 &rarr; 1, 8 &rarr; 1</span>
-      <span class="k">C2 attach</span><span class="v">12 &rarr; 9, 13 &rarr; 9, 14 &rarr; 9</span>
-      <span class="k">C3 attach</span><span class="v">17 &rarr; 15, 18 &rarr; 16</span>
-    </div>
-    <p style="margin-top:.7rem;color:var(--signal);font-size:.85rem">* budget inflation: probs[C1,C1] hits 0 but an edge is required, so int_deg[6]+=1 and probs[C1,C1]+=1.</p>`,
-});
-
-// Step 6: stage 2e, SBM overlay
-STEPS.push({
-  title:'stage 2e: SBM overlay on mutated probs',
-  desc:`gt.generate_sbm runs on the residual probs and residual degree array, which have been decremented and sometimes inflated by the constructive phase. New edges land in cells the constructive phase did not fill. Some overlay samples collide with constructive edges and get flagged for dedup.`,
-  nodes: id => {
-    if (OUTLIER_NODES.has(id)) return {opacity:.1};
-    return {opacity:1};
-  },
-  edges: [
-    ...INPUT_EDGES.map(([u,v])=>({u,v,stage:'input',faded:true,hidden:OUTLIER_EDGES_SET.has(key(u,v))})),
-    ...STAGE2_CONSTRUCTIVE.map(([u,v])=>({u,v,stage:'stage2'})),
-    ...STAGE2_OVERLAY_NEW.map(([u,v])=>({u,v,stage:'stage2-overlay',highlight:true})),
-    ...STAGE2_OVERLAY_COLLIDE.map(([u,v])=>({u,v,stage:'stage2-overlay',collide:true})),
-  ],
-  side: `<pre>g = gt.generate_sbm(
-    b, probs.tocsr(),
-    out_degs=deg,
-    micro_ers=True,
-    micro_degs=True,
-    directed=False,
-)
-g.add_edge_list(edges)</pre>
-    <p style="margin-top:.55rem">Collisions (red x) will be dropped next.</p>`,
-});
-
-// Step 7: stage 2f, remove parallel
-STEPS.push({
-  title:'stage 2f: remove_parallel_edges + remove_self_loops',
-  desc:`Dedup drops any overlay edge that collided with a constructive edge, and any self-loop. The remaining graph is written to the stage-2 edge.csv in the .state/gen_clustered/ cache.`,
-  nodes: id => {
-    if (OUTLIER_NODES.has(id)) return {opacity:.1};
-    return {opacity:1};
-  },
-  edges: [
-    ...INPUT_EDGES.map(([u,v])=>({u,v,stage:'input',faded:true,hidden:OUTLIER_EDGES_SET.has(key(u,v))})),
-    ...STAGE2_FINAL.map(([u,v])=>({u,v,stage:'stage2'})),
-  ],
-  side: `<div class="kv">
-      <span class="k">constructive</span><span class="v">${STAGE2_CONSTRUCTIVE.length}</span>
-      <span class="k">overlay kept</span><span class="v">${STAGE2_OVERLAY_NEW.length}</span>
-      <span class="k">overlay dropped</span><span class="v">${STAGE2_OVERLAY_COLLIDE.length}</span>
-      <span class="k">stage-2 total</span><span class="v">${STAGE2_FINAL.length}</span>
-    </div>
-    <pre>written: .state/gen_clustered/edge.csv</pre>`,
-});
-
-// Step 8: stage 3a, outlier SBM
-STEPS.push({
-  title:'stage 3a: outlier-only SBM (seed + 1)',
-  desc:`Outliers 19 and 20 return. Each outlier is its own size-1 block. gen_outlier.py re-reads the input, identifies outlier-incident edges, builds the probs matrix over just those cells, and runs gt.generate_sbm with seed + 1. Non-outlier-incident input edges are not touched here.`,
-  nodes: id => ({opacity:1, halo: OUTLIER_NODES.has(id)?'var(--signal)':null}),
-  edges: [
-    ...STAGE2_FINAL.map(([u,v])=>({u,v,stage:'stage2'})),
-    ...STAGE3_OUTLIER.map(([u,v])=>({u,v,stage:'stage3',highlight:true})),
-  ],
-  side: `<div class="kv">
-      <span class="k">outliers</span><span class="v">{19, 20}</span>
-      <span class="k">block count</span><span class="v">5 (3 clusters + 2 singletons)</span>
-      <span class="k">outlier-incident</span><span class="v">4 input edges</span>
-      <span class="k">seed</span><span class="v">seed + 1</span>
-    </div>
-    <pre>written: .state/gen_outlier/edges/edge_outlier.csv</pre>`,
-});
-
-// Step 9: stage 3b, combine
-STEPS.push({
-  title:'stage 3b: combine stage 2 + stage 3a',
-  desc:`combine_edgelists.py concatenates the two edgelists, undirected-dedups with first-seen wins so stage 2 takes priority, and emits edge.csv plus sources.json with inclusive 1-based row ranges per provenance band.`,
-  nodes: id => ({opacity:1}),
-  edges: [
-    ...STAGE2_FINAL.map(([u,v])=>({u,v,stage:'stage2'})),
-    ...STAGE3_OUTLIER.map(([u,v])=>({u,v,stage:'stage3'})),
-  ],
-  side: `<pre>{
-  "clustered":    [1, ${STAGE2_FINAL.length}],
-  "outlier":      [${STAGE2_FINAL.length+1}, ${STAGE2_FINAL.length+STAGE3_OUTLIER.length}]
-}</pre>
-    <div class="kv" style="margin-top:.55rem">
-      <span class="k">stage-2 band</span><span class="v">${STAGE2_FINAL.length} edges</span>
-      <span class="k">stage-3 band</span><span class="v">${STAGE3_OUTLIER.length} edges</span>
-      <span class="k">combined</span><span class="v">${STAGE2_FINAL.length+STAGE3_OUTLIER.length} edges</span>
-    </div>`,
-});
-
-// Step 10: stage 4a, match_degree greedy
-STEPS.push({
-  title:'stage 4a: heap-greedy match_degree (seed + 2)',
-  desc:`Residual degree per node = input target minus current output count. Build a max-heap keyed on (-residual, node). Pop u, take partners via set.pop() from u's available non-neighbours, add edges in paper-3 grey. v1 hardcodes --match-degree-algorithm greedy. If a node exits the heap with residual greater than zero, its stubs drop silently; v1 does not log this.`,
-  nodes: id => ({opacity:1}),
-  edges: [
-    ...STAGE2_FINAL.map(([u,v])=>({u,v,stage:'stage2'})),
-    ...STAGE3_OUTLIER.map(([u,v])=>({u,v,stage:'stage3'})),
-    ...STAGE4_MATCH.map(([u,v])=>({u,v,stage:'stage4',highlight:true})),
-  ],
-  side: `<pre>max_heap = [(-res_deg[i], i)
-            for i in range(N) if res_deg[i] > 0]
-heapq.heapify(max_heap)
-while max_heap:
-    _, u = heappop(...)
-    for _ in range(min(res_u, len(cands))):
-        v = cands.pop()
-        edges.add((u, v))</pre>
-    <p style="margin-top:.55rem;color:var(--paper-3);font-size:.84rem">silent gridlock: stubs dropped when candidates exhaust before residual hits zero. PYTHONHASHSEED=0 pins set.pop() order.</p>`,
-});
-
-// Step 11: stage 4b, final combine
-STEPS.push({
-  title:'stage 4b: final combine',
-  desc:`combine_edgelists.py merges stage-3b's edge.csv with stage-4a's degree_matching_edge.csv, passing stage-3b's sources.json as --json-1 so all three provenance bands land in the final sources.json. edge.csv, sources.json, and com.csv sit at the top-level output directory.`,
-  nodes: id => ({opacity:1}),
-  edges: [
-    ...STAGE2_FINAL.map(([u,v])=>({u,v,stage:'stage2'})),
-    ...STAGE3_OUTLIER.map(([u,v])=>({u,v,stage:'stage3'})),
-    ...STAGE4_MATCH.map(([u,v])=>({u,v,stage:'stage4'})),
-  ],
-  side: (() => {
-    const s2 = STAGE2_FINAL.length;
-    const s3 = STAGE3_OUTLIER.length;
-    const s4 = STAGE4_MATCH.length;
-    return `<pre>output/
-  edge.csv         (${s2+s3+s4} edges)
-  sources.json
-  com.csv          (stage-1 passthrough)
-
-sources.json:
-{
-  "clustered":    [1, ${s2}],
-  "outlier":      [${s2+1}, ${s2+s3}],
-  "match_degree": [${s2+s3+1}, ${s2+s3+s4}]
-}</pre>
-    <div class="kv" style="margin-top:.55rem">
-      <span class="k">N</span><span class="v">20</span>
-      <span class="k">|E| target</span><span class="v">33</span>
-      <span class="k">|E| output</span><span class="v">${s2+s3+s4}</span>
-      <span class="k">k(C1) out</span><span class="v">&ge; 3</span>
-      <span class="k">k(C2) out</span><span class="v">&ge; 2</span>
-      <span class="k">k(C3) out</span><span class="v">&ge; 1</span>
-    </div>`;
-  })(),
-});
-
-// ────────────────────────────────────────────────────────────────────────────
-// Renderer
-// ────────────────────────────────────────────────────────────────────────────
-const STAGE_COLOR = {
-  'input': 'var(--paper-4)',
-  'stage2': 'var(--azure-2)',
-  'stage2-overlay': '#c5e0ff',
-  'stage3': 'var(--orchid)',
-  'stage4': 'var(--paper-3)',
-};
-const svg = d3.select('#graph');
-const gEdges = svg.append('g').attr('class','edges');
-const gMarkers = svg.append('g').attr('class','markers');
-const gNodes = svg.append('g').attr('class','nodes');
-
-let current = 0;
-let playing = false;
-let playTimer = null;
-
-function midpoint(u, v){
-  const a = POSITIONS[u], b = POSITIONS[v];
-  return {x:(a.x+b.x)/2, y:(a.y+b.y)/2};
-}
-
-function render(stepIdx){
-  const step = STEPS[stepIdx];
-
-  // Deduplicate edges: if the same pair appears with different stages,
-  // the later entry wins (this matches how collisions and highlights layer).
-  const edgeMap = new Map();
-  for (const e of step.edges || []){
-    if (e.hidden) continue;
-    edgeMap.set(key(e.u,e.v), e);
-  }
-  const edgeList = [...edgeMap.values()];
-
-  // Edges
-  const edgeSel = gEdges.selectAll('line.edge').data(edgeList, d => key(d.u,d.v));
-  edgeSel.exit().transition().duration(220).attr('opacity',0).remove();
-
-  const edgeEnter = edgeSel.enter().append('line').attr('class','edge')
-    .attr('x1', d => POSITIONS[d.u].x).attr('y1', d => POSITIONS[d.u].y)
-    .attr('x2', d => POSITIONS[d.v].x).attr('y2', d => POSITIONS[d.v].y)
-    .attr('opacity', 0);
-
-  edgeEnter.merge(edgeSel)
-    .transition().duration(250).ease(d3.easeCubicInOut)
-    .attr('x1', d => POSITIONS[d.u].x).attr('y1', d => POSITIONS[d.u].y)
-    .attr('x2', d => POSITIONS[d.v].x).attr('y2', d => POSITIONS[d.v].y)
-    .attr('stroke', d => STAGE_COLOR[d.stage] || 'var(--paper-4)')
-    .attr('stroke-width', d => d.highlight ? 2.4 : (d.collide ? 2 : 1.3))
-    .attr('stroke-dasharray', d => d.collide ? '3 2' : null)
-    .attr('opacity', d => {
-      if (d.collide) return .75;
-      if (d.faded) return .22;
-      return d.highlight ? 1 : .7;
-    });
-
-  // Collision x-markers
-  const collisions = edgeList.filter(e => e.collide);
-  const mSel = gMarkers.selectAll('text.collide-x').data(collisions, d => key(d.u,d.v));
-  mSel.exit().remove();
-  mSel.enter().append('text').attr('class','collide-x').text('✕')
-    .merge(mSel)
-    .attr('x', d => midpoint(d.u,d.v).x)
-    .attr('y', d => midpoint(d.u,d.v).y);
-
-  // Inflate marker (stage 2d only)
-  gMarkers.selectAll('text.inflate-label').remove();
-  if (step.marker === 'inflate'){
-    const mp = midpoint(6, 1);
-    gMarkers.append('text').attr('class','inflate-label')
-      .attr('x', mp.x - 10).attr('y', mp.y - 8)
-      .text('budget inflation');
-  }
-
-  // Nodes
-  const nodeIds = Object.keys(POSITIONS).map(Number);
-  const nodeSel = gNodes.selectAll('g.node').data(nodeIds, d => d);
-  const nodeEnter = nodeSel.enter().append('g').attr('class','node')
-    .attr('transform', d => `translate(${POSITIONS[d].x},${POSITIONS[d].y})`);
-  nodeEnter.append('circle').attr('class','halo').attr('r',13).attr('fill','none');
-  nodeEnter.append('circle').attr('class','body').attr('r',9);
-  nodeEnter.append('text').attr('class','node-label').text(d => d);
-
-  const merged = nodeEnter.merge(nodeSel);
-  merged.each(function(d){
-    const style = step.nodes ? step.nodes(d) : {opacity:1};
-    const sel = d3.select(this);
-    sel.transition().duration(250).ease(d3.easeCubicInOut)
-       .attr('opacity', style.opacity ?? 1);
-    sel.select('circle.body')
-       .attr('fill', CLUSTER_COLOR[CLUSTER_OF[d]])
-       .attr('stroke', 'var(--ink)')
-       .attr('stroke-width', 1.2)
-       .attr('stroke-dasharray', style.outline === 'dashed' ? '2 1.5' : null);
-    sel.select('circle.halo')
-       .attr('stroke', style.halo || 'none')
-       .attr('stroke-width', style.halo ? 2 : 0)
-       .attr('opacity', style.halo ? .85 : 0);
+(function () {
+  document.getElementById("links").innerHTML = NETGEN.linksRow({gen: "ec-sbm-v1"});
+  document.getElementById("kin").innerHTML = NETGEN.kinSection({
+    siblings: [
+      { gen: "sbm", label: "sbm",
+        diff: "The plain block model. No edge-connectivity guarantee; ec-sbm bolts one on." },
+      { gen: "ec-sbm-v2", label: "ec-sbm-v2",
+        diff: "v1 re-architected: one SBM call on a proper residual, block-preserving 2-opt rewire, and five matcher algorithms." },
+    ],
   });
 
-  // Text panels
-  d3.select('#step-num').text(stepIdx);
-  d3.select('#step-total').text(STEPS.length - 1);
-  d3.select('#step-title').text(step.title);
-  d3.select('#step-description-body').html(step.desc);
-  d3.select('#state-panel-body').html(step.side || '');
+  const COL = NETGEN.COLORS;
+  const CORE_EDGES = NETGEN.CORE_EDGES;
+  const CORE_NODES = NETGEN.CORE_NODES;
+  const INTRA = NETGEN.INTRA;
+  const INTER = NETGEN.INTER;
+  const OUT_EDGES = NETGEN.OUT_EDGES;
+  const OUT_NODES = NETGEN.OUT;
+  const DEGREES = NETGEN.DEGREES;
 
-  // Controls
-  d3.select('#btn-prev').property('disabled', stepIdx === 0);
-  d3.select('#btn-next').property('disabled', stepIdx === STEPS.length - 1);
-}
+  function pickInputColor(e) {
+    if (e.kind === "outlier" || e.kind === "inter") return COL.edge_inter;
+    const c = NETGEN.CLUSTER_OF[e.u] || NETGEN.CLUSTER_OF[e.v];
+    return COL.edge_intra[c] || COL.edge_inter;
+  }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Controls
-// ────────────────────────────────────────────────────────────────────────────
-function go(i){
-  current = Math.max(0, Math.min(STEPS.length - 1, i));
-  render(current);
-  if (playing && current === STEPS.length - 1) stopPlay();
-}
-function next(){ go(current + 1); }
-function prev(){ go(current - 1); }
-function reset(){ stopPlay(); go(0); }
-function startPlay(){
-  if (current === STEPS.length - 1) go(0);
-  playing = true;
-  d3.select('#btn-play').text('pause');
-  playTimer = setInterval(() => {
-    if (current >= STEPS.length - 1){ stopPlay(); return; }
-    next();
-  }, 1700);
-}
-function stopPlay(){
-  playing = false;
-  d3.select('#btn-play').text('play');
-  if (playTimer){ clearInterval(playTimer); playTimer = null; }
-}
-function togglePlay(){ playing ? stopPlay() : startPlay(); }
+  // ── Stage 1: profile, excluded outliers. ──
+  (function () {
+    const edges = [
+      ...INTRA.C1.map(([u,v]) => ({u,v, color: COL.edge_intra.C1, w: 1.4})),
+      ...INTRA.C2.map(([u,v]) => ({u,v, color: COL.edge_intra.C2, w: 1.4})),
+      ...INTRA.C3.map(([u,v]) => ({u,v, color: COL.edge_intra.C3, w: 1.4})),
+      ...INTER.map(([u,v]) => ({u,v, color: COL.edge_inter, w: 1.2})),
+    ];
+    const cy = NETGEN.CY.init("g1-cy", {
+      showLabels: true,
+      includeOutliers: false,
+      edges,
+    });
+    NETGEN.makeTooltip(cy, document.getElementById("g1"));
+  })();
 
-d3.select('#btn-prev').on('click', prev);
-d3.select('#btn-next').on('click', next);
-d3.select('#btn-play').on('click', togglePlay);
-d3.select('#btn-reset').on('click', reset);
+  // ── Stage 2: K_{k+1} + attach step-through. ──
+  (function () {
+    // Per-step edges added to the running set. Node highlights per step.
+    // Step 0: no edges, all nodes faint.
+    // Step 1: highlight top-(k+1) per cluster, no edges.
+    // Step 2: draw K_{k+1} cores.
+    // Step 3-6: attach next remaining node per cluster in degree-desc order.
 
-document.addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'INPUT') return;
-  if (e.key === 'ArrowRight'){ e.preventDefault(); next(); }
-  else if (e.key === 'ArrowLeft'){ e.preventDefault(); prev(); }
-  else if (e.key === ' '){ e.preventDefault(); togglePlay(); }
-  else if (e.key === 'r' || e.key === 'R'){ e.preventDefault(); reset(); }
-});
+    const C1_rem = [5,6,7,8];   // degree-desc already
+    const C2_rem = [12,13,14];
+    const C3_rem = [17,18];
 
-render(0);
+    // For each remaining node, the k partners we draw edges to.
+    const ATTACH = {
+      5:  [1,2,3],
+      6:  [1,2,4],
+      7:  [3,4,5],
+      8:  [1,4,5],
+      12: [9,10],
+      13: [9,11],
+      14: [10,11],
+      17: [15],
+      18: [16],
+    };
+
+    function edgesAt(step) {
+      if (step < 2) return [];
+      const out = [];
+      if (step >= 2) {
+        CORE_EDGES.C1.forEach(([u,v]) => out.push({u,v, color: COL.edge_stage2, w: 2.5, id:`c-${u}-${v}`, classes:"core"}));
+        CORE_EDGES.C2.forEach(([u,v]) => out.push({u,v, color: COL.edge_stage2, w: 2.5, id:`c-${u}-${v}`, classes:"core"}));
+        CORE_EDGES.C3.forEach(([u,v]) => out.push({u,v, color: COL.edge_stage2, w: 2.5, id:`c-${u}-${v}`, classes:"core"}));
+      }
+      const maxAttach = step - 2;  // step 3 → 1st attach
+      for (let i = 0; i < maxAttach; i++) {
+        const c1n = C1_rem[i];
+        const c2n = C2_rem[i];
+        const c3n = C3_rem[i];
+        [c1n, c2n, c3n].forEach(n => {
+          if (n == null) return;
+          ATTACH[n].forEach(p => out.push({
+            u: Math.min(n,p), v: Math.max(n,p),
+            color: COL.edge_stage2, w: 1.6,
+            id: `a-${n}-${p}`,
+          }));
+        });
+      }
+      return out;
+    }
+
+    // Highlight data per step: which nodes are "core" (highlighted), "added this step", or dim.
+    function nodeHighlight(step) {
+      const added = new Set();
+      const core = new Set([...CORE_NODES.C1, ...CORE_NODES.C2, ...CORE_NODES.C3]);
+      if (step === 0) return { added, core: new Set(), dim: new Set([1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18]) };
+      if (step === 1) return { added, core, dim: new Set() };
+      const maxAttach = step - 2;
+      for (let i = 0; i < maxAttach; i++) {
+        if (C1_rem[i] != null) added.add(C1_rem[i]);
+        if (C2_rem[i] != null) added.add(C2_rem[i]);
+        if (C3_rem[i] != null) added.add(C3_rem[i]);
+      }
+      // The "this step" highlight focuses on the most recently attached node.
+      const newlyAdded = new Set();
+      if (step >= 3) {
+        if (C1_rem[maxAttach-1] != null) newlyAdded.add(C1_rem[maxAttach-1]);
+        if (C2_rem[maxAttach-1] != null) newlyAdded.add(C2_rem[maxAttach-1]);
+        if (C3_rem[maxAttach-1] != null) newlyAdded.add(C3_rem[maxAttach-1]);
+      }
+      return { added, core, dim: new Set(), newlyAdded };
+    }
+
+    const STEP_DESC = [
+      { label: "step 0 · stripped", desc: "No edges yet. 18 nodes after outlier exclusion." },
+      { label: "step 1 · top-(k+1) selected", desc: "Top-4 in C1 ({1,2,3,4}), top-3 in C2 ({9,10,11}), top-2 in C3 ({15,16}). These will form the k-edge-connected core." },
+      { label: "step 2 · K_{k+1} cliques", desc: "K_4 in C1 (6 edges), K_3 in C2 (3 edges), K_2 in C3 (1 edge). Each cluster now has a provably k-edge-connected skeleton." },
+      { label: "step 3 · first attach", desc: "Next node per cluster wires to k top-degree already-processed nodes. C1: node 5 → {1,2,3}. C2: node 12 → {9,10}. C3: node 17 → {15}." },
+      { label: "step 4 · second attach", desc: "C1: node 6 → {1,2,4}. C2: node 13 → {9,11}. C3: node 18 → {16}. C3 is done after this step." },
+      { label: "step 5 · third attach", desc: "C1: node 7 → {3,4,5}. C2: node 14 → {10,11}. C2 done." },
+      { label: "step 6 · fourth attach", desc: "C1: node 8 → {1,4,5}. C1 done. All three clusters now k-edge-connected." },
+    ];
+
+    // Build cytoscape once with no edges. We re-render edges per step via cy.add/cy.remove.
+    const cy = NETGEN.CY.init("g2-cy", {
+      showLabels: true,
+      includeOutliers: false,
+      edges: [],
+    });
+    cy.style()
+      .selector("node.core").style({ "border-color": COL.paper, "border-width": 2.5, "width": 26, "height": 26 })
+      .selector("node.newly").style({ "border-color": COL.edge_stage2, "border-width": 3, "width": 28, "height": 28 })
+      .selector("node.dim").style({ "opacity": 0.35 })
+      .update();
+
+    const descEl = document.getElementById("g2-desc");
+    const stageEl = document.getElementById("g2-stage");
+
+    function render(step) {
+      // Edges
+      cy.edges().remove();
+      edgesAt(step).forEach(e => cy.add({
+        data: {
+          id: e.id, source: String(e.u), target: String(e.v),
+          color: e.color, w: e.w,
+        },
+      }));
+      // Node highlights
+      const h = nodeHighlight(step);
+      cy.nodes().forEach(n => {
+        const id = parseInt(n.id(), 10);
+        n.removeClass("core newly dim");
+        if (h.dim && h.dim.has(id)) n.addClass("dim");
+        if (h.core && h.core.has(id) && !(h.added && h.added.has(id))) n.addClass("core");
+        if (h.newlyAdded && h.newlyAdded.has(id)) n.addClass("newly");
+      });
+
+      descEl.innerHTML = `<span class="st">${STEP_DESC[step].label}</span> — ${STEP_DESC[step].desc}`;
+      stageEl.textContent = STEP_DESC[step].label;
+    }
+
+    NETGEN.stepController({
+      prevBtn: document.getElementById("g2-prev"),
+      nextBtn: document.getElementById("g2-next"),
+      resetBtn: document.getElementById("g2-reset"),
+      labelCur: document.getElementById("g2-cur"),
+      labelTotal: document.getElementById("g2-total"),
+      total: STEP_DESC.length,
+      onRender: render,
+    });
+  })();
+
+  // ── Stage 3: SBM overlay toggle. ──
+  (function () {
+    // Constructive (stage 2 core + attach) = azure-2.
+    // Overlay adds a few inter-cluster edges (matching INTER) + a dashed collision
+    //   meant to simulate what SBM emits.
+    const constructive = [];
+    // Cores
+    CORE_EDGES.C1.forEach(([u,v]) => constructive.push({u,v, color: COL.edge_stage2, w: 2.2, id:`g3-c-${u}-${v}`}));
+    CORE_EDGES.C2.forEach(([u,v]) => constructive.push({u,v, color: COL.edge_stage2, w: 2.2, id:`g3-c-${u}-${v}`}));
+    CORE_EDGES.C3.forEach(([u,v]) => constructive.push({u,v, color: COL.edge_stage2, w: 2.2, id:`g3-c-${u}-${v}`}));
+    // Flat attach (end of stage 2 before overlay)
+    const ATTACH_FLAT = [
+      [1,5],[2,5],[3,5],[1,6],[2,6],[4,6],[3,7],[4,7],[5,7],[1,8],[4,8],[5,8],
+      [9,12],[10,12],[9,13],[11,13],[10,14],[11,14],
+      [15,17],[16,18],
+    ];
+    ATTACH_FLAT.forEach(([u,v]) => constructive.push({u,v, color: COL.edge_stage2, w: 1.4, id:`g3-a-${u}-${v}`}));
+
+    // Overlay edges (inter-cluster + a couple dashed collisions)
+    const overlay = [
+      { u:1, v:9, color: COL.edge_stage2, w: 1.6, id:"g3-o-1" },
+      { u:2, v:10, color: COL.edge_stage2, w: 1.6, id:"g3-o-2" },
+      { u:5, v:12, color: COL.edge_stage2, w: 1.6, id:"g3-o-3" },
+      { u:9, v:15, color: COL.edge_stage2, w: 1.6, id:"g3-o-4" },
+      { u:11, v:16, color: COL.edge_stage2, w: 1.6, id:"g3-o-5" },
+      { u:1, v:15, color: COL.edge_stage2, w: 1.6, id:"g3-o-6" },
+      { u:4, v:17, color: COL.edge_stage2, w: 1.6, id:"g3-o-7" },
+      // dashed collision (SBM sampled a duplicate of an already-constructive edge)
+      { u:1, v:2, color: COL.edge_drop, w: 2, id:"g3-dup-1", classes:"dashed thick" },
+      { u:10, v:11, color: COL.edge_drop, w: 2, id:"g3-dup-2", classes:"dashed thick" },
+    ];
+
+    const cy = NETGEN.CY.init("g3-cy", {
+      showLabels: true,
+      includeOutliers: false,
+      edges: constructive,
+    });
+    cy.style()
+      .selector("edge.dashed").style({ "line-style":"dashed" })
+      .update();
+
+    const label = document.getElementById("g3-label");
+    let overlayActive = false;
+    NETGEN.toggle({
+      input: document.getElementById("g3-toggle"),
+      onChange: (on) => {
+        if (on && !overlayActive) {
+          overlay.forEach(e => cy.add({
+            data: {
+              id: e.id, source: String(e.u), target: String(e.v),
+              color: e.color, w: e.w,
+            },
+            classes: e.classes || "",
+          }));
+          overlayActive = true;
+          label.textContent = "stage 2 complete (with SBM overlay)";
+        } else if (!on && overlayActive) {
+          overlay.forEach(e => cy.getElementById(e.id).remove());
+          overlayActive = false;
+          label.textContent = "constructive only";
+        }
+      },
+    });
+  })();
+
+  // ── Stage 4: stage 2 edges (post-dedup) + stage 3a outlier SBM orchid edges ──
+  (function () {
+    const stage2 = [
+      ...CORE_EDGES.C1.map(([u,v]) => ({u,v, color: COL.edge_stage2, w: 1.8})),
+      ...CORE_EDGES.C2.map(([u,v]) => ({u,v, color: COL.edge_stage2, w: 1.8})),
+      ...CORE_EDGES.C3.map(([u,v]) => ({u,v, color: COL.edge_stage2, w: 1.8})),
+      [1,5],[2,5],[3,5],[1,6],[2,6],[4,6],[3,7],[4,7],[5,7],[1,8],[4,8],[5,8],
+      [9,12],[10,12],[9,13],[11,13],[10,14],[11,14],
+      [15,17],[16,18],
+      [1,9],[2,10],[5,12],[9,15],[11,16],[1,15],[4,17],
+    ].map((e,i) => Array.isArray(e) ? {u:e[0], v:e[1], color: COL.edge_stage2, w: e.length>2 ? 1.8 : 1.4, id:`g4-a-${i}`} : {...e, id:`g4-a-${i}`});
+
+    const stage3 = OUT_EDGES.map(([u,v]) => ({u,v, color: COL.edge_stage3, w: 2, id:`g4-o-${u}-${v}`}));
+
+    NETGEN.CY.init("g4-cy", {
+      showLabels: true,
+      edges: [...stage2, ...stage3],
+    });
+  })();
+
+  // ── Stage 5: + match-degree top-up edges (grey). ──
+  (function () {
+    const stage2 = [
+      ...CORE_EDGES.C1.map(([u,v]) => ({u,v, color: COL.edge_stage2, w: 1.6})),
+      ...CORE_EDGES.C2.map(([u,v]) => ({u,v, color: COL.edge_stage2, w: 1.6})),
+      ...CORE_EDGES.C3.map(([u,v]) => ({u,v, color: COL.edge_stage2, w: 1.6})),
+      [1,5],[2,5],[3,5],[1,6],[2,6],[4,6],[3,7],[4,7],[5,7],[1,8],[4,8],[5,8],
+      [9,12],[10,12],[9,13],[11,13],[10,14],[11,14],
+      [15,17],[16,18],
+      [1,9],[2,10],[5,12],[9,15],[11,16],[1,15],[4,17],
+    ].map((e,i) => Array.isArray(e) ? {u:e[0], v:e[1], color: COL.edge_stage2, w: 1.4, id:`g5-a-${i}`} : {...e, id:`g5-a-${i}`});
+
+    const stage3 = OUT_EDGES.map(([u,v]) => ({u,v, color: COL.edge_stage3, w: 1.6, id:`g5-o-${u}-${v}`}));
+
+    // Stage-4 match-degree: simulate a couple of top-up edges between under-degreed pairs.
+    const stage4 = [
+      { u:6, v:14, color: COL.edge_stage4, w: 2, id:"g5-m-1" },
+      { u:7, v:13, color: COL.edge_stage4, w: 2, id:"g5-m-2" },
+    ];
+
+    NETGEN.CY.init("g5-cy", {
+      showLabels: true,
+      edges: [...stage2, ...stage3, ...stage4],
+    });
+  })();
+
+})();
 </script>
 </body>
 </html>
