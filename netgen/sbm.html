@@ -3,1234 +3,333 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>SBM generator, step by step</title>
+<title>SBM: the cookie cutter</title>
+<meta name="description" content="The degree-corrected stochastic block model, walked through stage by stage on a small synthetic graph. Interactive: click edges to see the block matrix fill in, toggle dedup on and off.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=Figtree:ital,wght@0,300..900;1,300..900&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./_shared.css">
 <style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-
-:root{
-  --ink:#0b1120;
-  --ink-2:#121a36;
-  --ink-3:#1a2448;
-  --paper:#f4f6fb;
-  --paper-2:#c0cceb;
-  --paper-3:#8494be;
-  --paper-4:#4e5f8a;
-  --rule:#263764;
-  --rule-2:#354d80;
-  --azure:#78b4ff;
-  --azure-2:#a0ccff;
-  --azure-3:#5090ff;
-  --cobalt:#3a66cc;
-  --signal:#ff6b7a;
-  --amber:#ffc66b;
-  --mint:#6bffc9;
-  --orchid:#c38bff;
-}
-
-html{scroll-behavior:smooth}
-
-body{
-  background:var(--ink);
-  color:var(--paper);
-  font-family:'Figtree',system-ui,-apple-system,sans-serif;
-  font-feature-settings:"ss01","kern","liga","cv11";
-  font-size:16px;
-  line-height:1.55;
-  -webkit-font-smoothing:antialiased;
-  text-rendering:optimizeLegibility;
-  min-height:100vh;
-  background-image:
-    radial-gradient(ellipse 80% 60% at 15% 8%, rgba(58,102,204,.08) 0%, transparent 60%),
-    radial-gradient(ellipse 60% 50% at 85% 88%, rgba(120,180,255,.05) 0%, transparent 55%);
-  background-attachment:fixed;
-}
-a{color:var(--azure);text-decoration-thickness:1px;text-underline-offset:3px;transition:color .2s}
-a:hover{color:var(--paper)}
-
-.page{max-width:1180px;margin:0 auto;padding:2.4rem 1.5rem 4rem;position:relative}
-
-/* ═══════════ HEADER ═══════════ */
-header{position:relative;margin-bottom:2.2rem}
-header .top-rule{
-  display:flex;align-items:center;justify-content:space-between;gap:1rem;
-  padding:.55rem 0;
-  border-top:1px solid var(--paper-3);
-  border-bottom:1px solid var(--paper-4);
+.blockmat{
+  display:grid; gap:3px;
+  grid-template-columns:repeat(5, minmax(0, 1fr));
+  max-width:280px; margin:1rem auto;
   font-family:'JetBrains Mono',ui-monospace,monospace;
-  font-size:.66rem;letter-spacing:.22em;
-  color:var(--paper-2);text-transform:uppercase;
+  font-size:.75rem;
 }
-header .top-rule .ornament{
-  font-family:'Fraunces',serif;font-size:1.1rem;letter-spacing:.4em;
-  color:var(--azure);
-}
-header .back{
-  font-family:'JetBrains Mono',monospace;
-  text-decoration:none;color:var(--paper-2);
-  font-size:.66rem;letter-spacing:.22em;text-transform:uppercase;
-}
-header .back:hover{color:var(--azure)}
-header h1{
-  font-family:'Fraunces',serif;
-  font-optical-sizing:auto;
-  font-variation-settings:"opsz" 144,"SOFT" 30;
-  font-weight:800;
-  font-size:clamp(2.4rem,5.8vw,4rem);
-  line-height:.95;
-  letter-spacing:-.028em;
-  color:var(--paper);
-  margin:1.4rem 0 .35rem;
-}
-header h1 em{
-  font-style:italic;
-  font-variation-settings:"opsz" 144,"SOFT" 100;
-  font-weight:300;
-  color:var(--azure);
-}
-header .sub{
-  font-family:'Fraunces',serif;font-style:italic;font-weight:400;
-  font-variation-settings:"opsz" 14;
-  font-size:1.02rem;
-  color:var(--paper-2);
-  max-width:58ch;
-}
-
-/* ═══════════ INTRO ═══════════ */
-.intro{
-  margin:1.8rem 0 2.2rem;
-  font-size:1.02rem;
-  color:var(--paper-2);
-  max-width:62ch;
-}
-.intro p + p{margin-top:.9rem}
-.intro code{
-  font-family:'JetBrains Mono',monospace;
-  font-size:.88em;
-  color:var(--azure-2);
-  background:rgba(120,180,255,.06);
-  padding:.05em .35em;
-  border-radius:2px;
-}
-
-/* ═══════════ CONTROLS ═══════════ */
-.controls{
-  display:flex;align-items:center;flex-wrap:wrap;gap:.55rem;
-  padding:.9rem 1rem;
-  background:var(--ink-2);
-  border:1px solid var(--rule);
-  position:relative;
-  margin-bottom:1.3rem;
-}
-.controls::before,.controls::after{
-  content:'';position:absolute;width:14px;height:14px;pointer-events:none;
-}
-.controls::before{top:-1px;left:-1px;border-top:1px solid var(--azure-3);border-left:1px solid var(--azure-3)}
-.controls::after{bottom:-1px;right:-1px;border-bottom:1px solid var(--azure-3);border-right:1px solid var(--azure-3)}
-
-.btn{
-  font-family:'JetBrains Mono',monospace;
-  font-size:.72rem;letter-spacing:.11em;text-transform:uppercase;
-  color:var(--paper);
-  background:transparent;
-  border:1px solid var(--rule-2);
-  padding:.55rem .95rem;
-  cursor:pointer;
-  transition:all .18s;
-  border-radius:2px;
-}
-.btn:hover:not(:disabled){border-color:var(--azure);color:var(--azure)}
-.btn:active:not(:disabled){transform:translateY(1px)}
-.btn:disabled{opacity:.35;cursor:not-allowed}
-.btn.primary{background:var(--cobalt);border-color:var(--cobalt)}
-.btn.primary:hover:not(:disabled){background:var(--azure-3);border-color:var(--azure-3);color:var(--paper)}
-.btn.primary.active{background:var(--signal);border-color:var(--signal)}
-
-.step-indicator{
-  margin-left:auto;
-  font-family:'JetBrains Mono',monospace;
-  font-size:.72rem;letter-spacing:.18em;text-transform:uppercase;
-  color:var(--paper-3);
-}
-.step-indicator b{color:var(--azure);font-weight:500}
-
-.step-title{
-  flex-basis:100%;
-  margin-top:.6rem;padding-top:.75rem;
-  border-top:1px solid var(--rule);
-  font-family:'Fraunces',serif;
-  font-style:italic;
-  font-weight:400;
-  font-size:1.1rem;
-  color:var(--paper);
-}
-.step-title .num{
-  font-family:'JetBrains Mono',monospace;
-  font-size:.66rem;
-  letter-spacing:.22em;
-  color:var(--azure);
-  font-style:normal;
-  margin-right:.8rem;
-  vertical-align:.15em;
-}
-
-/* ═══════════ VIZ GRID ═══════════ */
-.viz-grid{
-  display:grid;
-  grid-template-columns:minmax(0,2fr) minmax(0,1fr);
-  gap:1.2rem;
-  margin-bottom:2.5rem;
-}
-.viz-main,.panel{
-  background:var(--ink-2);
-  border:1px solid var(--rule);
-  position:relative;
-  transition:border-color .25s;
-}
-.viz-main::before,.viz-main::after,
-.panel::before,.panel::after{
-  content:'';position:absolute;width:14px;height:14px;pointer-events:none;
-}
-.viz-main::before,.panel::before{top:-1px;left:-1px;border-top:1px solid var(--azure-3);border-left:1px solid var(--azure-3)}
-.viz-main::after,.panel::after{bottom:-1px;right:-1px;border-bottom:1px solid var(--azure-3);border-right:1px solid var(--azure-3)}
-
-.viz-main{padding:.9rem;display:flex;flex-direction:column;min-height:460px}
-.viz-main .chrome{
-  display:flex;justify-content:space-between;align-items:center;
-  padding:0 .3rem .6rem;
-  font-family:'JetBrains Mono',monospace;
-  font-size:.62rem;letter-spacing:.22em;text-transform:uppercase;
-  color:var(--paper-4);
-}
-.viz-main .chrome .right{color:var(--paper-3)}
-.viz-main svg{flex:1;width:100%;min-height:420px;display:block}
-
-.legend{
-  display:flex;flex-wrap:wrap;gap:.55rem .95rem;
-  padding:.7rem .3rem 0;
-  font-family:'JetBrains Mono',monospace;
-  font-size:.65rem;
-  color:var(--paper-3);
-  letter-spacing:.02em;
-  border-top:1px solid var(--rule);
-  margin-top:.6rem;
-}
-.legend span{display:inline-flex;align-items:center;gap:.4rem}
-.legend .sw{
-  display:inline-block;width:10px;height:10px;border-radius:50%;
-  border:1px solid rgba(255,255,255,.2);
-}
-
-.side{display:flex;flex-direction:column;gap:1.2rem}
-.panel{padding:1rem 1.1rem}
-.panel h3{
-  font-family:'JetBrains Mono',monospace;
-  font-size:.62rem;letter-spacing:.22em;text-transform:uppercase;
-  color:var(--paper-3);
-  padding-bottom:.55rem;
-  margin-bottom:.8rem;
-  border-bottom:1px solid var(--rule);
-  display:flex;justify-content:space-between;align-items:center;
-}
-.panel h3 .tag{
-  color:var(--azure);
-  font-weight:500;
-}
-.panel p{
-  color:var(--paper-2);
-  font-size:.92rem;
-  line-height:1.55;
-}
-.panel p + p{margin-top:.7rem}
-.panel code, .mono{
-  font-family:'JetBrains Mono',monospace;
-  font-size:.82em;
-  color:var(--azure-2);
-}
-.panel .callout{
-  background:rgba(120,180,255,.05);
-  border-left:2px solid var(--azure-3);
-  padding:.5rem .7rem;
-  margin-top:.8rem;
-  font-size:.85rem;
-  color:var(--paper-2);
-}
-.panel .callout.warn{
-  border-left-color:var(--signal);
-  background:rgba(255,107,122,.06);
-}
-
-/* block list */
-.block-list{
-  font-family:'JetBrains Mono',monospace;
-  font-size:.8rem;
-  display:grid;
-  grid-template-columns:auto 1fr auto;
-  gap:.3rem .7rem;
-  align-items:center;
-}
-.block-list .bx{width:10px;height:10px;border-radius:2px;border:1px solid rgba(255,255,255,.15)}
-.block-list .name{color:var(--paper)}
-.block-list .sz{color:var(--paper-3);text-align:right}
-
-/* degree table */
-.dtable{
-  width:100%;
-  font-family:'JetBrains Mono',monospace;
-  font-size:.78rem;
-  border-collapse:collapse;
-}
-.dtable th{
-  text-align:left;
-  color:var(--paper-4);
-  font-weight:500;
-  font-size:.62rem;
-  letter-spacing:.18em;
-  text-transform:uppercase;
-  padding:.2rem .5rem .4rem 0;
-  border-bottom:1px solid var(--rule);
-}
-.dtable td{
-  padding:.22rem .5rem .22rem 0;
-  color:var(--paper-2);
-}
-.dtable td.id{color:var(--paper)}
-.dtable td.iid{color:var(--azure)}
-.dtable td.deg{text-align:right;color:var(--paper-3)}
-
-/* heatmap */
-.heat-wrap{display:flex;flex-direction:column;gap:.35rem}
-.heat-grid{
-  display:grid;
-  grid-template-columns:1.2rem repeat(4,1fr);
-  gap:3px;
-  font-family:'JetBrains Mono',monospace;
-  font-size:.7rem;
-}
-.heat-grid .lbl{
-  color:var(--paper-4);
-  display:flex;align-items:center;justify-content:center;
-  font-size:.62rem;
-  letter-spacing:.1em;
-}
-.heat-grid .cell{
-  aspect-ratio:1;
-  display:flex;align-items:center;justify-content:center;
-  font-family:'JetBrains Mono',monospace;
-  font-size:.85rem;
-  font-weight:500;
-  color:var(--ink);
-  border-radius:2px;
-  position:relative;
-}
-.heat-grid .cell.zero{color:var(--paper-4)}
-.heat-caption{
-  font-family:'JetBrains Mono',monospace;
-  font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;
-  color:var(--paper-4);margin-top:.3rem;
-}
-
-/* code block */
-.code-block{
-  font-family:'JetBrains Mono',monospace;
-  font-size:.78rem;
-  line-height:1.55;
-  background:var(--ink);
-  border:1px solid var(--rule);
-  padding:.8rem .9rem;
-  overflow-x:auto;
-  color:var(--paper-2);
-}
-.code-block .kw{color:var(--azure)}
-.code-block .arg{color:var(--amber)}
-.code-block .str{color:var(--mint)}
-.code-block .cmt{color:var(--paper-4);font-style:italic}
-.code-block .fn{color:var(--azure-2)}
-
-/* counter */
-.counter{
-  display:flex;align-items:baseline;gap:.5rem;
-  font-family:'Fraunces',serif;
-  margin:.4rem 0 .3rem;
-}
-.counter .n{
-  font-size:2.4rem;
-  font-weight:700;
-  color:var(--signal);
-  font-variation-settings:"opsz" 72;
-  line-height:1;
-}
-.counter .lbl{
-  font-family:'JetBrains Mono',monospace;
-  font-size:.7rem;letter-spacing:.14em;text-transform:uppercase;
-  color:var(--paper-3);
-}
-
-/* degree bars */
-.degbars{
-  display:grid;
-  grid-template-columns:1.4rem 1fr;
-  row-gap:4px;
-  column-gap:.5rem;
-  font-family:'JetBrains Mono',monospace;
-  font-size:.68rem;
-  align-items:center;
-}
-.degbars .id{color:var(--paper-3);text-align:right}
-.degbars .bar{
-  position:relative;
-  height:10px;
+.blockmat .cell{
   background:var(--ink-3);
-  border-radius:1px;
+  border:1px solid var(--rule);
+  aspect-ratio:1;
+  display:flex; align-items:center; justify-content:center;
+  color:var(--paper-2);
+  transition:background .2s ease, border-color .2s ease;
+  font-variant-numeric:tabular-nums;
 }
-.degbars .bar .tgt{
-  position:absolute;inset:0 auto 0 0;
-  background:var(--paper-4);
-  opacity:.45;
+.blockmat .cell.head{
+  background:transparent; border:none; color:var(--paper-3);
+  font-size:.68rem; letter-spacing:.1em; text-transform:uppercase;
 }
-.degbars .bar .ach{
-  position:absolute;inset:0 auto 0 0;
-  background:var(--azure);
+.blockmat .cell.on{
+  background:var(--azure-3); color:var(--paper); border-color:var(--azure-3);
 }
-.degbars .bar.deficit .ach{background:var(--signal)}
-.degbars .bar .val{
-  position:absolute;right:.3rem;top:50%;transform:translateY(-50%);
-  font-size:.62rem;color:var(--paper-2);
-  mix-blend-mode:screen;
+.blockmat .cell.flash{ animation:flash 0.6s ease-out; }
+@keyframes flash{
+  0%{background:var(--paper); color:var(--ink);}
+  100%{background:var(--azure-3); color:var(--paper);}
 }
-
-/* stats */
-.stats{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:.55rem .9rem;
-  font-family:'JetBrains Mono',monospace;
-  font-size:.78rem;
-}
-.stats .k{color:var(--paper-4);font-size:.62rem;letter-spacing:.14em;text-transform:uppercase}
-.stats .v{color:var(--paper);font-size:1rem;margin-top:.15rem}
-.stats .v.dim{color:var(--paper-3)}
-
-/* ═══════════ FOOTER ═══════════ */
-footer{
-  margin-top:3rem;
-  padding-top:1.4rem;
-  border-top:1px solid var(--rule);
-  font-family:'JetBrains Mono',monospace;
-  font-size:.7rem;
-  letter-spacing:.12em;
-  text-transform:uppercase;
-  color:var(--paper-3);
-  display:flex;
-  justify-content:space-between;
-  flex-wrap:wrap;
-  gap:.8rem;
-}
-footer a{color:var(--paper-2);text-decoration:none;transition:color .2s}
-footer a:hover{color:var(--azure)}
-
-/* ═══════════ RESPONSIVE ═══════════ */
-@media (max-width:768px){
-  .page{padding:1.6rem 1rem 3rem}
-  .viz-grid{grid-template-columns:1fr}
-  .viz-main{min-height:360px}
-  .viz-main svg{min-height:320px}
-  header h1{font-size:clamp(2rem,7vw,2.8rem)}
-  .step-indicator{margin-left:0}
-}
-
-/* ═══════════ SVG STYLING ═══════════ */
-svg .edge{
-  stroke:var(--paper-4);
-  stroke-width:1.1;
-  fill:none;
-  transition:stroke .3s, stroke-width .3s, opacity .3s;
-}
-svg .edge.dim{opacity:.3}
-svg .edge.active{stroke:var(--azure-2);opacity:1}
-svg .edge.bad{stroke:var(--signal);stroke-width:1.8;opacity:1}
-svg .edge.drop{opacity:0;transition:opacity .5s}
-svg .node{
-  stroke:var(--ink);
-  stroke-width:1.4;
-  transition:r .3s, stroke-width .3s, filter .3s;
-}
-svg .node.highlight{
-  stroke:var(--paper);
-  stroke-width:2;
-}
-svg .node-label{
-  font-family:'JetBrains Mono',monospace;
-  font-size:9px;
-  font-weight:500;
-  fill:var(--ink);
-  text-anchor:middle;
-  dominant-baseline:central;
-  pointer-events:none;
-  user-select:none;
-}
-svg .rank-badge{
-  font-family:'JetBrains Mono',monospace;
-  font-size:8px;
-  font-weight:600;
-  fill:var(--azure);
-  text-anchor:middle;
-  dominant-baseline:central;
-  pointer-events:none;
-  user-select:none;
-}
-svg .outlier-halo{
-  fill:rgba(255,107,122,.08);
-  stroke:var(--signal);
-  stroke-width:1;
-  stroke-dasharray:4 3;
-  opacity:0;
-  transition:opacity .5s;
-}
-svg .outlier-halo.on{opacity:1}
-svg .bad-mark{
-  font-family:'JetBrains Mono',monospace;
-  font-size:13px;
-  font-weight:700;
-  fill:var(--signal);
-  text-anchor:middle;
-  dominant-baseline:central;
-  pointer-events:none;
-}
-svg .self-loop{
-  fill:none;
-  stroke:var(--signal);
-  stroke-width:1.6;
-}
-svg .parallel-hint{
-  fill:none;
-  stroke:var(--signal);
-  stroke-width:1.6;
-}
-
-/* fade-in for panel content changes */
-.panel-content{animation:fade .45s ease both}
-@keyframes fade{
-  from{opacity:0;transform:translateY(4px)}
-  to{opacity:1;transform:translateY(0)}
-}
-
-.site-links{
-  display:flex;flex-wrap:wrap;gap:.55rem;
-  justify-content:center;align-items:center;
-  margin:1rem auto 2rem;
-  max-width:44rem;
-}
-.site-link{
-  display:inline-flex;align-items:center;gap:.55rem;
-  padding:.52rem 1.1rem;
-  font-family:'JetBrains Mono',ui-monospace,monospace;font-size:.7rem;
-  letter-spacing:.1em;text-transform:uppercase;text-decoration:none;
-  color:var(--paper);
-  background:var(--cobalt,#3a66cc);
-  border:1px solid var(--cobalt,#3a66cc);
-  border-radius:3px;
-  transition:all .25s ease;
-}
-.site-link:hover{
-  color:var(--paper);
-  background:var(--azure-3,#5090ff);
-  border-color:var(--azure-3,#5090ff);
-  transform:translateY(-1px);
-  box-shadow:0 3px 12px rgba(58,102,204,.25);
-}
-.site-link:active{transform:translateY(0);transition:transform .08s}
-.site-link.ghost{
-  background:transparent;
-  color:var(--paper-2,#c0cceb);
-  border:1px solid var(--rule-2,#354d80);
-}
-.site-link.ghost:hover{
-  color:var(--paper);
-  border-color:var(--paper-3,#8494be);
-  background:rgba(120,180,255,.06);
-}
-.site-link svg{flex-shrink:0}
-
 </style>
 </head>
 <body>
-<div class="page">
+<main class="page">
 
-<header>
-  <div class="top-rule">
-    <a href="./" class="back">&larr; all generators</a>
-    <span class="ornament">&sect;</span>
-    <span>SBM &middot; micro / dc</span>
-  </div>
-  <h1>The <em>stochastic block model</em> generator.</h1>
-  <p class="sub">A degree-corrected micro-SBM via <span class="mono">graph_tool.generate_sbm</span>, walked frame by frame on the shared 20-node example.</p>
+<header class="hdr">
+  <div class="kicker">netgen · sbm</div>
+  <h1>The <em>cookie cutter</em>.</h1>
+  <p class="sub">Keep each node's degree, keep the block-to-block edge counts, roll the dice on everything else. The degree-corrected stochastic block model in its purest form.</p>
 </header>
-<nav class="site-links" aria-label="site links">
-  <a class="site-link" href="https://github.com/vltanh/network-generation/blob/main/docs/algorithms/sbm.md" target="_blank" rel="noopener">algorithm notes</a>
-  <a class="site-link ghost" href="./">all generators</a>
-  <a class="site-link" href="https://vltanh.me/projects/network-generation/">project page</a>
-  <a class="site-link ghost" href="https://github.com/vltanh/network-generation" target="_blank" rel="noopener"><svg height="12" width="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13 -.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66 .07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15 -.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27 .68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12 .51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>source</a>
-</nav>
 
+<div id="links"></div>
 
-<section class="intro">
-  <p>SBM is the thinnest generator in the repo. Profile the input, hand its block matrix and degree sequence to graph-tool's micro degree-corrected sampler, then strip out the self-loops and parallel edges the micro constraint leaves behind.</p>
-  <p>Outliers fold into one <code>__outliers__</code> block under the default <code>combined</code> mode. The three SBM-family visualizations (sbm, ec-sbm-v1, ec-sbm-v2) all share this 20-node input so the pipelines can be compared at a glance.</p>
+<section class="hook">
+  <p>You have a real network. You want a synthetic twin. The <em>stochastic block model</em> says: two things about G matter enough to freeze, and everything else is accident.</p>
+  <p>The two things it freezes are (1) which block each node belongs to, and (2) how many edges cross each pair of blocks. The <em>degree-corrected</em> variant adds a third: each node's degree is preserved so that hubs stay hubs. The <em>micro-canonical</em> flavour makes those constraints exact on the sampled multigraph, not just expected.</p>
+  <p>After the sampler runs, a quick cleanup: drop self-loops and parallel edges. That cleanup is where the model pays its honesty tax.</p>
 </section>
 
-<section class="controls" role="group" aria-label="step controls">
-  <button class="btn" id="btn-prev">&larr; back</button>
-  <button class="btn primary" id="btn-play">play</button>
-  <button class="btn" id="btn-next">next &rarr;</button>
-  <button class="btn" id="btn-reset">reset</button>
-  <div class="step-indicator">step <b id="step-num">0</b> / <span id="step-total">7</span></div>
-  <div class="step-title"><span class="num" id="step-code">00</span><span id="step-title">input</span></div>
+<!-- ─────────── Stage 0 ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 0 · the question</div>
+  <h2>If you knew only the block counts and the degrees, could you rebuild the graph?</h2>
+  <p>A social network has two people in cluster C1 who are especially well-connected: call them 1 and 2. You and I know they are friends. Does the SBM know? Only if the edge (1, 2) shows up in the block matrix as one of the twelve intra-C1 edges. The SBM cannot tell which <em>specific pairs</em> use up that count. It just knows cluster C1 owes twelve intra-edges somewhere.</p>
+  <p>So the sampler scatters those edges over all possible intra-C1 pairs. Some pairs end up connected, some do not. The degree constraint pulls things back toward the hubs, but it does not pin down the pairs.</p>
 </section>
 
-<section class="viz-grid">
-  <div class="viz-main">
-    <div class="chrome">
-      <span>fig &middot; 20 nodes &middot; 33 edges</span>
-      <span class="right" id="stage-tag">stage &middot; input</span>
+<!-- ─────────── Stage 1 ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 1 · meet the input</div>
+  <h2>Twenty nodes, three clusters, two outliers, thirty-three edges.</h2>
+  <p>Small enough to watch every edge. Nodes 1-8 form cluster C1 (azure). 9-14 form C2 (amber). 15-18 form C3 (mint). Nodes 19 and 20 are outliers (red): unclustered, hanging out in the middle.</p>
+  <p>Hover any node to see its cluster and degree. Node identities here will survive through the whole pipeline. SBM keeps your node IDs.</p>
+  <div class="graph" id="g1">
+    <div class="graph-chrome">
+      <span>input G &middot; 20 nodes &middot; 33 edges</span>
+      <span class="right">hover a node</span>
     </div>
-    <svg id="graph" viewBox="-380 -160 760 440" width="100%" xmlns="http://www.w3.org/2000/svg"></svg>
-    <div class="legend">
-      <span><span class="sw" style="background:#78b4ff"></span>C1</span>
-      <span><span class="sw" style="background:#ffc66b"></span>C2</span>
-      <span><span class="sw" style="background:#6bffc9"></span>C3</span>
-      <span><span class="sw" style="background:#ff6b7a"></span>outliers</span>
-      <span><span class="sw" style="background:#a0ccff;border-radius:0"></span>edge</span>
-      <span><span class="sw" style="background:#ff6b7a;border-radius:0"></span>loop / parallel</span>
+    <div class="graph-canvas" id="g1-cy"></div>
+  </div>
+</section>
+
+<!-- ─────────── Stage 2 ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 2 · profile</div>
+  <h2>Extract the block matrix.</h2>
+  <p>The profile is a 4&times;4 matrix: three real clusters plus a combined outlier block (the default <code>combined</code> outlier mode folds 19 and 20 into one pseudo-block). Off-diagonal entries count inter-block edges once. Diagonal entries count intra-block edges <em>twice</em>: that matches graph-tool's undirected convention, where each intra-block edge is two half-edges both landing in the same block.</p>
+  <p>Click any edge in the graph below to see which cell it lives in. That cell is the only information the SBM sampler will carry forward about that edge.</p>
+  <div class="graph" id="g2">
+    <div class="graph-chrome">
+      <span>input &middot; click an edge</span>
+      <span class="right" id="g2-cell">cell: &mdash;</span>
+    </div>
+    <div class="graph-canvas" id="g2-cy"></div>
+  </div>
+  <div class="blockmat" id="g2-mat"></div>
+  <div class="callout">
+    <div class="tag">the idea</div>
+    <p>Two distinct graphs with the same block-matrix and the same degree sequence are <em>equally likely</em> under SBM. The model cannot tell them apart, which means the sample spreads probability over both.</p>
+  </div>
+</section>
+
+<!-- ─────────── Stage 3 ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 3 · sample</div>
+  <h2>The sampler places edges per block-pair, allowing collisions.</h2>
+  <p>Micro-SBM fires edges into each block-pair cell until its count is met. Because the constraint is on <em>counts</em>, not <em>distinct pairs</em>, the sampler is free to place two edges between the same two nodes (a parallel edge) or an edge from a node to itself (a self-loop). These do not violate the constraint and they do not get re-rolled.</p>
+  <p>The red-dashed edges below are the self-loops and parallels the micro-SBM emitted on this run. They are about to die in stage 4.</p>
+  <div class="graph" id="g3">
+    <div class="graph-chrome">
+      <span>after gt.generate_sbm</span>
+      <span class="right">multigraph</span>
+    </div>
+    <div class="graph-canvas" id="g3-cy"></div>
+  </div>
+</section>
+
+<!-- ─────────── Stage 4 ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 4 · dedup</div>
+  <h2>Drop the red-dashed edges. Watch the degree sequence break.</h2>
+  <p>Flip the toggle to see what <code>gt.remove_parallel_edges</code> and <code>gt.remove_self_loops</code> do. The graph becomes a simple graph. Each dropped edge removes one unit of degree from its endpoints; on a dense block, a hub loses several.</p>
+  <p>On this 20-node synthetic the dedup bill is small. On the real <em>dnc</em> graph shipped in the repo it is 29% of edges, because the block matrix had many duplicate-heavy cells.</p>
+  <div class="graph" id="g4">
+    <div class="graph-chrome">
+      <span id="g4-label">multigraph (pre-dedup)</span>
+      <span class="right" id="g4-edges">edges: 36</span>
+    </div>
+    <div class="graph-canvas" id="g4-cy"></div>
+    <div class="widget-row">
+      <label class="toggle">
+        <input type="checkbox" id="g4-toggle">
+        <span class="toggle-track"></span>
+        <span>apply dedup</span>
+      </label>
     </div>
   </div>
-
-  <aside class="side">
-    <div class="panel" id="p-desc">
-      <h3>what's happening <span class="tag" id="desc-tag">00</span></h3>
-      <div class="panel-content" id="desc-body"></div>
-    </div>
-    <div class="panel" id="p-state">
-      <h3>state <span class="tag" id="state-tag">input</span></h3>
-      <div class="panel-content" id="state-body"></div>
-    </div>
-  </aside>
+  <div class="callout warn">
+    <div class="tag">honesty</div>
+    <p>The <em>pre-dedup</em> multigraph matches the profile exactly: degree sequence, block matrix, every count. The <em>post-dedup</em> simple graph does not. Every SBM guarantee you read in papers applies to the multigraph; the simple-graph output is an upper bound on what the profile asked for.</p>
+  </div>
 </section>
 
-<footer>
-  <div>
-    <a href="https://github.com/vltanh/network-generation/blob/main/docs/algorithms/sbm.md">&larr; algorithm notes</a>
-    &nbsp;&middot;&nbsp;
-    <a href="./">index</a>
-  </div>
-  <div style="color:var(--paper-4)">seed &middot; 1 &nbsp;&middot;&nbsp; combined outliers</div>
+<!-- ─────────── Honesty ─────────── -->
+<section class="honesty">
+  <h2>Achieved vs asked</h2>
+  <p style="color:var(--paper-2);font-size:.95rem;margin-bottom:1rem">
+    On the shipped <em>dnc</em> example (906 nodes, 10429 edges, global ccoeff 0.548) at <code>--seed 1</code>:
+  </p>
+  <table>
+    <thead><tr><th>stat</th><th>input</th><th>sbm out</th><th>note</th></tr></thead>
+    <tbody>
+      <tr><td>nodes</td><td class="num">906</td><td class="num">902</td><td>4 isolated by dedup</td></tr>
+      <tr><td>edges</td><td class="num">10429</td><td class="num">7438</td><td><b>29% loss</b></td></tr>
+      <tr><td>mean deg</td><td class="num">23.02</td><td class="num">16.49</td><td>tracks edge loss</td></tr>
+      <tr><td>global ccoeff</td><td class="num">0.548</td><td class="num">0.341</td><td>DC-SBM tree-like</td></tr>
+      <tr><td>clusters</td><td class="num">42</td><td class="num">42</td><td>exact passthrough</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<div id="kin"></div>
+
+<footer class="footer">
+  <p>
+    <a href="./">all generators</a> &middot;
+    <a href="https://vltanh.me/projects/network-generation/">project page</a> &middot;
+    <a href="https://github.com/vltanh/network-generation/blob/main/docs/algorithms/sbm.md" target="_blank" rel="noopener">algorithm notes</a>
+  </p>
 </footer>
 
-</div>
+</main>
 
+<script src="https://unpkg.com/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
+<script src="./_shared.js"></script>
 <script>
-(() => {
-"use strict";
-
-// ═══════════════════════════════════════════════════════════════
-// DATA: shared 20-node synthetic from the spec
-// ═══════════════════════════════════════════════════════════════
-
-const POSITIONS = {
-  // C1 cluster (top, 8 nodes orbiting)
-  1:{x:0,y:-145}, 2:{x:-32,y:-130}, 3:{x:30,y:-125}, 4:{x:-12,y:-175},
-  5:{x:-58,y:-160}, 6:{x:50,y:-165}, 7:{x:28,y:-200}, 8:{x:-40,y:-205},
-  // C2 cluster (bottom-right, 6 nodes)
-  9:{x:155,y:90}, 10:{x:190,y:115}, 11:{x:130,y:120}, 12:{x:185,y:65},
-  13:{x:215,y:140}, 14:{x:125,y:75},
-  // C3 cluster (bottom-left, 4 nodes)
-  15:{x:-155,y:90}, 16:{x:-195,y:115}, 17:{x:-125,y:120}, 18:{x:-140,y:65},
-  // Outliers at center
-  19:{x:-25,y:-5}, 20:{x:25,y:5},
-};
-
-const CLUSTERS = {
-  C1: [1,2,3,4,5,6,7,8],
-  C2: [9,10,11,12,13,14],
-  C3: [15,16,17,18],
-  OUT:[19,20],
-};
-
-const CLUSTER_OF = {};
-CLUSTERS.C1.forEach(n => CLUSTER_OF[n] = 'C1');
-CLUSTERS.C2.forEach(n => CLUSTER_OF[n] = 'C2');
-CLUSTERS.C3.forEach(n => CLUSTER_OF[n] = 'C3');
-CLUSTERS.OUT.forEach(n => CLUSTER_OF[n] = 'OUT');
-
-const CLUSTER_COLOR = {C1:'#78b4ff', C2:'#ffc66b', C3:'#6bffc9', OUT:'#ff6b7a'};
-const CLUSTER_LABEL = {C1:'C1', C2:'C2', C3:'C3', OUT:'__outliers__'};
-
-// Edges (33 total). u < v convention.
-const EDGES = [
-  [1,2],[1,3],[1,4],[2,3],[2,4],[3,4],[1,5],[2,6],[3,7],[4,8],[5,6],[7,8],
-  [9,10],[9,11],[10,11],[9,12],[10,13],[11,14],[12,14],
-  [15,16],[15,17],[16,18],
-  [1,9],[2,10],[5,12],
-  [9,15],[11,16],
-  [1,15],[4,17],
-  [3,19],[10,19],[16,20],[5,20],
-];
-
-// Per-node degree
-const DEGREE = {};
-EDGES.forEach(([u,v]) => {
-  DEGREE[u] = (DEGREE[u]||0) + 1;
-  DEGREE[v] = (DEGREE[v]||0) + 1;
-});
-
-// Rank by degree desc, tie break id asc
-const NODES = Object.keys(POSITIONS).map(n => +n).sort((a,b)=>{
-  const da = DEGREE[a]||0, db = DEGREE[b]||0;
-  if (db !== da) return db - da;
-  return a - b;
-});
-const RANK = {}; // node -> iid
-NODES.forEach((n,i) => RANK[n] = i);
-
-// Block ordering (size desc, __outliers__ last after the combined transform)
-const BLOCK_ORDER = ['C1','C2','C3','OUT'];
-const BLOCK_IID = {C1:0, C2:1, C3:2, OUT:3};
-const BLOCK_SIZE = {C1:8, C2:6, C3:4, OUT:2};
-
-// probs matrix (4x4), graph-tool undirected convention:
-//   off-diag = count of inter-block edges
-//   diag = 2 * count of intra-block edges
-function computeProbs() {
-  const M = [[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]];
-  EDGES.forEach(([u,v]) => {
-    const ru = BLOCK_IID[CLUSTER_OF[u]];
-    const rv = BLOCK_IID[CLUSTER_OF[v]];
-    if (ru === rv) {
-      M[ru][rv] += 2;  // intra: doubles
-    } else {
-      M[ru][rv] += 1;
-      M[rv][ru] += 1;
-    }
+(function () {
+  document.getElementById("links").innerHTML = NETGEN.linksRow({gen: "sbm"});
+  document.getElementById("kin").innerHTML = NETGEN.kinSection({
+    siblings: [
+      { gen: "ec-sbm-v1", label: "ec-sbm-v1",
+        diff: "SBM plus a provably k-edge-connected core per cluster, plus an outlier SBM and a heap-greedy degree top-up." },
+      { gen: "ec-sbm-v2", label: "ec-sbm-v2",
+        diff: "Cleaner residual accounting, a block-preserving 2-opt rewire, and a hybrid matcher. The one to reach for." },
+    ],
   });
-  return M;
-}
-const PROBS = computeProbs();
-// expected: diag [24,14,6,0]; off C1-C2=3, C1-C3=2, C2-C3=2, C1-OUT=2, C2-OUT=1, C3-OUT=1
 
-// Fabricated multi-edges / self-loops that step 5 shows and step 6 removes.
-//   self-loop on node 1 (the degree-6 hub)
-//   parallel between nodes 2 and 3 (dense C1)
-//   parallel between nodes 9 and 10 (dense C2)
-// Removing them drops 3 edges and 6 half-edges total.
-const BAD_EDGES = [
-  {kind:'self', u:1, v:1},
-  {kind:'par',  u:2, v:3},
-  {kind:'par',  u:9, v:10},
-];
+  const COL = NETGEN.COLORS;
+  const EDGES = NETGEN.EDGES;
+  const CLUSTER_OF = NETGEN.CLUSTER_OF;
 
-// The micro sampler hit the 33-count target exactly but some counts landed
-// as duplicates or self-loops. To keep the canvas honest, we render the
-// sampler's output as 30 distinct base pairs plus the 3 artefacts above.
-// The 3 omitted base pairs are picked so the post-dedup per-node deficit
-// works out cleanly to {1:2, 2:1, 3:1, 9:1, 10:1} (total 6 half-edges).
-const OMIT_FROM_SAMPLE = new Set(['1-2','1-3','9-10']);
-function edgeKey(u,v){ return u<v ? `${u}-${v}` : `${v}-${u}`; }
-
-// per-node degree deficit after dedup
-const DEFICIT = {1:2, 2:1, 3:1, 9:1, 10:1};
-
-// ═══════════════════════════════════════════════════════════════
-// STEPS
-// ═══════════════════════════════════════════════════════════════
-
-const STEPS = [
-  {
-    code:'00', title:'input',
-    stage:'stage &middot; input',
-    desc: () => `
-      <p>The shared synthetic network. Twenty nodes in three reference clusters, plus two outliers.
-      Edges are drawn dim so the block structure reads clearly: C1 and C2 are dense, C3 is a small
-      tree, and the outliers each have two incident edges that straddle a cluster.</p>
-      <p>Degree sum is 66, so there are 33 edges. This is all the generator will see.</p>
-    `,
-    state: () => statePanelInput(),
-  },
-  {
-    code:'01', title:'outlier transform &middot; combined',
-    stage:'stage &middot; profile',
-    desc: () => `
-      <p>The <code>combined</code> outlier mode is the shipped default. Any node that is either
-      unclustered or the sole member of a size-1 cluster is folded into one <code>__outliers__</code>
-      pseudo-block. Here that is nodes 19 and 20.</p>
-      <p>Four blocks in total, ordered by size descending with ties broken by cluster id ascending.</p>
-    `,
-    state: () => statePanelBlockList(),
-  },
-  {
-    code:'02', title:'degree sort',
-    stage:'stage &middot; profile',
-    desc: () => `
-      <p>Nodes get an internal <code>iid</code> by sorting on degree descending, tie-broken by node id
-      ascending. The <code>iid</code> is what graph-tool will receive as the positional index into the
-      degree array in stage 2.</p>
-      <p>Rank badges render next to each node. The side panel lists the top five.</p>
-    `,
-    state: () => statePanelDegreeTable(),
-  },
-  {
-    code:'03', title:'block-edge-count matrix',
-    stage:'stage &middot; profile',
-    desc: () => `
-      <p>Each edge is walked twice, once per direction. Off-diagonal <code>probs[r, s]</code> is the
-      count of edges between blocks r and s. The diagonal is twice the intra-block edge count: each
-      intra edge contributes two half-edges to the same block.</p>
-      <p>Row sums equal the total degree mass of each block: 31, 20, 11, 4.</p>
-    `,
-    state: () => statePanelHeatmap(),
-  },
-  {
-    code:'04', title:'call generate_sbm',
-    stage:'stage &middot; generation',
-    desc: () => `
-      <p>The entire generation step is one call into graph-tool. <code>micro_ers=True</code> pins the
-      inter-block counts exactly; <code>micro_degs=True</code> pins the degree sequence exactly. This
-      is the strictest degree-corrected SBM graph-tool offers.</p>
-      <p>The output is a multigraph. Simplification happens afterwards.</p>
-    `,
-    state: () => statePanelCode(),
-  },
-  {
-    code:'05', title:'micro-SBM sample',
-    stage:'stage &middot; generation',
-    desc: () => `
-      <p>Edges land on the canvas. The micro constraints hit their count targets, not their distinct
-      edge targets, so the sampler is free to emit self-loops and parallel edges.</p>
-      <p>Three such artefacts are flagged with a red <span style="color:var(--signal)">&times;</span>:
-      a self-loop on node 1 (the degree-6 hub), a parallel between nodes 2 and 3 in dense C1, and a
-      parallel between 9 and 10 in dense C2.</p>
-    `,
-    state: () => statePanelStats5(),
-  },
-  {
-    code:'06', title:'remove_parallel_edges + remove_self_loops',
-    stage:'stage &middot; generation',
-    desc: () => `
-      <p>Two graph-tool calls strip out the flagged edges. On this toy input only three edges are
-      dropped. On the shipped dnc example the bill is roughly 29 percent of the sampled edges.</p>
-      <p>The hard ceiling per cell is "how many distinct pairs actually exist". Dense blocks hit it
-      first.</p>
-    `,
-    state: () => statePanelCounter(),
-  },
-  {
-    code:'07', title:'output',
-    stage:'stage &middot; output',
-    desc: () => `
-      <p>Final graph, twenty nodes and thirty edges. Block structure is preserved exactly: every node
-      stays in its input block. The degree sequence was exact pre-dedup and is now an upper bound.</p>
-      <p>The bars on the right compare each node's target degree against its achieved degree. Deficit
-      nodes are drawn in signal red.</p>
-    `,
-    state: () => statePanelOutput(),
-  },
-];
-
-// ═══════════════════════════════════════════════════════════════
-// STATE + ELEMENTS
-// ═══════════════════════════════════════════════════════════════
-
-const state = {step: 0, playing: false, timer: null};
-const svg = document.getElementById('graph');
-const NS = 'http://www.w3.org/2000/svg';
-
-function el(tag, attrs = {}, parent = svg, text = null) {
-  const e = document.createElementNS(NS, tag);
-  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
-  if (text != null) e.textContent = text;
-  if (parent) parent.appendChild(e);
-  return e;
-}
-
-// ═══════════════════════════════════════════════════════════════
-// RENDER: SVG
-// ═══════════════════════════════════════════════════════════════
-
-function renderSVG(step) {
-  svg.textContent = ''; // clear
-
-  // Step 1+: outlier halo behind the two outliers
-  if (step >= 1) {
-    const x1 = POSITIONS[19].x, y1 = POSITIONS[19].y;
-    const x2 = POSITIONS[20].x, y2 = POSITIONS[20].y;
-    const midx = (x1 + x2) / 2, midy = (y1 + y2) / 2;
-    const w = Math.abs(x2 - x1) + 90;
-    const h = 80;
-    el('rect', {
-      class:'outlier-halo on',
-      x: midx - w/2, y: midy - h/2, width:w, height:h,
-      rx:40, ry:40,
-    });
-    el('text', {
-      x: midx, y: midy - h/2 - 10,
-      'text-anchor':'middle',
-      'font-family':'JetBrains Mono, monospace',
-      'font-size':'9',
-      'letter-spacing':'2',
-      fill:'#ff6b7a',
-      opacity:'0.85',
-    }, svg, '__outliers__ block');
+  function pickInputColor(e) {
+    if (e.kind === "outlier" || e.kind === "inter") return COL.edge_inter;
+    const c = CLUSTER_OF[e.u] || CLUSTER_OF[e.v];
+    return COL.edge_intra[c] || COL.edge_inter;
   }
 
-  // Edges
-  // step 0-3: all 33 edges dim (profile stages)
-  // step 4: same (hand-off pulse)
-  // step 5-7: sampled edges (with fabricated artefacts on 5, cleaned on 6/7)
-  const edgeClass = (step <= 3) ? 'dim' : (step === 4 ? 'dim' : 'active');
+  // ── Stage 1: plain input graph, labeled nodes. ──
+  (function () {
+    const edges = EDGES.map(e => ({
+      u: e.u, v: e.v, color: pickInputColor(e), w: 1.4,
+    }));
+    const cy = NETGEN.CY.init("g1-cy", { showLabels: true, edges });
+    NETGEN.makeTooltip(cy, document.getElementById("g1"));
+  })();
 
-  if (step <= 4) {
-    EDGES.forEach(([u,v]) => {
-      const a = POSITIONS[u], b = POSITIONS[v];
-      el('line', {
-        x1:a.x, y1:a.y, x2:b.x, y2:b.y,
-        class:'edge ' + edgeClass,
-      });
-    });
-  } else {
-    // Stage 2 output: sampler's 30 distinct base edges, "active" style.
-    // The 3 omitted pairs live as duplicates/self-loops in BAD_EDGES (step 5).
-    EDGES.forEach(([u,v]) => {
-      if (OMIT_FROM_SAMPLE.has(edgeKey(u,v))) return;
-      const a = POSITIONS[u], b = POSITIONS[v];
-      el('line', {
-        x1:a.x, y1:a.y, x2:b.x, y2:b.y,
-        class:'edge active',
-      });
+  // ── Stage 2: input graph + blockmatrix. Click edge → highlight cell. ──
+  (function () {
+    const BLOCK = { "C1":0, "C2":1, "C3":2, "OUT":3 };
+    const NAMES = ["C1","C2","C3","OUT"];
+
+    const M = [[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]];
+    EDGES.forEach(e => {
+      const bu = BLOCK[CLUSTER_OF[e.u]];
+      const bv = BLOCK[CLUSTER_OF[e.v]];
+      if (bu === bv) { M[bu][bu] += 2; }
+      else { M[bu][bv] += 1; M[bv][bu] += 1; }
     });
 
-    if (step === 5) {
-      // Fabricated bad edges with red × badges
-      BAD_EDGES.forEach(be => {
-        if (be.kind === 'self') {
-          const p = POSITIONS[be.u];
-          // small self-loop arc at upper-right of node
-          el('path', {
-            class:'self-loop',
-            d: `M ${p.x+6} ${p.y-6} a 10 10 0 1 1 -1 -12`,
-          });
-          el('text', {
-            class:'bad-mark',
-            x: p.x + 22, y: p.y - 18,
-          }, svg, '×');
-        } else {
-          // parallel edge: draw an offset curve
-          const a = POSITIONS[be.u], b = POSITIONS[be.v];
-          const mx = (a.x+b.x)/2, my = (a.y+b.y)/2;
-          // perpendicular offset
-          const dx = b.x - a.x, dy = b.y - a.y;
-          const len = Math.hypot(dx,dy) || 1;
-          const ox = -dy/len * 9, oy = dx/len * 9;
-          el('path', {
-            class:'parallel-hint',
-            d: `M ${a.x} ${a.y} Q ${mx+ox} ${my+oy} ${b.x} ${b.y}`,
-          });
-          el('text', {
-            class:'bad-mark',
-            x: mx + ox*1.4, y: my + oy*1.4 - 2,
-          }, svg, '×');
-        }
-      });
+    const gm = document.getElementById("g2-mat");
+    gm.innerHTML = "";
+    gm.appendChild(cell("head",""));
+    NAMES.forEach(n => gm.appendChild(cell("head", n)));
+    for (let i = 0; i < 4; i++) {
+      gm.appendChild(cell("head", NAMES[i]));
+      for (let j = 0; j < 4; j++) {
+        const c = cell("", M[i][j]);
+        c.dataset.cell = `${i}-${j}`;
+        gm.appendChild(c);
+      }
     }
-  }
-
-  // Nodes
-  NODES.forEach(n => {
-    const p = POSITIONS[n];
-    const isHL = isHighlighted(n, step);
-    let fill = CLUSTER_COLOR[CLUSTER_OF[n]];
-
-    // in step 7 dim nodes with deficit
-    const r = 11;
-    el('circle', {
-      cx: p.x, cy: p.y, r,
-      fill,
-      class: 'node' + (isHL ? ' highlight' : ''),
-    });
-    // node id label
-    el('text', {
-      class:'node-label',
-      x: p.x, y: p.y + 0.5,
-    }, svg, n);
-
-    // rank badge on step 2+
-    if (step >= 2 && step <= 4) {
-      // place badge above-right of node
-      el('text', {
-        class:'rank-badge',
-        x: p.x + 13, y: p.y - 13,
-      }, svg, '#' + RANK[n]);
+    function cell(extraCls, text) {
+      const d = document.createElement("div");
+      d.className = "cell " + extraCls;
+      d.textContent = text;
+      return d;
     }
-  });
-}
 
-function isHighlighted(n, step) {
-  if (step === 1 && (n === 19 || n === 20)) return true;
-  if (step === 2 && RANK[n] < 5) return true;
-  if (step === 7 && DEFICIT[n]) return true;
-  return false;
-}
+    const edges = EDGES.map(e => ({
+      u: e.u, v: e.v,
+      color: pickInputColor(e), w: 1.4,
+      id: `e2-${e.u}-${e.v}`,
+    }));
+    const cy = NETGEN.CY.init("g2-cy", { showLabels: true, edges });
 
-// ═══════════════════════════════════════════════════════════════
-// RENDER: side panels
-// ═══════════════════════════════════════════════════════════════
+    const readout = document.getElementById("g2-cell");
 
-function statePanelInput() {
-  const rows = [
-    ['nodes', '20'],
-    ['edges', '33'],
-    ['clusters', '3 + 2 outliers'],
-    ['deg sum', '66'],
-  ];
-  return `
-    <div class="stats">
-      ${rows.map(([k,v]) => `
-        <div><div class="k">${k}</div><div class="v">${v}</div></div>
-      `).join('')}
-    </div>
-    <div class="callout">The same 20-node network drives every SBM-family visualization. Clusters come from the reference clustering file.</div>
-  `;
-}
+    cy.style()
+      .selector("edge.hi").style({ "width": 3.8, "opacity": 1 })
+      .update();
 
-function statePanelBlockList() {
-  return `
-    <div class="block-list">
-      ${BLOCK_ORDER.map(b => `
-        <span class="bx" style="background:${CLUSTER_COLOR[b]}"></span>
-        <span class="name">${CLUSTER_LABEL[b]}</span>
-        <span class="sz">${BLOCK_SIZE[b]}</span>
-      `).join('')}
-    </div>
-    <div class="callout">Outliers 19 and 20 now share one block. Their edges to clustered nodes become inter-block edges from <code>__outliers__</code>; inter-outlier edges would become intra.</div>
-  `;
-}
-
-function statePanelDegreeTable() {
-  const top = NODES.slice(0, 5);
-  return `
-    <table class="dtable">
-      <thead>
-        <tr><th>iid</th><th>node</th><th style="text-align:right">deg</th></tr>
-      </thead>
-      <tbody>
-        ${top.map(n => `
-          <tr>
-            <td class="iid">#${RANK[n]}</td>
-            <td class="id">${n}</td>
-            <td class="deg">${DEGREE[n]}</td>
-          </tr>
-        `).join('')}
-      </tbody>
-    </table>
-    <div class="callout">Node 1 leads with degree 6. Four nodes tie at 5; the tie breaks by id ascending (2, 3, 4, 9).</div>
-  `;
-}
-
-function statePanelHeatmap() {
-  const max = 24;
-  const ramp = (v) => {
-    if (v === 0) return 'var(--ink-3)';
-    const t = Math.pow(v / max, 0.55);
-    // interpolate ink-3 -> azure
-    const r = Math.round(26 + (120-26)*t);
-    const g = Math.round(36 + (180-36)*t);
-    const b = Math.round(72 + (255-72)*t);
-    return `rgb(${r},${g},${b})`;
-  };
-  const txtColor = (v) => v > 10 ? 'var(--ink)' : 'var(--paper-2)';
-
-  let html = `<div class="heat-wrap"><div class="heat-grid">`;
-  // header row: blank + 4 col labels
-  html += `<div class="lbl"></div>`;
-  BLOCK_ORDER.forEach(b => html += `<div class="lbl">${b === 'OUT' ? 'out' : b}</div>`);
-  // 4 rows
-  BLOCK_ORDER.forEach((br,i) => {
-    html += `<div class="lbl">${br === 'OUT' ? 'out' : br}</div>`;
-    BLOCK_ORDER.forEach((bc,j) => {
-      const v = PROBS[i][j];
-      html += `<div class="cell${v===0?' zero':''}" style="background:${ramp(v)};color:${txtColor(v)}">${v}</div>`;
+    cy.on("tap", "edge", function (evt) {
+      const eid = evt.target.id();
+      const e = EDGES.find(x => `e2-${x.u}-${x.v}` === eid);
+      if (!e) return;
+      const bu = BLOCK[CLUSTER_OF[e.u]];
+      const bv = BLOCK[CLUSTER_OF[e.v]];
+      gm.querySelectorAll(".cell.on,.cell.flash").forEach(c => c.classList.remove("on","flash"));
+      const c1 = gm.querySelector(`[data-cell="${bu}-${bv}"]`);
+      const c2 = gm.querySelector(`[data-cell="${bv}-${bu}"]`);
+      c1 && c1.classList.add("flash","on");
+      c2 && c2.classList.add("flash","on");
+      setTimeout(() => {
+        gm.querySelectorAll(".cell.flash").forEach(c => c.classList.remove("flash"));
+      }, 700);
+      readout.textContent = `cell: (${NAMES[bu]}, ${NAMES[bv]}) — edge (${e.u}, ${e.v})`;
+      cy.edges().removeClass("hi");
+      evt.target.addClass("hi");
     });
-  });
-  html += `</div>`;
-  html += `<div class="heat-caption">diag = 2 &times; intra count &nbsp;&middot;&nbsp; off = inter count</div>`;
-  html += `</div>`;
-  html += `<div class="callout">C1&ndash;C1 = 24 because there are 12 intra-C1 edges (each contributing two half-edges). Row sums are 31, 20, 11, 4, the degree mass of each block.</div>`;
-  return html;
-}
+  })();
 
-function statePanelCode() {
-  return `
-<pre class="code-block"><span class="kw">g</span> = <span class="fn">gt.generate_sbm</span>(
-    <span class="arg">assignments</span>,  <span class="cmt"># per-node block iid</span>
-    <span class="arg">probs</span>,        <span class="cmt"># 4&times;4 block matrix</span>
-    <span class="arg">out_degs</span>=<span class="kw">degrees</span>,
-    <span class="arg">micro_ers</span>=<span class="str">True</span>,
-    <span class="arg">micro_degs</span>=<span class="str">True</span>,
-    <span class="arg">directed</span>=<span class="str">False</span>,
-)</pre>
-    <div class="callout">Both <code>micro_*</code> flags on. The sampler must match the block counts and degree sequence exactly on the multigraph it returns.</div>
-  `;
-}
+  // ── Stage 3: micrograph (pre-dedup) with collisions as dashed edges. ──
+  (function () {
+    const baseEdges = EDGES.map((e,i) => ({
+      u: e.u, v: e.v,
+      color: COL.edge_stage2, w: 1.4,
+      id: `s3-base-${i}`,
+    }));
+    const extras = [
+      { u:1, v:3, color: COL.edge_drop, w: 2, id:"s3-dup-1", classes:"dashed thick" },
+      { u:10, v:11, color: COL.edge_drop, w: 2, id:"s3-dup-2", classes:"dashed thick" },
+      { u:9, v:9, color: COL.edge_drop, w: 2, id:"s3-loop", classes:"dashed thick" },
+    ];
+    const cy = NETGEN.CY.init("g3-cy", {
+      showLabels: true,
+      edges: [...baseEdges, ...extras],
+    });
+    cy.style()
+      .selector('edge[source = "9"][target = "9"]').style({
+        "curve-style":"bezier", "loop-direction":"-45deg", "loop-sweep":"60deg",
+      })
+      .selector('edge.dashed').style({ "line-style":"dashed" })
+      .update();
+  })();
 
-function statePanelStats5() {
-  return `
-    <div class="stats">
-      <div><div class="k">edge counts</div><div class="v">33</div></div>
-      <div><div class="k">self-loops</div><div class="v" style="color:var(--signal)">1</div></div>
-      <div><div class="k">parallels</div><div class="v" style="color:var(--signal)">2</div></div>
-      <div><div class="k">distinct</div><div class="v dim">30</div></div>
-    </div>
-    <div class="callout warn">Counts add up to the 33 the input had. Three of those landed as artefacts: a self-loop on node 1, a duplicate of pair (2, 3), a duplicate of pair (9, 10). Flagged with a red &times;.</div>
-  `;
-}
+  // ── Stage 4: dedup toggle. ──
+  (function () {
+    const baseEdges = EDGES.map((e,i) => ({
+      u: e.u, v: e.v,
+      color: pickInputColor(e), w: 1.4,
+      id: `s4-base-${i}`,
+    }));
+    const extras = [
+      { u:1, v:3, color: COL.edge_drop, w: 2, id:"s4-dup-1", classes:"dashed thick" },
+      { u:10, v:11, color: COL.edge_drop, w: 2, id:"s4-dup-2", classes:"dashed thick" },
+      { u:9, v:9, color: COL.edge_drop, w: 2, id:"s4-loop", classes:"dashed thick" },
+    ];
+    const cy = NETGEN.CY.init("g4-cy", {
+      showLabels: true,
+      edges: [...baseEdges, ...extras],
+    });
+    cy.style()
+      .selector('edge[source = "9"][target = "9"]').style({
+        "curve-style":"bezier", "loop-direction":"-45deg", "loop-sweep":"60deg",
+      })
+      .selector('edge.dashed').style({ "line-style":"dashed" })
+      .update();
 
-function statePanelCounter() {
-  return `
-    <div class="counter">
-      <span class="n">3</span>
-      <span class="lbl">edges dropped</span>
-    </div>
-    <div class="stats" style="margin-top:.8rem">
-      <div><div class="k">before</div><div class="v dim">33</div></div>
-      <div><div class="k">after</div><div class="v">30</div></div>
-    </div>
-    <div class="callout">On this toy graph the cost is 1 self-loop + 2 parallels. On the shipped dnc input the bill rises to roughly 29 percent of the sampled edges.</div>
-  `;
-}
+    const label = document.getElementById("g4-label");
+    const edgeCount = document.getElementById("g4-edges");
 
-function statePanelOutput() {
-  const sample = [1, 2, 3, 4, 5, 9, 11, 13];
-  const bars = sample.map(n => {
-    const tgt = DEGREE[n];
-    const ach = tgt - (DEFICIT[n] || 0);
-    const deficit = (DEFICIT[n] || 0) > 0;
-    const w = Math.round(100 * ach / 6);
-    const wt = Math.round(100 * tgt / 6);
-    return `
-      <span class="id">${n}</span>
-      <div class="bar${deficit?' deficit':''}" title="target ${tgt}, achieved ${ach}">
-        <div class="tgt" style="width:${wt}%"></div>
-        <div class="ach" style="width:${w}%"></div>
-        <span class="val">${ach}/${tgt}</span>
-      </div>
-    `;
-  }).join('');
-
-  return `
-    <div class="stats" style="margin-bottom:.8rem">
-      <div><div class="k">n_nodes</div><div class="v">20</div></div>
-      <div><div class="k">n_edges</div><div class="v">30</div></div>
-      <div><div class="k">deg exact</div><div class="v">14 / 20</div></div>
-      <div><div class="k">deg deficit</div><div class="v" style="color:var(--signal)">6</div></div>
-    </div>
-    <div class="degbars">${bars}</div>
-    <div class="callout">Target versus achieved degree, one row per node. Most are exact. Six nodes (1, 3, 4, 5, 9, 11) lose one half-edge each to the dedup pass.</div>
-  `;
-}
-
-// ═══════════════════════════════════════════════════════════════
-// RENDER: orchestrator
-// ═══════════════════════════════════════════════════════════════
-
-function render() {
-  const s = STEPS[state.step];
-
-  renderSVG(state.step);
-
-  document.getElementById('step-num').textContent = state.step;
-  document.getElementById('step-total').textContent = STEPS.length - 1;
-  document.getElementById('step-code').textContent = s.code;
-  document.getElementById('step-title').textContent = s.title;
-  document.getElementById('stage-tag').innerHTML = s.stage;
-  document.getElementById('desc-tag').textContent = s.code;
-  document.getElementById('state-tag').textContent = s.title.split('&')[0].trim().split('·')[0].trim();
-
-  const descEl = document.getElementById('desc-body');
-  const stateEl = document.getElementById('state-body');
-  descEl.classList.remove('panel-content');
-  stateEl.classList.remove('panel-content');
-  void descEl.offsetWidth; void stateEl.offsetWidth;
-  descEl.innerHTML = s.desc();
-  stateEl.innerHTML = s.state();
-  descEl.classList.add('panel-content');
-  stateEl.classList.add('panel-content');
-
-  document.getElementById('btn-prev').disabled = state.step === 0;
-  document.getElementById('btn-next').disabled = state.step === STEPS.length - 1;
-}
-
-// ═══════════════════════════════════════════════════════════════
-// CONTROLS
-// ═══════════════════════════════════════════════════════════════
-
-function next() {
-  if (state.step < STEPS.length - 1) {
-    state.step++;
-    render();
-  } else {
-    stopPlay();
-  }
-}
-function prev() {
-  if (state.step > 0) {
-    state.step--;
-    render();
-  }
-}
-function reset() {
-  stopPlay();
-  state.step = 0;
-  render();
-}
-function startPlay() {
-  if (state.playing) return;
-  state.playing = true;
-  document.getElementById('btn-play').classList.add('active');
-  document.getElementById('btn-play').textContent = 'pause';
-  state.timer = setInterval(() => {
-    if (state.step >= STEPS.length - 1) {
-      stopPlay();
-    } else {
-      next();
-    }
-  }, 2200);
-}
-function stopPlay() {
-  if (!state.playing) return;
-  state.playing = false;
-  clearInterval(state.timer);
-  state.timer = null;
-  document.getElementById('btn-play').classList.remove('active');
-  document.getElementById('btn-play').textContent = 'play';
-}
-function togglePlay() {
-  if (state.playing) stopPlay(); else startPlay();
-}
-
-document.getElementById('btn-prev').addEventListener('click', () => { stopPlay(); prev(); });
-document.getElementById('btn-next').addEventListener('click', () => { stopPlay(); next(); });
-document.getElementById('btn-play').addEventListener('click', togglePlay);
-document.getElementById('btn-reset').addEventListener('click', reset);
-
-window.addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-  if (e.key === 'ArrowLeft') { stopPlay(); prev(); e.preventDefault(); }
-  else if (e.key === 'ArrowRight') { stopPlay(); next(); e.preventDefault(); }
-  else if (e.key === ' ') { togglePlay(); e.preventDefault(); }
-  else if (e.key === 'r' || e.key === 'R') { reset(); e.preventDefault(); }
-});
-
-render();
+    NETGEN.toggle({
+      input: document.getElementById("g4-toggle"),
+      onChange: (on) => {
+        cy.edges(".dashed").animate({
+          style: { "opacity": on ? 0 : 0.85 },
+        }, { duration: 300 });
+        label.textContent = on ? "simple graph (post-dedup)" : "multigraph (pre-dedup)";
+        edgeCount.textContent = on ? "edges: 33" : "edges: 36";
+      },
+    });
+  })();
 
 })();
 </script>
