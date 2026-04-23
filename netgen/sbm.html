@@ -45,18 +45,16 @@
 
 <div id="links"></div>
 
-<div class="wip-banner" role="alert"><svg class="wip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 L22 21 L2 21 Z"/><line x1="12" y1="10" x2="12" y2="15"/><circle cx="12" cy="18" r="1" fill="currentColor" stroke="none"/></svg><strong class="wip-label">warning</strong><span class="wip-msg">work in progress &middot; expect rough edges and breaking changes.</span></div>
-
 <header class="hdr">
   <div class="kicker">network-generation · sbm</div>
   <h1><em>SBM</em></h1>
-  <p class="sub">The degree-corrected stochastic block model. Freezes the cluster assignment $$\mathcal{C}$$, the block-to-block edge counts, and the per-node degree sequence; the rest is random.</p>
+  <p class="sub">Degree-corrected stochastic block model. Freezes the block assignment, the per-pair edge counts, and the per-node degree sequence; the rest is random.</p>
 </header>
 
 <section class="hook">
-  <p>You have a real network. You want a synthetic twin. The <em>stochastic block model</em> says: two things about G matter enough to freeze, and everything else is accident.</p>
-  <p>The two things it freezes are (1) which block each node belongs to, and (2) how many edges cross each pair of blocks. The <em>degree-corrected</em> variant adds a third: each node's degree is preserved so that hubs stay hubs. The <em>micro-canonical</em> flavour makes those constraints exact on the sampled multigraph, not just expected.</p>
-  <p>After the sampler runs, a quick cleanup: drop self-loops and parallel edges. That cleanup is where the model pays its honesty tax.</p>
+  <p>You have a real network. You want a synthetic twin that shares its block structure and its degree distribution but is otherwise drawn fresh. The <em>stochastic block model</em> says: a few things about \(G\) matter enough to freeze, and the rest is accident.</p>
+  <p>Peixoto's micro-canonical degree-corrected SBM freezes three things: (1) each node's block label, (2) the edge count between every pair of blocks \(e_{rs}\), and (3) each node's degree \(k_i\). Any graph that meets those three constraints is equally likely under the model.</p>
+  <p>The catch is honesty tax. Micro-SBM samples a multigraph where those constraints hit exactly, then a cleanup step drops self-loops and parallel edges so the output is a simple graph. On dense blocks the cleanup kills a visible fraction of edges, and the three frozen quantities end up as upper bounds, not targets hit.</p>
 </section>
 
 <!-- ─────────── Stage 0 ─────────── -->
@@ -145,33 +143,68 @@
 
 <div id="kin"></div>
 
-<footer class="footer">
+<footer class="ack">
+  <p class="tools">drawn with <a href="https://d3js.org" target="_blank" rel="noopener">d3</a></p>
   <p class="credit">typed by vltanh, doodled with Claude</p>
 </footer>
 
 </main>
 
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 <script>
 window.MathJax = {
   tex: {
-    inlineMath: [['\\(', '\\)'], ['$', '$'], ['$$', '$$']],
+    inlineMath: [['\\(', '\\)']],
     displayMath: [['\\[', '\\]']]
   },
   chtml: { scale: 1.0 }
 };
 </script>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 <script src="./shared.js"></script>
 <script>
 (function () {
   document.getElementById("links").innerHTML = NETGEN.linksRow({gen: "sbm"});
+  // Extra links specific to SBM: the upstream paper + graph-tool code.
+  (function () {
+    const icons = document.querySelector("#links .top-icons");
+    if (!icons) return;
+    const extras = [
+      {
+        href: "https://doi.org/10.1103/PhysRevE.95.012317",
+        label: "paper",
+        svg: '<path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/>',
+      },
+    ];
+    // Repoint the default "source" link at src/sbm within this repo.
+    const sourceLink = icons.querySelector('a[aria-label="github repository"]');
+    if (sourceLink) {
+      sourceLink.setAttribute("href",
+        "https://github.com/vltanh/network-generation/tree/main/src/sbm");
+      const span = sourceLink.querySelector("span");
+      if (span) span.textContent = "code";
+    }
+    extras.forEach(x => {
+      const a = document.createElement("a");
+      a.href = x.href;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.setAttribute("aria-label", x.label);
+      a.innerHTML =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+        + 'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" '
+        + 'aria-hidden="true">' + x.svg + '</svg>'
+        + '<span>' + x.label + '</span>';
+      icons.appendChild(a);
+    });
+  })();
   document.getElementById("kin").innerHTML = NETGEN.kinSection({
+    title: "similarity",
     siblings: [
-      { gen: "ec-sbm-v1", label: "ec-sbm-v1",
-        diff: "SBM with an edge-connectivity guarantee per cluster, delivered by a hand-built $$k$$-edge-connected core before sampling. Outliers are treated as singleton clusters; a naive greedy matcher fills any residual degree deficit." },
-      { gen: "ec-sbm-v2", label: "ec-sbm-v2",
-        diff: "Same edge-connectivity guarantee as v1, but outliers fold into a single block instead of singletons. Residual is accounted for in one SBM call, with a block-preserving rewire and hybrid degree-matching pass." },
+      { gen: "ec-sbm-v1", label: "EC-SBM v1",
+        diff: "Micro-SBM sampling after a hand-built \\(K_{k+1}\\) core per cluster forces per-cluster edge connectivity \\(\\ge k\\). Outliers are singleton blocks; a greedy matcher tops up any residual degree." },
+      { gen: "ec-sbm-v2", label: "EC-SBM v2",
+        diff: "Same \\(K_{k+1}\\) core idea, but residual edges pass through a single SBM call over all blocks (including outliers) and a block-preserving 2-opt rewire replaces the brute dedup." },
     ],
   });
 
