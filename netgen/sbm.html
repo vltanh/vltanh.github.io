@@ -36,34 +36,36 @@
   background:var(--cobalt); color:var(--ink); border-color:var(--cobalt);
 }
 .blockmat .cell.flash{ animation:flash 0.6s ease-out; }
-.graph-mat-pair,
-.graph-bars-pair{
+/* "Graph with a side panel" card: graph canvas on the left, a related
+   chart / matrix on the right, inside a single .graph card (one border,
+   one tape). On narrow screens the side panel wraps under the graph. */
+.graph.g-with-side .side-body{
   display:grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 340px);
   gap: 1rem;
   align-items: start;
-  margin: 1rem 0;
+  margin-bottom: .4rem;
 }
-.graph-mat-pair .graph,
-.graph-bars-pair .graph{ margin:0; }
-.graph-mat-pair .blockmat-wrap,
-.graph-bars-pair .deg-bars-wrap{
-  background:var(--ink-2);
-  border:1px solid var(--rule);
-  border-radius:4px;
-  padding:1rem .8rem;
-  display:flex;
-  flex-direction:column;
+.graph.g-with-side .side-right{
+  display:flex; flex-direction:column;
+  gap:.55rem;
+  padding-top:.1rem;
 }
-.graph-bars-pair .deg-bars-wrap svg{ width:100%; flex:1; }
-.graph-mat-pair .blockmat-wrap .step-desc{ margin-top:.8rem; text-align:center; }
-@media (max-width: 780px){
-  .graph-mat-pair,
-  .graph-bars-pair{ grid-template-columns: 1fr; }
+.graph.g-with-side .side-right > svg{ width:100%; height:auto; }
+.graph.g-with-side .side-right > .blockmat{ margin:0 auto; }
+.graph.g-with-side .side-right .step-desc{ margin-top:0; }
+@media (max-width: 820px){
+  .graph.g-with-side .side-body{ grid-template-columns: 1fr; }
 }
 .viz-node.ringed{ stroke:#c7801e; stroke-width:3.4; }
-.deg-bar-row.hot rect.target-frame{
-  stroke:#c7801e; stroke-width:2;
+.deg-bar-row{ cursor:default; }
+.deg-bar-row.hot rect.hitbox{ fill: rgba(199, 128, 30, .15); }
+.deg-bar-row.hot rect.target-frame{ stroke:#c7801e; stroke-width:2; }
+.deg-bar-row.hot rect.bar{ stroke:#c7801e; stroke-width:1.2; }
+.block-ring-label{
+  font-family:'Caveat Brush', cursive;
+  font-size:20px;
+  letter-spacing:.04em;
 }
 @keyframes flash{
   0%{background:var(--hl-yellow); color:var(--paper);}
@@ -122,24 +124,39 @@
   <p>The catch is dedup. Micro-SBM samples a multigraph where those constraints hit exactly, then a simplify step drops self-loops and parallel edges so the output is a simple graph. On dense blocks the simplify step kills a visible fraction of edges, and the three frozen quantities end up as upper bounds, not targets hit.</p>
 </section>
 
-<!-- ─────────── Profiling · contract ─────────── -->
+<!-- ─────────── Profiling · block assignment ─────────── -->
 <section class="stage">
-  <div class="stage-num">profiling · the contract</div>
+  <div class="stage-num">profiling · block assignment</div>
   <h2>Three vectors, one matrix: that is the input contract.</h2>
-  <p>Profile reads the reference network and its clustering and writes five CSVs. Two are label dictionaries (<code>node_id.csv</code>, <code>cluster_id.csv</code>). The other three carry the quantities the sampler will try to match: <code>assignment.csv</code> (which block each node sits in), <code>degree.csv</code> (each node's degree), and <code>edge_counts.csv</code> (the block matrix from the next step). Anything not in those three vectors — mean degree, triangle count, distances — is not in the contract.</p>
+  <p>Profile reads the reference network and its clustering and writes five CSVs. Two are label dictionaries (<code>node_id.csv</code>, <code>cluster_id.csv</code>). The other three carry the quantities the sampler will try to match: <code>assignment.csv</code> (block per node, this section), <code>degree.csv</code> (degree per node, next), and <code>edge_counts.csv</code> (the block matrix, the section after). Anything not in those three vectors, like mean degree, triangle count, or pairwise distances, is not in the contract.</p>
   <p>Outlier handling happens here too. Under the default <code>outlier_mode=combined</code>, every unclustered node and every size-1 cluster is folded into one pseudo-block labelled <code>__outliers__</code>, so the sampler never has to treat them as a special case. The flag <code>drop_outlier_outlier_edges</code> is off by default, so outlier-outlier edges survive into the pseudo-block's diagonal.</p>
 
-  <div class="graph" id="g1">
+  <div class="graph" id="g-assign">
     <div class="graph-chrome">
-      <span>input G &middot; click or hover a node</span>
-      <span class="right" id="g1-right">nodes coloured by input block (C1, C2, C3, __outliers__)</span>
+      <span>input G &middot; dashed rings enclose each block</span>
+      <span class="right">assignment.csv</span>
     </div>
-    <div class="graph-canvas" id="g1-cy"></div>
+    <div class="graph-canvas" id="g-assign-cy"></div>
   </div>
+</section>
 
-  <div class="disk-panel" style="margin-top:1rem">
-    <div class="step-desc" style="margin-bottom:.6rem"><span class="st">degree sequence</span> &middot; one bar per node, sorted by degree desc (same order the sampler uses). Bar colour = input block. This is what <code>degree.csv</code> holds; the sampler will try to hit every bar exactly, then dedup shaves a few in the "generation · dedup" step below.</div>
-    <svg id="deg-seq" viewBox="0 0 640 220" preserveAspectRatio="xMidYMid meet"></svg>
+<!-- ─────────── Profiling · degree sequence ─────────── -->
+<section class="stage">
+  <div class="stage-num">profiling · degree sequence</div>
+  <h2>How many edges each node has.</h2>
+  <p>The second vector in the contract is <code>degree.csv</code>: \(k_i\) per node. Below, the bars on the right are the degree sequence, one row per node sorted by degree desc and coloured by block. Hover a node to find its bar, or a bar to find its node. The block matrix (the third and last input) is in the next section.</p>
+  <div class="graph g-with-side" id="g-deg">
+    <div class="graph-chrome">
+      <span>input G + degree bars &middot; hover to link</span>
+      <span class="right">degree.csv</span>
+    </div>
+    <div class="side-body">
+      <div class="graph-canvas" id="g-deg-cy"></div>
+      <div class="side-right">
+        <div class="step-desc"><span class="st">degree sequence</span> &middot; one row per node, sorted by \(k_i\) desc. Bar colour = input block.</div>
+        <svg id="deg-seq" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -153,17 +170,17 @@
   \]
   <p>This half-edge reading is what makes the diagonal doubling natural, and it matches graph-tool's undirected convention. It is not how most SBM write-ups introduce \(e_{rs}\) (they usually call it "edge count" and then note the factor of two as a bookkeeping detail), so expect a small re-orientation if you are coming from there.</p>
   <p>The matrix has one row and column per block, so on this synthetic it is a compact 4x4. Each edge contributes to exactly one cell (diagonal) or to the pair \((r, s), (s, r)\) (off-diagonal). Click any edge to highlight the cell it lands in, or click a cell to light up every edge that contributes to its count: the sampler will not remember which specific edges were there, only that the cell owes that many.</p>
-  <div class="graph-mat-pair">
-    <div class="graph" id="g2">
-      <div class="graph-chrome">
-        <span>input &middot; click an edge or a cell</span>
-        <span class="right" id="g2-cell">cell: (none)</span>
-      </div>
-      <div class="graph-canvas" id="g2-cy"></div>
+  <div class="graph g-with-side" id="g2">
+    <div class="graph-chrome">
+      <span>input G &middot; click an edge or a cell</span>
+      <span class="right" id="g2-cell">cell: (none)</span>
     </div>
-    <div class="blockmat-wrap">
-      <div class="blockmat" id="g2-mat"></div>
-      <div class="step-desc"><span class="st">block matrix</span> &middot; diagonal cells are doubled. Click a cell to highlight every edge that contributes to it.</div>
+    <div class="side-body">
+      <div class="graph-canvas" id="g2-cy"></div>
+      <div class="side-right">
+        <div class="blockmat" id="g2-mat"></div>
+        <div class="step-desc" style="text-align:center"><span class="st">block matrix</span> &middot; diagonal cells are doubled.</div>
+      </div>
     </div>
   </div>
   <div class="callout">
@@ -180,7 +197,7 @@
   <p>For each block-pair \((r, s)\), build two stub lists (or one for \(r = s\)): each node \(i\) appears \(k_i^{(s)}\) times. Shuffle, pair up consecutively. Every pair becomes an edge; nothing is rejected.</p>
   <div class="callout">
     <div class="tag">graph-tool accepts non-equality input</div>
-    <p>We feed <code>gt.generate_sbm</code> a \((k, e)\) pair that satisfies the identities above, but the function actually accepts looser input: the consistency condition is only the inequality \(\sum_{u \in C_r} k_u \;\ge\; \sum_{s} e_{rs}\) (LHS = stubs available in block \(r\), RHS = edges incident to \(r\)). When the two sides match exactly, the sampler distributes the stubs the natural way. When they do not, some nodes come out with a degree <em>below</em> the requested \(k\): graph-tool prioritises hitting \(e_{rs}\) over hitting \(k_i\). A minimal example: \(b = (0, 0)\), \(k = (3, 3)\), \(e = (4)\) — two nodes, both asking for degree 3, four half-edges on the diagonal. The condition \(3 + 3 \ge 4\) holds, but only as a strict inequality, and the sampler reliably returns one node with degree 1 rather than 3. The identities we use on this page (equality, not inequality) are why the toy runs above behave cleanly.</p>
+    <p>We feed <code>gt.generate_sbm</code> a \((k, e)\) pair that satisfies the identities above, but the function actually accepts looser input: the consistency condition is only the inequality \(\sum_{u \in C_r} k_u \;\ge\; \sum_{s} e_{rs}\) (LHS = stubs available in block \(r\), RHS = edges incident to \(r\)). When the two sides match exactly, the sampler distributes the stubs the natural way. When they do not, some nodes come out with a degree <em>below</em> the requested \(k\): graph-tool prioritises hitting \(e_{rs}\) over hitting \(k_i\). A minimal example: \(b = (0, 0)\), \(k = (3, 3)\), \(e = (4)\), i.e. two nodes both asking for degree 3, with four half-edges on the diagonal. The condition \(3 + 3 \ge 4\) holds, but only as a strict inequality, and the sampler reliably returns one node with degree 1 rather than 3. The identities we use on this page (equality, not inequality) are why the toy runs above behave cleanly.</p>
   </div>
   <div class="callout warn">
     <div class="tag">caveat: counts, not distinct pairs</div>
@@ -204,26 +221,26 @@
   <div class="stage-num">generation · dedup</div>
   <h2>Collapse parallels, drop self-loops. Degree sequence stops being exact.</h2>
   <p>Every generator in this project ships a simple graph, so the last step of <code>gen.py</code> is a shared utility, <code>simplify_edges</code>, that drops self-loops and collapses parallels in pandas. graph-tool's own <code>remove_parallel_edges</code> + <code>remove_self_loops</code> would do the same job; we keep the pandas version so the guard is identical across sbm, ec-sbm, abcd, lfr, and npso. Each parallel edge between \((u, v)\) is collapsed to one; each self-loop on \(u\) is dropped. Every dropped half-edge is a unit of degree the sampler can no longer account for, so the output degree sequence sits at-or-below the target.</p>
-  <p>Flip the toggle to watch the same multigraph from above simplify. The bars below the graph compare target vs achieved degree per node, sorted by target; a node whose bar shrinks after the flip lost a duplicate or a self-loop.</p>
-  <div class="graph-bars-pair">
-    <div class="graph" id="g4">
-      <div class="graph-chrome">
-        <span id="g4-label">multigraph (pre-dedup)</span>
-        <span class="right" id="g4-edges">edges: &middot;</span>
-      </div>
+  <p>Flip the toggle to watch the same multigraph from above simplify. The bars on the right compare target vs achieved degree per node, sorted by target; a node whose bar shrinks after the flip lost a duplicate or a self-loop. Hover a node or a row to link them.</p>
+  <div class="graph g-with-side" id="g4">
+    <div class="graph-chrome">
+      <span id="g4-label">multigraph (pre-dedup)</span>
+      <span class="right" id="g4-edges">edges: &middot;</span>
+    </div>
+    <div class="side-body">
       <div class="graph-canvas" id="g4-cy"></div>
-      <div class="widget-row">
-        <label class="toggle">
-          <input type="checkbox" id="g4-toggle">
-          <span class="toggle-track"></span>
-          <span>apply dedup</span>
-        </label>
-        <span class="step-label">toggle drops the red-dashed edges</span>
+      <div class="side-right">
+        <div class="step-desc"><span class="st">degree: target vs achieved</span> &middot; one row per node, sorted by target desc. Mint = achieved, faint red = dropped (target minus achieved).</div>
+        <svg id="deg-bars" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet"></svg>
       </div>
     </div>
-    <div class="deg-bars-wrap">
-      <div class="step-desc" style="margin-top:0"><span class="st">degree: target vs achieved</span> &middot; one row per node, sorted by target desc. The mint segment is degree the sampler kept; the faint red tail is target-minus-achieved (dedup loss on that node). Hover a node or a row to link them.</div>
-      <svg id="deg-bars" viewBox="0 0 360 440" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="widget-row">
+      <label class="toggle">
+        <input type="checkbox" id="g4-toggle">
+        <span class="toggle-track"></span>
+        <span>apply dedup</span>
+      </label>
+      <span class="step-label">toggle drops the red-dashed edges</span>
     </div>
   </div>
 </section>
@@ -411,67 +428,147 @@ window.MathJax = {
   const MEAN_DEG    = EDGES_TOTAL * 2 / NODES.length;
   const OUT_COUNT   = OUT_N.length;
 
-  // ── Profiling · input graph ──
+  // Helper: render dashed rings enclosing each block's nodes, plus a
+  // handwritten block label above each ring. Returns nothing; expects an
+  // existing d3 svg selection where VIZ will later append its own layers.
+  function drawBlockRings(svg) {
+    const ringsG = svg.append("g").attr("class", "block-rings");
+    BLOCK_NAMES.forEach((name, idx) => {
+      const nodes = BLOCK_NODES[name];
+      if (!nodes || nodes.length === 0) return;
+      const xs = nodes.map(n => NETGEN.POSITIONS[n].x);
+      const ys = nodes.map(n => NETGEN.POSITIONS[n].y);
+      const cx = d3.mean(xs), cy = d3.mean(ys);
+      const rCore = d3.max(nodes.map(n => {
+        const dx = NETGEN.POSITIONS[n].x - cx, dy = NETGEN.POSITIONS[n].y - cy;
+        return Math.sqrt(dx * dx + dy * dy);
+      }));
+      // Pad: node radius (~13) + breathing room. Floor for blocks whose
+      // members happen to sit near the same point (outlier pseudo-block).
+      const r = Math.max(rCore + 30, 34);
+      const color = BLOCK_COLOR[name];
+      ringsG.append("circle")
+        .attr("cx", cx).attr("cy", cy).attr("r", r)
+        .attr("fill", color).attr("fill-opacity", 0.08)
+        .attr("stroke", color).attr("stroke-width", 1.6)
+        .attr("stroke-dasharray", "6 4")
+        .attr("opacity", 0.9);
+      ringsG.append("text")
+        .attr("class", "block-ring-label")
+        .attr("x", cx).attr("y", cy - r - 6)
+        .attr("text-anchor", "middle")
+        .attr("fill", color)
+        .attr("opacity", 0.95)
+        .text(BLOCK_LABELS[idx]);
+    });
+  }
+
+  // ── Profiling · block assignment (graph with dashed block rings) ──
   (function () {
+    const host = document.getElementById("g-assign-cy");
+    if (!host) return;
+    host.innerHTML = "";
+    const svg = d3.select(host).append("svg")
+      .attr("class", "viz-svg")
+      .attr("viewBox", "-320 -340 640 680")
+      .attr("preserveAspectRatio", "xMidYMid meet");
+    drawBlockRings(svg);
     const edges = EDGES.map(e => ({
-      u: e.u, v: e.v, color: pickInputColor(e), w: 1.4,
+      u: e.u, v: e.v, color: pickInputColor(e), w: 1.2,
     }));
-    const viz = NETGEN.VIZ.init("g1-cy", { showLabels: true, edges });
-    NETGEN.makeTooltip(viz, document.getElementById("g1"));
+    const viz = NETGEN.VIZ.init("g-assign-cy", { svg, showLabels: true, edges });
+    NETGEN.makeTooltip(viz, document.getElementById("g-assign"));
   })();
 
-  // ── Profiling · degree sequence (one bar per node, sorted desc) ──
+  // ── Profiling · degree sequence (horizontal bars + hover link) ──
   (function () {
+    const edges = EDGES.map(e => ({
+      u: e.u, v: e.v, color: pickInputColor(e), w: 1.2,
+    }));
+    const viz = NETGEN.VIZ.init("g-deg-cy", { showLabels: true, edges });
+
     const svg = d3.select("#deg-seq");
-    const W = 640, H = 220;
-    const PAD = { top: 16, right: 14, bottom: 42, left: 40 };
+    svg.selectAll("*").remove();
+    const W = 340, H = 420;
+    const PAD = { top: 12, right: 42, bottom: 28, left: 38 };
     const iw = W - PAD.left - PAD.right;
     const ih = H - PAD.top - PAD.bottom;
     const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
 
     const ordered = NODES.slice().sort((a, b) => TARGET_DEG[b] - TARGET_DEG[a] || a - b);
     const maxDeg  = d3.max(NODES, n => TARGET_DEG[n]) || 1;
-    const x = d3.scaleBand().domain(ordered.map(String)).range([0, iw]).padding(0.22);
-    const y = d3.scaleLinear().domain([0, maxDeg + 1]).range([ih, 0]);
+    const y = d3.scaleBand().domain(ordered.map(String)).range([0, ih]).padding(0.22);
+    const x = d3.scaleLinear().domain([0, maxDeg + 1]).range([0, iw]);
 
-    g.append("g").attr("transform", `translate(0,${ih})`)
-      .call(d3.axisBottom(x).tickValues(ordered.map(String)))
-      .selectAll("text")
-        .style("fill", "#6b6a54")
+    g.append("g").call(d3.axisLeft(y).tickSize(0).tickPadding(6))
+      .selectAll("text").style("fill", "#6b6a54")
         .style("font-family", "Special Elite, Courier New, monospace")
         .style("font-size", "10px");
-    g.append("g").call(d3.axisLeft(y).ticks(4))
-      .selectAll("text").style("fill", "#6b6a54").style("font-family", "Special Elite, Courier New, monospace");
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).ticks(4))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace")
+        .style("font-size", "10px");
     g.selectAll(".domain").style("stroke", "#b9a263");
     g.selectAll(".tick line").style("stroke", "#cdbf8d");
-    svg.append("text").attr("x", W / 2).attr("y", H - 6)
+    svg.append("text").attr("x", W / 2).attr("y", H - 4)
       .attr("text-anchor", "middle").style("fill", "#6b6a54")
-      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "11px")
-      .text("node id (sorted by degree desc)");
-    svg.append("text").attr("transform", "rotate(-90)").attr("x", -H / 2).attr("y", 13)
-      .attr("text-anchor", "middle").style("fill", "#6b6a54")
-      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "11px")
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px")
       .text("degree k_i");
 
-    g.selectAll(".dseq-bar").data(ordered).join("rect")
-      .attr("class", "dseq-bar")
-      .attr("x", d => x(String(d)))
-      .attr("y", d => y(TARGET_DEG[d]))
-      .attr("width", x.bandwidth())
-      .attr("height", d => ih - y(TARGET_DEG[d]))
-      .attr("fill", d => BLOCK_COLOR[blockOf(d)])
-      .attr("stroke", "#1b2033").attr("stroke-width", 0.6)
-      .attr("opacity", 0.9);
+    const gBars = g.append("g").attr("class", "deg-seq-bars");
+    ordered.forEach(n => {
+      const row = gBars.append("g")
+        .attr("class", "deg-bar-row")
+        .attr("data-id", String(n))
+        .attr("transform", `translate(0,${y(String(n))})`);
+      row.append("rect").attr("class", "hitbox")
+        .attr("x", -PAD.left + 4).attr("y", 0)
+        .attr("width", iw + PAD.left + PAD.right - 8)
+        .attr("height", y.bandwidth())
+        .attr("fill", "transparent");
+      row.append("rect").attr("class", "bar")
+        .attr("x", 0).attr("y", 0)
+        .attr("width", x(TARGET_DEG[n]))
+        .attr("height", y.bandwidth())
+        .attr("fill", BLOCK_COLOR[blockOf(n)])
+        .attr("stroke", "transparent")
+        .attr("opacity", 0.92);
+      row.append("text").attr("class", "dlbl")
+        .attr("x", x(TARGET_DEG[n]) + 5)
+        .attr("y", y.bandwidth() / 2)
+        .attr("dominant-baseline", "central")
+        .attr("font-family", "Special Elite, Courier New, monospace")
+        .attr("font-size", "10px")
+        .attr("fill", "#2f3a54")
+        .text(TARGET_DEG[n]);
+    });
 
-    g.selectAll(".dseq-lbl").data(ordered).join("text")
-      .attr("class", "dseq-lbl")
-      .attr("x", d => x(String(d)) + x.bandwidth() / 2)
-      .attr("y", d => y(TARGET_DEG[d]) - 3)
-      .attr("text-anchor", "middle")
-      .style("fill", "#2f3a54")
-      .style("font-family", "Special Elite, Courier New, monospace")
-      .style("font-size", "9.5px")
-      .text(d => TARGET_DEG[d]);
+    function setRowHot(id, on) {
+      gBars.select('.deg-bar-row[data-id="' + id + '"]').classed("hot", on);
+    }
+    gBars.on("mouseover", function (ev) {
+      const el = ev.target.closest(".deg-bar-row");
+      if (!el) return;
+      const id = el.getAttribute("data-id");
+      setRowHot(id, true);
+      viz.addNodeClass(id, "ringed");
+    });
+    gBars.on("mouseout", function (ev) {
+      const el = ev.target.closest(".deg-bar-row");
+      if (!el) return;
+      const id = el.getAttribute("data-id");
+      setRowHot(id, false);
+      viz.removeNodeClass(id, "ringed");
+    });
+    viz.onNodeHoverEnter(function (d) {
+      setRowHot(d.id, true);
+      viz.addNodeClass(d.id, "ringed");
+    });
+    viz.onNodeHoverLeave(function (d) {
+      setRowHot(d.id, false);
+      viz.removeNodeClass(d.id, "ringed");
+    });
   })();
 
   // ── Profiling · block matrix + two-way edge↔cell interaction ──
@@ -727,12 +824,12 @@ window.MathJax = {
       renderDegBars(sample, deduped);
     });
 
-    // Target-vs-achieved degree bars — horizontal, one row per node.
+    // Target-vs-achieved degree bars, horizontal, one row per node.
     // Stacked: mint segment = achieved, faint red tail = dropped
     // (target minus achieved). Rows and graph nodes are hover-linked.
     const svg = d3.select("#deg-bars");
-    const W = 360, H = 440;
-    const PAD = { top: 14, right: 44, bottom: 30, left: 38 };
+    const W = 340, H = 420;
+    const PAD = { top: 12, right: 44, bottom: 28, left: 38 };
     const iw = W - PAD.left - PAD.right;
     const ih = H - PAD.top - PAD.bottom;
     const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
