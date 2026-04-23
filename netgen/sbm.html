@@ -13,9 +13,9 @@
 .blockmat{
   display:grid; gap:3px;
   grid-template-columns:repeat(5, minmax(0, 1fr));
-  max-width:280px; margin:1rem auto;
+  max-width:320px; margin:1.2rem auto;
   font-family:'Special Elite','Courier New',monospace;
-  font-size:.75rem;
+  font-size:.8rem;
 }
 .blockmat .cell{
   background:var(--ink-3);
@@ -38,6 +38,32 @@
   0%{background:var(--hl-yellow); color:var(--paper);}
   100%{background:var(--cobalt); color:var(--ink);}
 }
+.disk-panel{
+  padding:1rem; background:var(--ink-2); border:1px solid var(--rule);
+  border-radius:6px; margin:1rem 0;
+}
+.disk-panel svg{ width:100%; height:auto; display:block; }
+.step-desc{
+  font-family:'Special Elite','Courier New',monospace;
+  font-size:.78rem; color:var(--paper-2); margin-top:.6rem;
+}
+.step-desc .st{ color:var(--azure); letter-spacing:.1em; text-transform:uppercase; }
+.step-desc mjx-container{ font-size:1em !important; }
+.profile-table{ width:100%; border-collapse:collapse; margin:1rem 0; background:var(--ink-2); border:1px solid var(--rule); border-radius:4px; overflow:hidden; }
+.profile-table th, .profile-table td{ padding:.55rem .85rem; border-bottom:1px solid var(--rule); vertical-align:middle; text-align:left; }
+.profile-table tr:last-child th, .profile-table tr:last-child td{ border-bottom:none; }
+.profile-table th{ font-family:'Special Elite','Courier New',monospace; font-size:.72rem; letter-spacing:.15em; color:var(--paper-3); width:10%; white-space:nowrap; }
+.profile-table td.val{ font-family:'Special Elite','Courier New',monospace; font-size:1.05rem; color:var(--azure); font-variant-numeric:tabular-nums; width:14%; white-space:nowrap; }
+.profile-table td.desc{ color:var(--paper-2); font-size:.88rem; line-height:1.45; }
+.readout{
+  display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:.8rem;
+  font-family:'Special Elite','Courier New',monospace; font-size:.78rem;
+}
+.readout .item{ color:var(--paper-3); }
+.readout .item b{ color:var(--azure); margin-left:.3rem; }
+.readout .item.diff b{ color:var(--signal); }
+.heat-cell{ cursor:default; }
+.heat-cell:hover{ stroke:#1b2033; stroke-width:.8; }
 </style>
 </head>
 <body>
@@ -57,35 +83,45 @@
   <p>The catch is honesty tax. Micro-SBM samples a multigraph where those constraints hit exactly, then a cleanup step drops self-loops and parallel edges so the output is a simple graph. On dense blocks the cleanup kills a visible fraction of edges, and the three frozen quantities end up as upper bounds, not targets hit.</p>
 </section>
 
-<!-- ─────────── Stage 0 ─────────── -->
-<section class="stage">
-  <div class="stage-num">stage 0 · the question</div>
-  <h2>If you knew only the block counts and the degrees, could you rebuild the graph?</h2>
-  <p>A social network has two people in cluster C1 who are especially well-connected: call them 1 and 2. You and I know they are friends. Does the SBM know? Only if the edge (1, 2) shows up in the block matrix as one of the twelve intra-C1 edges. The SBM cannot tell which <em>specific pairs</em> use up that count. It just knows cluster C1 owes twelve intra-edges somewhere.</p>
-  <p>So the sampler scatters those edges over all possible intra-C1 pairs. Some pairs end up connected, some do not. The degree constraint pulls things back toward the hubs, but it does not pin down the pairs.</p>
-</section>
-
 <!-- ─────────── Stage 1 ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 1 · meet the input</div>
-  <h2>Twenty nodes, three clusters, two outliers, thirty-three edges.</h2>
-  <p>Small enough to watch every edge. Nodes 1-8 form cluster C1 (azure). 9-14 form C2 (amber). 15-18 form C3 (mint). Nodes 19 and 20 are outliers (red): unclustered, hanging out in the middle.</p>
-  <p>Hover any node to see its cluster and degree. Node identities here will survive through the whole pipeline. SBM keeps your node IDs.</p>
+  <div class="stage-num">stage 1 · profile</div>
+  <h2>Three vectors, one matrix: that is the input contract.</h2>
+  <p>Profile reads the reference network and its clustering and writes five CSVs. <code>node_id.csv</code> and <code>cluster_id.csv</code> are label dictionaries; <code>assignment.csv</code>, <code>degree.csv</code>, and <code>edge_counts.csv</code> hold the three quantities the sampler will try to match: per-node block, per-node degree, per-block-pair edge count.</p>
+  <p>Outlier handling happens here. Under the default <code>outlier_mode=combined</code>, every unclustered node and every size-1 cluster is folded into one pseudo-block labelled <code>__outliers__</code>, so the sampler never has to treat them as a separate case. The flag <code>drop_outlier_outlier_edges</code> is off by default, so outlier-outlier edges survive into the pseudo-block's diagonal.</p>
+  <table class="profile-table">
+    <tbody>
+      <tr><th>N</th><td class="val" id="prof-N">&middot;</td><td class="desc">Nodes in the input.</td></tr>
+      <tr><th>m</th><td class="val" id="prof-m">&middot;</td><td class="desc">Edges (undirected, after self-loops dropped on read).</td></tr>
+      <tr><th>B</th><td class="val" id="prof-B">&middot;</td><td class="desc">Blocks in the profile. Real clusters plus the combined outlier pseudo-block.</td></tr>
+      <tr><th>&#773;k</th><td class="val" id="prof-mdeg">&middot;</td><td class="desc">Mean degree, \(2m / N\).</td></tr>
+      <tr><th>outliers</th><td class="val" id="prof-out">&middot;</td><td class="desc">Nodes routed to the combined pseudo-block under <code>outlier_mode=combined</code>.</td></tr>
+    </tbody>
+  </table>
+
   <div class="graph" id="g1">
     <div class="graph-chrome">
-      <span>input G &middot; 20 nodes &middot; 45 edges</span>
-      <span class="right">hover a node</span>
+      <span>input G &middot; click or hover a node</span>
+      <span class="right" id="g1-right">nodes coloured by input block</span>
     </div>
     <div class="graph-canvas" id="g1-cy"></div>
+  </div>
+
+  <div class="disk-panel" style="margin-top:1rem">
+    <div class="step-desc" style="margin-bottom:.6rem"><span class="st">block sizes &amp; intra-edge counts</span> &middot; one bar per block in profile order (size desc, then id asc on ties). Left number = block size, right number in parens = intra-block edges. The combined outlier pseudo-block sits at the bottom in this synthetic.</div>
+    <svg id="block-bars" viewBox="0 0 640 200" preserveAspectRatio="xMidYMid meet"></svg>
   </div>
 </section>
 
 <!-- ─────────── Stage 2 ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 2 · profile</div>
-  <h2>Extract the block matrix.</h2>
-  <p>The profile is a 4&times;4 matrix: three real clusters plus a combined outlier block (the default <code>combined</code> outlier mode folds 19 and 20 into one pseudo-block). Off-diagonal entries count inter-block edges once. Diagonal entries count intra-block edges <em>twice</em>: that matches graph-tool's undirected convention, where each intra-block edge is two half-edges both landing in the same block.</p>
-  <p>Click any edge in the graph below to see which cell it lives in. That cell is the only information the SBM sampler will carry forward about that edge.</p>
+  <div class="stage-num">stage 2 · the block matrix</div>
+  <h2>Count edges per block-pair. That is the only structure the sampler sees.</h2>
+  <p>For blocks \(r\) and \(s\), \(e_{rs}\) is the count of edges between any node in \(r\) and any node in \(s\). For \(r \neq s\), it is stored symmetrically: \(e_{rs} = e_{sr}\). For \(r = s\), graph-tool's undirected convention counts each intra-block edge <em>twice</em> (both half-edges land in the same block), so</p>
+  \[
+    e_{rr} \;=\; 2 \cdot |\{(u, v) \in E : b(u) = b(v) = r\}|.
+  \]
+  <p>The matrix has one row and column per block, so on this synthetic it is a compact 4x4. Each edge in the graph contributes to exactly one cell (or to the pair \((r, s), (s, r)\) for inter-block edges). Click any edge to highlight the cell it lands in: the sampler will not remember which specific edge it was, only that the cell owes that many.</p>
   <div class="graph" id="g2">
     <div class="graph-chrome">
       <span>input &middot; click an edge</span>
@@ -95,36 +131,44 @@
   </div>
   <div class="blockmat" id="g2-mat"></div>
   <div class="callout">
-    <div class="tag">the idea</div>
-    <p>Two distinct graphs with the same block-matrix and the same degree sequence are <em>equally likely</em> under SBM. The model cannot tell them apart, which means the sample spreads probability over both.</p>
+    <div class="tag">why this is the whole contract</div>
+    <p>Two graphs with the same \(e_{rs}\) matrix and the same degree sequence are equally likely under the degree-corrected SBM. The model cannot tell them apart and the sampler spreads probability across all such graphs uniformly. That is why SBM matches \(e_{rs}\) and \(k_i\) in distribution but reshuffles which specific pairs are connected: the specific pairs are not in the contract.</p>
   </div>
 </section>
 
 <!-- ─────────── Stage 3 ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 3 · sample</div>
-  <h2>The sampler places edges per block-pair, allowing collisions.</h2>
-  <p>Micro-SBM fires edges into each block-pair cell until its count is met. Because the constraint is on <em>counts</em>, not <em>distinct pairs</em>, the sampler is free to place two edges between the same two nodes (a parallel edge) or an edge from a node to itself (a self-loop). These do not violate the constraint and they do not get re-rolled.</p>
-  <p>The red-dashed edges below are the self-loops and parallels the micro-SBM emitted on this run. They are about to die in stage 4.</p>
+  <div class="stage-num">stage 3 · sample the multigraph</div>
+  <h2>Stub-matching per block-pair, micro-canonical.</h2>
+  <p>Each node \(i\) has a target degree \(k_i\) that splits across the blocks it connects to: call the split \(k_i^{(s)}\), the number of half-edges from \(i\) landing in block \(s\). The sums match the block matrix: \(\sum_{i \in r} k_i^{(s)} = e_{rs}\) for \(r \neq s\), and \(\sum_{i \in r} k_i^{(r)} = e_{rr} = 2 \cdot \text{intra-edges}(r)\).</p>
+  <p>For each block-pair \((r, s)\), build two stub lists (or one for \(r = s\)): each node \(i\) appears \(k_i^{(s)}\) times. Shuffle, pair up consecutively. Every pair becomes an edge; nothing is rejected.</p>
+  <div class="callout">
+    <div class="tag">the honest catch</div>
+    <p>The constraint is on <em>counts</em>, not <em>distinct pairs</em>. When a hub's stub lands next to one of its own other stubs (same block, \(r = s\)) the sampler emits a <em>self-loop</em>. When two of a hub's stubs for block \(s\) pair with two of another node's stubs for the same block, the sampler emits a <em>parallel edge</em>. Both are legal under the micro constraint. The graph below flags both as red-dashed.</p>
+  </div>
   <div class="graph" id="g3">
     <div class="graph-chrome">
-      <span>after gt.generate_sbm</span>
-      <span class="right">multigraph</span>
+      <span>after gt.generate_sbm &middot; multigraph</span>
+      <span class="right" id="g3-stats">&middot;</span>
     </div>
     <div class="graph-canvas" id="g3-cy"></div>
+    <div class="widget-row" style="padding:.9rem 0 0;border-top:1px dashed rgba(139,117,65,.45)">
+      <button class="btn" id="reroll-btn" type="button">random seed</button>
+      <span class="step-label">reshuffle stubs; dedup stage follows</span>
+    </div>
   </div>
 </section>
 
 <!-- ─────────── Stage 4 ─────────── -->
 <section class="stage">
   <div class="stage-num">stage 4 · dedup</div>
-  <h2>Drop the red-dashed edges. Watch the degree sequence break.</h2>
-  <p>Flip the toggle to see what <code>gt.remove_parallel_edges</code> and <code>gt.remove_self_loops</code> do. The graph becomes a simple graph. Each dropped edge removes one unit of degree from its endpoints; on a dense block, a hub loses several.</p>
-  <p>On this 20-node synthetic the dedup bill is small. On the real <em>dnc</em> graph shipped in the repo it is 29% of edges, because the block matrix had many duplicate-heavy cells.</p>
+  <h2>Collapse parallels, drop self-loops. Degree sequence stops being exact.</h2>
+  <p>graph-tool's <code>remove_parallel_edges</code> + <code>remove_self_loops</code> run unconditionally at the end of <code>gen.py</code>. Each parallel edge between \((u, v)\) is collapsed to one; each self-loop on \(u\) is dropped. Every dropped half-edge is one unit of degree the sampler can no longer account for, so the output degree sequence sits at-or-below the target.</p>
+  <p>Flip the toggle to watch the same multigraph from Stage 3 simplify. The bars below the graph compare target vs achieved degree per node, sorted by target; a node whose bar shrinks after the flip lost a duplicate or a self-loop.</p>
   <div class="graph" id="g4">
     <div class="graph-chrome">
       <span id="g4-label">multigraph (pre-dedup)</span>
-      <span class="right" id="g4-edges">edges: 36</span>
+      <span class="right" id="g4-edges">edges: &middot;</span>
     </div>
     <div class="graph-canvas" id="g4-cy"></div>
     <div class="widget-row">
@@ -133,11 +177,63 @@
         <span class="toggle-track"></span>
         <span>apply dedup</span>
       </label>
+      <span class="step-label">toggle drops the red-dashed edges above</span>
     </div>
   </div>
+  <div class="disk-panel" style="margin-top:1rem">
+    <div class="step-desc" style="margin-bottom:.6rem"><span class="st">degree sequence</span> &middot; target bar in azure, achieved bar in mint; nodes sorted by target degree desc. Hubs in dense blocks are where the gap opens first.</div>
+    <svg id="deg-bars" viewBox="0 0 640 220" preserveAspectRatio="xMidYMid meet"></svg>
+  </div>
+</section>
+
+<!-- ─────────── Centerpiece · dnc ─────────── -->
+<section class="stage">
+  <div class="stage-num">centerpiece · dnc</div>
+  <h2>Same sampler at scale: 88 blocks, 10,429 edges in, 7,438 edges out.</h2>
+  <p>The synthetic above has one big intra-block cell (C1: 36 half-edges over 8 nodes) and the rest thin. On the shipped example <code>dnc</code> + <code>sbm-flat-best+cc</code>, the block matrix has 696 non-zero cells over 88 blocks, and the largest cell carries 2,450 half-edges (1,225 intra-edges, all inside one 50-node cluster). That density is where the honesty tax lands hardest.</p>
+  <p>Left: \(e_{rs}\) as extracted by profile. Right: the same matrix recomputed on the output graph. Bottom: per-cell dedup loss \((\text{input} - \text{output})\), log-scaled so small cells still register. Blocks are sorted by size desc; the <code>__outliers__</code> pseudo-block (355 nodes) sits top-left. Hover any cell for its triple.</p>
+  <div class="disk-panel" style="padding:1.1rem 1rem">
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem 1.1rem; align-items:end">
+      <div>
+        <div class="step-desc" style="text-align:center; margin-bottom:.3rem"><span class="st">input</span> &middot; \(e_{rs}\) from <code>edge_counts.csv</code></div>
+        <svg id="heat-in" viewBox="0 0 320 320" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+      <div>
+        <div class="step-desc" style="text-align:center; margin-bottom:.3rem"><span class="st">output</span> &middot; \(e_{rs}\) recomputed on <code>edge.csv</code></div>
+        <svg id="heat-out" viewBox="0 0 320 320" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+    </div>
+    <div style="margin-top:1rem">
+      <div class="step-desc" style="text-align:center; margin-bottom:.3rem"><span class="st">per-cell dedup loss</span> &middot; input minus output, log-scaled. Darker red = more edges lost in that cell.</div>
+      <svg id="heat-loss" viewBox="0 0 640 320" preserveAspectRatio="xMidYMid meet"></svg>
+    </div>
+    <div class="readout" style="justify-content:center">
+      <span class="item">edges in <b id="dnc-ein">&middot;</b></span>
+      <span class="item">edges out <b id="dnc-eout">&middot;</b></span>
+      <span class="item diff">lost <b id="dnc-loss">&middot;</b></span>
+    </div>
+  </div>
+  <p style="margin-top:1.2rem">Most of the loss concentrates in the diagonal cells of the densest blocks. The outlier pseudo-block is the second-worst offender (355 nodes and 278 intra-edges pre-dedup, 170 after). The off-diagonal cells with any loss at all are the ones where two hubs in the adjacent blocks share too many stubs for just one edge to absorb them.</p>
+  <table class="profile-table">
+    <thead>
+      <tr><th style="font-size:.62rem">stat</th><th style="font-size:.62rem">input</th><th style="font-size:.62rem">sbm output</th><th style="font-size:.62rem">note</th></tr>
+    </thead>
+    <tbody>
+      <tr><th>N</th><td class="val">906</td><td class="val">902</td><td class="desc">Four isolated nodes after dedup have zero output-edges and drop out of <code>edge.csv</code>'s node set.</td></tr>
+      <tr><th>edges</th><td class="val">10,429</td><td class="val">7,438</td><td class="desc">2,991 lost (28.7%): parallels collapsed, self-loops dropped.</td></tr>
+      <tr><th>mean degree</th><td class="val">23.02</td><td class="val">16.49</td><td class="desc">Follows from the edge count drop.</td></tr>
+      <tr><th>global cc</th><td class="val">0.548</td><td class="val">0.341</td><td class="desc">DC-SBM has no triangle-level constraint; the only clustering that survives is whatever shook out of the stub match.</td></tr>
+      <tr><th>mean local cc</th><td class="val">0.494</td><td class="val">0.216</td><td class="desc">Same story: edges inside a block land on random pairs, not on closing triples.</td></tr>
+      <tr><th>clusters</th><td class="val">87</td><td class="val">87</td><td class="desc">Passes through the input clustering, minus size-1 clusters (the input has none).</td></tr>
+    </tbody>
+  </table>
   <div class="callout warn">
-    <div class="tag">honesty</div>
-    <p>The <em>pre-dedup</em> multigraph matches the profile exactly: degree sequence, block matrix, every count. The <em>post-dedup</em> simple graph does not. Every SBM guarantee you read in papers applies to the multigraph; the simple-graph output is an upper bound on what the profile asked for.</p>
+    <div class="tag">caveat 1: dedup loss is not uniform</div>
+    <p>Parallels collide where stubs concentrate. A hub with many stubs into a small neighbour block (or into its own dense block) is the most likely to pair with itself twice or land two edges on the same partner. On <code>dnc</code>, the single largest cell alone loses 894 edges; the outlier pseudo-block loses 108 of its 278 intra-edges. Telling the degree sequence "we matched your hubs" is partially true pre-dedup and partially false post-dedup, and the discrepancy tracks block density.</p>
+  </div>
+  <div class="callout warn">
+    <div class="tag">caveat 2: global cc is not a target</div>
+    <p>The micro constraint pins \(e_{rs}\) and \(k_i\) but nothing about triangles. For sparse inputs or inputs whose clustering coefficient comes mostly from degree structure, the output cc happens to land near the input. For structured inputs like <code>dnc</code> where cc comes from triangle-rich motifs inside clusters, the sampler misses by a lot: 0.548 target, 0.341 achieved. If triangles matter, reach for ec-sbm-v1 or ec-sbm-v2.</p>
   </div>
 </section>
 
@@ -162,6 +258,18 @@ window.MathJax = {
 </script>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 <script src="./shared.js"></script>
+<script id="sbm-dnc-data" type="application/json">
+{"B":88,"labels":["__outliers__","27","13","22","15","19","2","25","10","11","6","3","12","30","20","9","0","7","49","17","4","8","16","21","1","14","18","24","26","5","72","28","32","33","38","39","42","43","44","47","55","62","73","78","23","29","31","34","35","36","37","40","41","45","46","48","50","51","52","53","54","56","57","58","59","60","61","63","64","65","66","67","68","69","70","71","74","75","76","77","79","80","81","82","83","84","85","86"],"sizes":[355,52,50,36,33,33,29,19,15,14,14,12,10,10,9,9,8,8,7,6,6,6,5,5,4,4,4,4,4,4,4,3,3,3,3,3,3,3,3,3,3,3,3,3,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2],"cells":[[0,0,556,340],[0,1,21,20],[0,2,59,53],[0,3,35,33],[0,4,30,28],[0,5,35,32],[0,6,83,71],[0,8,50,45],[0,9,58,48],[0,10,33,29],[0,11,52,40],[0,12,42,33],[0,13,29,21],[0,14,2,2],[0,15,27,21],[0,16,3,3],[0,17,44,32],[0,19,25,16],[0,20,79,44],[0,21,28,23],[0,22,17,12],[0,24,38,24],[0,25,4,4],[0,26,18,16],[0,29,21,17],[0,31,3,3],[0,34,2,2],[0,35,3,3],[0,36,2,2],[0,37,1,1],[0,38,2,2],[0,39,1,1],[0,40,1,1],[0,42,2,2],[0,44,3,3],[0,45,3,3],[0,46,2,2],[0,49,2,2],[0,52,2,2],[0,53,2,2],[0,56,2,2],[0,59,2,2],[0,60,2,2],[0,61,2,2],[0,62,1,1],[0,63,1,1],[0,65,2,2],[0,80,2,2],[1,0,21,20],[1,1,270,240],[1,4,1,1],[1,5,8,8],[1,9,7,7],[1,11,23,21],[1,12,8,8],[1,17,1,1],[1,22,81,65],[1,24,1,1],[2,0,59,53],[2,2,2450,1556],[2,4,3,3],[2,9,700,442],[2,12,7,7],[2,14,2,2],[2,17,2,2],[2,19,2,2],[2,20,300,189],[2,21,2,2],[2,24,1,1],[2,25,4,4],[2,26,38,34],[2,29,200,135],[2,38,4,4],[3,0,35,33],[3,3,972,664],[4,0,30,28],[4,1,1,1],[4,2,3,3],[4,4,94,82],[4,6,4,4],[4,8,3,3],[4,9,14,14],[4,10,2,2],[4,11,1,1],[4,12,4,4],[4,13,1,1],[4,15,4,4],[4,17,22,22],[4,18,1,1],[4,19,35,31],[4,20,35,33],[4,21,28,27],[4,22,1,1],[4,24,25,25],[4,26,1,1],[4,29,1,1],[4,38,1,1],[5,0,35,32],[5,1,8,8],[5,5,132,114],[5,6,8,8],[5,8,3,3],[5,11,98,84],[5,12,6,6],[5,13,2,2],[5,14,2,2],[5,15,6,6],[5,17,5,5],[5,22,23,21],[5,24,7,7],[5,39,1,1],[5,41,3,3],[5,43,2,2],[5,47,1,1],[5,48,2,2],[5,63,1,1],[6,0,83,71],[6,4,4,4],[6,5,8,8],[6,6,314,250],[6,8,193,143],[6,9,23,23],[6,10,15,15],[6,11,117,97],[6,12,5,5],[6,13,37,33],[6,14,2,2],[6,15,167,117],[6,17,179,117],[6,19,3,3],[6,20,115,85],[6,21,43,38],[6,22,1,1],[6,24,45,39],[6,26,2,2],[6,29,72,48],[6,44,1,1],[6,61,1,1],[7,7,342,224],[7,22,19,18],[8,0,50,45],[8,4,3,3],[8,5,3,3],[8,6,193,143],[8,8,210,128],[8,9,167,112],[8,10,121,90],[8,11,109,82],[8,12,137,82],[8,13,4,4],[8,15,114,71],[8,17,120,78],[8,19,1,1],[8,20,90,60],[8,21,59,39],[8,22,1,1],[8,24,46,31],[8,26,2,2],[8,29,55,36],[8,38,1,1],[8,44,1,1],[9,0,58,48],[9,1,7,7],[9,2,700,442],[9,4,14,14],[9,6,23,23],[9,8,167,112],[9,9,182,118],[9,10,7,7],[9,11,5,5],[9,12,97,71],[9,13,3,3],[9,14,6,6],[9,15,18,17],[9,17,94,60],[9,18,1,1],[9,19,6,6],[9,20,84,50],[9,21,24,22],[9,22,2,2],[9,24,36,25],[9,25,14,12],[9,26,30,19],[9,29,56,37],[9,38,13,12],[9,44,2,2],[9,46,5,5],[9,59,2,2],[10,0,33,29],[10,4,2,2],[10,6,15,15],[10,8,121,90],[10,9,7,7],[10,10,100,72],[10,11,61,50],[10,12,3,3],[10,15,100,66],[10,17,107,64],[10,19,2,2],[10,20,62,47],[10,21,41,33],[10,24,4,4],[10,26,1,1],[10,29,45,33],[10,46,1,1],[11,0,52,40],[11,1,23,21],[11,4,1,1],[11,5,98,84],[11,6,117,97],[11,8,109,82],[11,9,5,5],[11,10,61,50],[11,11,110,70],[11,12,3,3],[11,13,3,3],[11,14,2,2],[11,15,87,60],[11,17,92,59],[11,20,52,41],[11,21,32,22],[11,22,15,14],[11,24,13,13],[11,29,39,26],[11,39,2,2],[11,55,2,2],[11,61,2,2],[11,75,1,1],[11,76,1,1],[12,0,42,33],[12,1,8,8],[12,2,7,7],[12,4,4,4],[12,5,6,6],[12,6,5,5],[12,8,137,82],[12,9,97,71],[12,10,3,3],[12,11,3,3],[12,12,84,52],[12,13,2,2],[12,15,2,2],[12,17,77,51],[12,19,6,6],[12,20,59,34],[12,21,3,3],[12,22,3,3],[12,24,36,24],[12,26,3,2],[12,29,11,10],[12,31,1,1],[12,38,1,1],[12,40,2,2],[12,44,1,1],[12,46,3,3],[12,59,1,1],[13,0,29,21],[13,4,1,1],[13,5,2,2],[13,6,37,33],[13,8,4,4],[13,9,3,3],[13,11,3,3],[13,12,2,2],[13,13,56,36],[13,15,33,29],[13,17,73,45],[13,19,5,5],[13,20,42,29],[13,21,16,14],[13,22,1,1],[13,24,27,20],[13,29,4,4],[13,35,3,3],[13,39,1,1],[13,61,1,1],[13,63,1,1],[14,0,2,2],[14,2,2,2],[14,5,2,2],[14,6,2,2],[14,9,6,6],[14,11,2,2],[14,14,58,36],[14,20,5,5],[14,21,5,4],[14,26,11,9],[14,29,1,1],[15,0,27,21],[15,4,4,4],[15,5,6,6],[15,6,167,117],[15,8,114,71],[15,9,18,17],[15,10,100,66],[15,11,87,60],[15,12,2,2],[15,13,33,29],[15,15,68,40],[15,17,71,49],[15,19,1,1],[15,20,52,38],[15,21,50,33],[15,24,27,17],[15,29,36,21],[16,0,3,3],[16,16,28,22],[17,0,44,32],[17,1,1,1],[17,2,2,2],[17,4,22,22],[17,5,5,5],[17,6,179,117],[17,8,120,78],[17,9,94,60],[17,10,107,64],[17,11,92,59],[17,12,77,51],[17,13,73,45],[17,15,71,49],[17,17,56,28],[17,19,14,12],[17,20,48,30],[17,21,48,32],[17,22,3,3],[17,24,32,20],[17,26,4,4],[17,29,32,20],[17,31,4,4],[17,45,5,5],[17,46,3,3],[17,53,2,2],[17,59,1,1],[17,60,4,4],[17,72,3,3],[17,80,2,1],[18,4,1,1],[18,9,1,1],[18,18,18,12],[19,0,25,16],[19,2,2,2],[19,4,35,31],[19,6,3,3],[19,8,1,1],[19,9,6,6],[19,10,2,2],[19,12,6,6],[19,13,5,5],[19,15,1,1],[19,17,14,12],[19,19,22,16],[19,20,19,15],[19,21,10,10],[19,24,20,14],[19,29,1,1],[19,31,11,8],[19,35,9,6],[19,37,2,2],[19,40,2,2],[19,44,1,1],[19,46,1,1],[19,59,2,1],[19,60,2,2],[19,69,1,1],[19,80,1,1],[20,0,79,44],[20,2,300,189],[20,4,35,33],[20,6,115,85],[20,8,90,60],[20,9,84,50],[20,10,62,47],[20,11,52,41],[20,12,59,34],[20,13,42,29],[20,14,5,5],[20,15,52,38],[20,17,48,30],[20,19,19,15],[20,20,30,14],[20,21,35,23],[20,22,1,1],[20,24,24,14],[20,25,4,3],[20,26,15,11],[20,29,24,17],[20,31,6,5],[20,34,1,1],[20,35,1,1],[20,37,2,2],[20,38,7,7],[20,44,4,3],[20,45,8,5],[20,46,2,2],[20,49,5,4],[20,51,1,1],[20,59,2,2],[20,66,2,2],[20,69,1,1],[20,73,1,1],[20,80,2,2],[21,0,28,23],[21,2,2,2],[21,4,28,27],[21,6,43,38],[21,8,59,39],[21,9,24,22],[21,10,41,33],[21,11,32,22],[21,12,3,3],[21,13,16,14],[21,14,5,4],[21,15,50,33],[21,17,48,32],[21,19,10,10],[21,20,35,23],[21,21,24,18],[21,24,18,14],[21,26,9,8],[21,29,21,16],[21,31,5,4],[21,36,3,2],[21,37,1,1],[21,38,1,1],[21,42,1,1],[21,44,2,2],[21,45,5,3],[21,59,1,1],[22,0,17,12],[22,1,81,65],[22,4,1,1],[22,5,23,21],[22,6,1,1],[22,7,19,18],[22,8,1,1],[22,9,2,2],[22,11,15,14],[22,12,3,3],[22,13,1,1],[22,17,3,3],[22,20,1,1],[22,22,14,10],[22,24,4,3],[22,28,4,4],[22,39,1,1],[22,76,2,2],[22,81,1,1],[23,23,20,14],[24,0,38,24],[24,1,1,1],[24,2,1,1],[24,4,25,25],[24,5,7,7],[24,6,45,39],[24,8,46,31],[24,9,36,25],[24,10,4,4],[24,11,13,13],[24,12,36,24],[24,13,27,20],[24,15,27,17],[24,17,32,20],[24,19,20,14],[24,20,24,14],[24,21,18,14],[24,22,4,3],[24,24,12,4],[24,26,1,1],[24,29,12,8],[24,31,7,5],[24,35,2,2],[24,36,3,3],[24,45,1,1],[24,46,1,1],[24,53,2,2],[24,59,2,2],[24,60,2,2],[25,0,4,4],[25,2,4,4],[25,9,14,12],[25,20,4,3],[25,25,6,2],[25,26,3,3],[25,29,2,2],[26,0,18,16],[26,2,38,34],[26,4,1,1],[26,6,2,2],[26,8,2,2],[26,9,30,19],[26,10,1,1],[26,12,3,2],[26,14,11,9],[26,17,4,4],[26,20,15,11],[26,21,9,8],[26,24,1,1],[26,25,3,3],[26,26,12,6],[26,29,4,4],[26,38,1,1],[27,27,12,8],[28,22,4,4],[28,28,12,8],[29,0,21,17],[29,2,200,135],[29,4,1,1],[29,6,72,48],[29,8,55,36],[29,9,56,37],[29,10,45,33],[29,11,39,26],[29,12,11,10],[29,13,4,4],[29,14,1,1],[29,15,36,21],[29,17,32,20],[29,19,1,1],[29,20,24,17],[29,21,21,16],[29,24,12,8],[29,25,2,2],[29,26,4,4],[29,29,12,12],[29,38,1,1],[29,45,3,3],[29,46,2,2],[30,30,8,8],[31,0,3,3],[31,12,1,1],[31,17,4,4],[31,19,11,8],[31,20,6,5],[31,21,5,4],[31,24,7,5],[31,31,4,4],[32,32,6,6],[33,33,6,2],[34,0,2,2],[34,20,1,1],[34,34,4,2],[35,0,3,3],[35,13,3,3],[35,19,9,6],[35,20,1,1],[35,24,2,2],[35,35,6,4],[36,0,2,2],[36,21,3,2],[36,24,3,3],[36,36,4,4],[37,0,1,1],[37,19,2,2],[37,20,2,2],[37,21,1,1],[37,37,4,2],[38,0,2,2],[38,2,4,4],[38,4,1,1],[38,8,1,1],[38,9,13,12],[38,12,1,1],[38,20,7,7],[38,21,1,1],[38,26,1,1],[38,29,1,1],[38,38,4,2],[39,0,1,1],[39,5,1,1],[39,11,2,2],[39,13,1,1],[39,22,1,1],[39,39,4,2],[40,0,1,1],[40,12,2,2],[40,19,2,2],[40,40,6,6],[41,5,3,3],[41,41,6,4],[42,0,2,2],[42,21,1,1],[42,42,4,4],[43,5,2,2],[43,43,4,2],[44,0,3,3],[44,6,1,1],[44,8,1,1],[44,9,2,2],[44,12,1,1],[44,19,1,1],[44,20,4,3],[44,21,2,2],[44,44,2,0],[45,0,3,3],[45,17,5,5],[45,20,8,5],[45,21,5,3],[45,24,1,1],[45,29,3,3],[45,45,2,2],[46,0,2,2],[46,9,5,5],[46,10,1,1],[46,12,3,3],[46,17,3,3],[46,19,1,1],[46,20,2,2],[46,24,1,1],[46,29,2,2],[46,46,2,0],[47,5,1,1],[47,47,2,0],[48,5,2,2],[48,48,2,2],[49,0,2,2],[49,20,5,4],[49,49,2,2],[50,50,2,2],[51,20,1,1],[51,51,2,2],[52,0,2,2],[52,52,2,2],[53,0,2,2],[53,17,2,2],[53,24,2,2],[53,53,2,0],[54,54,2,2],[55,11,2,2],[55,55,2,2],[56,0,2,2],[56,56,2,2],[57,57,2,2],[58,58,2,2],[59,0,2,2],[59,9,2,2],[59,12,1,1],[59,17,1,1],[59,19,2,1],[59,20,2,2],[59,21,1,1],[59,24,2,2],[59,59,2,0],[60,0,2,2],[60,17,4,4],[60,19,2,2],[60,24,2,2],[60,60,2,0],[61,0,2,2],[61,6,1,1],[61,11,2,2],[61,13,1,1],[61,61,2,0],[62,0,1,1],[62,62,2,2],[63,0,1,1],[63,5,1,1],[63,13,1,1],[63,63,2,0],[64,64,2,2],[65,0,2,2],[65,65,2,2],[66,20,2,2],[66,66,2,2],[67,67,2,2],[68,68,2,2],[69,19,1,1],[69,20,1,1],[69,69,2,0],[70,70,2,2],[71,71,2,2],[72,17,3,3],[72,72,2,0],[73,20,1,1],[73,73,2,2],[74,74,2,2],[75,11,1,1],[75,75,2,2],[76,11,1,1],[76,22,2,2],[76,76,2,2],[77,77,2,2],[78,78,2,2],[79,79,2,2],[80,0,2,2],[80,17,2,1],[80,19,1,1],[80,20,2,2],[80,80,2,2],[81,22,1,1],[81,81,2,2],[82,82,2,2],[83,83,2,2],[84,84,2,2],[85,85,2,2],[86,86,2,2],[87,87,2,2]]}
+</script>
+<script>
+(function () {
+  try {
+    const raw = document.getElementById("sbm-dnc-data").textContent;
+    window.NETGEN_SBM_DNC = JSON.parse(raw);
+    if (window.NETGEN_SBM_DNC.__placeholder__) window.NETGEN_SBM_DNC = null;
+  } catch (e) { window.NETGEN_SBM_DNC = null; }
+})();
+</script>
 <script>
 (function () {
   document.getElementById("links").innerHTML = NETGEN.linksRow({gen: "sbm"});
@@ -211,6 +319,8 @@ window.MathJax = {
   const COL = NETGEN.COLORS;
   const EDGES = NETGEN.EDGES;
   const CLUSTER_OF = NETGEN.CLUSTER_OF;
+  const NODES = NETGEN.NODES;
+  const C1 = NETGEN.C1, C2 = NETGEN.C2, C3 = NETGEN.C3, OUT_N = NETGEN.OUT;
 
   function pickInputColor(e) {
     if (e.kind === "outlier" || e.kind === "inter") return COL.edge_inter;
@@ -218,121 +328,547 @@ window.MathJax = {
     return COL.edge_intra[c] || COL.edge_inter;
   }
 
-  // ── Stage 1: plain input graph, labeled nodes. ──
+  // ── Block indexing for the synthetic (combined outlier pseudo-block). ──
+  // Mirrors profile_common.compute_comm_size: sorted by size desc, id asc on
+  // ties. On this graph C1(8) > C2(6) > C3(4) > OUT(2), so the order is
+  // already right. The "combined" outlier mode folds 19 + 20 into a single
+  // pseudo-block labelled OUT here for readability.
+  const BLOCK_NAMES  = ["C1", "C2", "C3", "OUT"];
+  const BLOCK_LABELS = ["C1", "C2", "C3", "__outliers__"];
+  const BLOCK_NODES  = { "C1": C1, "C2": C2, "C3": C3, "OUT": OUT_N };
+  const BLOCK_COLOR  = { "C1": COL.C1, "C2": COL.C2, "C3": COL.C3, "OUT": COL.OUT };
+  const NUM_BLOCKS   = BLOCK_NAMES.length;
+  const blockOf = (n) => CLUSTER_OF[n];
+  const blockIdx = (n) => BLOCK_NAMES.indexOf(blockOf(n));
+
+  // e_{rs}: intra doubled, inter counted once per direction.
+  const EDGE_COUNTS = Array.from({length: NUM_BLOCKS}, () => new Array(NUM_BLOCKS).fill(0));
+  EDGES.forEach(e => {
+    const r = blockIdx(e.u), s = blockIdx(e.v);
+    if (r === s) EDGE_COUNTS[r][r] += 2;
+    else { EDGE_COUNTS[r][s] += 1; EDGE_COUNTS[s][r] += 1; }
+  });
+
+  // Per-node stubs per target block: k_i^{(s)} = count of edges from i into s.
+  // For intra (s = block(i)), k_i^{(s)} equals the intra-block degree; for
+  // inter it equals the directed count to block s. Sum_{i in r} k_i^{(s)} =
+  // e_{rs} for r != s, and = e_{rr} for r = s.
+  const STUBS = {};
+  NODES.forEach(n => {
+    STUBS[n] = new Array(NUM_BLOCKS).fill(0);
+  });
+  EDGES.forEach(e => {
+    const r = blockIdx(e.u), s = blockIdx(e.v);
+    STUBS[e.u][s] += 1;
+    STUBS[e.v][r] += 1;
+  });
+
+  const TARGET_DEG = {};
+  NODES.forEach(n => { TARGET_DEG[n] = STUBS[n].reduce((a, b) => a + b, 0); });
+  const EDGES_TOTAL = EDGES.length;
+  const MEAN_DEG    = EDGES_TOTAL * 2 / NODES.length;
+  const OUT_COUNT   = OUT_N.length;
+
+  // ── Populate profile table ──
+  document.getElementById("prof-N").textContent    = NODES.length;
+  document.getElementById("prof-m").textContent    = EDGES_TOTAL;
+  document.getElementById("prof-B").textContent    = NUM_BLOCKS;
+  document.getElementById("prof-mdeg").textContent = MEAN_DEG.toFixed(2);
+  document.getElementById("prof-out").textContent  = OUT_COUNT;
+
+  // ── Stage 1: block-size + intra-edge bars ──
+  (function () {
+    const svg = d3.select("#block-bars");
+    const W = 640, H = 200;
+    const PAD = { top: 18, right: 140, bottom: 32, left: 52 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+
+    const data = BLOCK_NAMES.map((name, idx) => ({
+      name,
+      label: BLOCK_LABELS[idx],
+      size: BLOCK_NODES[name].length,
+      intra: EDGE_COUNTS[idx][idx] / 2,
+      color: BLOCK_COLOR[name],
+    }));
+
+    const y = d3.scaleBand().domain(data.map(d => d.name)).range([0, ih]).padding(0.22);
+    const x = d3.scaleLinear().domain([0, d3.max(data, d => d.size) * 1.05]).range([0, iw]);
+
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).ticks(4))
+      .selectAll("text").style("fill", "#6b6a54").style("font-family", "Special Elite, Courier New, monospace");
+    g.append("g").call(d3.axisLeft(y))
+      .selectAll("text").style("fill", "#6b6a54").style("font-family", "Special Elite, Courier New, monospace");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+
+    svg.append("text").attr("x", W / 2).attr("y", H - 6)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "11px")
+      .text("block size (nodes)");
+
+    g.selectAll(".blk-bar").data(data).join("rect")
+      .attr("class", "blk-bar")
+      .attr("x", 0).attr("y", d => y(d.name))
+      .attr("width", d => x(d.size))
+      .attr("height", y.bandwidth())
+      .attr("fill", d => d.color).attr("opacity", 0.88)
+      .attr("stroke", "#1b2033").attr("stroke-width", 0.8);
+
+    g.selectAll(".blk-lbl").data(data).join("text")
+      .attr("class", "blk-lbl")
+      .attr("x", d => x(d.size) + 6)
+      .attr("y", d => y(d.name) + y.bandwidth() / 2)
+      .attr("dominant-baseline", "central")
+      .attr("fill", "#1b2033")
+      .attr("font-family", "Special Elite, Courier New, monospace")
+      .attr("font-size", 11)
+      .text(d => d.size + "  (" + d.intra + " intra, e_rr = " + (d.intra * 2) + ")");
+  })();
+
+  // ── Stage 1 graph ──
   (function () {
     const edges = EDGES.map(e => ({
       u: e.u, v: e.v, color: pickInputColor(e), w: 1.4,
     }));
-    const cy = NETGEN.CY.init("g1-cy", { showLabels: true, edges });
-    NETGEN.makeTooltip(cy, document.getElementById("g1"));
+    const viz = NETGEN.VIZ.init("g1-cy", { showLabels: true, edges });
+    NETGEN.makeTooltip(viz, document.getElementById("g1"));
   })();
 
-  // ── Stage 2: input graph + blockmatrix. Click edge → highlight cell. ──
+  // ── Stage 2: block matrix + click-edge interaction ──
   (function () {
-    const BLOCK = { "C1":0, "C2":1, "C3":2, "OUT":3 };
-    const NAMES = ["C1","C2","C3","OUT"];
-
-    const M = [[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]];
-    EDGES.forEach(e => {
-      const bu = BLOCK[CLUSTER_OF[e.u]];
-      const bv = BLOCK[CLUSTER_OF[e.v]];
-      if (bu === bv) { M[bu][bu] += 2; }
-      else { M[bu][bv] += 1; M[bv][bu] += 1; }
-    });
-
     const gm = document.getElementById("g2-mat");
     gm.innerHTML = "";
-    gm.appendChild(cell("head",""));
-    NAMES.forEach(n => gm.appendChild(cell("head", n)));
-    for (let i = 0; i < 4; i++) {
-      gm.appendChild(cell("head", NAMES[i]));
-      for (let j = 0; j < 4; j++) {
-        const c = cell("", M[i][j]);
-        c.dataset.cell = `${i}-${j}`;
-        gm.appendChild(c);
-      }
-    }
-    function cell(extraCls, text) {
+    const cellFactory = (extraCls, text) => {
       const d = document.createElement("div");
       d.className = "cell " + extraCls;
       d.textContent = text;
       return d;
+    };
+    gm.appendChild(cellFactory("head", ""));
+    BLOCK_NAMES.forEach(n => gm.appendChild(cellFactory("head", n)));
+    for (let i = 0; i < NUM_BLOCKS; i++) {
+      gm.appendChild(cellFactory("head", BLOCK_NAMES[i]));
+      for (let j = 0; j < NUM_BLOCKS; j++) {
+        const c = cellFactory("", EDGE_COUNTS[i][j]);
+        c.dataset.cell = i + "-" + j;
+        gm.appendChild(c);
+      }
     }
 
     const edges = EDGES.map(e => ({
       u: e.u, v: e.v,
       color: pickInputColor(e), w: 1.4,
-      id: `e2-${e.u}-${e.v}`,
+      id: "e2-" + e.u + "-" + e.v,
     }));
-    const viz = NETGEN.CY.init("g2-cy", { showLabels: true, edges });
-
+    const viz = NETGEN.VIZ.init("g2-cy", { showLabels: true, edges });
     const readout = document.getElementById("g2-cell");
 
-    viz.onEdgeTap(function (d) {
-      const e = EDGES.find(x => `e2-${x.u}-${x.v}` === d.id);
+    viz.onEdgeTap((d) => {
+      const e = EDGES.find(x => "e2-" + x.u + "-" + x.v === d.id);
       if (!e) return;
-      const bu = BLOCK[CLUSTER_OF[e.u]];
-      const bv = BLOCK[CLUSTER_OF[e.v]];
+      const bu = blockIdx(e.u), bv = blockIdx(e.v);
       gm.querySelectorAll(".cell.on,.cell.flash").forEach(c => c.classList.remove("on","flash"));
-      const c1 = gm.querySelector(`[data-cell="${bu}-${bv}"]`);
-      const c2 = gm.querySelector(`[data-cell="${bv}-${bu}"]`);
+      const c1 = gm.querySelector('[data-cell="' + bu + '-' + bv + '"]');
+      const c2 = gm.querySelector('[data-cell="' + bv + '-' + bu + '"]');
       c1 && c1.classList.add("flash","on");
       c2 && c2.classList.add("flash","on");
       setTimeout(() => {
         gm.querySelectorAll(".cell.flash").forEach(c => c.classList.remove("flash"));
       }, 700);
-      readout.textContent = `cell: (${NAMES[bu]}, ${NAMES[bv]}) · edge (${e.u}, ${e.v})`;
+      readout.textContent = "cell: (" + BLOCK_NAMES[bu] + ", " + BLOCK_NAMES[bv] + ") · edge (" + e.u + ", " + e.v + ")";
       viz.clearAllEdgeClass("hi");
       viz.addEdgeClass(d.id, "hi");
     });
   })();
 
-  // ── Stage 3: micrograph (pre-dedup) with collisions as dashed edges. ──
-  (function () {
-    const baseEdges = EDGES.map((e,i) => ({
-      u: e.u, v: e.v,
-      color: COL.edge_stage2, w: 1.4,
-      id: `s3-base-${i}`,
-    }));
-    const extras = [
-      { u:1, v:3, color: COL.edge_drop, w: 2, id:"s3-dup-1", classes:"dashed thick" },
-      { u:10, v:11, color: COL.edge_drop, w: 2, id:"s3-dup-2", classes:"dashed thick" },
-      { u:9, v:9, color: COL.edge_drop, w: 2, id:"s3-loop", classes:"dashed thick" },
-    ];
-    NETGEN.CY.init("g3-cy", {
-      showLabels: true,
-      edges: [...baseEdges, ...extras],
+  // ── Micro-SBM sampler (JS). ──
+  // Mirrors graph-tool's generate_sbm(micro_ers=true, micro_degs=true) via
+  // configuration-model stub-matching per block-pair. Output is a multigraph
+  // whose per-pair and per-node half-edge counts hit the profile exactly;
+  // dedup afterwards turns it into a simple graph and bleeds both counts
+  // down by the parallel + self-loop count.
+  function seededRng(seed) {
+    // d3.randomLcg gives deterministic U[0,1). Stable across browsers.
+    return d3.randomLcg(seed);
+  }
+  function shuffleInPlace(arr, rng) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+    }
+  }
+  function sampleMicroSBM(seed) {
+    const rng = seededRng(seed);
+    const raw = [];  // {u, v, intra, multi, loop}
+    for (let r = 0; r < NUM_BLOCKS; r++) {
+      for (let s = r; s < NUM_BLOCKS; s++) {
+        if (r === s) {
+          const stubs = [];
+          BLOCK_NODES[BLOCK_NAMES[r]].forEach(u => {
+            for (let k = 0; k < STUBS[u][r]; k++) stubs.push(u);
+          });
+          shuffleInPlace(stubs, rng);
+          for (let k = 0; k + 1 < stubs.length; k += 2) {
+            raw.push({ u: stubs[k], v: stubs[k+1], intra: true });
+          }
+        } else {
+          const stubsR = [], stubsS = [];
+          BLOCK_NODES[BLOCK_NAMES[r]].forEach(u => {
+            for (let k = 0; k < STUBS[u][s]; k++) stubsR.push(u);
+          });
+          BLOCK_NODES[BLOCK_NAMES[s]].forEach(u => {
+            for (let k = 0; k < STUBS[u][r]; k++) stubsS.push(u);
+          });
+          shuffleInPlace(stubsR, rng);
+          shuffleInPlace(stubsS, rng);
+          const n = Math.min(stubsR.length, stubsS.length);
+          for (let k = 0; k < n; k++) {
+            raw.push({ u: stubsR[k], v: stubsS[k], intra: false });
+          }
+        }
+      }
+    }
+    // Label loops + parallels (in arrival order).
+    const seen = new Map();
+    raw.forEach(e => {
+      const u = Math.min(e.u, e.v), v = Math.max(e.u, e.v);
+      const key = u + "|" + v;
+      if (u === v) {
+        e.loop = true;
+      } else if (seen.has(key)) {
+        e.multi = true;
+      } else {
+        seen.set(key, 1);
+      }
     });
+    const kept = raw.filter(e => !e.loop && !e.multi);
+    const dropped = raw.filter(e => e.loop || e.multi);
+    // Per-node achieved (post-dedup) degree.
+    const achievedDeg = {};
+    NODES.forEach(n => { achievedDeg[n] = 0; });
+    kept.forEach(e => { achievedDeg[e.u]++; achievedDeg[e.v]++; });
+    return {
+      all: raw,
+      kept,
+      dropped,
+      achievedDeg,
+      stats: {
+        preEdges: raw.length,
+        postEdges: kept.length,
+        nLoops: raw.filter(e => e.loop).length,
+        nParallels: raw.filter(e => e.multi).length,
+      },
+    };
+  }
+
+  let currSeed = 1;
+  let SAMPLE = sampleMicroSBM(currSeed);
+  const sampleListeners = [];
+  function onSampleReroll(fn) { sampleListeners.push(fn); }
+  function triggerReroll() {
+    currSeed += 1;
+    SAMPLE = sampleMicroSBM(currSeed);
+    sampleListeners.forEach(fn => fn(SAMPLE));
+  }
+
+  // ── Stage 3: live multigraph with dashed parallels + self-loops ──
+  (function () {
+    const viz = NETGEN.VIZ.init("g3-cy", {
+      showLabels: true,
+      edges: [],
+    });
+    const statsEl = document.getElementById("g3-stats");
+
+    function render(sample) {
+      const edges = sample.all.map((e, i) => {
+        if (e.loop || e.multi) {
+          return {
+            u: e.u, v: e.v,
+            color: COL.edge_drop, w: 2,
+            id: "s3-" + i, classes: "dashed thick",
+          };
+        }
+        return {
+          u: e.u, v: e.v,
+          color: e.intra ? (COL.edge_intra[blockOf(e.u)] || COL.edge_stage2) : COL.edge_inter,
+          w: 1.4,
+          id: "s3-" + i,
+        };
+      });
+      viz.setEdges(edges);
+      statsEl.textContent =
+        sample.stats.preEdges + " half-pairs · "
+        + sample.stats.nLoops + " self-loops · "
+        + sample.stats.nParallels + " parallels";
+    }
+    render(SAMPLE);
+    onSampleReroll(render);
+
+    const btn = document.getElementById("reroll-btn");
+    if (btn) btn.addEventListener("click", triggerReroll);
   })();
 
-  // ── Stage 4: dedup toggle. ──
+  // ── Stage 4: dedup toggle + target-vs-achieved degree bars ──
   (function () {
-    const baseEdges = EDGES.map((e,i) => ({
-      u: e.u, v: e.v,
-      color: pickInputColor(e), w: 1.4,
-      id: `s4-base-${i}`,
-    }));
-    const extras = [
-      { u:1, v:3, color: COL.edge_drop, w: 2, id:"s4-dup-1", classes:"dashed thick" },
-      { u:10, v:11, color: COL.edge_drop, w: 2, id:"s4-dup-2", classes:"dashed thick" },
-      { u:9, v:9, color: COL.edge_drop, w: 2, id:"s4-loop", classes:"dashed thick" },
-    ];
-    const viz = NETGEN.CY.init("g4-cy", {
+    const viz = NETGEN.VIZ.init("g4-cy", {
       showLabels: true,
-      edges: [...baseEdges, ...extras],
+      edges: [],
     });
-
-    const label = document.getElementById("g4-label");
+    const label     = document.getElementById("g4-label");
     const edgeCount = document.getElementById("g4-edges");
+    const toggleIn  = document.getElementById("g4-toggle");
 
-    NETGEN.toggle({
-      input: document.getElementById("g4-toggle"),
-      onChange: (on) => {
-        viz.animateEdgeOpacityByClass("dashed", on ? 0 : 0.85, 300);
-        label.textContent = on ? "simple graph (post-dedup)" : "multigraph (pre-dedup)";
-        edgeCount.textContent = on ? "edges: 33" : "edges: 36";
-      },
+    function render(sample, deduped) {
+      const edges = sample.all.map((e, i) => {
+        const bad = e.loop || e.multi;
+        if (bad && deduped) return null;  // omit entirely when deduped on
+        if (bad) {
+          return {
+            u: e.u, v: e.v,
+            color: COL.edge_drop, w: 2,
+            id: "s4-" + i, classes: "dashed thick",
+          };
+        }
+        return {
+          u: e.u, v: e.v,
+          color: e.intra ? (COL.edge_intra[blockOf(e.u)] || COL.edge_stage2) : COL.edge_inter,
+          w: 1.4,
+          id: "s4-" + i,
+        };
+      }).filter(Boolean);
+      viz.setEdges(edges);
+      const n = deduped ? sample.stats.postEdges : sample.stats.preEdges;
+      label.textContent = deduped ? "simple graph (post-dedup)" : "multigraph (pre-dedup)";
+      edgeCount.textContent = "edges: " + n;
+    }
+
+    let deduped = false;
+    render(SAMPLE, deduped);
+    toggleIn.addEventListener("change", () => {
+      deduped = toggleIn.checked;
+      render(SAMPLE, deduped);
+      renderDegBars(SAMPLE, deduped);
     });
+    onSampleReroll((sample) => {
+      render(sample, deduped);
+      renderDegBars(sample, deduped);
+    });
+
+    // Target-vs-achieved degree bars.
+    const svg = d3.select("#deg-bars");
+    const W = 640, H = 220;
+    const PAD = { top: 18, right: 16, bottom: 48, left: 44 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+
+    const orderedNodes = NODES.slice().sort((a, b) => TARGET_DEG[b] - TARGET_DEG[a] || a - b);
+    const x = d3.scaleBand().domain(orderedNodes.map(String)).range([0, iw]).padding(0.18);
+    const y = d3.scaleLinear().domain([0, d3.max(NODES, n => TARGET_DEG[n]) + 1]).range([ih, 0]);
+
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).tickValues(orderedNodes.filter((_, i) => i % 2 === 0).map(String)))
+      .selectAll("text").style("fill", "#6b6a54").style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10px");
+    g.append("g").call(d3.axisLeft(y).ticks(4))
+      .selectAll("text").style("fill", "#6b6a54").style("font-family", "Special Elite, Courier New, monospace");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+    svg.append("text").attr("x", W / 2).attr("y", H - 6)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "11px")
+      .text("node id (sorted by target degree)");
+    svg.append("text").attr("transform", "rotate(-90)").attr("x", -H / 2).attr("y", 14)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "11px")
+      .text("degree");
+
+    const gBars = g.append("g").attr("class", "deg-bars");
+
+    function renderDegBars(sample, deduped) {
+      const bw = x.bandwidth();
+      const targetW = bw * 0.55, achievedW = bw * 0.55;
+      const tRects = gBars.selectAll(".t-bar").data(orderedNodes, d => d);
+      tRects.enter().append("rect")
+        .attr("class", "t-bar")
+        .attr("x", d => x(String(d)))
+        .attr("y", d => y(TARGET_DEG[d]))
+        .attr("width", targetW)
+        .attr("height", d => ih - y(TARGET_DEG[d]))
+        .attr("fill", COL.azure).attr("opacity", 0.75);
+      const aRects = gBars.selectAll(".a-bar").data(orderedNodes, d => d);
+      aRects.enter().append("rect")
+        .attr("class", "a-bar")
+        .attr("x", d => x(String(d)) + bw - achievedW)
+        .attr("width", achievedW);
+      gBars.selectAll(".a-bar")
+        .attr("y", d => deduped ? y(sample.achievedDeg[d]) : y(TARGET_DEG[d]))
+        .attr("height", d => deduped
+          ? (ih - y(sample.achievedDeg[d]))
+          : (ih - y(TARGET_DEG[d])))
+        .attr("fill", COL.mint).attr("opacity", 0.85);
+    }
+    renderDegBars(SAMPLE, deduped);
+  })();
+
+  // ── Centerpiece: dnc input vs output block heatmaps + per-cell loss ──
+  (function () {
+    if (!window.NETGEN_SBM_DNC) return;
+    const d = window.NETGEN_SBM_DNC;  // { B, labels, sizes, cells: [[i,j,p,e],...] }
+    const B = d.B;
+
+    // Normalise cell arrays into dense-ish maps for lookup.
+    const getCell = (i, j) => {
+      // linear search is OK: 696 cells, lookups only on hover.
+      const row = d.cells.find(c => c[0] === i && c[1] === j);
+      return row ? { p: row[2], e: row[3] } : { p: 0, e: 0 };
+    };
+
+    const maxVal = d3.max(d.cells, c => Math.max(c[2], c[3])) || 1;
+    const colorIn  = d3.scaleSequential(d3.interpolateBlues).domain([0, Math.log1p(maxVal)]);
+    const colorOut = d3.scaleSequential(d3.interpolateBlues).domain([0, Math.log1p(maxVal)]);
+
+    function drawHeat(svgSel, getVal, color, { highlight } = {}) {
+      const svg = d3.select(svgSel);
+      svg.selectAll("*").remove();
+      const size = 300, pad = 10;
+      const cellSize = size / B;
+      const g = svg.append("g").attr("transform", `translate(${pad},${pad})`);
+      // Background
+      g.append("rect")
+        .attr("x", 0).attr("y", 0)
+        .attr("width", size).attr("height", size)
+        .attr("fill", "#ede4c9").attr("stroke", "#8e7a3c").attr("stroke-width", 1);
+
+      for (let i = 0; i < B; i++) {
+        for (let j = 0; j < B; j++) {
+          const v = getVal(i, j);
+          if (v <= 0) continue;
+          g.append("rect")
+            .attr("class", "heat-cell")
+            .attr("x", j * cellSize).attr("y", i * cellSize)
+            .attr("width", cellSize + 0.5).attr("height", cellSize + 0.5)
+            .attr("fill", color(Math.log1p(v)))
+            .attr("opacity", 0.95);
+        }
+      }
+      if (highlight) {
+        g.append("rect")
+          .attr("x", 0).attr("y", 0)
+          .attr("width", cellSize).attr("height", cellSize)
+          .attr("fill", "none").attr("stroke", "#c92a2a").attr("stroke-width", 1.4)
+          .attr("stroke-dasharray", "3 2");
+      }
+      // Diagonal guide
+      g.append("line")
+        .attr("x1", 0).attr("y1", 0).attr("x2", size).attr("y2", size)
+        .attr("stroke", "#b9a263").attr("stroke-dasharray", "2 3").attr("opacity", 0.35);
+    }
+
+    drawHeat("#heat-in", (i, j) => getCell(i, j).p, colorIn, { highlight: true });
+    drawHeat("#heat-out", (i, j) => getCell(i, j).e, colorOut, { highlight: true });
+
+    // Loss heatmap is wider (640x320) so it can sit full-width under the pair.
+    (function () {
+      const svg = d3.select("#heat-loss");
+      svg.selectAll("*").remove();
+      const W = 640, H = 320;
+      const pad = { top: 14, right: 16, bottom: 18, left: 16 };
+      const iw = W - pad.left - pad.right;
+      const ih = H - pad.top - pad.bottom;
+      const size = Math.min(iw, ih);
+      const offsetX = pad.left + (iw - size) / 2;
+      const cellSize = size / B;
+      const g = svg.append("g").attr("transform", `translate(${offsetX},${pad.top})`);
+      g.append("rect").attr("x", 0).attr("y", 0)
+        .attr("width", size).attr("height", size)
+        .attr("fill", "#ede4c9").attr("stroke", "#8e7a3c").attr("stroke-width", 1);
+
+      const maxLoss = d3.max(d.cells, c => Math.max(c[2] - c[3], 0)) || 1;
+      const colorLoss = d3.scaleSequential(d3.interpolateReds).domain([0, Math.log1p(maxLoss)]);
+      for (const [i, j, p, e] of d.cells) {
+        const loss = p - e;
+        if (loss <= 0) continue;
+        g.append("rect")
+          .attr("class", "heat-cell")
+          .attr("x", j * cellSize).attr("y", i * cellSize)
+          .attr("width", cellSize + 0.5).attr("height", cellSize + 0.5)
+          .attr("fill", colorLoss(Math.log1p(loss)))
+          .attr("opacity", 0.95);
+      }
+      g.append("line")
+        .attr("x1", 0).attr("y1", 0).attr("x2", size).attr("y2", size)
+        .attr("stroke", "#b9a263").attr("stroke-dasharray", "2 3").attr("opacity", 0.35);
+      // Outlier-block highlight square at (0,0)
+      g.append("rect")
+        .attr("x", 0).attr("y", 0)
+        .attr("width", cellSize).attr("height", cellSize)
+        .attr("fill", "none").attr("stroke", "#c92a2a").attr("stroke-width", 1.4)
+        .attr("stroke-dasharray", "3 2");
+      // Legend label
+      svg.append("text")
+        .attr("x", offsetX + size / 2).attr("y", H - 2)
+        .attr("text-anchor", "middle").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10px")
+        .text("max single-cell loss = " + maxLoss + " (half-edges)");
+    })();
+
+    // Hover tooltip over the three heatmaps: piggyback on a shared div.
+    const container = document.querySelector("#heat-in").closest(".disk-panel");
+    const tip = document.createElement("div");
+    tip.className = "cy-tooltip";
+    if (getComputedStyle(container).position === "static") container.style.position = "relative";
+    container.appendChild(tip);
+    function place(ev) {
+      const rect = container.getBoundingClientRect();
+      let x = ev.clientX - rect.left + 14;
+      let y = ev.clientY - rect.top + 14;
+      const tw = tip.offsetWidth, th = tip.offsetHeight;
+      if (x + tw > rect.width - 8) x = ev.clientX - rect.left - tw - 12;
+      if (y + th > rect.height - 8) y = ev.clientY - rect.top - th - 8;
+      tip.style.left = x + "px";
+      tip.style.top = y + "px";
+    }
+    function attachHover(svgSel) {
+      d3.select(svgSel).selectAll(".heat-cell")
+        .on("mouseenter", function (ev) {
+          const rect = this.getBoundingClientRect();
+          const cellSvg = d3.select(this.closest("svg")).node();
+          const svgRect = cellSvg.getBoundingClientRect();
+          // Recover (i, j) from the rect's x/y attributes via parent transform.
+          const r = d3.select(this);
+          const cx = parseFloat(r.attr("x"));
+          const cy = parseFloat(r.attr("y"));
+          const cellSize = parseFloat(r.attr("width")) - 0.5;
+          const j = Math.round(cx / cellSize);
+          const i = Math.round(cy / cellSize);
+          const c = getCell(i, j);
+          const li = d.labels[i] || "?";
+          const lj = d.labels[j] || "?";
+          tip.innerHTML =
+            '<div class="hd">block ' + li + " · " + lj + '</div>' +
+            '<div>input <b>' + c.p + '</b></div>' +
+            '<div>output <b>' + c.e + '</b></div>' +
+            '<div>loss <b>' + (c.p - c.e) + '</b></div>';
+          tip.classList.add("on");
+          place(ev);
+        })
+        .on("mousemove", function (ev) { place(ev); })
+        .on("mouseleave", function () { tip.classList.remove("on"); });
+    }
+    attachHover("#heat-in");
+    attachHover("#heat-out");
+    attachHover("#heat-loss");
+
+    // Readout totals
+    let sumIn = 0, sumOut = 0;
+    d.cells.forEach(c => { sumIn += c[2]; sumOut += c[3]; });
+    document.getElementById("dnc-ein").textContent  = (sumIn  / 2).toLocaleString();
+    document.getElementById("dnc-eout").textContent = (sumOut / 2).toLocaleString();
+    document.getElementById("dnc-loss").textContent = ((sumIn - sumOut) / 2).toLocaleString()
+      + " (" + ((1 - sumOut / sumIn) * 100).toFixed(1) + "%)";
   })();
 
 })();
