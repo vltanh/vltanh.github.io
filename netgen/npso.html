@@ -140,6 +140,7 @@
         <input type="range" id="T-slider" min="0.001" max="0.999" step="0.001" value="0.5">
         <output id="T-val">0.500</output>
       </div>
+      <button class="btn" id="T-reroll" type="button">random edges</button>
     </div>
     <svg id="disk-T" viewBox="-270 -270 540 540" preserveAspectRatio="xMidYMid meet"></svg>
     <div class="step-desc" style="margin-bottom:.6rem">Edge count is constant (impl 3 gives \(m(m+1)/2 + (N-m-1)m\) regardless of T). What the slider actually shows is the edge set rearranging: hubs near the centre stay connected to each other at any T (their pairwise \(p(i,j)\) is near 1 across the bracket), while the lower-rank periphery swaps neighbours as \(T\) rises and the Fermi-Dirac sigmoid flattens.</div>
@@ -164,11 +165,11 @@
   <p>Margin guard: if the secant iterate falls within 5% of the bracket width from either endpoint (i.e. \(T_{\mathrm{sec}} \leq T_{\min} + 0.05(T_{\max} - T_{\min})\) or \(T_{\mathrm{sec}} \geq T_{\max} - 0.05(T_{\max} - T_{\min})\)), the code falls back to the bracket midpoint for that iter. Without the guard, secant stalls hugging the endpoint when \(cc(T)\) flattens near a bracket edge. Stop conditions: residual &lt; 0.005, step &lt; 0.0001, or 100 iters. The wrapper keeps the lowest-residual iterate regardless of whether convergence was formally reached.</p>
   <div class="callout warn">
     <div class="tag">caveat 1: bisect + secant assumes monotone</div>
-    <p>The framework assumes \(cc(T)\) is monotone so residual signs carry information. On a noisy non-monotone sample, equal-signed residuals can cluster on the wrong side, the secant never fires, and bisection walks into a local minimum. Better options when \(cc(T)\) is suspected to be noisy or non-monotone: grid-scan \(T\) on a log-uniform schedule and keep the best-residual iterate; repeat sampling at each \(T\) and minimise over the mean (dampens Monte Carlo noise); or a golden-section search if unimodality is plausible. The current code does none of these.</p>
+    <p>The framework assumes \(cc(T)\) is monotone so residual signs carry information. Look at the ghost band below: the mean curve drifts downward but is not strictly so, and the ±1σ / ±2σ bands show the single-shot noise that a real search iterate carries. Equal-signed residuals can cluster on the wrong side, the secant never fires, and bisection walks into a local minimum. Better options when \(cc(T)\) is noisy or non-monotone: grid-scan \(T\) on a log-uniform schedule and keep the best-residual iterate; sample several times per \(T\) and minimise over the mean (the same smoothing the ghost band applies); or a golden-section search if unimodality is plausible. The current code does none of these.</p>
   </div>
   <div class="callout warn">
     <div class="tag">caveat 2: the target may be too high</div>
-    <p>nPSO's achievable \(cc\) ceiling depends on \((N, m, \gamma, C)\). On some inputs that ceiling sits below the empirical target: even driving \(T\) toward 0 cannot push \(cc(T)\) up to the target. When that happens the search never crosses the target line, residuals stay same-signed across the whole bracket, and bisection walks \(T \to 0\) until the step collapses. Always check achieved \(cc\) in the run log. The DNC case study below is such an instance: target 0.548, best achievable ≈ 0.098.</p>
+    <p>nPSO's achievable \(cc\) ceiling depends on \((N, m, \gamma, C)\). If the target line sits above the top of the ±2σ band at every \(T\), even driving \(T\) toward 0 cannot push \(cc(T)\) up to it. When that happens the search never crosses the target, residuals stay same-signed across the whole bracket, and bisection walks \(T \to 0\) until the step collapses. On this 20-node synthetic the target sits right at the top edge of the ghost band: reachable, but only barely. The DNC case study below is the extreme: target 0.548, ghost band top barely above 0.1.</p>
   </div>
   <div class="disk-panel">
     <div class="best-readout">
@@ -176,7 +177,7 @@
     </div>
     <svg id="trajectory" viewBox="0 0 640 320" preserveAspectRatio="xMidYMid meet"></svg>
     <svg id="trajectory-brackets" viewBox="0 0 640 150" preserveAspectRatio="xMidYMid meet"></svg>
-    <div class="step-desc" style="margin-bottom:.6rem">Top: ghost <code>cc(T)</code> curve (swept densely) with target line in mint and iter samples in azure; the current iter is a larger ring, the best-so-far has a mint dashed halo. Bottom: bracket heatmap per iter. Each row colours every θ by residual sign (blue = cc below target, red = above), the red ring marks the sampled T for that iter, the mint dashed vertical marks where cc crosses the target inside the bracket.</div>
+    <div class="step-desc" style="margin-bottom:.6rem">Top: ghost <code>cc(T)</code> mean (64 draws per T) with ±1σ and ±2σ shaded bands; mint dashed line is the target. Azure dots = single-shot iters (current iter larger, best-so-far haloed). Bottom: bracket heatmap per iter. Blue = cc below target, red = above. Red ring = sampled T; mint dashed vertical = where mean cc crosses the target inside the bracket.</div>
     <div class="widget-row">
       <button class="btn" id="traj-prev">← back</button>
       <button class="btn primary" id="traj-next">next →</button>
@@ -788,16 +789,36 @@ window.MathJax = {
     });
     NETGEN.makeTooltip(viz, svg.node().closest(".disk-panel"));
 
-    const ach     = document.getElementById("ach");
-    const nedgeEl = document.getElementById("nedge");
-    const diffEl  = document.getElementById("diff");
-    const slider  = document.getElementById("T-slider");
-    const tval    = document.getElementById("T-val");
+    const ach       = document.getElementById("ach");
+    const nedgeEl   = document.getElementById("nedge");
+    const diffEl    = document.getElementById("diff");
+    const slider    = document.getElementById("T-slider");
+    const tval      = document.getElementById("T-val");
+    const rerollBtn = document.getElementById("T-reroll");
     document.getElementById("target-cc").textContent = TARGET_CC.toFixed(3);
+
+    // Stage 3 keeps its own edge-sample state, separate from SHARED, so
+    // the "random edges" button can reseed just the per-arrival U_NODE
+    // without re-rolling the angular embedding (that's stage 2's job)
+    // or disturbing the trajectory (stage 4).
+    let localEmb = SHARED;
+    let edgeNonce = 0;
+    function rerollEdges() {
+      edgeNonce += 1;
+      const rngEdge = d3.randomLcg(edgeNonce * 9973 + 17);
+      const U_NODE = [];
+      for (let i = 0; i < nodesAll.length; i++) {
+        const us = [];
+        for (let c = 0; c < M_PROF; c++) us.push(rngEdge());
+        U_NODE.push(us);
+      }
+      localEmb = { ...SHARED, U_NODE };
+      update(parseFloat(slider.value));
+    }
 
     function update(T) {
       tval.textContent = T.toFixed(3);
-      const edges = edgesAtT(T, SHARED);
+      const edges = edgesAtT(T, localEmb);
       const cc    = globalCC(edges);
       ach.textContent     = cc.toFixed(3);
       nedgeEl.textContent = edges.length;
@@ -806,10 +827,17 @@ window.MathJax = {
         u, v, color: COL.edge_stage2, w: 1.4, id: "t-" + i,
       })));
     }
+
     slider.addEventListener("input", () => update(parseFloat(slider.value)));
+    rerollBtn.addEventListener("click", rerollEdges);
     update(parseFloat(slider.value));
 
     onEmbeddingReroll((emb) => {
+      // Global reroll (stage 2 button) overrides any local edge state:
+      // fresh SHARED includes fresh POLAR + DISTS + U_NODE, so the
+      // local edgeNonce resets and we fall back to SHARED for both.
+      edgeNonce = 0;
+      localEmb = emb;
       viz.nodesData.forEach(n => {
         const nid = parseInt(n.id, 10);
         const p = emb.POS_POLAR[nid];
@@ -918,11 +946,31 @@ window.MathJax = {
     }
 
     function computeGhost(emb) {
+      // Draw many independent cc(T) samples per T with rerolled
+      // U_NODE. Store mean + std so the renderer can shade a 1-σ band
+      // around the mean line, giving the reader a read on how much
+      // single-sample noise there is at each T. Keep SAMPLES_PER_T
+      // high enough for std to settle; 8 was too few and the band
+      // danced as the seeds cycled; 64 gives a stable envelope.
       const GHOST_N = 120;
+      const SAMPLES_PER_T = 64;
       const pts = [];
       for (let k = 0; k < GHOST_N; k++) {
         const T_k = 0.005 + 0.99 * (k / (GHOST_N - 1));
-        pts.push({ T: T_k, cc: globalCC(edgesAtT(T_k, emb)) });
+        const ccs = [];
+        for (let s = 0; s < SAMPLES_PER_T; s++) {
+          const rngEdge = d3.randomLcg(k * 1009 + s * 31 + embedSeed * 97 + 5);
+          const U_NODE = [];
+          for (let i = 0; i < nodesAll.length; i++) {
+            const us = [];
+            for (let c = 0; c < M_PROF; c++) us.push(rngEdge());
+            U_NODE.push(us);
+          }
+          ccs.push(globalCC(edgesAtT(T_k, { ...emb, U_NODE })));
+        }
+        const mean = ccs.reduce((a, b) => a + b, 0) / ccs.length;
+        const variance = ccs.reduce((a, b) => a + (b - mean) * (b - mean), 0) / ccs.length;
+        pts.push({ T: T_k, cc: mean, std: Math.sqrt(variance) });
       }
       return pts;
     }
@@ -941,12 +989,29 @@ window.MathJax = {
 
     function renderGhost(pts) {
       ghostG.selectAll("path").remove();
+      function makeBand(kSigma) {
+        return d3.area()
+          .x(d => x(d.T))
+          .y0(d => y(Math.max(0, d.cc - kSigma * d.std)))
+          .y1(d => y(Math.min(1, d.cc + kSigma * d.std)));
+      }
+      // ±2σ outer band (faint, ~95% coverage under a normal assumption).
+      ghostG.append("path")
+        .datum(pts).attr("d", makeBand(2))
+        .attr("fill", COL.paper_3).attr("opacity", 0.09)
+        .attr("stroke", "none");
+      // ±1σ inner band (denser, ~68% coverage).
+      ghostG.append("path")
+        .datum(pts).attr("d", makeBand(1))
+        .attr("fill", COL.paper_3).attr("opacity", 0.18)
+        .attr("stroke", "none");
+      // Mean line on top.
       const line = d3.line().x(d => x(d.T)).y(d => y(d.cc));
       ghostG.append("path")
         .datum(pts).attr("d", line)
         .attr("fill", "none").attr("stroke", COL.paper_3)
         .attr("stroke-width", 1.3).attr("stroke-dasharray", "2 2")
-        .attr("opacity", 0.55);
+        .attr("opacity", 0.7);
       const lblIdx = Math.floor(pts.length * 0.12);
       ghostTxt.attr("x", x(pts[lblIdx].T)).attr("y", y(pts[lblIdx].cc) - 8);
     }
