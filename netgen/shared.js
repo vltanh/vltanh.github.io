@@ -245,6 +245,7 @@ const VIZ = {
     const gLabels = svg.append("g").attr("class", "viz-labels");
 
     const showLabels = !!opts.showLabels;
+    const labelTextFn = typeof opts.labelText === "function" ? opts.labelText : (d => d.id);
     let onNodeTap = null, onEdgeTap = null;
     let onNodeEnter = null, onNodeLeave = null;
     let onEdgeEnter = null, onEdgeLeave = null;
@@ -323,7 +324,7 @@ const VIZ = {
           .attr("fill", "#1b2033")
           .attr("pointer-events", "none")
           .merge(lblSel)
-          .text(d => d.id);
+          .text(labelTextFn);
       }
 
       sim.force("link").links(links);
