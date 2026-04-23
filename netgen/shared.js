@@ -363,18 +363,17 @@ const VIZ = {
       const sx = d.source.x, sy = d.source.y, tx = d.target.x, ty = d.target.y;
       const total = d.dupTotal || 1;
       if (total <= 1) return "M" + sx + "," + sy + "L" + tx + "," + ty;
-      // Parallel edges: quadratic bezier through the midpoint shifted
-      // perpendicular by a per-duplicate amount. Center the fan so the
-      // "straight" path sits near the middle when total is odd.
+      // Parallel edges: quadratic bezier through a midpoint shifted
+      // perpendicular by a per-duplicate amount. Spread scales with edge
+      // length so short edges still visibly separate and long edges do
+      // not arc wildly. The curve passes through a point offset ~2x the
+      // midpoint shift (quadratic-bezier geometry) so the arc actually
+      // reaches the desired displacement.
       const dx = tx - sx, dy = ty - sy;
       const len = Math.sqrt(dx * dx + dy * dy) || 1;
       const nx = -dy / len, ny = dx / len;
       const centered = (d.dupIdx || 0) - (total - 1) / 2;
-      const spread = 14;
-      const mx = (sx + tx) / 2 + nx * centered * spread;
-      const my = (sy + ty) / 2 + ny * centered * spread;
-      // Quadratic control = midpoint offset scaled x2 so the curve
-      // actually arcs through roughly that point.
+      const spread = Math.max(22, Math.min(42, len * 0.18));
       const cx = (sx + tx) / 2 + nx * centered * spread * 2;
       const cy = (sy + ty) / 2 + ny * centered * spread * 2;
       return "M" + sx + "," + sy + " Q" + cx + "," + cy + " " + tx + "," + ty;

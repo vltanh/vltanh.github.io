@@ -38,24 +38,40 @@
 .blockmat .cell.flash{ animation:flash 0.6s ease-out; }
 /* "Graph with a side panel" card: graph canvas on the left, a related
    chart / matrix on the right, inside a single .graph card (one border,
-   one tape). On narrow screens the side panel wraps under the graph. */
+   one tape). Caption is shared above both columns so the panels line up
+   vertically even when their natural heights differ. On narrow screens
+   the side panel wraps under the graph. */
+.graph.g-with-side .side-caption{
+  font-family:'Special Elite','Courier New',monospace;
+  font-size:.76rem;
+  color:var(--paper-2);
+  padding:.15rem 0 .7rem;
+  margin-bottom:.55rem;
+  border-bottom:1px dashed rgba(139,117,65,.4);
+  line-height:1.45;
+}
+.graph.g-with-side .side-caption .st{
+  color:var(--azure);
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  margin-right:.25rem;
+}
 .graph.g-with-side .side-body{
   display:grid;
-  grid-template-columns: minmax(0, 1fr) minmax(240px, 340px);
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
   gap: 1rem;
-  align-items: start;
+  align-items: center;
   margin-bottom: .4rem;
 }
 .graph.g-with-side .side-right{
   display:flex; flex-direction:column;
-  gap:.55rem;
-  padding-top:.1rem;
+  align-items:stretch;
+  gap:.4rem;
 }
 .graph.g-with-side .side-right > svg{ width:100%; height:auto; }
-.graph.g-with-side .side-right > .blockmat{ margin:0 auto; }
-.graph.g-with-side .side-right .step-desc{ margin-top:0; }
+.graph.g-with-side .side-right > .blockmat{ width:100%; max-width:none; margin:0; }
 @media (max-width: 820px){
-  .graph.g-with-side .side-body{ grid-template-columns: 1fr; }
+  .graph.g-with-side .side-body{ grid-template-columns: 1fr; align-items: start; }
 }
 .viz-node.ringed{ stroke:#c7801e; stroke-width:3.4; }
 .deg-bar-row{ cursor:default; }
@@ -150,10 +166,12 @@
       <span>input G + degree bars &middot; hover to link</span>
       <span class="right">degree.csv</span>
     </div>
+    <div class="side-caption">
+      <span class="st">left</span>input graph &middot; <span class="st">right</span>degree sequence, one row per node sorted by \(k_u\) desc, coloured by input block.
+    </div>
     <div class="side-body">
       <div class="graph-canvas" id="g-deg-cy"></div>
       <div class="side-right">
-        <div class="step-desc"><span class="st">degree sequence</span> &middot; one row per node, sorted by \(k_i\) desc. Bar colour = input block.</div>
         <svg id="deg-seq" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet"></svg>
       </div>
     </div>
@@ -164,22 +182,23 @@
 <section class="stage">
   <div class="stage-num">profiling · the block matrix</div>
   <h2>Count edges per block-pair. That is the only structure the sampler sees.</h2>
-  <p>\(e_{rs}\) is best read as a <em>stub</em> (half-edge) count: how many half-edges from block \(r\) land in block \(s\). For \(r \neq s\) that is also the number of edges between the two blocks and the matrix is symmetric \(e_{rs} = e_{sr}\). For \(r = s\), each intra-block edge has both of its half-edges inside \(r\), so it contributes twice:</p>
+  <p>With \(b\) the block assignment (\(b_u \in \{1,\ldots,B\}\)), \(k\) the degree sequence, and \(e\) the block-pair count matrix, read \(e_{rs}\) as a <em>stub</em> (half-edge) count: how many half-edges from block \(r\) land in block \(s\). For \(r \neq s\) that is also the number of edges between the two blocks and the matrix is symmetric \(e_{rs} = e_{sr}\). For \(r = s\), each intra-block edge has both of its half-edges inside \(r\), so it contributes twice:</p>
   \[
-    e_{rr} \;=\; 2 \cdot |\{(u, v) \in E : b(u) = b(v) = r\}|.
+    e_{rr} \;=\; 2 \cdot \bigl| \{\, \{u, v\} \in E \,:\, b_u = b_v = r \,\} \bigr|.
   \]
   <p>This half-edge reading is what makes the diagonal doubling natural, and it matches graph-tool's undirected convention. It is not how most SBM write-ups introduce \(e_{rs}\) (they usually call it "edge count" and then note the factor of two as a bookkeeping detail), so expect a small re-orientation if you are coming from there.</p>
   <p>The matrix has one row and column per block, so on this synthetic it is a compact 4x4. Each edge contributes to exactly one cell (diagonal) or to the pair \((r, s), (s, r)\) (off-diagonal). Click any edge to highlight the cell it lands in, or click a cell to light up every edge that contributes to its count: the sampler will not remember which specific edges were there, only that the cell owes that many.</p>
   <div class="graph g-with-side" id="g2">
     <div class="graph-chrome">
-      <span>input G &middot; click an edge or a cell</span>
+      <span>input G &middot; hover an edge or a cell</span>
       <span class="right" id="g2-cell">cell: (none)</span>
     </div>
+    <div class="side-caption">
+      <span class="st">left</span>input graph &middot; <span class="st">right</span>block matrix \(e\), diagonal cells doubled. Hover an edge to find its cell, or a cell to light up every edge that contributes to its count.</div>
     <div class="side-body">
       <div class="graph-canvas" id="g2-cy"></div>
       <div class="side-right">
         <div class="blockmat" id="g2-mat"></div>
-        <div class="step-desc" style="text-align:center"><span class="st">block matrix</span> &middot; diagonal cells are doubled.</div>
       </div>
     </div>
   </div>
@@ -193,11 +212,11 @@
 <section class="stage">
   <div class="stage-num">generation · sample the multigraph</div>
   <h2>Stub-matching per block-pair, micro-canonical.</h2>
-  <p>Each node \(i\) has a target degree \(k_i\) that splits across the blocks it connects to: call the split \(k_i^{(s)}\), the number of half-edges from \(i\) landing in block \(s\). The sums match the block matrix: \(\sum_{i \in r} k_i^{(s)} = e_{rs}\) for \(r \neq s\), and \(\sum_{i \in r} k_i^{(r)} = e_{rr} = 2 \cdot \text{intra-edges}(r)\).</p>
-  <p>For each block-pair \((r, s)\), build two stub lists (or one for \(r = s\)): each node \(i\) appears \(k_i^{(s)}\) times. Shuffle, pair up consecutively. Every pair becomes an edge; nothing is rejected.</p>
+  <p>Each node \(u\) has a target degree \(k_u\) that splits across the blocks it connects to: call the split \(k_u^{(s)}\), the number of half-edges from \(u\) landing in block \(s\). The sums match the block matrix: \(\sum_{u \,:\, b_u = r} k_u^{(s)} = e_{rs}\) for \(r \neq s\), and \(\sum_{u \,:\, b_u = r} k_u^{(r)} = e_{rr} = 2 \cdot \text{intra-edges}(r)\).</p>
+  <p>For each block-pair \((r, s)\), build two stub lists (or one for \(r = s\)): each node \(u\) appears \(k_u^{(s)}\) times. Shuffle, pair up consecutively. Every pair becomes an edge; nothing is rejected.</p>
   <div class="callout">
     <div class="tag">graph-tool accepts non-equality input</div>
-    <p>We feed <code>gt.generate_sbm</code> a \((k, e)\) pair that satisfies the identities above, but the function actually accepts looser input: the consistency condition is only the inequality \(\sum_{u \in C_r} k_u \;\ge\; \sum_{s} e_{rs}\) (LHS = stubs available in block \(r\), RHS = edges incident to \(r\)). When the two sides match exactly, the sampler distributes the stubs the natural way. When they do not, some nodes come out with a degree <em>below</em> the requested \(k\): graph-tool prioritises hitting \(e_{rs}\) over hitting \(k_i\). A minimal example: \(b = (0, 0)\), \(k = (3, 3)\), \(e = (4)\), i.e. two nodes both asking for degree 3, with four half-edges on the diagonal. The condition \(3 + 3 \ge 4\) holds, but only as a strict inequality, and the sampler reliably returns one node with degree 1 rather than 3. The identities we use on this page (equality, not inequality) are why the toy runs above behave cleanly.</p>
+    <p>We feed <code>gt.generate_sbm</code> a \((k, e)\) pair that satisfies the identities above, but the function actually accepts looser input: the consistency condition is only the inequality \(\sum_{u \,:\, b_u = r} k_u \;\ge\; \sum_{s} e_{rs}\) (LHS = stubs available in block \(r\), RHS = edges incident to \(r\)). When the two sides match exactly, the sampler distributes the stubs the natural way. When they do not, some nodes come out with a degree <em>below</em> the requested \(k\): graph-tool prioritises hitting \(e_{rs}\) over hitting \(k_u\). A minimal example: \(b = (1, 1)\), \(k = (3, 3)\), \(e = (4)\), i.e. two nodes both asking for degree 3, with four half-edges on the diagonal. The condition \(3 + 3 \ge 4\) holds, but only as a strict inequality, and the sampler reliably returns one node with degree 1 rather than 3. The identities we use on this page (equality, not inequality) are why the toy runs above behave cleanly.</p>
   </div>
   <div class="callout warn">
     <div class="tag">caveat: counts, not distinct pairs</div>
@@ -227,10 +246,12 @@
       <span id="g4-label">multigraph (pre-dedup)</span>
       <span class="right" id="g4-edges">edges: &middot;</span>
     </div>
+    <div class="side-caption">
+      <span class="st">left</span>multigraph (toggle dedup to simplify) &middot; <span class="st">right</span>degree per node, target vs achieved, one row per node sorted by target desc. Mint = achieved, faint red = target minus achieved.
+    </div>
     <div class="side-body">
       <div class="graph-canvas" id="g4-cy"></div>
       <div class="side-right">
-        <div class="step-desc"><span class="st">degree: target vs achieved</span> &middot; one row per node, sorted by target desc. Mint = achieved, faint red = dropped (target minus achieved).</div>
         <svg id="deg-bars" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet"></svg>
       </div>
     </div>
@@ -428,35 +449,34 @@ window.MathJax = {
   const MEAN_DEG    = EDGES_TOTAL * 2 / NODES.length;
   const OUT_COUNT   = OUT_N.length;
 
-  // Helper: render dashed rings enclosing each block's nodes, plus a
-  // handwritten block label above each ring. Returns nothing; expects an
-  // existing d3 svg selection where VIZ will later append its own layers.
-  function drawBlockRings(svg) {
-    const ringsG = svg.append("g").attr("class", "block-rings");
+  // Helper: render a dashed rectangle around each block's nodes, with a
+  // handwritten block label tucked against the top-left inside the rect.
+  // Expects a d3 svg selection where VIZ will later append its own layers.
+  function drawBlockRects(svg) {
+    const layer = svg.append("g").attr("class", "block-rects");
     BLOCK_NAMES.forEach((name, idx) => {
       const nodes = BLOCK_NODES[name];
       if (!nodes || nodes.length === 0) return;
       const xs = nodes.map(n => NETGEN.POSITIONS[n].x);
       const ys = nodes.map(n => NETGEN.POSITIONS[n].y);
-      const cx = d3.mean(xs), cy = d3.mean(ys);
-      const rCore = d3.max(nodes.map(n => {
-        const dx = NETGEN.POSITIONS[n].x - cx, dy = NETGEN.POSITIONS[n].y - cy;
-        return Math.sqrt(dx * dx + dy * dy);
-      }));
-      // Pad: node radius (~13) + breathing room. Floor for blocks whose
-      // members happen to sit near the same point (outlier pseudo-block).
-      const r = Math.max(rCore + 30, 34);
+      const minX = d3.min(xs), maxX = d3.max(xs);
+      const minY = d3.min(ys), maxY = d3.max(ys);
+      const padX = 34, padY = 38;
+      const x = minX - padX, y = minY - padY;
+      const w = (maxX - minX) + 2 * padX;
+      const h = (maxY - minY) + 2 * padY;
       const color = BLOCK_COLOR[name];
-      ringsG.append("circle")
-        .attr("cx", cx).attr("cy", cy).attr("r", r)
-        .attr("fill", color).attr("fill-opacity", 0.08)
-        .attr("stroke", color).attr("stroke-width", 1.6)
-        .attr("stroke-dasharray", "6 4")
-        .attr("opacity", 0.9);
-      ringsG.append("text")
+      layer.append("rect")
+        .attr("x", x).attr("y", y).attr("width", w).attr("height", h)
+        .attr("rx", 10).attr("ry", 10)
+        .attr("fill", color).attr("fill-opacity", 0.07)
+        .attr("stroke", color).attr("stroke-width", 1.5)
+        .attr("stroke-dasharray", "7 5")
+        .attr("opacity", 0.92);
+      layer.append("text")
         .attr("class", "block-ring-label")
-        .attr("x", cx).attr("y", cy - r - 6)
-        .attr("text-anchor", "middle")
+        .attr("x", x + 12).attr("y", y + 20)
+        .attr("text-anchor", "start")
         .attr("fill", color)
         .attr("opacity", 0.95)
         .text(BLOCK_LABELS[idx]);
@@ -472,7 +492,7 @@ window.MathJax = {
       .attr("class", "viz-svg")
       .attr("viewBox", "-320 -340 640 680")
       .attr("preserveAspectRatio", "xMidYMid meet");
-    drawBlockRings(svg);
+    drawBlockRects(svg);
     const edges = EDGES.map(e => ({
       u: e.u, v: e.v, color: pickInputColor(e), w: 1.2,
     }));
@@ -601,22 +621,14 @@ window.MathJax = {
     const readout = document.getElementById("g2-cell");
 
     function clearAllHighlights() {
-      gm.querySelectorAll(".cell.on,.cell.flash").forEach(c => c.classList.remove("on","flash"));
+      gm.querySelectorAll(".cell.on").forEach(c => c.classList.remove("on"));
       viz.clearAllEdgeClass("hi");
-      viz.eachEdge(e => { e.w = 1.4; });
     }
-    function highlightCell(bu, bv, { flash = true } = {}) {
+    function highlightCell(bu, bv) {
       const c1 = gm.querySelector('[data-cell="' + bu + '-' + bv + '"]');
       const c2 = gm.querySelector('[data-cell="' + bv + '-' + bu + '"]');
       c1 && c1.classList.add("on");
       c2 && c2.classList.add("on");
-      if (flash) {
-        c1 && c1.classList.add("flash");
-        c2 && c2.classList.add("flash");
-        setTimeout(() => {
-          gm.querySelectorAll(".cell.flash").forEach(c => c.classList.remove("flash"));
-        }, 700);
-      }
     }
     function edgesInPair(bu, bv) {
       // {(u,v) : (blockIdx(u), blockIdx(v)) ∈ {(bu,bv),(bv,bu)}}
@@ -625,19 +637,27 @@ window.MathJax = {
         return (ru === bu && rv === bv) || (ru === bv && rv === bu);
       });
     }
+    function resetReadout() {
+      readout.textContent = "cell: (none)";
+    }
 
-    viz.onEdgeTap((d) => {
+    // Edge hover → highlight its cell.
+    viz.onEdgeHoverEnter((d) => {
       const e = EDGES.find(x => "e2-" + x.u + "-" + x.v === d.id);
       if (!e) return;
       const bu = blockIdx(e.u), bv = blockIdx(e.v);
       clearAllHighlights();
       highlightCell(bu, bv);
-      readout.textContent = "cell: (" + BLOCK_NAMES[bu] + ", " + BLOCK_NAMES[bv] + ") · edge (" + e.u + ", " + e.v + ")";
       viz.addEdgeClass(d.id, "hi");
+      readout.textContent = "cell: (" + BLOCK_NAMES[bu] + ", " + BLOCK_NAMES[bv] + ") · edge (" + e.u + ", " + e.v + ")";
+    });
+    viz.onEdgeHoverLeave(() => {
+      clearAllHighlights();
+      resetReadout();
     });
 
-    // Click a matrix cell → highlight every edge contributing to it.
-    gm.addEventListener("click", (ev) => {
+    // Cell hover → highlight every edge contributing to it.
+    gm.addEventListener("mouseover", (ev) => {
       const cell = ev.target.closest(".cell");
       if (!cell || cell.classList.contains("head")) return;
       const [bu, bv] = cell.dataset.cell.split("-").map(Number);
@@ -648,6 +668,10 @@ window.MathJax = {
       const cellVal = EDGE_COUNTS[bu][bv];
       readout.textContent = "cell: (" + BLOCK_NAMES[bu] + ", " + BLOCK_NAMES[bv]
         + ") · " + cellVal + " half-edges from " + matching.length + " edges";
+    });
+    gm.addEventListener("mouseleave", () => {
+      clearAllHighlights();
+      resetReadout();
     });
   })();
 
