@@ -172,7 +172,7 @@ window.MathJax = {
 
 </main>
 
-<script src="https://unpkg.com/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 <script src="./shared.js"></script>
 <script>
 (function () {
@@ -299,38 +299,27 @@ window.MathJax = {
       { label: "step 6 · fourth attach", desc: "C1: node 8 → {1,4,5}. C1 done. All three clusters now k-edge-connected." },
     ];
 
-    // Build cytoscape once with no edges. We re-render edges per step via cy.add/cy.remove.
-    const cy = NETGEN.CY.init("g2-cy", {
+    // VIZ handle; re-render edges per step via viz.setEdges.
+    const viz = NETGEN.CY.init("g2-cy", {
       showLabels: true,
       includeOutliers: false,
       edges: [],
     });
-    cy.style()
-      .selector("node.core").style({ "border-color": COL.paper, "border-width": 2.5, "width": 26, "height": 26 })
-      .selector("node.newly").style({ "border-color": COL.edge_stage2, "border-width": 3, "width": 28, "height": 28 })
-      .selector("node.dim").style({ "opacity": 0.35 })
-      .update();
 
     const descEl = document.getElementById("g2-desc");
     const stageEl = document.getElementById("g2-stage");
 
     function render(step) {
-      // Edges
-      cy.edges().remove();
-      edgesAt(step).forEach(e => cy.add({
-        data: {
-          id: e.id, source: String(e.u), target: String(e.v),
-          color: e.color, w: e.w,
-        },
-      }));
-      // Node highlights
+      viz.setEdges(edgesAt(step));
       const h = nodeHighlight(step);
-      cy.nodes().forEach(n => {
-        const id = parseInt(n.id(), 10);
-        n.removeClass("core newly dim");
-        if (h.dim && h.dim.has(id)) n.addClass("dim");
-        if (h.core && h.core.has(id) && !(h.added && h.added.has(id))) n.addClass("core");
-        if (h.newlyAdded && h.newlyAdded.has(id)) n.addClass("newly");
+      viz.clearAllNodeClass("core");
+      viz.clearAllNodeClass("newly");
+      viz.clearAllNodeClass("dim");
+      viz.eachNode(n => {
+        const id = parseInt(n.id, 10);
+        if (h.dim && h.dim.has(id)) viz.addNodeClass(n.id, "dim");
+        if (h.core && h.core.has(id) && !(h.added && h.added.has(id))) viz.addNodeClass(n.id, "core");
+        if (h.newlyAdded && h.newlyAdded.has(id)) viz.addNodeClass(n.id, "newly");
       });
 
       descEl.innerHTML = `<span class="st">${STEP_DESC[step].label}</span> &middot; ${STEP_DESC[step].desc}`;
@@ -380,14 +369,11 @@ window.MathJax = {
       { u:10, v:11, color: COL.edge_drop, w: 2, id:"g3-dup-2", classes:"dashed thick" },
     ];
 
-    const cy = NETGEN.CY.init("g3-cy", {
+    const viz = NETGEN.CY.init("g3-cy", {
       showLabels: true,
       includeOutliers: false,
       edges: constructive,
     });
-    cy.style()
-      .selector("edge.dashed").style({ "line-style":"dashed" })
-      .update();
 
     const label = document.getElementById("g3-label");
     let overlayActive = false;
@@ -395,17 +381,11 @@ window.MathJax = {
       input: document.getElementById("g3-toggle"),
       onChange: (on) => {
         if (on && !overlayActive) {
-          overlay.forEach(e => cy.add({
-            data: {
-              id: e.id, source: String(e.u), target: String(e.v),
-              color: e.color, w: e.w,
-            },
-            classes: e.classes || "",
-          }));
+          viz.addEdges(overlay);
           overlayActive = true;
           label.textContent = "stage 2 complete (with SBM overlay)";
         } else if (!on && overlayActive) {
-          overlay.forEach(e => cy.getElementById(e.id).remove());
+          viz.removeEdges(overlay.map(e => e.id));
           overlayActive = false;
           label.textContent = "constructive only";
         }

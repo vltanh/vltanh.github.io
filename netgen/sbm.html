@@ -149,7 +149,6 @@
 
 </main>
 
-<script src="https://unpkg.com/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
 <script>
 window.MathJax = {
   tex: {
@@ -160,6 +159,7 @@ window.MathJax = {
 };
 </script>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 <script src="./shared.js"></script>
 <script>
 (function () {
@@ -229,17 +229,12 @@ window.MathJax = {
       color: pickInputColor(e), w: 1.4,
       id: `e2-${e.u}-${e.v}`,
     }));
-    const cy = NETGEN.CY.init("g2-cy", { showLabels: true, edges });
+    const viz = NETGEN.CY.init("g2-cy", { showLabels: true, edges });
 
     const readout = document.getElementById("g2-cell");
 
-    cy.style()
-      .selector("edge.hi").style({ "width": 3.8, "opacity": 1 })
-      .update();
-
-    cy.on("tap", "edge", function (evt) {
-      const eid = evt.target.id();
-      const e = EDGES.find(x => `e2-${x.u}-${x.v}` === eid);
+    viz.onEdgeTap(function (d) {
+      const e = EDGES.find(x => `e2-${x.u}-${x.v}` === d.id);
       if (!e) return;
       const bu = BLOCK[CLUSTER_OF[e.u]];
       const bv = BLOCK[CLUSTER_OF[e.v]];
@@ -251,9 +246,9 @@ window.MathJax = {
       setTimeout(() => {
         gm.querySelectorAll(".cell.flash").forEach(c => c.classList.remove("flash"));
       }, 700);
-      readout.textContent = `cell: (${NAMES[bu]}, ${NAMES[bv]}) &middot; edge (${e.u}, ${e.v})`;
-      cy.edges().removeClass("hi");
-      evt.target.addClass("hi");
+      readout.textContent = `cell: (${NAMES[bu]}, ${NAMES[bv]}) · edge (${e.u}, ${e.v})`;
+      viz.clearAllEdgeClass("hi");
+      viz.addEdgeClass(d.id, "hi");
     });
   })();
 
@@ -269,16 +264,10 @@ window.MathJax = {
       { u:10, v:11, color: COL.edge_drop, w: 2, id:"s3-dup-2", classes:"dashed thick" },
       { u:9, v:9, color: COL.edge_drop, w: 2, id:"s3-loop", classes:"dashed thick" },
     ];
-    const cy = NETGEN.CY.init("g3-cy", {
+    NETGEN.CY.init("g3-cy", {
       showLabels: true,
       edges: [...baseEdges, ...extras],
     });
-    cy.style()
-      .selector('edge[source = "9"][target = "9"]').style({
-        "curve-style":"bezier", "loop-direction":"-45deg", "loop-sweep":"60deg",
-      })
-      .selector('edge.dashed').style({ "line-style":"dashed" })
-      .update();
   })();
 
   // ── Stage 4: dedup toggle. ──
@@ -293,16 +282,10 @@ window.MathJax = {
       { u:10, v:11, color: COL.edge_drop, w: 2, id:"s4-dup-2", classes:"dashed thick" },
       { u:9, v:9, color: COL.edge_drop, w: 2, id:"s4-loop", classes:"dashed thick" },
     ];
-    const cy = NETGEN.CY.init("g4-cy", {
+    const viz = NETGEN.CY.init("g4-cy", {
       showLabels: true,
       edges: [...baseEdges, ...extras],
     });
-    cy.style()
-      .selector('edge[source = "9"][target = "9"]').style({
-        "curve-style":"bezier", "loop-direction":"-45deg", "loop-sweep":"60deg",
-      })
-      .selector('edge.dashed').style({ "line-style":"dashed" })
-      .update();
 
     const label = document.getElementById("g4-label");
     const edgeCount = document.getElementById("g4-edges");
@@ -310,9 +293,7 @@ window.MathJax = {
     NETGEN.toggle({
       input: document.getElementById("g4-toggle"),
       onChange: (on) => {
-        cy.edges(".dashed").animate({
-          style: { "opacity": on ? 0 : 0.85 },
-        }, { duration: 300 });
+        viz.animateEdgeOpacityByClass("dashed", on ? 0 : 0.85, 300);
         label.textContent = on ? "simple graph (post-dedup)" : "multigraph (pre-dedup)";
         edgeCount.textContent = on ? "edges: 33" : "edges: 36";
       },

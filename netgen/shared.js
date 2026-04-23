@@ -161,131 +161,281 @@ const COLORS = {
   hl_yellow:"#f6e15a",
 };
 
-// ── Cytoscape defaults ───────────────────────────────────────
-const CY = {
-  baseStyle(opts = {}) {
-    // opts: { showLabels (bool): show numeric labels on nodes. }
-    const lblOn = !!opts.showLabels;
-    return [
-      {
-        selector: "node",
-        style: {
-          "background-color": "data(color)",
-          "background-gradient-stop-colors": (ele) => {
-            const c = ele.data("color") || "#7b9bd6";
-            return `${c} ${c}`;
-          },
-          "width": "data(size)",
-          "height": "data(size)",
-          "border-width": 2,
-          "border-color": "#1b2033",
-          "border-opacity": 1,
-          "label": lblOn ? "data(id)" : "",
-          "font-family": "Special Elite, Courier New, monospace",
-          "font-size": 11,
-          "font-weight": "400",
-          "color": "#1b2033",
-          "text-valign": "center",
-          "text-halign": "center",
-          "text-outline-color": "#f3ecd7",
-          "text-outline-width": 1.5,
-          "overlay-padding": 6,
-          "overlay-opacity": 0,
-          "transition-property": "background-color, opacity, border-color, border-width, width, height",
-          "transition-duration": 220,
-          "transition-timing-function": "ease-in-out",
-        },
-      },
-      {
-        selector: "node.dim",
-        style: { "opacity": 0.25 },
-      },
-      {
-        selector: "node.hi",
-        style: { "border-color": COLORS.paper, "border-width": 2.5 },
-      },
-      {
-        selector: "node.core",
-        style: { "border-color": COLORS.paper, "border-width": 2 },
-      },
-      {
-        selector: "edge",
-        style: {
-          "width": "data(w)",
-          "line-color": "data(color)",
-          "curve-style": "bezier",
-          "control-point-step-size": 25,
-          "line-cap": "round",
-          "opacity": 0.82,
-          "transition-property": "line-color, opacity, width, line-style",
-          "transition-duration": 220,
-          "transition-timing-function": "ease-in-out",
-        },
-      },
-      {
-        selector: "edge.dim",
-        style: { "opacity": 0.2 },
-      },
-      {
-        selector: "edge.hidden",
-        style: { "opacity": 0 },
-      },
-      {
-        selector: "edge.dashed",
-        style: { "line-style": "dashed" },
-      },
-      {
-        selector: "edge.thick",
-        style: { "width": 3.5 },
-      },
-    ];
-  },
-
-  baseElements(opts = {}) {
-    // opts: { includeOutliers (bool, default true), nodeColor(n) → color override,
-    //         edges: [{u,v,color,w,classes?}] }
-    const includeOutliers = opts.includeOutliers !== false;
-    const nodes = NODES
-      .filter(n => includeOutliers || CLUSTER_OF[n] !== "OUT")
-      .map(n => ({
-        data: {
-          id: String(n),
-          color: opts.nodeColor ? opts.nodeColor(n) : COLORS[CLUSTER_OF[n]],
-          size: 26,
-        },
-        position: { x: POSITIONS[n].x, y: POSITIONS[n].y },
-      }));
-    const edges = (opts.edges || []).map((e, i) => ({
-      data: {
-        id: e.id || `e-${e.u}-${e.v}-${i}`,
-        source: String(e.u), target: String(e.v),
-        color: e.color || COLORS.edge_stage2,
-        w: e.w == null ? 1.6 : e.w,
-      },
-      classes: e.classes || "",
-    }));
-    return [...nodes, ...edges];
-  },
-
+// ── VIZ: d3-force graph helper ───────────────────────────────
+// Replaces the old Cytoscape-backed CY. Each stage graph mounts
+// an <svg> inside its .graph-canvas container, runs a force sim
+// anchored to preset POSITIONS so the layout "remembers" where
+// each node lives while still allowing drag + reflow.
+//
+// Returned handle exposes a compact API. CSS classes `.dashed`,
+// `.hi`, `.fade`, `.dim`, `.core`, `.newly`, `.thick` on the
+// .viz-edge / .viz-node elements drive styling (see shared.css).
+const VIZ = {
   init(containerId, opts = {}) {
-    const cy = cytoscape({
-      container: document.getElementById(containerId),
-      style: CY.baseStyle(opts),
-      elements: CY.baseElements(opts),
-      layout: { name: "preset" },
-      minZoom: 0.5, maxZoom: 2.5,
-      wheelSensitivity: 0.25,
-      autounselectify: true,
-      autoungrabify: false,
+    if (typeof d3 === "undefined") {
+      console.warn("[netgen] d3 not loaded; VIZ.init cannot run");
+      return null;
+    }
+    // Container setup. Caller may pass an existing d3 SVG selection
+    // via opts.svg (useful when a stage page pre-renders decorations
+    // into the svg and wants VIZ to append its layers on top).
+    let host = null, svg = null;
+    if (opts.svg) {
+      svg = opts.svg;
+      host = svg.node().parentElement;
+    } else {
+      host = document.getElementById(containerId);
+      if (!host) return null;
+      host.innerHTML = "";
+      svg = d3.select(host).append("svg")
+        .attr("class", "viz-svg")
+        .attr("viewBox", "-320 -340 640 680")
+        .attr("preserveAspectRatio", "xMidYMid meet");
+    }
+    const includeOutliers = opts.includeOutliers !== false;
+    const posSrc = opts.positions || POSITIONS;
+    const nodeR  = opts.nodeR != null ? opts.nodeR : 13;
+    // pinned: node positions are authoritative (semantic, e.g., nPSO's
+    // polar-encoded disk). We set fx/fy to homeX/homeY so the force
+    // simulation cannot push nodes off their home. Drag temporarily
+    // frees them; drag-end animates the snap back to home.
+    const pinned = !!opts.pinned;
+
+    const nodesData = NODES
+      .filter(n => includeOutliers || CLUSTER_OF[n] !== "OUT")
+      .filter(n => posSrc[n] != null)
+      .map(id => {
+        const hx = posSrc[id].x, hy = posSrc[id].y;
+        return {
+          id: String(id),
+          cluster: CLUSTER_OF[id],
+          color: opts.nodeColor ? opts.nodeColor(id) : COLORS[CLUSTER_OF[id]],
+          r: nodeR,
+          homeX: hx,
+          homeY: hy,
+          x: hx,
+          y: hy,
+          fx: pinned ? hx : null,
+          fy: pinned ? hy : null,
+          cls: "",
+        };
+      });
+    const nodeById = {};
+    nodesData.forEach(n => { nodeById[n.id] = n; });
+    const links = [];
+
+    function normEdge(e, idx) {
+      const u = String(e.u), v = String(e.v);
+      const src = nodeById[u], tgt = nodeById[v];
+      if (!src || !tgt) return null;
+      return {
+        id: e.id || ("e-" + u + "-" + v + "-" + idx),
+        source: src,
+        target: tgt,
+        u, v,
+        color: e.color || COLORS.edge_stage2,
+        w: (e.w == null ? 1.6 : e.w),
+        kind: e.kind || null,
+        cls: e.classes || "",
+      };
+    }
+
+    const gLinks  = svg.append("g").attr("class", "viz-edges");
+    const gNodes  = svg.append("g").attr("class", "viz-nodes");
+    const gLabels = svg.append("g").attr("class", "viz-labels");
+
+    const showLabels = !!opts.showLabels;
+    let onNodeTap = null, onEdgeTap = null;
+    let onNodeEnter = null, onNodeLeave = null;
+    let onEdgeEnter = null, onEdgeLeave = null;
+
+    const sim = d3.forceSimulation(nodesData)
+      .force("link",    d3.forceLink([]).id(d => d.id).distance(55).strength(0.12))
+      .force("charge",  d3.forceManyBody().strength(-45))
+      .force("collide", d3.forceCollide(16))
+      .force("x",       d3.forceX(d => d.homeX).strength(0.22))
+      .force("y",       d3.forceY(d => d.homeY).strength(0.22))
+      .alpha(0.35).alphaDecay(0.04);
+
+    function classStr(base, extra) { return extra ? (base + " " + extra).trim() : base; }
+
+    function draw() {
+      const linkSel = gLinks.selectAll("path.viz-edge").data(links, d => d.id);
+      linkSel.exit().remove();
+      const linkEnter = linkSel.enter().append("path")
+        .attr("class", d => classStr("viz-edge", d.cls))
+        .attr("fill", "none")
+        .attr("stroke", d => d.color)
+        .attr("stroke-width", d => d.w)
+        .style("cursor", "pointer")
+        .on("click",      function (ev, d) { if (onEdgeTap) onEdgeTap(d, ev); })
+        .on("mouseenter", function (ev, d) { if (onEdgeEnter) onEdgeEnter(d, ev); })
+        .on("mouseleave", function (ev, d) { if (onEdgeLeave) onEdgeLeave(d, ev); });
+      linkEnter.merge(linkSel)
+        .attr("class", d => classStr("viz-edge", d.cls))
+        .attr("stroke", d => d.color)
+        .attr("stroke-width", d => d.w);
+
+      const nodeSel = gNodes.selectAll("circle.viz-node").data(nodesData, d => d.id);
+      nodeSel.exit().remove();
+      const nodeEnter = nodeSel.enter().append("circle")
+        .attr("class", d => classStr("viz-node", d.cls))
+        .attr("r", d => d.r)
+        .attr("fill", d => d.color)
+        .attr("stroke", "#1b2033")
+        .attr("stroke-width", 1.5)
+        .style("cursor", "grab")
+        .call(d3.drag()
+          .on("start", function (ev, d) { if (!ev.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; d3.select(this).interrupt("snapback"); d3.select(this).style("cursor", "grabbing"); })
+          .on("drag",  function (ev, d) { d.fx = ev.x; d.fy = ev.y; })
+          .on("end",   function (ev, d) {
+            if (!ev.active) sim.alphaTarget(0);
+            d3.select(this).style("cursor", "grab");
+            if (pinned) {
+              const sx = d.fx, sy = d.fy, ex = d.homeX, ey = d.homeY;
+              d3.select(this)
+                .transition("snapback").duration(420)
+                .tween("snap", () => (t) => {
+                  d.fx = sx + (ex - sx) * t;
+                  d.fy = sy + (ey - sy) * t;
+                  sim.alpha(0.1);
+                })
+                .on("end.snap", () => { d.fx = d.homeX; d.fy = d.homeY; });
+            } else {
+              d.fx = null; d.fy = null;
+            }
+          }))
+        .on("click",      function (ev, d) { if (onNodeTap) onNodeTap(d, ev); })
+        .on("mouseenter", function (ev, d) { if (onNodeEnter) onNodeEnter(d, ev); })
+        .on("mouseleave", function (ev, d) { if (onNodeLeave) onNodeLeave(d, ev); });
+      nodeEnter.merge(nodeSel)
+        .attr("class", d => classStr("viz-node", d.cls))
+        .attr("fill", d => d.color)
+        .attr("r", d => d.r);
+
+      if (showLabels) {
+        const lblSel = gLabels.selectAll("text.viz-label").data(nodesData, d => d.id);
+        lblSel.exit().remove();
+        lblSel.enter().append("text")
+          .attr("class", "viz-label")
+          .attr("text-anchor", "middle")
+          .attr("dominant-baseline", "central")
+          .attr("fill", "#1b2033")
+          .attr("pointer-events", "none")
+          .merge(lblSel)
+          .text(d => d.id);
+      }
+
+      sim.force("link").links(links);
+      sim.alpha(0.3).restart();
+    }
+
+    function edgePath(d) {
+      if (d.source === d.target) {
+        // self-loop rendered as small upward arc
+        const r = 18, x = d.source.x, y = d.source.y;
+        return "M" + x + "," + y + " C" + (x - r) + "," + (y - r * 2.2) + " " + (x + r) + "," + (y - r * 2.2) + " " + (x + 0.01) + "," + (y - 0.01);
+      }
+      return "M" + d.source.x + "," + d.source.y + "L" + d.target.x + "," + d.target.y;
+    }
+    sim.on("tick", () => {
+      gLinks.selectAll("path.viz-edge").attr("d", edgePath);
+      gNodes.selectAll("circle.viz-node").attr("cx", d => d.x).attr("cy", d => d.y);
+      if (showLabels) gLabels.selectAll("text.viz-label").attr("x", d => d.x).attr("y", d => d.y);
     });
-    cy.fit(undefined, 40);
-    window.addEventListener("resize", () => {
-      cy.resize();
-      cy.fit(undefined, 40);
-    }, { passive: true });
-    return cy;
+
+    // Initial edges
+    (opts.edges || []).forEach((e, i) => {
+      const l = normEdge(e, i);
+      if (l) links.push(l);
+    });
+    draw();
+
+    const handle = {
+      svg, sim, nodesData, links, nodeById,
+
+      setEdges(edges) {
+        links.length = 0;
+        (edges || []).forEach((e, i) => { const l = normEdge(e, i); if (l) links.push(l); });
+        draw();
+      },
+      addEdges(edges) {
+        (edges || []).forEach((e, i) => { const l = normEdge(e, links.length + i); if (l) links.push(l); });
+        draw();
+      },
+      addEdge(edge) { handle.addEdges([edge]); },
+      removeEdges(pred) {
+        let keep;
+        if (pred == null)                 keep = [];
+        else if (typeof pred === "string") keep = links.filter(l => l.id !== pred);
+        else if (Array.isArray(pred))      keep = links.filter(l => !pred.includes(l.id));
+        else if (typeof pred === "function") keep = links.filter(l => !pred(l));
+        else keep = links;
+        links.length = 0; keep.forEach(l => links.push(l));
+        draw();
+      },
+      clearEdges() { handle.removeEdges(null); },
+      hasEdge(id) { return !!links.find(l => l.id === id); },
+      getEdge(id) { return links.find(l => l.id === id); },
+
+      addEdgeClass(id, cls) {
+        const e = links.find(l => l.id === id); if (!e) return;
+        if (!(" " + e.cls + " ").includes(" " + cls + " ")) e.cls = (e.cls + " " + cls).trim();
+        draw();
+      },
+      removeEdgeClass(id, cls) {
+        const e = links.find(l => l.id === id); if (!e) return;
+        e.cls = e.cls.split(/\s+/).filter(c => c && c !== cls).join(" ");
+        draw();
+      },
+      toggleEdgeClass(id, cls, on) { on ? handle.addEdgeClass(id, cls) : handle.removeEdgeClass(id, cls); },
+      addAllEdgeClass(cls)    { links.forEach(e => e.cls = (e.cls + " " + cls).trim()); draw(); },
+      clearAllEdgeClass(cls)  { links.forEach(e => e.cls = e.cls.split(/\s+/).filter(c => c && c !== cls).join(" ")); draw(); },
+      eachEdge(fn)            { links.forEach(l => fn(l)); },
+
+      addNodeClass(id, cls) {
+        const n = nodeById[String(id)]; if (!n) return;
+        if (!(" " + n.cls + " ").includes(" " + cls + " ")) n.cls = (n.cls + " " + cls).trim();
+        draw();
+      },
+      removeNodeClass(id, cls) {
+        const n = nodeById[String(id)]; if (!n) return;
+        n.cls = n.cls.split(/\s+/).filter(c => c && c !== cls).join(" ");
+        draw();
+      },
+      clearAllNodeClass(cls) { nodesData.forEach(n => n.cls = n.cls.split(/\s+/).filter(c => c && c !== cls).join(" ")); draw(); },
+      eachNode(fn) { nodesData.forEach(n => fn(n)); },
+      setNodeStyle(id, patch) {
+        const n = nodeById[String(id)]; if (!n) return;
+        if (patch.color) n.color = patch.color;
+        if (patch.r != null) n.r = patch.r;
+        draw();
+      },
+
+      animateEdgeOpacityByClass(cls, target, durMs = 300) {
+        gLinks.selectAll("path.viz-edge")
+          .filter(function (d) { return (" " + d.cls + " ").includes(" " + cls + " "); })
+          .transition().duration(durMs)
+          .style("opacity", target);
+      },
+
+      onEdgeTap(fn)     { onEdgeTap   = fn; },
+      onNodeTap(fn)     { onNodeTap   = fn; },
+      onNodeHoverEnter(fn) { onNodeEnter = fn; },
+      onNodeHoverLeave(fn) { onNodeLeave = fn; },
+      onEdgeHoverEnter(fn) { onEdgeEnter = fn; },
+      onEdgeHoverLeave(fn) { onEdgeLeave = fn; },
+
+      fit()    {},
+      resize() {},
+    };
+
+    return handle;
   },
 };
+// Back-compat alias: old pages that still reference NETGEN.CY.init
+// will just get the new VIZ init.
+const CY = VIZ;
 
 // ── Tooltip helper (rich node + edge stats) ──────────────────
 // Pre-compute intra/inter degree + local clustering coefficient
@@ -319,22 +469,25 @@ function __edgeKind(u, v) {
   return "inter-cluster (" + cu + ", " + cv + ")";
 }
 
-function makeTooltip(cy, container) {
+function makeTooltip(handle, container) {
   const tip = document.createElement("div");
   tip.className = "cy-tooltip";
+  if (getComputedStyle(container).position === "static") {
+    container.style.position = "relative";
+  }
   container.appendChild(tip);
-  function place(rx, ry) {
+  function place(clientX, clientY) {
     const rect = container.getBoundingClientRect();
-    let x = rx + 14, y = ry + 14;
+    let x = clientX - rect.left + 14;
+    let y = clientY - rect.top + 14;
     const tw = tip.offsetWidth, th = tip.offsetHeight;
-    if (x + tw > rect.width - 8)  x = rx - tw - 12;
-    if (y + th > rect.height - 8) y = ry - th - 8;
+    if (x + tw > rect.width - 8)  x = clientX - rect.left - tw - 12;
+    if (y + th > rect.height - 8) y = clientY - rect.top - th - 8;
     tip.style.left = x + "px";
     tip.style.top  = y + "px";
   }
-  cy.on("mouseover", "node", e => {
-    const n = e.target;
-    const id = parseInt(n.id(), 10);
+  handle.onNodeHoverEnter(function (d, ev) {
+    const id = parseInt(d.id, 10);
     const cl = CLUSTER_OF[id];
     const type = cl === "OUT" ? "outlier" : "clustered";
     const clLabel = cl === "OUT" ? "(none)" : cl;
@@ -350,27 +503,20 @@ function makeTooltip(cy, container) {
       '<div>local cc <b>' + cc.toFixed(2) + '</b></div>' +
       '<div>&mu;<sub>i</sub> <b>' + mu.toFixed(2) + '</b></div>';
     tip.classList.add("on");
-    const { x, y } = n.renderedPosition();
-    place(x, y);
+    place(ev.clientX, ev.clientY);
   });
-  cy.on("mouseover", "edge", e => {
-    const edge = e.target;
-    const src = edge.source().id();
-    const tgt = edge.target().id();
+  handle.onNodeHoverLeave(function () { tip.classList.remove("on"); });
+  handle.onEdgeHoverEnter(function (d, ev) {
+    const src = d.source.id, tgt = d.target.id;
     const kind = __edgeKind(parseInt(src, 10), parseInt(tgt, 10));
     tip.innerHTML =
       '<div class="hd">edge</div>' +
       '<div><b>' + src + '</b>, <b>' + tgt + '</b></div>' +
       '<div class="dim">' + kind + '</div>';
     tip.classList.add("on");
-    const mid = edge.midpoint ? edge.midpoint() : null;
-    const rp = mid && mid.x != null ? mid : edge.renderedBoundingBox();
-    const rx = rp.x != null ? rp.x : (rp.x1 + rp.x2) / 2;
-    const ry = rp.y != null ? rp.y : (rp.y1 + rp.y2) / 2;
-    place(rx, ry);
+    place(ev.clientX, ev.clientY);
   });
-  cy.on("mouseout", "node edge", () => tip.classList.remove("on"));
-  cy.on("pan zoom", () => tip.classList.remove("on"));
+  handle.onEdgeHoverLeave(function () { tip.classList.remove("on"); });
   return tip;
 }
 
@@ -488,7 +634,7 @@ global.NETGEN = {
   POSITIONS, NODES, EDGES, CLUSTER_OF, DEGREES, MINCUTS,
   C1, C2, C3, OUT, INTRA, INTER, OUT_EDGES,
   CORE_NODES, CORE_EDGES, topK, cliqueEdges,
-  COLORS, CY,
+  COLORS, CY, VIZ,
   makeTooltip, scrubSlider, stepController, toggle,
   linksRow, kinSection,
 };
