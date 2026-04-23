@@ -240,9 +240,14 @@ const VIZ = {
       };
     }
 
-    const gLinks  = svg.append("g").attr("class", "viz-edges");
-    const gNodes  = svg.append("g").attr("class", "viz-nodes");
-    const gLabels = svg.append("g").attr("class", "viz-labels");
+    const gLinks = svg.append("g").attr("class", "viz-edges");
+    // Each node lives in its own <g.viz-node-group> containing the
+    // circle + optional label. This per-node grouping gives correct
+    // z-order: a node's own label sits in front of its own circle,
+    // but neighbouring nodes' circles paint on top of that label when
+    // they overlap (DOM order determines SVG paint order). Avoids the
+    // need for a halo on labels.
+    const gNodes = svg.append("g").attr("class", "viz-nodes");
 
     const showLabels = !!opts.showLabels;
     const labelTextFn = typeof opts.labelText === "function" ? opts.labelText : (d => d.id);
@@ -277,9 +282,10 @@ const VIZ = {
         .attr("stroke", d => d.color)
         .attr("stroke-width", d => d.w);
 
-      const nodeSel = gNodes.selectAll("circle.viz-node").data(nodesData, d => d.id);
-      nodeSel.exit().remove();
-      const nodeEnter = nodeSel.enter().append("circle")
+      const groupSel = gNodes.selectAll("g.viz-node-group").data(nodesData, d => d.id);
+      groupSel.exit().remove();
+      const groupEnter = groupSel.enter().append("g").attr("class", "viz-node-group");
+      groupEnter.append("circle")
         .attr("class", d => classStr("viz-node", d.cls))
         .attr("r", d => d.r)
         .attr("fill", d => d.color)
@@ -309,22 +315,20 @@ const VIZ = {
         .on("click",      function (ev, d) { if (onNodeTap) onNodeTap(d, ev); })
         .on("mouseenter", function (ev, d) { if (onNodeEnter) onNodeEnter(d, ev); })
         .on("mouseleave", function (ev, d) { if (onNodeLeave) onNodeLeave(d, ev); });
-      nodeEnter.merge(nodeSel)
-        .attr("class", d => classStr("viz-node", d.cls))
-        .attr("fill", d => d.color)
-        .attr("r", d => d.r);
-
       if (showLabels) {
-        const lblSel = gLabels.selectAll("text.viz-label").data(nodesData, d => d.id);
-        lblSel.exit().remove();
-        lblSel.enter().append("text")
+        groupEnter.append("text")
           .attr("class", "viz-label")
           .attr("text-anchor", "middle")
           .attr("dominant-baseline", "central")
-          .attr("fill", "#1b2033")
-          .attr("pointer-events", "none")
-          .merge(lblSel)
-          .text(labelTextFn);
+          .attr("pointer-events", "none");
+      }
+      const groups = groupEnter.merge(groupSel);
+      groups.select("circle.viz-node")
+        .attr("class", d => classStr("viz-node", d.cls))
+        .attr("fill", d => d.color)
+        .attr("r", d => d.r);
+      if (showLabels) {
+        groups.select("text.viz-label").text(labelTextFn);
       }
 
       sim.force("link").links(links);
@@ -341,8 +345,8 @@ const VIZ = {
     }
     sim.on("tick", () => {
       gLinks.selectAll("path.viz-edge").attr("d", edgePath);
-      gNodes.selectAll("circle.viz-node").attr("cx", d => d.x).attr("cy", d => d.y);
-      if (showLabels) gLabels.selectAll("text.viz-label").attr("x", d => d.x).attr("y", d => d.y);
+      gNodes.selectAll("g.viz-node-group > circle.viz-node").attr("cx", d => d.x).attr("cy", d => d.y);
+      if (showLabels) gNodes.selectAll("g.viz-node-group > text.viz-label").attr("x", d => d.x).attr("y", d => d.y);
     });
 
     // Initial edges
@@ -535,7 +539,8 @@ function scrubSlider(opts) {
 
 // ── Step-controller ──────────────────────────────────────────
 function stepController(opts) {
-  const { prevBtn, nextBtn, resetBtn, labelCur, labelTotal, total, onRender } = opts;
+  const { prevBtn, nextBtn, resetBtn, labelCur, labelTotal, onRender } = opts;
+  let total = opts.total;
   let idx = 0;
   function render() {
     if (labelCur) labelCur.textContent = idx;
@@ -556,7 +561,14 @@ function stepController(opts) {
     }
   });
   render();
-  return { get idx() { return idx; }, set: (i) => { idx = Math.max(0, Math.min(total-1, i)); render(); } };
+  return {
+    get idx() { return idx; },
+    set: (i) => { idx = Math.max(0, Math.min(total-1, i)); render(); },
+    // Callers that regenerate their data (e.g. nPSO's trajectory on a
+    // random-button reroll) can swap `total` and reset idx without
+    // reconstructing the controller.
+    reconfigure: (newTotal) => { total = newTotal; idx = 0; render(); },
+  };
 }
 
 // ── Toggle widget ────────────────────────────────────────────

@@ -47,8 +47,6 @@
 
 <div id="links"></div>
 
-<div class="wip-banner" role="alert"><svg class="wip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 L22 21 L2 21 Z"/><line x1="12" y1="10" x2="12" y2="15"/><circle cx="12" cy="18" r="1" fill="currentColor" stroke="none"/></svg><strong class="wip-label">warning</strong><span class="wip-msg">work in progress &middot; expect rough edges and breaking changes.</span></div>
-
 <header class="hdr">
   <div class="kicker">network-generation · npso</div>
   <h1><em>nPSO</em></h1>
@@ -124,7 +122,7 @@
 <!-- ─────────── Stage 3 ─────────── -->
 <section class="stage">
   <div class="stage-num">stage 3 · temperature</div>
-  <h2>Drag $$T$$. Watch edges form or dissolve.</h2>
+  <h2>Drag $$T$$. Watch which edges get picked.</h2>
   <p>For each pair of nodes \((i, j)\), nPSO computes a hyperbolic distance \(h_{ij}\) on the Poincaré disk,</p>
   \[
     h_{ij} \;=\; \mathrm{arccosh}\bigl( \cosh r_i \cosh r_j \;-\; \sinh r_i \sinh r_j \cos d_\mathrm{ang}(\theta_i, \theta_j) \bigr),
@@ -134,6 +132,7 @@
     p(i, j) \;=\; \frac{1}{1 + \exp\!\bigl((h_{ij} - R(T)) / (2T)\bigr)}.
   \]
   <p>At \(T \to 0\) the sigmoid turns into a hard cutoff: every pair with \(h_{ij} &lt; R(T)\) connects and nothing else does. Triangles are plentiful because close triples all lie inside the cutoff. At \(T \to 1\) the sigmoid is shallow and most pairs flip a near-fair coin regardless of distance, so edges look random and triangle density collapses. \(cc(T)\) is the clustering coefficient of a specific nPSO sample at temperature \(T\); different draws at the same \(T\) give different values, so the curve is noisy.</p>
+  <p>Edges are placed via the paper's <strong>implementation 3</strong>: each node arriving at time \(t_i\) picks exactly \(m\) targets from earlier arrivals without replacement, with probability proportional to \(p(i, j)\). Total edge count is \(m(m+1)/2 + (N-m-1) \cdot m\), independent of \(T\); the full \(T\) knob reshuffles <em>which</em> pairs get picked but not how many. Paper proves impl 1 (per-pair Bernoulli against \(p(i, j)\)) and impl 3 are equivalent in expectation; this page uses impl 3 to match what MATLAB actually runs.</p>
   <div class="disk-panel">
     <div class="widget-row" style="padding:0;border:none;margin:0 0 .8rem">
       <div class="scrub">
@@ -143,6 +142,7 @@
       </div>
     </div>
     <svg id="disk-T" viewBox="-270 -270 540 540" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="step-desc" style="margin-bottom:.6rem">Edge count is constant (impl 3 gives \(m(m+1)/2 + (N-m-1)m\) regardless of T). What the slider actually shows is the edge set rearranging: hubs near the centre stay connected to each other at any T (their pairwise \(p(i,j)\) is near 1 across the bracket), while the lower-rank periphery swaps neighbours as \(T\) rises and the Fermi-Dirac sigmoid flattens.</div>
     <div class="readout">
       <span class="item target">target ccoeff <b id="target-cc">&middot;</b></span>
       <span class="item">achieved ccoeff <b id="ach">&middot;</b></span>
@@ -167,8 +167,8 @@
     <p>The framework assumes \(cc(T)\) is monotone so residual signs carry information. On a noisy non-monotone sample, equal-signed residuals can cluster on the wrong side, the secant never fires, and bisection walks into a local minimum. Better options when \(cc(T)\) is suspected to be noisy or non-monotone: grid-scan \(T\) on a log-uniform schedule and keep the best-residual iterate; repeat sampling at each \(T\) and minimise over the mean (dampens Monte Carlo noise); or a golden-section search if unimodality is plausible. The current code does none of these.</p>
   </div>
   <div class="callout warn">
-    <div class="tag">caveat 2: the target may be unreachable</div>
-    <p>Achievable \(cc\) on a given input depends on \((N, m, \gamma, C)\). If the target sits above that range, the search exhausts its 100-iter budget and returns the best-so-far. Always check achieved \(cc\) in the run log. The DNC case study below is an instance: target 0.548, best achievable ≈ 0.098.</p>
+    <div class="tag">caveat 2: the target may be too high</div>
+    <p>nPSO's achievable \(cc\) ceiling depends on \((N, m, \gamma, C)\). On some inputs that ceiling sits below the empirical target: even driving \(T\) toward 0 cannot push \(cc(T)\) up to the target. When that happens the search never crosses the target line, residuals stay same-signed across the whole bracket, and bisection walks \(T \to 0\) until the step collapses. Always check achieved \(cc\) in the run log. The DNC case study below is such an instance: target 0.548, best achievable ≈ 0.098.</p>
   </div>
   <div class="disk-panel">
     <div class="best-readout">
@@ -210,12 +210,12 @@
     <svg id="dnc-traj" viewBox="0 0 640 300" preserveAspectRatio="xMidYMid meet"></svg>
     <div class="step-desc"><span class="st">dnc trajectory</span> &middot; mint dashed line = target 0.548. Blue dots = sampled iters (log-spaced T on the x-axis so the bisection halving reads as evenly spaced). The sampled curve hovers around cc ≈ 0.098 for every sampled T; residuals stay same-signed so the secant never fires.</div>
   </div>
-  <p>If the target sits outside nPSO's reachable range on these parameters, options include: <code>--npso-model nPSO1</code> (uniform weights, skips the outlier-induced C inflation), <code>--outlier-mode combined</code> (442 → 42 + 1, giving the angular geometry more room to pack triangles), or picking a different generator entirely.</p>
 </section>
 
 <div id="kin"></div>
 
-<footer class="footer">
+<footer class="ack">
+  <p class="tools">drawn with <a href="https://d3js.org" target="_blank" rel="noopener">d3</a></p>
   <p class="credit">typed by vltanh, doodled with Claude</p>
 </footer>
 
@@ -272,8 +272,8 @@ window.MathJax = {
   document.getElementById("kin").innerHTML = NETGEN.kinSection({
     title: "similarity",
     siblings: [
-      { gen: "lfr", label: "lfr",
-        diff: "Also assumes a power-law degree distribution and fits γ via the same powerlaw package. Differs on geometry: LFR places edges from configuration-model stubs per cluster, so clustering coefficient is an emergent side effect. nPSO builds triangles on purpose." },
+      { gen: "lfr", label: "LFR",
+        diff: "Also assumes a power-law degree distribution and fits γ via the same Python powerlaw package." },
     ],
   });
 
@@ -553,18 +553,22 @@ window.MathJax = {
       }
     }
 
-    // Per-pair uniform draws so the edge set slides smoothly as T
-    // changes within a given embedding. Separate seed stream so the
-    // pair draws don't alias with the angular draws.
+    // Per-arrival uniforms for implementation 3 of the paper's edge
+    // sampler (Muscoloni & Cannistraci 2018, page 7). Node i arriving
+    // at time t_i picks m targets from the earlier arrivals without
+    // replacement, weighted by p(i, j). Pre-drawing m uniforms per
+    // node (instead of sampling fresh per T) keeps edges continuous
+    // under T scrub. Separate seed stream so the pair draws don't
+    // alias with the angular draws.
     const rngEdge = d3.randomLcg(seed * 31 + 7);
-    const U_PAIR = {};
+    const U_NODE = [];
     for (let i = 0; i < nodesAll.length; i++) {
-      for (let j = i + 1; j < nodesAll.length; j++) {
-        U_PAIR[`${nodesAll[i]}-${nodesAll[j]}`] = rngEdge();
-      }
+      const us = [];
+      for (let c = 0; c < M_PROF; c++) us.push(rngEdge());
+      U_NODE.push(us);
     }
 
-    return { POLAR, POS_POLAR, DISTS, U_PAIR, ASSIGNED };
+    return { POLAR, POS_POLAR, DISTS, U_NODE, ASSIGNED };
   }
 
   let SHARED = computeEmbedding(1);
@@ -593,18 +597,51 @@ window.MathJax = {
     return 2 * LOG_N - 2 * Math.log(num / den);
   }
 
+  // Implementation 3 from Muscoloni & Cannistraci 2018 (page 7): each
+  // new node arrives in degree-rank order and picks m targets from the
+  // existing nodes without replacement, with probability proportional
+  // to the Fermi-Dirac connection rule p(i, j). For arrivals with
+  // fewer than m predecessors, connect to all predecessors (matches
+  // the paper's m*(m+1)/2 + (N-m-1)*m edge count). Using pre-drawn
+  // per-node uniforms from the embedding so edges slide continuously
+  // under T scrub.
   function edgesAtT(T, emb) {
     const R = R_of_T(T);
     const inv2T = 1 / (2 * T);
+    const m = M_PROF;
+    const byArrival = sorted;
     const out = [];
-    for (let i = 0; i < nodesAll.length; i++) {
-      for (let j = i + 1; j < nodesAll.length; j++) {
-        const u = nodesAll[i], v = nodesAll[j];
-        const d = emb.DISTS[`${u}-${v}`];
+    for (let i = 0; i < byArrival.length; i++) {
+      const newNode = byArrival[i];
+      if (i === 0) continue;
+      const candidates = [];
+      const weights = [];
+      for (let j = 0; j < i; j++) {
+        const other = byArrival[j];
+        const a = Math.min(other, newNode), b = Math.max(other, newNode);
+        const d = emb.DISTS[`${a}-${b}`];
         const p = 1 / (1 + Math.exp((d - R) * inv2T));
-        if (emb.U_PAIR[`${u}-${v}`] < p) {
-          out.push([u, v]);
+        candidates.push(other);
+        weights.push(p);
+      }
+      if (candidates.length <= m) {
+        candidates.forEach(c => out.push([Math.min(newNode, c), Math.max(newNode, c)]));
+        continue;
+      }
+      const us = emb.U_NODE[i];
+      for (let c = 0; c < m; c++) {
+        let sum = 0;
+        for (const w of weights) sum += w;
+        if (sum <= 0) break;
+        const u = us[c] * sum;
+        let acc = 0, pick = 0;
+        for (let j = 0; j < weights.length; j++) {
+          acc += weights[j];
+          if (acc >= u) { pick = j; break; }
         }
+        out.push([Math.min(newNode, candidates[pick]), Math.max(newNode, candidates[pick])]);
+        candidates.splice(pick, 1);
+        weights.splice(pick, 1);
       }
     }
     return out;
@@ -787,59 +824,9 @@ window.MathJax = {
     });
   })();
 
-  // ── Stage 3: secant trajectory ──
+  // ── Stage 4: secant trajectory (rebuilds on embedding reroll) ──
   (function () {
-    // Simulate a search. For each iter pick a T, compute cc, decide next T via bisection/secant.
     const TARGET = TARGET_CC;
-    const iters = [];
-    let minT = 0, maxT = 1;
-    let f_min = null, f_max = null;
-
-    function nextT(i) {
-      if (i === 0) return 0.5;
-      const mid = (minT + maxT) / 2;
-      if (f_min === null || f_max === null) return mid;
-      if (f_min * f_max > 0) return mid;
-      const denom = f_max - f_min;
-      if (denom === 0) return mid;
-      const Tsec = minT - f_min * (maxT - minT) / denom;
-      const margin = 0.05 * (maxT - minT);
-      if (Tsec <= minT + margin || Tsec >= maxT - margin) return mid;
-      return Tsec;
-    }
-
-    // Best-so-far tracking mirrors gen.py: we don't just return the
-    // last iterate, we return the lowest |residual| we've seen.
-    let best = null;
-    const MAX_ITER = 12;
-    const CONV_EPS = 0.005;
-    const STALL_EPS = 0.0001;
-    let finalStatus = "budget";
-    for (let i = 0; i < MAX_ITER; i++) {
-      const T = nextT(i);
-      const edges = edgesAtT(T, SHARED);
-      const cc = globalCC(edges);
-      const f = cc - TARGET;
-      const newBest = (best == null) || (Math.abs(f) < Math.abs(best.diff));
-      if (newBest) best = { T, cc, diff: f, iter: i };
-      iters.push({
-        T, cc, diff: f,
-        is_best: newBest,
-        best_T: best.T, best_cc: best.cc, best_diff: best.diff,
-      });
-      const stepGap = iters.length >= 2
-        ? Math.abs(iters[iters.length - 2].cc - cc)
-        : Infinity;
-      if (Math.abs(best.diff) < CONV_EPS)   { finalStatus = "converged"; break; }
-      if (i > 0 && stepGap < STALL_EPS)     { finalStatus = "stalled";   break; }
-      if (f < 0) { maxT = T; f_max = f; }
-      else       { minT = T; f_min = f; }
-    }
-    // Tag the terminal iteration.
-    iters[iters.length - 1].is_final = true;
-    iters[iters.length - 1].final_status = finalStatus;
-
-    // Render scatter
     const svg = d3.select("#trajectory");
     const W = 640, H = 320;
     const PAD = { top: 20, right: 20, bottom: 40, left: 60 };
@@ -847,8 +834,6 @@ window.MathJax = {
     const ih = H - PAD.top - PAD.bottom;
     const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
 
-    // Static x in [0,1]; clustering near the end is expected and
-    // handled by a companion "bracket narrowing" bar chart below.
     const x = d3.scaleLinear().domain([0, 1]).range([0, iw]);
     const y = d3.scaleLinear().domain([0, 1]).range([ih, 0]);
     g.append("g").attr("class", "traj-xaxis").attr("transform", `translate(0,${ih})`)
@@ -868,33 +853,8 @@ window.MathJax = {
       .style("fill","#6b6a54").style("font-family","Special Elite, Courier New, monospace").style("font-size","11px")
       .text("global ccoeff");
 
-    // Ghost curve: cc(T) swept densely so the viewer can see the
-    // full function the search is chasing.
-    const GHOST_N = 120;
-    const ghostPts = [];
-    for (let k = 0; k < GHOST_N; k++) {
-      const T_k = 0.005 + 0.99 * (k / (GHOST_N - 1));
-      ghostPts.push({ T: T_k, cc: globalCC(edgesAtT(T_k, SHARED)) });
-    }
-    const ghostLine = d3.line().x(d => x(d.T)).y(d => y(d.cc));
-    g.append("path")
-      .datum(ghostPts)
-      .attr("d", ghostLine)
-      .attr("fill", "none")
-      .attr("stroke", COL.paper_3)
-      .attr("stroke-width", 1.3)
-      .attr("stroke-dasharray", "2 2")
-      .attr("opacity", 0.55);
-    g.append("text")
-      .attr("x", x(ghostPts[Math.floor(GHOST_N * 0.12)].T))
-      .attr("y", y(ghostPts[Math.floor(GHOST_N * 0.12)].cc) - 8)
-      .attr("fill", COL.paper_3)
-      .attr("font-family", "Caveat Brush, cursive")
-      .attr("font-size", 13)
-      .text("cc(T)");
-
-    // Target line
     g.append("line")
+      .attr("class", "target-line")
       .attr("y1", y(TARGET)).attr("y2", y(TARGET))
       .attr("x1", 0).attr("x2", iw)
       .attr("stroke", COL.mint).attr("stroke-width", 1.2)
@@ -904,15 +864,70 @@ window.MathJax = {
       .attr("font-family","Special Elite, Courier New, monospace").attr("font-size", 10)
       .text("target = " + TARGET.toFixed(3));
 
-    const pointG = g.append("g");
-    const connG  = g.append("g");
+    const ghostG  = g.append("g").attr("class", "traj-ghost");
+    const ghostTxt = g.append("text")
+      .attr("class", "traj-ghost-lbl")
+      .attr("fill", COL.paper_3)
+      .attr("font-family", "Caveat Brush, cursive")
+      .attr("font-size", 13).text("cc(T)");
+    const pointG = g.append("g").attr("class", "traj-points");
+    const connG  = g.append("g").attr("class", "traj-conn");
 
-    // ── Secondary panel: bracket narrowing over iteration ─────
-    // Horizontal heatmap rows of the bracket [min_T, max_T] per iter,
-    // each coloured by residual sign. Complements the top scatter by
-    // exposing the bracket shrink + where target crosses cc(T).
-    const BR_H = 150;
-    const brackets = (function () {
+    function computeIters(emb) {
+      const iters = [];
+      let minT = 0, maxT = 1;
+      let f_min = null, f_max = null;
+      let best = null;
+      const MAX_ITER = 12;
+      const CONV_EPS = 0.005;
+      const STALL_EPS = 0.0001;
+      let finalStatus = "budget";
+      function nextT(i) {
+        if (i === 0) return 0.5;
+        const mid = (minT + maxT) / 2;
+        if (f_min === null || f_max === null) return mid;
+        if (f_min * f_max > 0) return mid;
+        const denom = f_max - f_min;
+        if (denom === 0) return mid;
+        const Tsec = minT - f_min * (maxT - minT) / denom;
+        const margin = 0.05 * (maxT - minT);
+        if (Tsec <= minT + margin || Tsec >= maxT - margin) return mid;
+        return Tsec;
+      }
+      for (let i = 0; i < MAX_ITER; i++) {
+        const T = nextT(i);
+        const cc = globalCC(edgesAtT(T, emb));
+        const f = cc - TARGET;
+        const newBest = (best == null) || (Math.abs(f) < Math.abs(best.diff));
+        if (newBest) best = { T, cc, diff: f, iter: i };
+        iters.push({
+          T, cc, diff: f, is_best: newBest,
+          best_T: best.T, best_cc: best.cc, best_diff: best.diff,
+        });
+        const stepGap = iters.length >= 2
+          ? Math.abs(iters[iters.length - 2].cc - cc)
+          : Infinity;
+        if (Math.abs(best.diff) < CONV_EPS)  { finalStatus = "converged"; break; }
+        if (i > 0 && stepGap < STALL_EPS)    { finalStatus = "stalled";   break; }
+        if (f < 0) { maxT = T; f_max = f; }
+        else       { minT = T; f_min = f; }
+      }
+      iters[iters.length - 1].is_final = true;
+      iters[iters.length - 1].final_status = finalStatus;
+      return iters;
+    }
+
+    function computeGhost(emb) {
+      const GHOST_N = 120;
+      const pts = [];
+      for (let k = 0; k < GHOST_N; k++) {
+        const T_k = 0.005 + 0.99 * (k / (GHOST_N - 1));
+        pts.push({ T: T_k, cc: globalCC(edgesAtT(T_k, emb)) });
+      }
+      return pts;
+    }
+
+    function computeBrackets(iters) {
       const out = [];
       let lo = 0, hi = 1;
       for (let k = 0; k < iters.length; k++) {
@@ -922,32 +937,58 @@ window.MathJax = {
         else                       lo = it.T;
       }
       return out;
-    })();
+    }
+
+    function renderGhost(pts) {
+      ghostG.selectAll("path").remove();
+      const line = d3.line().x(d => x(d.T)).y(d => y(d.cc));
+      ghostG.append("path")
+        .datum(pts).attr("d", line)
+        .attr("fill", "none").attr("stroke", COL.paper_3)
+        .attr("stroke-width", 1.3).attr("stroke-dasharray", "2 2")
+        .attr("opacity", 0.55);
+      const lblIdx = Math.floor(pts.length * 0.12);
+      ghostTxt.attr("x", x(pts[lblIdx].T)).attr("y", y(pts[lblIdx].cc) - 8);
+    }
+
+    // Bracket heatmap panel: static axes built once, rows redrawn on
+    // each rebuild.
     const brSvg = d3.select("#trajectory-brackets");
-    let updateBrRing = function () {};
-    if (!brSvg.empty()) {
-      const BW = 640, BPAD = { top: 18, right: 20, bottom: 30, left: 60 };
-      const biw = BW - BPAD.left - BPAD.right;
-      const bih = BR_H - BPAD.top - BPAD.bottom;
-      const bg = brSvg.append("g").attr("transform", `translate(${BPAD.left},${BPAD.top})`);
-      const bx = d3.scaleLinear().domain([0, 1]).range([0, biw]);
-      const by = d3.scaleBand().domain(d3.range(iters.length).map(String)).range([0, bih]).paddingInner(0.25);
-      bg.append("g").attr("transform", `translate(0,${bih})`)
+    const BR_W = 640, BR_H = 150, BPAD = { top: 18, right: 20, bottom: 30, left: 60 };
+    const biw = BR_W - BPAD.left - BPAD.right;
+    const bih = BR_H - BPAD.top - BPAD.bottom;
+    const bg = brSvg.empty() ? null : brSvg.append("g").attr("transform", `translate(${BPAD.left},${BPAD.top})`);
+    const bx = d3.scaleLinear().domain([0, 1]).range([0, biw]);
+    let by = d3.scaleBand().domain([]).range([0, bih]).paddingInner(0.25);
+    let brYAxis, brContent, brRing;
+    if (bg) {
+      bg.append("g").attr("class", "br-xaxis").attr("transform", `translate(0,${bih})`)
         .call(d3.axisBottom(bx).ticks(6))
         .selectAll("text").style("fill", "#6b6a54").style("font-family", "Special Elite, Courier New, monospace");
-      bg.append("g")
-        .call(d3.axisLeft(by).tickFormat(d => "#" + d))
-        .selectAll("text").style("fill", "#6b6a54").style("font-family", "Special Elite, Courier New, monospace");
+      brYAxis = bg.append("g").attr("class", "br-yaxis");
       bg.selectAll(".domain").style("stroke", "#b9a263");
       bg.selectAll(".tick line").style("stroke", "#cdbf8d");
-      brSvg.append("text").attr("x", BW/2).attr("y", BR_H-6)
+      brSvg.append("text").attr("x", BR_W/2).attr("y", BR_H-6)
         .attr("text-anchor","middle").style("fill","#6b6a54")
         .style("font-family","Special Elite, Courier New, monospace").style("font-size","11px")
         .text("T");
+      brContent = bg.append("g").attr("class", "br-content");
+      brRing = bg.append("circle").attr("class", "br-ring")
+        .attr("r", 6).attr("fill", "none")
+        .attr("stroke", COL.signal).attr("stroke-width", 1.8)
+        .attr("opacity", 0.9).attr("display", "none");
+    }
+
+    function renderBrackets(brackets, ghostPts) {
+      if (!bg) return;
+      by = d3.scaleBand().domain(d3.range(brackets.length).map(String)).range([0, bih]).paddingInner(0.25);
+      brYAxis.call(d3.axisLeft(by).tickFormat(d => "#" + d))
+        .selectAll("text").style("fill", "#6b6a54").style("font-family", "Special Elite, Courier New, monospace");
+      bg.selectAll(".domain").style("stroke", "#b9a263");
+      bg.selectAll(".tick line").style("stroke", "#cdbf8d");
+      brContent.selectAll("*").remove();
       const resColor = d3.scaleLinear()
-        .domain([-0.30, 0, 0.30])
-        .range(["#3a66cc", "#ede4c9", "#c92a2a"])
-        .clamp(true);
+        .domain([-0.30, 0, 0.30]).range(["#3a66cc", "#ede4c9", "#c92a2a"]).clamp(true);
       brackets.forEach((b, i) => {
         const y0 = by(String(i));
         const h = by.bandwidth();
@@ -956,14 +997,14 @@ window.MathJax = {
         for (let k = 0; k < inside.length - 1; k++) {
           const x0 = bx(inside[k].T);
           const x1 = bx(inside[k + 1].T);
-          bg.append("rect")
+          brContent.append("rect")
             .attr("x", x0).attr("y", y0)
             .attr("width", Math.max(1, x1 - x0))
             .attr("height", h)
             .attr("fill", resColor(inside[k].cc - TARGET))
             .attr("opacity", 0.85);
         }
-        bg.append("rect")
+        brContent.append("rect")
           .attr("x", bx(b.lo)).attr("y", y0)
           .attr("width", Math.max(2, bx(b.hi) - bx(b.lo)))
           .attr("height", h)
@@ -982,36 +1023,35 @@ window.MathJax = {
           return null;
         })();
         if (crossing != null) {
-          bg.append("line")
+          brContent.append("line")
             .attr("x1", bx(crossing)).attr("x2", bx(crossing))
             .attr("y1", y0).attr("y2", y0 + h)
             .attr("stroke", COL.mint).attr("stroke-width", 1)
             .attr("stroke-dasharray", "2 2").attr("opacity", 0.85);
         }
       });
-      bg.selectAll("circle.br-t").data(brackets).join("circle")
+      brContent.selectAll("circle.br-t").data(brackets).join("circle")
         .attr("class", "br-t")
         .attr("cx", d => bx(d.T))
         .attr("cy", (_, i) => by(String(i)) + by.bandwidth() / 2)
         .attr("r", 2)
         .attr("fill", "#1b2033").attr("stroke", "#f3ecd7").attr("stroke-width", 0.8);
-      const brRing = bg.append("circle")
-        .attr("class", "br-ring")
-        .attr("r", 6).attr("fill", "none")
-        .attr("stroke", COL.signal).attr("stroke-width", 1.8)
-        .attr("opacity", 0.9);
-      updateBrRing = function (step) {
-        const d = brackets[step];
-        brRing.attr("cx", bx(d.T)).attr("cy", by(String(step)) + by.bandwidth() / 2);
-      };
     }
 
-    const total = iters.length;
-    document.getElementById("traj-total").textContent = total - 1;
+    function updateBrRing(step, brackets) {
+      if (!bg || !brackets[step]) { if (brRing) brRing.attr("display", "none"); return; }
+      const d = brackets[step];
+      brRing.attr("display", null)
+        .attr("cx", bx(d.T)).attr("cy", by(String(step)) + by.bandwidth() / 2);
+    }
+
+    let iters = [], ghostPts = [], brackets = [];
 
     function render(step) {
       connG.selectAll("*").remove();
       pointG.selectAll("*").remove();
+      if (!iters.length) return;
+      if (step >= iters.length) step = iters.length - 1;
 
       const pts = iters.slice(0, step + 1);
       const lineGen = d3.line().x(d => x(d.T)).y(d => y(d.cc));
@@ -1030,11 +1070,10 @@ window.MathJax = {
       });
       const cur = iters[step];
 
-      updateBrRing(step);
+      updateBrRing(step, brackets);
 
-      // Extra ring on the best-so-far iterate.
       pointG.selectAll("circle.best-mark").remove();
-      if (cur.best_T != null && step >= 0) {
+      if (cur.best_T != null) {
         pointG.append("circle").attr("class", "best-mark")
           .attr("cx", x(cur.best_T)).attr("cy", y(cur.best_cc))
           .attr("r", 10).attr("fill", "none")
@@ -1063,20 +1102,35 @@ window.MathJax = {
         `<span class="st">iter ${step}</span> &middot; T = ${cur.T.toFixed(3)}, ccoeff = ${cur.cc.toFixed(3)}, residual = ${cur.diff.toFixed(3)}. ${tail}`;
     }
 
-    NETGEN.stepController({
+    let controller = null;
+    function rebuildTrajectory() {
+      iters = computeIters(SHARED);
+      ghostPts = computeGhost(SHARED);
+      brackets = computeBrackets(iters);
+      renderGhost(ghostPts);
+      renderBrackets(brackets, ghostPts);
+      if (controller) controller.reconfigure(iters.length);
+      else render(0);
+    }
+
+    rebuildTrajectory();
+    controller = NETGEN.stepController({
       prevBtn: document.getElementById("traj-prev"),
       nextBtn: document.getElementById("traj-next"),
       resetBtn: document.getElementById("traj-reset"),
       labelCur: document.getElementById("traj-cur"),
       labelTotal: document.getElementById("traj-total"),
-      total,
+      total: iters.length,
       onRender: render,
     });
+
+    onEmbeddingReroll(rebuildTrajectory);
   })();
 
   // Global reroll button. Click dispatches a fresh embedding to every
-  // listener registered above. Trajectory (stage 3) stays frozen to
-  // the initial SHARED so the secant-search narrative is stable.
+  // listener registered above: stage 1 + stage 2 disks reposition, and
+  // the stage-4 trajectory recomputes so the secant search runs on the
+  // embedding the user is actually looking at.
   document.getElementById("reroll-btn").addEventListener("click", triggerReroll);
 
   // ── DNC trajectory plot ──────────────────────────────────
@@ -1147,7 +1201,7 @@ window.MathJax = {
       .attr("stroke", "#1b2033").attr("stroke-width", 1);
 
     g.append("text")
-      .attr("x", x(iters[BEST_I].T) + 12).attr("y", y(iters[BEST_I].cc) + 4)
+      .attr("x", x(iters[BEST_I].T) + 12).attr("y", y(iters[BEST_I].cc) - 16)
       .attr("fill", COL.mint)
       .attr("font-family", "Caveat Brush, cursive").attr("font-size", 16)
       .text("best: T=0.125, cc=0.098");
