@@ -40,6 +40,8 @@
 
 <div id="links"></div>
 
+<div class="wip-banner" role="alert"><svg class="wip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 L22 21 L2 21 Z"/><line x1="12" y1="10" x2="12" y2="15"/><circle cx="12" cy="18" r="1" fill="currentColor" stroke="none"/></svg><strong class="wip-label">warning</strong><span class="wip-msg">work in progress &middot; expect rough edges and breaking changes.</span></div>
+
 <header class="hdr">
   <div class="kicker">network-generation · npso</div>
   <h1><em>nPSO</em></h1>
@@ -53,38 +55,68 @@
 
 <!-- ─────────── Stage 1 ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 1 · the disk</div>
-  <h2>Hubs at the center, leaves at the rim, angular sectors by cluster.</h2>
-  <p>Each node gets two coordinates. The <em>radial</em> position is the popularity: hubs sit near the center, low-degree nodes near the rim. The <em>angular</em> position is the similarity: nodes in the same community sit in the same angular sector.</p>
-  <p>For this small 20-node demo the formulas used are:</p>
-  $$
-    r_i \;=\; r_{\min} + (r_{\max} - r_{\min}) \cdot \frac{\ln(\mathrm{rank}_i + 1)}{\ln N}
-    \qquad
-    \theta_i \;=\; \theta_{C(i)} + \delta_i
-  $$
-  <p>where \(\mathrm{rank}_i\) is the node's degree rank (0 for the biggest hub, \(N{-}1\) for the lowest-degree leaf), \(\theta_{C(i)}\) is the angular centre of node \(i\)'s cluster sector, and \(\delta_i\) spreads nodes evenly within that sector.</p>
-  <div class="disk-panel">
-    <svg id="disk-svg" viewBox="-260 -260 520 520" preserveAspectRatio="xMidYMid meet"></svg>
-    <div class="step-desc"><span class="st">reading the disk</span> &middot; the dashed circles mark popularity levels (degree rank tiers). The angular sectors are cluster-coloured faintly at the rim. Drag a node to see the snap-back to its polar home; hover for stats.</div>
+  <div class="stage-num">stage 1 · profile</div>
+  <h2>Fit every scalar the generator needs.</h2>
+  <p>Profile reads the reference network + clustering and distils them into a small, explicit contract. Stage 2 gets only those derived values; it never re-reads the edgelist. The default model is <strong>nPSO2</strong>, so alongside the scalars profile also emits a weight vector \(\rho_k = \text{size}_k / N\), one entry per mixture component.</p>
+  <div class="summary-grid">
+    <div class="summary-card"><div class="hd">N</div><div class="val" id="prof-N">&middot;</div><div class="desc">Number of nodes after the outlier transform.</div></div>
+    <div class="summary-card"><div class="hd">m</div><div class="val" id="prof-m">&middot;</div><div class="desc">Half of the mean degree, rounded. Controls how many existing nodes each arrival attaches to.</div></div>
+    <div class="summary-card"><div class="hd">&gamma;</div><div class="val" id="prof-gamma">&middot;</div><div class="desc">Power-law exponent of the degree distribution, fit via Hill-MLE and floored at \(\gamma \ge 2\).</div></div>
+    <div class="summary-card"><div class="hd">C</div><div class="val" id="prof-C">&middot;</div><div class="desc">Number of mixture components. Under outlier-mode <em>singleton</em> (the default), each input outlier becomes its own 1-node cluster, so \(C = \text{real clusters} + \text{outliers}\).</div></div>
+    <div class="summary-card"><div class="hd">target C<sub>G</sub></div><div class="val" id="prof-tcc">&middot;</div><div class="desc">Global clustering coefficient of the input, via <code>networkit.ClusteringCoefficient.exactGlobal</code>. Stage 4's secant search targets this.</div></div>
+  </div>
+
+  <div class="disk-panel" style="margin-top:1.2rem">
+    <div class="step-desc" style="margin-bottom:.6rem"><span class="st">degree histogram + power-law fit</span> &middot; log-log axes. On this 20-node synthetic the tail is too short for a clean fit and Hill collapses to the \(\gamma = 2\) floor; on a real network the cloud straightens out.</div>
+    <svg id="deg-hist" viewBox="0 0 640 260" preserveAspectRatio="xMidYMid meet"></svg>
+  </div>
+
+  <div class="disk-panel" style="margin-top:1rem">
+    <div class="step-desc" style="margin-bottom:.6rem"><span class="st">mixing proportions</span> \(\rho_k = \text{size}_k / N\), sorted size-desc. The two short bars on the right are singleton outliers (1 node each, \(\rho = 1/20 = 0.05\)); the three taller bars are the real clusters. nPSO2 feeds this vector directly into <code>gmdistribution</code> as component weights.</div>
+    <svg id="mix-bars" viewBox="0 0 640 180" preserveAspectRatio="xMidYMid meet"></svg>
   </div>
 </section>
 
 <!-- ─────────── Stage 2 ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 2 · temperature</div>
+  <div class="stage-num">stage 2 · the disk</div>
+  <h2>Embed every node on the Poincar&eacute; disk.</h2>
+  <p>Each node gets two polar coordinates. The <em>radial</em> position encodes popularity: hubs sit near the centre, low-degree nodes drift to the rim. The <em>angular</em> position encodes similarity: nodes in the same component share an angular neighbourhood.</p>
+  <p>Let \(t_i \in \{1, \dots, N\}\) be the node's arrival time in the growth process (biggest hub = earliest arrival), and let \(\beta = 1/(\gamma - 1)\). Under the popularity-fading rule (Papadopoulos et al. 2012; Muscoloni &amp; Cannistraci 2018), the radial coordinate after all \(N\) arrivals is</p>
+  \[
+    r_i \;=\; 2\beta \, \ln(t_i) \;+\; 2(1-\beta) \, \ln(N).
+  \]
+  <p>Default model is <strong>nPSO2</strong>: the angular coordinate is sampled from a Gaussian mixture with \(C\) equidistant means \(\mu_k = 2\pi k / C\), common width \(\sigma = 2\pi / (6C)\), and the profile-supplied weights \(\rho_k = \text{size}_k / N\):</p>
+  \[
+    \theta_i \;\sim\; \sum_{k=1}^{C} \rho_k \, \mathcal{N}(\mu_k, \sigma^2) \pmod{2\pi}.
+  \]
+  <p>Each node is assigned to the component \(C(i) = \arg\min_k d_\mathrm{ang}(\theta_i, \mu_k)\). Under outlier-mode singleton (the default), each input outlier rides on its own tiny-weight component with \(\rho = 1/N\), so it lands near a dedicated \(\mu_k\) rather than in an anonymous gap. The outer heatmap strip reflects this: the three bright lobes are the real clusters, the two dim lobes are singleton outliers.</p>
+  <div class="disk-panel">
+    <div class="widget-row" style="padding:0;border:none;margin:0 0 .8rem">
+      <button class="btn" id="reroll-btn" type="button">random</button>
+      <span class="step-label">resample angular GMM draws &amp; per-pair uniforms</span>
+    </div>
+    <svg id="disk-svg" viewBox="-260 -260 520 520" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="step-desc"><span class="st">reading the disk</span> &middot; dashed circles = popularity tiers. The outer strip is a heatmap of the Gaussian-mixture angular density: bright at each &mu;<sub>k</sub>, dark in the gaps. Drag a node to see the snap-back to its polar home; hover for stats. <span class="st">random</span> rerolls the embedding, and both disks below follow.</div>
+  </div>
+</section>
+
+<!-- ─────────── Stage 3 ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 3 · temperature</div>
   <h2>Drag $$T$$. Watch edges form or dissolve.</h2>
   <p>For each pair of nodes, nPSO checks their hyperbolic distance against a cutoff scaled by $$T$$. Low $$T$$: only the closest pairs connect, which produces many triangles because triangles require three pairwise-close nodes. High $$T$$: the cutoff stretches and random-looking pairs connect, triangles become scarce.</p>
   <div class="disk-panel">
     <div class="widget-row" style="padding:0;border:none;margin:0 0 .8rem">
       <div class="scrub">
         <label>T</label>
-        <input type="range" id="T-slider" min="0.05" max="0.95" step="0.001" value="0.5">
+        <input type="range" id="T-slider" min="0.001" max="0.999" step="0.001" value="0.5">
         <output id="T-val">0.500</output>
       </div>
     </div>
     <svg id="disk-T" viewBox="-260 -260 520 520" preserveAspectRatio="xMidYMid meet"></svg>
     <div class="readout">
-      <span class="item target">target ccoeff <b>0.55</b></span>
+      <span class="item target">target ccoeff <b id="target-cc">&middot;</b></span>
       <span class="item">achieved ccoeff <b id="ach">&middot;</b></span>
       <span class="item">edges <b id="nedge">&middot;</b></span>
       <span class="item diff">|diff| <b id="diff">&middot;</b></span>
@@ -96,13 +128,14 @@
   </div>
 </section>
 
-<!-- ─────────── Stage 3 ─────────── -->
+<!-- ─────────── Stage 4 ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 3 · the secant search</div>
+  <div class="stage-num">stage 4 · the secant search</div>
   <h2>Bracket, bisect, and (where possible) take secant steps.</h2>
-  <p>The wrapper starts with $$[T_{\min}, T_{\max}] = [0, 1]$$ and bisects. Once both endpoints have residuals with opposite signs it switches to the secant formula $$T_{\text{sec}} = T_{\min} - f_{\min} \cdot (T_{\max} - T_{\min}) / (f_{\max} - f_{\min})$$. A 5% margin guard falls back to midpoint if the secant lands too close to an endpoint. Stops when the residual drops below 0.005 or the step stalls below 0.0001 or after 100 iters.</p>
+  <p>The wrapper starts with $$[T_{\min}, T_{\max}] = [0, 1]$$ and bisects. Because $$cc(T)$$ is monotonically <em>decreasing</em>, the bracket update is the opposite of the textbook rule: an iterate with $$cc &gt; \mathrm{target}$$ means $$T$$ is too small, so $$T_{\min}$$ is raised and the next sample moves right; an iterate with $$cc &lt; \mathrm{target}$$ overshoots, so $$T_{\max}$$ is lowered and the next sample moves left. Once both endpoints have residuals with opposite signs it switches to the secant formula $$T_{\text{sec}} = T_{\min} - f_{\min} \cdot (T_{\max} - T_{\min}) / (f_{\max} - f_{\min})$$. A 5% margin guard falls back to midpoint if the secant lands too close to an endpoint. Stops when the residual drops below 0.005 or the step stalls below 0.0001 or after 100 iters.</p>
   <div class="disk-panel">
     <svg id="trajectory" viewBox="0 0 640 320" preserveAspectRatio="xMidYMid meet"></svg>
+    <svg id="trajectory-brackets" viewBox="0 0 640 150" preserveAspectRatio="xMidYMid meet"></svg>
     <div class="widget-row">
       <button class="btn" id="traj-prev">← back</button>
       <button class="btn primary" id="traj-next">next →</button>
@@ -156,73 +189,291 @@ window.MathJax = {
   const C1 = NETGEN.C1, C2 = NETGEN.C2, C3 = NETGEN.C3, OUT_N = NETGEN.OUT;
 
   // ── Compute polar positions ──
-  // Radial: by degree rank (hubs near center). Radius_max ~ 210.
-  // Angular: by cluster sector. C1 at 90°, C2 at 330°, C3 at 210°, outliers at ~150° and ~30°.
+  // Radial: by degree rank (hubs near centre). Radius_max ~ 210.
+  // Angular: by cluster, one GMM component per cluster.
 
   const nodesAll = [...C1, ...C2, ...C3, ...OUT_N];
   const sorted = nodesAll.slice().sort((a,b) => DEGREES[b] - DEGREES[a] || a - b);
   const rankOf = {};
   sorted.forEach((n, i) => rankOf[n] = i);
 
-  const SECTOR = {
-    C1:  {center: -Math.PI/2,   span: Math.PI / 1.9},   // top, ~95°
-    C2:  {center:  Math.PI/5,   span: Math.PI / 2.2},   // lower-right, ~82°
-    C3:  {center:  5*Math.PI/6, span: Math.PI / 2.6},   // lower-left, ~69°
-    OUT: {center: -5*Math.PI/6, span: Math.PI / 6},     // ~30° between the two outliers
-  };
-
-  const R_MIN = 45, R_MAX = 230;
-  const N_NODES = nodesAll.length;
-  const POLAR = {};
-  const byCluster = {C1:C1, C2:C2, C3:C3, OUT:OUT_N};
-  Object.entries(byCluster).forEach(([cl, ids]) => {
-    const sorted_in = ids.slice().sort((a,b) => DEGREES[b]-DEGREES[a] || a-b);
-    sorted_in.forEach((n, idx) => {
-      const rank = rankOf[n];
-      // log-rank radial: hub at r_min, leaf at r_max, spread widens with rank
-      const r = R_MIN + (R_MAX - R_MIN) * Math.log(rank + 1) / Math.log(N_NODES);
-      // Even angular spread inside the cluster sector.
-      const sec = SECTOR[cl];
-      const denom = Math.max(ids.length - 1, 1);
-      const offset = ids.length === 1 ? 0 : (idx - (ids.length - 1) / 2) * sec.span / denom;
-      const theta = sec.center + offset;
-      POLAR[n] = { r, theta };
+  // Mirror the profile's outlier-mode=singleton default: each input
+  // outlier becomes its own 1-node cluster, which bumps C. The clusters
+  // are ordered exactly the way profile_common.compute_comm_size does it
+  // (size desc, cluster-id asc on ties), so index k here matches the
+  // mixing-proportions entry k in derived.txt.
+  const CLUSTER_DEFS = (function () {
+    const raw = [
+      { id: 'C1', nodes: C1, color: COL.C1, isOutlier: false },
+      { id: 'C2', nodes: C2, color: COL.C2, isOutlier: false },
+      { id: 'C3', nodes: C3, color: COL.C3, isOutlier: false },
+    ];
+    OUT_N.forEach(n => {
+      raw.push({ id: 'OUT' + n, nodes: [n], color: COL.OUT, isOutlier: true });
     });
-  });
+    raw.sort((a, b) => (b.nodes.length - a.nodes.length) || (a.id < b.id ? -1 : 1));
+    return raw;
+  })();
 
-  // Convert polar to cartesian
-  const POSX = {}, POSY = {};
-  nodesAll.forEach(n => {
-    POSX[n] = POLAR[n].r * Math.cos(POLAR[n].theta);
-    POSY[n] = POLAR[n].r * Math.sin(POLAR[n].theta);
-  });
+  // ── Profile step ────────────────────────────────────────────
+  // Mirror gen.py: N, m = round(mean_deg/2), γ = max(Hill-MLE, 2), C,
+  // target global clustering coefficient, mixing_proportions.
+  const N_NODES = nodesAll.length;
+  const degValues = nodesAll.map(n => DEGREES[n]);
+  const meanDeg = degValues.reduce((a, b) => a + b, 0) / N_NODES;
+  const M_PROF = Math.max(1, Math.round(meanDeg / 2));
+  // Discrete Hill estimator with x_min = 1: γ̂ = 1 + N / Σ ln(d_i).
+  const logSum = degValues.reduce((s, d) => s + Math.log(Math.max(d, 1)), 0);
+  const gammaHill = logSum > 0 ? 1 + N_NODES / logSum : 2.0;
+  const GAMMA = Math.max(gammaHill, 2.0);
+  const BETA  = 1 / (GAMMA - 1);
+  const C     = CLUSTER_DEFS.length;
+  const MIXING_PROPORTIONS = CLUSTER_DEFS.map(cd => cd.nodes.length / N_NODES);
 
-  // ── hyperbolic-ish distance ──
-  function dist(u, v) {
-    // Fake hyperbolic distance: angular diff contributes + radial summed.
-    const du = POLAR[u], dv = POLAR[v];
-    let dth = Math.abs(du.theta - dv.theta);
-    if (dth > Math.PI) dth = 2*Math.PI - dth;
-    // Heuristic: d ~ r_u + r_v + angular_penalty
-    return 0.004 * (du.r + dv.r) + dth * 1.5;
-  }
+  // Global clustering coefficient of the input (triangles / triples).
+  const TARGET_CC = (function () {
+    const adj = {};
+    nodesAll.forEach(n => adj[n] = new Set());
+    NETGEN.EDGES.forEach(({ u, v }) => { adj[u].add(v); adj[v].add(u); });
+    let triples = 0, triangles = 0;
+    nodesAll.forEach(n => {
+      const nbrs = [...adj[n]];
+      for (let i = 0; i < nbrs.length; i++) for (let j = i + 1; j < nbrs.length; j++) {
+        triples++;
+        if (adj[nbrs[i]].has(nbrs[j])) triangles++;
+      }
+    });
+    return triples > 0 ? triangles / triples : 0;
+  })();
 
-  const DISTS = {};
-  for (let i = 0; i < nodesAll.length; i++) {
-    for (let j = i+1; j < nodesAll.length; j++) {
-      const u = nodesAll[i], v = nodesAll[j];
-      DISTS[`${u}-${v}`] = dist(u, v);
+  // Populate the profile cards in stage 1.
+  document.getElementById("prof-N").textContent     = N_NODES;
+  document.getElementById("prof-m").textContent     = M_PROF;
+  document.getElementById("prof-gamma").textContent = GAMMA.toFixed(2);
+  document.getElementById("prof-C").textContent     = C;
+  document.getElementById("prof-tcc").textContent   = TARGET_CC.toFixed(3);
+
+  // ── Stage 1 plot: degree histogram + Hill fit ──────────────
+  (function () {
+    const svg = d3.select("#deg-hist");
+    const W = 640, H = 260;
+    const PAD = { top: 20, right: 20, bottom: 40, left: 50 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+
+    const hist = d3.rollup(degValues, v => v.length, d => d);
+    const data = Array.from(hist.entries())
+      .map(([d, n]) => ({ d, n }))
+      .sort((a, b) => a.d - b.d);
+    const xMax = d3.max(data, d => d.d);
+
+    const x = d3.scaleLog().domain([0.9, xMax * 1.15]).range([0, iw]);
+    const y = d3.scaleLog().domain([0.5, d3.max(data, d => d.n) * 1.6]).range([ih, 0]);
+
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).ticks(5, "~g"))
+      .selectAll("text").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace");
+    g.append("g").call(d3.axisLeft(y).ticks(5, "~g"))
+      .selectAll("text").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+
+    svg.append("text").attr("x", W/2).attr("y", H - 6)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "11px")
+      .text("degree (log)");
+    svg.append("text").attr("transform", "rotate(-90)").attr("x", -H/2).attr("y", 14)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "11px")
+      .text("count (log)");
+
+    // Power-law fit line pinned to the observed (max_degree, its_count)
+    // so the viewer sees the slope of γ rather than an arbitrary
+    // normalisation. In log-log: y = n_max · (d / d_max)^(-γ).
+    const nAtMax = data.find(d => d.d === xMax).n;
+    const fitPts = [];
+    for (let k = 1; k <= xMax * 1.15; k += 0.1) {
+      fitPts.push({ d: k, n: Math.max(0.5, nAtMax * Math.pow(k / xMax, -GAMMA)) });
     }
+    const fitLine = d3.line().x(d => x(d.d)).y(d => y(d.n));
+    g.append("path")
+      .datum(fitPts).attr("d", fitLine)
+      .attr("fill", "none").attr("stroke", COL.azure)
+      .attr("stroke-width", 1.8).attr("opacity", 0.85);
+
+    // Points on top of the fit line.
+    g.selectAll(".deg-pt").data(data).join("circle")
+      .attr("class", "deg-pt")
+      .attr("cx", d => x(d.d)).attr("cy", d => y(d.n))
+      .attr("r", 5).attr("fill", COL.C1).attr("opacity", 0.9)
+      .attr("stroke", "#1b2033").attr("stroke-width", 1);
+
+    svg.append("text").attr("x", W - 24).attr("y", 34)
+      .attr("text-anchor", "end").attr("fill", COL.azure)
+      .attr("font-family", "Caveat Brush, cursive").attr("font-size", 20)
+      .text(`γ = ${GAMMA.toFixed(2)}`);
+  })();
+
+  // ── Stage 1 plot: mixing proportions bar chart ─────────────
+  (function () {
+    const svg = d3.select("#mix-bars");
+    const W = 640, H = 180;
+    const PAD = { top: 22, right: 20, bottom: 36, left: 50 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+
+    const labels = CLUSTER_DEFS.map(cd => cd.id);
+    const x = d3.scaleBand().domain(labels).range([0, iw]).padding(0.18);
+    const y = d3.scaleLinear().domain([0, d3.max(MIXING_PROPORTIONS) * 1.2]).range([ih, 0]);
+
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x))
+      .selectAll("text").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace");
+    g.append("g").call(d3.axisLeft(y).ticks(4))
+      .selectAll("text").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+
+    svg.append("text").attr("transform", "rotate(-90)").attr("x", -H/2).attr("y", 14)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "11px")
+      .text("ρ_k");
+
+    g.selectAll(".mix-bar").data(CLUSTER_DEFS).join("rect")
+      .attr("class", "mix-bar")
+      .attr("x", d => x(d.id))
+      .attr("y", (d, i) => y(MIXING_PROPORTIONS[i]))
+      .attr("width", x.bandwidth())
+      .attr("height", (d, i) => ih - y(MIXING_PROPORTIONS[i]))
+      .attr("fill", d => d.color).attr("opacity", 0.88)
+      .attr("stroke", "#1b2033").attr("stroke-width", 0.8);
+
+    g.selectAll(".mix-lbl").data(CLUSTER_DEFS).join("text")
+      .attr("class", "mix-lbl")
+      .attr("x", d => x(d.id) + x.bandwidth() / 2)
+      .attr("y", (d, i) => y(MIXING_PROPORTIONS[i]) - 5)
+      .attr("text-anchor", "middle")
+      .attr("fill", "#1b2033")
+      .attr("font-family", "Special Elite, Courier New, monospace")
+      .attr("font-size", 10)
+      .text((d, i) => MIXING_PROPORTIONS[i].toFixed(2));
+  })();
+
+  // ── Embedding: real PSO radial law + real GMM angular sampling ──
+  const R_MIN = 20;
+  const R_MAX = 230;
+  const LOG_N = Math.log(N_NODES);
+  const R_HYP_MAX = 2 * BETA * LOG_N + 2 * (1 - BETA) * LOG_N;
+
+  // GMM component means μ_k = 2π·k/C, rotated so the biggest cluster
+  // sits at the top of the disk. Keyed by cluster id so computeEmbedding
+  // and drawGmmStrip can look them up directly.
+  const MU = {};
+  CLUSTER_DEFS.forEach((cd, k) => {
+    MU[cd.id] = -Math.PI / 2 + 2 * Math.PI * k / C;
+  });
+  const SIGMA_NPSO = 2 * Math.PI / (6 * C);      // paper's σ
+
+  function wrapAngle(a) {
+    a = a % (2 * Math.PI);
+    if (a > Math.PI)  a -= 2 * Math.PI;
+    if (a < -Math.PI) a += 2 * Math.PI;
+    return a;
   }
 
-  // Edge formation: edge in if dist < cutoff(T). cutoff: scales roughly with T.
-  function edgesAtT(T) {
-    const cutoff = 0.7 + 2.4 * T;      // tuned: low T → very few edges; high T → many
+  // A full embedding bundle is a deterministic function of `seed`:
+  // one N(μ_k, σ²) angular draw per node (outliers are just singleton
+  // clusters under outlier-mode=singleton), pairwise hyperbolic
+  // distances, and per-pair uniform draws that the Fermi-Dirac rule
+  // consumes. Factored out so the T-slider panel can reroll the draws.
+  function computeEmbedding(seed) {
+    const rng = d3.randomLcg(seed);
+    const normalSrc = d3.randomNormal.source(rng);
+
+    const POLAR = {};
+    CLUSTER_DEFS.forEach(cd => {
+      const sampler = normalSrc(MU[cd.id], SIGMA_NPSO);
+      cd.nodes.forEach(n => {
+        const t_i   = rankOf[n] + 1;
+        const r_hyp = 2 * BETA * Math.log(t_i) + 2 * (1 - BETA) * LOG_N;
+        const r     = R_MIN + (R_MAX - R_MIN) * (r_hyp / R_HYP_MAX);
+        POLAR[n]    = { r, r_hyp, theta: wrapAngle(sampler()) };
+      });
+    });
+
+    const POS_POLAR = {};
+    nodesAll.forEach(n => {
+      POS_POLAR[n] = {
+        x: POLAR[n].r * Math.cos(POLAR[n].theta),
+        y: POLAR[n].r * Math.sin(POLAR[n].theta),
+      };
+    });
+
+    // Real hyperbolic distance on the Poincaré disk.
+    // d = arccosh( cosh(r_u)·cosh(r_v) − sinh(r_u)·sinh(r_v)·cos(Θ) )
+    // with Θ = shortest angular distance between the two.
+    const DISTS = {};
+    for (let i = 0; i < nodesAll.length; i++) {
+      for (let j = i + 1; j < nodesAll.length; j++) {
+        const u = nodesAll[i], v = nodesAll[j];
+        const ru = POLAR[u].r_hyp, rv = POLAR[v].r_hyp;
+        let dth = Math.abs(POLAR[u].theta - POLAR[v].theta);
+        if (dth > Math.PI) dth = 2 * Math.PI - dth;
+        const val = Math.cosh(ru) * Math.cosh(rv) - Math.sinh(ru) * Math.sinh(rv) * Math.cos(dth);
+        DISTS[`${u}-${v}`] = val > 1 ? Math.acosh(val) : Math.abs(ru - rv);
+      }
+    }
+
+    // Per-pair uniform draws so the edge set slides smoothly as T
+    // changes within a given embedding. Separate seed stream so the
+    // pair draws don't alias with the angular draws.
+    const rngEdge = d3.randomLcg(seed * 31 + 7);
+    const U_PAIR = {};
+    for (let i = 0; i < nodesAll.length; i++) {
+      for (let j = i + 1; j < nodesAll.length; j++) {
+        U_PAIR[`${nodesAll[i]}-${nodesAll[j]}`] = rngEdge();
+      }
+    }
+
+    return { POLAR, POS_POLAR, DISTS, U_PAIR };
+  }
+
+  let SHARED = computeEmbedding(1);
+  let embedSeed = 1;
+  const rerollListeners = [];
+  function onEmbeddingReroll(fn) { rerollListeners.push(fn); }
+  function triggerReroll() {
+    embedSeed += 1;
+    SHARED = computeEmbedding(embedSeed);
+    rerollListeners.forEach(fn => fn(SHARED));
+  }
+
+  // Paper's Fermi-Dirac connection rule with a T-dependent threshold
+  // R(T) ≈ 2 ln(N) − 2 ln( 2T / (sin(πT) · m) )  for β = 1 (γ = 2).
+  // R decreases as T grows, so cc(T) is monotonically decreasing in
+  // expectation — matching the secant search assumption.
+  function R_of_T(T) {
+    const s = Math.sin(Math.PI * T);
+    if (s <= 0) return Infinity;
+    return 2 * LOG_N - 2 * Math.log((2 * T) / (s * M_PROF));
+  }
+
+  function edgesAtT(T, emb) {
+    const R = R_of_T(T);
+    const inv2T = 1 / (2 * T);
     const out = [];
     for (let i = 0; i < nodesAll.length; i++) {
-      for (let j = i+1; j < nodesAll.length; j++) {
+      for (let j = i + 1; j < nodesAll.length; j++) {
         const u = nodesAll[i], v = nodesAll[j];
-        if (DISTS[`${u}-${v}`] < cutoff) {
+        const d = emb.DISTS[`${u}-${v}`];
+        const p = 1 / (1 + Math.exp((d - R) * inv2T));
+        if (emb.U_PAIR[`${u}-${v}`] < p) {
           out.push([u, v]);
         }
       }
@@ -249,23 +500,56 @@ window.MathJax = {
     return triples > 0 ? triangles / triples : 0;
   }
 
-  // Pack polar-cartesian positions into a map VIZ can consume.
-  const POS_POLAR = {};
-  nodesAll.forEach(n => { POS_POLAR[n] = { x: POSX[n], y: POSY[n] }; });
-
   function drawDiskDecorations(svg) {
     for (const r of [60, 120, 180, 220]) {
       svg.append("circle").attr("cx", 0).attr("cy", 0).attr("r", r)
         .attr("fill", "none").attr("stroke", "#b9a263")
         .attr("stroke-dasharray", "2 3").attr("opacity", 0.45);
     }
-    ["C1","C2","C3"].forEach(cl => {
-      const sec = SECTOR[cl];
-      const a0 = sec.center - sec.span/2 - 0.12;
-      const a1 = sec.center + sec.span/2 + 0.12;
-      svg.append("path")
-        .attr("d", d3.arc()({ innerRadius: 220, outerRadius: 240, startAngle: a0 + Math.PI/2, endAngle: a1 + Math.PI/2 }))
-        .attr("fill", COL[cl]).attr("opacity", 0.25);
+    drawGmmStrip(svg);
+  }
+
+  // Outer-ring heatmap of the angular GMM. Sweep θ in small slices,
+  // paint an annular wedge per component per slice with opacity ∝ that
+  // component's weighted contribution ρ_k · N(θ; μ_k, σ²), normalised
+  // against the heaviest component's peak so the dominant lobe hits
+  // alpha=1 and lighter-weighted lobes scale down in proportion.
+  // Overlapping components blend via SVG alpha compositing.
+  function drawGmmStrip(svg) {
+    const INNER = 224, OUTER = 248;
+    const compPeak = 1 / (SIGMA_NPSO * Math.sqrt(2 * Math.PI));
+    const peakAlpha = Math.max(...MIXING_PROPORTIONS) * compPeak;
+    const SLICES = 180;
+    const sliceW = (2 * Math.PI) / SLICES;
+    const arcGen = d3.arc().innerRadius(INNER).outerRadius(OUTER);
+    for (let i = 0; i < SLICES; i++) {
+      const theta0 = -Math.PI + i * sliceW;
+      const theta1 = theta0 + sliceW;
+      const centre = (theta0 + theta1) / 2;
+      CLUSTER_DEFS.forEach((cd, k) => {
+        const mu = MU[cd.id];
+        let d = ((centre - mu + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+        const dens = Math.exp(-(d * d) / (2 * SIGMA_NPSO * SIGMA_NPSO))
+                     / (SIGMA_NPSO * Math.sqrt(2 * Math.PI));
+        const alpha = (MIXING_PROPORTIONS[k] * dens) / peakAlpha;
+        if (alpha < 0.02) return;
+        svg.append("path")
+          .attr("d", arcGen({ startAngle: theta0 + Math.PI / 2, endAngle: theta1 + Math.PI / 2 }))
+          .attr("fill", cd.color).attr("opacity", alpha * 0.9);
+      });
+    }
+    // Frame the strip with a faint outer ring so the heatmap reads
+    // as a bounded band rather than smudges.
+    svg.append("circle").attr("cx", 0).attr("cy", 0).attr("r", OUTER)
+      .attr("fill", "none").attr("stroke", "#b9a263")
+      .attr("stroke-dasharray", "2 3").attr("opacity", 0.55);
+    // Mean ticks.
+    CLUSTER_DEFS.forEach(cd => {
+      const mu = MU[cd.id];
+      svg.append("line")
+        .attr("x1", INNER * Math.cos(mu)).attr("y1", INNER * Math.sin(mu))
+        .attr("x2", OUTER * Math.cos(mu)).attr("y2", OUTER * Math.sin(mu))
+        .attr("stroke", cd.color).attr("stroke-width", 1.6).attr("opacity", 0.95);
     });
   }
 
@@ -278,13 +562,24 @@ window.MathJax = {
     }));
     const viz = NETGEN.VIZ.init(null, {
       svg,
-      positions: POS_POLAR,
+      positions: SHARED.POS_POLAR,
       nodeR: 10,
       pinned: true,
       showLabels: true,
       edges,
     });
     NETGEN.makeTooltip(viz, document.querySelector(".disk-panel"));
+    // Reroll just moves the pinned node homes — input edges stay.
+    onEmbeddingReroll((emb) => {
+      viz.nodesData.forEach(n => {
+        const p = emb.POS_POLAR[parseInt(n.id, 10)];
+        if (!p) return;
+        n.homeX = p.x; n.homeY = p.y;
+        n.fx = p.x; n.fy = p.y;
+        n.x = p.x;   n.y = p.y;
+      });
+      viz.sim.alpha(0.3).restart();
+    });
   })();
 
   // ── Stage 2: T slider disk (VIZ + setEdges per T) ──
@@ -293,7 +588,7 @@ window.MathJax = {
     drawDiskDecorations(svg);
     const viz = NETGEN.VIZ.init(null, {
       svg,
-      positions: POS_POLAR,
+      positions: SHARED.POS_POLAR,
       nodeR: 10,
       pinned: true,
       showLabels: true,
@@ -306,13 +601,13 @@ window.MathJax = {
     const diffEl  = document.getElementById("diff");
     const slider  = document.getElementById("T-slider");
     const tval    = document.getElementById("T-val");
-    const TARGET_CC = 0.55;
+    document.getElementById("target-cc").textContent = TARGET_CC.toFixed(3);
 
     function update(T) {
       tval.textContent = T.toFixed(3);
-      const edges = edgesAtT(T);
+      const edges = edgesAtT(T, SHARED);
       const cc    = globalCC(edges);
-      ach.textContent   = cc.toFixed(3);
+      ach.textContent     = cc.toFixed(3);
       nedgeEl.textContent = edges.length;
       diffEl.textContent  = Math.abs(cc - TARGET_CC).toFixed(3);
       viz.setEdges(edges.map(([u, v], i) => ({
@@ -321,12 +616,24 @@ window.MathJax = {
     }
     slider.addEventListener("input", () => update(parseFloat(slider.value)));
     update(parseFloat(slider.value));
+
+    onEmbeddingReroll((emb) => {
+      viz.nodesData.forEach(n => {
+        const p = emb.POS_POLAR[parseInt(n.id, 10)];
+        if (!p) return;
+        n.homeX = p.x; n.homeY = p.y;
+        n.fx = p.x; n.fy = p.y;
+        n.x = p.x;   n.y = p.y;
+      });
+      viz.sim.alpha(0.3).restart();
+      update(parseFloat(slider.value));
+    });
   })();
 
   // ── Stage 3: secant trajectory ──
   (function () {
     // Simulate a search. For each iter pick a T, compute cc, decide next T via bisection/secant.
-    const TARGET = 0.55;
+    const TARGET = TARGET_CC;
     const iters = [];
     let minT = 0, maxT = 1;
     let f_min = null, f_max = null;
@@ -344,15 +651,36 @@ window.MathJax = {
       return Tsec;
     }
 
-    for (let i = 0; i < 7; i++) {
+    // Best-so-far tracking mirrors gen.py: we don't just return the
+    // last iterate, we return the lowest |residual| we've seen.
+    let best = null;
+    const MAX_ITER = 12;
+    const CONV_EPS = 0.005;
+    const STALL_EPS = 0.0001;
+    let finalStatus = "budget";
+    for (let i = 0; i < MAX_ITER; i++) {
       const T = nextT(i);
-      const edges = edgesAtT(T);
+      const edges = edgesAtT(T, SHARED);
       const cc = globalCC(edges);
       const f = cc - TARGET;
-      iters.push({ T, cc, diff: cc - TARGET });
+      const newBest = (best == null) || (Math.abs(f) < Math.abs(best.diff));
+      if (newBest) best = { T, cc, diff: f, iter: i };
+      iters.push({
+        T, cc, diff: f,
+        is_best: newBest,
+        best_T: best.T, best_cc: best.cc, best_diff: best.diff,
+      });
+      const stepGap = iters.length >= 2
+        ? Math.abs(iters[iters.length - 2].cc - cc)
+        : Infinity;
+      if (Math.abs(best.diff) < CONV_EPS)   { finalStatus = "converged"; break; }
+      if (i > 0 && stepGap < STALL_EPS)     { finalStatus = "stalled";   break; }
       if (f < 0) { maxT = T; f_max = f; }
-      else { minT = T; f_min = f; }
+      else       { minT = T; f_min = f; }
     }
+    // Tag the terminal iteration.
+    iters[iters.length - 1].is_final = true;
+    iters[iters.length - 1].final_status = finalStatus;
 
     // Render scatter
     const svg = d3.select("#trajectory");
@@ -362,15 +690,18 @@ window.MathJax = {
     const ih = H - PAD.top - PAD.bottom;
     const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
 
+    // Static x in [0,1]; clustering near the end is expected and
+    // handled by a companion "bracket narrowing" bar chart below.
     const x = d3.scaleLinear().domain([0, 1]).range([0, iw]);
     const y = d3.scaleLinear().domain([0, 1]).range([ih, 0]);
-    g.append("g").attr("transform",`translate(0,${ih})`)
+    g.append("g").attr("class", "traj-xaxis").attr("transform", `translate(0,${ih})`)
       .call(d3.axisBottom(x).ticks(6))
-      .selectAll("text").style("fill","#6b6a54").style("font-family","Special Elite, Courier New, monospace");
-    g.append("g").call(d3.axisLeft(y).ticks(5))
-      .selectAll("text").style("fill","#6b6a54").style("font-family","Special Elite, Courier New, monospace");
-    g.selectAll(".domain").style("stroke","#b9a263");
-    g.selectAll(".tick line").style("stroke","#cdbf8d");
+      .selectAll("text").style("fill", "#6b6a54").style("font-family", "Special Elite, Courier New, monospace");
+    g.append("g").attr("class", "traj-yaxis")
+      .call(d3.axisLeft(y).ticks(5))
+      .selectAll("text").style("fill", "#6b6a54").style("font-family", "Special Elite, Courier New, monospace");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
     svg.append("text").attr("x", W/2).attr("y", H-6)
       .attr("text-anchor","middle").style("fill","#6b6a54")
       .style("font-family","Special Elite, Courier New, monospace").style("font-size","11px")
@@ -380,53 +711,215 @@ window.MathJax = {
       .style("fill","#6b6a54").style("font-family","Special Elite, Courier New, monospace").style("font-size","11px")
       .text("global ccoeff");
 
+    // Ghost curve: cc(T) swept densely so the viewer can see the
+    // full function the search is chasing.
+    const GHOST_N = 120;
+    const ghostPts = [];
+    for (let k = 0; k < GHOST_N; k++) {
+      const T_k = 0.005 + 0.99 * (k / (GHOST_N - 1));
+      ghostPts.push({ T: T_k, cc: globalCC(edgesAtT(T_k, SHARED)) });
+    }
+    const ghostLine = d3.line().x(d => x(d.T)).y(d => y(d.cc));
+    g.append("path")
+      .datum(ghostPts)
+      .attr("d", ghostLine)
+      .attr("fill", "none")
+      .attr("stroke", COL.paper_3)
+      .attr("stroke-width", 1.3)
+      .attr("stroke-dasharray", "2 2")
+      .attr("opacity", 0.55);
+    g.append("text")
+      .attr("x", x(ghostPts[Math.floor(GHOST_N * 0.12)].T))
+      .attr("y", y(ghostPts[Math.floor(GHOST_N * 0.12)].cc) - 8)
+      .attr("fill", COL.paper_3)
+      .attr("font-family", "Caveat Brush, cursive")
+      .attr("font-size", 13)
+      .text("cc(T)");
+
     // Target line
     g.append("line")
-      .attr("x1", 0).attr("x2", iw)
       .attr("y1", y(TARGET)).attr("y2", y(TARGET))
+      .attr("x1", 0).attr("x2", iw)
       .attr("stroke", COL.mint).attr("stroke-width", 1.2)
       .attr("stroke-dasharray","4 3").attr("opacity", 0.8);
-    g.append("text").attr("x", iw - 6).attr("y", y(TARGET) - 6)
-      .attr("text-anchor","end").attr("fill", COL.mint)
+    g.append("text").attr("x", 4).attr("y", y(TARGET) - 6)
+      .attr("text-anchor","start").attr("fill", COL.mint)
       .attr("font-family","Special Elite, Courier New, monospace").attr("font-size", 10)
-      .text("target = 0.55");
+      .text("target = " + TARGET.toFixed(3));
 
     const pointG = g.append("g");
-    const connG = g.append("g");
+    const connG  = g.append("g");
+
+    // ── Secondary panel: bracket narrowing over iteration ─────
+    // Horizontal bars showing [min_T, max_T] per step, stacked by
+    // iteration. Each bar contains a tick at the sampled T. This
+    // exposes the convergence behaviour without zooming the main
+    // panel so clustered late iterations become easy to read.
+    const BR_H = 150;
+    const brackets = (function () {
+      const out = [];
+      let lo = 0, hi = 1;
+      for (let k = 0; k < iters.length; k++) {
+        const it = iters[k];
+        out.push({ lo, hi, T: it.T, cc: it.cc });
+        if ((it.cc - TARGET) < 0) hi = it.T;
+        else                       lo = it.T;
+      }
+      return out;
+    })();
+    const brSvg = d3.select("#trajectory-brackets");
+    if (!brSvg.empty()) {
+      const BW = 640, BPAD = { top: 18, right: 20, bottom: 30, left: 60 };
+      const biw = BW - BPAD.left - BPAD.right;
+      const bih = BR_H - BPAD.top - BPAD.bottom;
+      const bg = brSvg.append("g").attr("transform", `translate(${BPAD.left},${BPAD.top})`);
+      const bx = d3.scaleLinear().domain([0, 1]).range([0, biw]);
+      const by = d3.scaleBand().domain(d3.range(iters.length).map(String)).range([0, bih]).paddingInner(0.25);
+      bg.append("g").attr("transform", `translate(0,${bih})`)
+        .call(d3.axisBottom(bx).ticks(6))
+        .selectAll("text").style("fill", "#6b6a54").style("font-family", "Special Elite, Courier New, monospace");
+      bg.append("g")
+        .call(d3.axisLeft(by).tickFormat(d => "#" + d))
+        .selectAll("text").style("fill", "#6b6a54").style("font-family", "Special Elite, Courier New, monospace");
+      bg.selectAll(".domain").style("stroke", "#b9a263");
+      bg.selectAll(".tick line").style("stroke", "#cdbf8d");
+      brSvg.append("text").attr("x", BW/2).attr("y", BR_H-6)
+        .attr("text-anchor","middle").style("fill","#6b6a54")
+        .style("font-family","Special Elite, Courier New, monospace").style("font-size","11px")
+        .text("T");
+      // Heatmap: colour every pixel column in each row by the
+      // residual cc(T) − target, so the viewer can see the
+      // "landscape" the search is navigating. Blue = cc below
+      // target, cream = at target, red = cc above target.
+      const resColor = d3.scaleLinear()
+        .domain([-0.30, 0, 0.30])
+        .range(["#3a66cc", "#ede4c9", "#c92a2a"])
+        .clamp(true);
+      brackets.forEach((b, i) => {
+        const y0 = by(String(i));
+        const h = by.bandwidth();
+        const inside = ghostPts.filter(p => p.T >= b.lo && p.T <= b.hi);
+        if (inside.length < 2) return;
+        for (let k = 0; k < inside.length - 1; k++) {
+          const x0 = bx(inside[k].T);
+          const x1 = bx(inside[k + 1].T);
+          bg.append("rect")
+            .attr("x", x0).attr("y", y0)
+            .attr("width", Math.max(1, x1 - x0))
+            .attr("height", h)
+            .attr("fill", resColor(inside[k].cc - TARGET))
+            .attr("opacity", 0.85);
+        }
+        // Pen-ink outline around the bracket.
+        bg.append("rect")
+          .attr("x", bx(b.lo)).attr("y", y0)
+          .attr("width", Math.max(2, bx(b.hi) - bx(b.lo)))
+          .attr("height", h)
+          .attr("fill", "none")
+          .attr("stroke", COL.paper_2).attr("stroke-width", 0.8);
+        // Vertical target marker (where cc == target) if it falls
+        // inside the current bracket.
+        const crossing = (function () {
+          for (let k = 0; k < inside.length - 1; k++) {
+            const a = inside[k].cc - TARGET;
+            const b2 = inside[k + 1].cc - TARGET;
+            if (a === 0) return inside[k].T;
+            if (a * b2 < 0) {
+              const t = a / (a - b2);
+              return inside[k].T + t * (inside[k + 1].T - inside[k].T);
+            }
+          }
+          return null;
+        })();
+        if (crossing != null) {
+          bg.append("line")
+            .attr("x1", bx(crossing)).attr("x2", bx(crossing))
+            .attr("y1", y0).attr("y2", y0 + h)
+            .attr("stroke", COL.mint).attr("stroke-width", 1)
+            .attr("stroke-dasharray", "2 2").attr("opacity", 0.85);
+        }
+      });
+      // Small sampled-T dot per row (doesn't obscure the heatmap).
+      bg.selectAll("circle.br-t").data(brackets).join("circle")
+        .attr("class", "br-t")
+        .attr("cx", d => bx(d.T))
+        .attr("cy", (_, i) => by(String(i)) + by.bandwidth() / 2)
+        .attr("r", 2)
+        .attr("fill", "#1b2033").attr("stroke", "#f3ecd7").attr("stroke-width", 0.8);
+      // Active-iter marker.
+      var brRing = bg.append("circle")
+        .attr("class", "br-ring")
+        .attr("r", 6).attr("fill", "none")
+        .attr("stroke", COL.signal).attr("stroke-width", 1.8)
+        .attr("opacity", 0.9);
+      var updateBrRing = function (step) {
+        const d = brackets[step];
+        brRing.attr("cx", bx(d.T)).attr("cy", by(String(step)) + by.bandwidth() / 2);
+      };
+    } else {
+      var updateBrRing = function () {};
+    }
 
     const total = iters.length;
     document.getElementById("traj-total").textContent = total - 1;
 
     function render(step) {
-      pointG.selectAll("*").remove();
       connG.selectAll("*").remove();
+      pointG.selectAll("*").remove();
 
-      // Draw iters up to and including `step`.
       const pts = iters.slice(0, step + 1);
-      // Connecting path
-      const line = d3.line().x(d => x(d.T)).y(d => y(d.cc));
+      const lineGen = d3.line().x(d => x(d.T)).y(d => y(d.cc));
       connG.append("path")
-        .datum(pts)
-        .attr("d", line)
-        .attr("fill","none").attr("stroke", COL.paper_4)
+        .datum(pts).attr("d", lineGen)
+        .attr("fill", "none").attr("stroke", COL.paper_4)
         .attr("stroke-width", 1).attr("opacity", 0.6);
+
       pts.forEach((p, i) => {
         pointG.append("circle")
           .attr("cx", x(p.T)).attr("cy", y(p.cc))
-          .attr("r", i === step ? 8 : 5)
-          .attr("fill", i === step ? COL.azure_2 || "#567ad8" : COL.azure)
-          .attr("stroke", "#1b2033").attr("stroke-width", 1.5);
-        pointG.append("text")
-          .attr("x", x(p.T) + 8).attr("y", y(p.cc) - 6)
-          .attr("fill", COL.paper_2)
-          .attr("font-family","Special Elite, Courier New, monospace")
-          .attr("font-size", 9)
-          .text(`#${i}`);
+          .attr("r", i === step ? 7 : 4)
+          .attr("fill", i === step ? (COL.azure_2 || "#567ad8") : COL.azure)
+          .attr("opacity", i === step ? 1 : 0.55)
+          .attr("stroke", "#1b2033").attr("stroke-width", 1.3);
       });
-
+      // Label the current iteration only (avoids the crowded "#3#4#5"
+      // pile that the full list produces near convergence).
       const cur = iters[step];
+      pointG.append("text")
+        .attr("x", x(cur.T) + 9).attr("y", y(cur.cc) - 7)
+        .attr("fill", COL.paper_2)
+        .attr("font-family", "Special Elite, Courier New, monospace")
+        .attr("font-size", 10)
+        .text("#" + step);
+
+      updateBrRing(step);
+
+      // Extra ring on the best-so-far iterate.
+      pointG.selectAll("circle.best-mark").remove();
+      if (cur.best_T != null && step >= 0) {
+        pointG.append("circle").attr("class", "best-mark")
+          .attr("cx", x(cur.best_T)).attr("cy", y(cur.best_cc))
+          .attr("r", 10).attr("fill", "none")
+          .attr("stroke", COL.mint).attr("stroke-width", 1.5)
+          .attr("stroke-dasharray", "2 2").attr("opacity", 0.9);
+      }
+
+      let tail;
+      if (cur.is_final) {
+        const how = cur.final_status === "converged"
+          ? "converged (residual below 0.005)"
+          : cur.final_status === "stalled"
+            ? "stalled (step below 0.0001)"
+            : "budget exhausted";
+        tail = `Search ${how}. Best-so-far: T = ${cur.best_T.toFixed(3)}, ccoeff = ${cur.best_cc.toFixed(3)}, residual = ${cur.best_diff.toFixed(3)}.`;
+      } else if (step === 0) {
+        tail = "First midpoint guess.";
+      } else {
+        tail = (cur.is_best ? "New best-so-far. " : "")
+          + "Bracket updated; next step will bisect or take secant.";
+      }
       document.getElementById("traj-desc").innerHTML =
-        `<span class="st">iter ${step}</span> &middot; T = ${cur.T.toFixed(3)}, ccoeff = ${cur.cc.toFixed(3)}, residual = ${cur.diff.toFixed(3)}. ${step === 0 ? "First midpoint guess." : Math.abs(cur.diff) < 0.005 ? "Converged." : "Bracket updated, next step will bisect or take secant."}`;
+        `<span class="st">iter ${step}</span> &middot; T = ${cur.T.toFixed(3)}, ccoeff = ${cur.cc.toFixed(3)}, residual = ${cur.diff.toFixed(3)}. ${tail}`;
     }
 
     NETGEN.stepController({
@@ -439,6 +932,11 @@ window.MathJax = {
       onRender: render,
     });
   })();
+
+  // Global reroll button. Click dispatches a fresh embedding to every
+  // listener registered above. Trajectory (stage 3) stays frozen to
+  // the initial SHARED so the secant-search narrative is stable.
+  document.getElementById("reroll-btn").addEventListener("click", triggerReroll);
 
 })();
 </script>
