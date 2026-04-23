@@ -70,6 +70,11 @@ All seven generators are byte-reproducible under a fixed `--seed` on a fixed too
 
 ## Acknowledgements
 
-- The models themselves: Karrer and Newman (degree-corrected SBM); Kamiński, Prałat, and Théberge (ABCD); Lancichinetti, Fortunato, and Radicchi (LFR); Muscoloni and Cannistraci (nPSO).
-- Implementations I lean on: [`graph-tool`](https://graph-tool.skewed.de/), [`ABCDGraphGenerator.jl`](https://github.com/bkamins/ABCDGraphGenerator.jl), the LFR C++ benchmark binary, the [`nPSO_model`](https://github.com/biomedical-cybernetics/nPSO_model) MATLAB package, [`networkit`](https://github.com/networkit/networkit), [`powerlaw`](https://pypi.org/project/powerlaw/), [`pymincut`](https://github.com/llekha/pymincut).
-- The pipeline glue, the blog posts, and the interactive visualizations were developed with help from [**Anthropic Claude**](https://claude.ai/) and its [`/frontend-design`](https://github.com/anthropics/skills/blob/main/skills/frontend-design/) skill.
+- **`sbm`**: [graph-tool](https://graph-tool.skewed.de/).
+- **`ec-sbm-v1`**: [illinois-or-research-analytics/ec-sbm](https://github.com/illinois-or-research-analytics/ec-sbm); uses [python-mincut](https://github.com/vikramr2/python-mincut).
+- **`ec-sbm-v2`**: extended from `ec-sbm-v1`.
+- **`abcd` / `abcd+o`**: [ABCDGraphGenerator.jl](https://github.com/bkamins/ABCDGraphGenerator.jl).
+- **`lfr`**: [LFR benchmark](https://www.santofortunato.net/resources).
+- **`npso`**: [nPSO_model](https://github.com/biomedical-cybernetics/nPSO_model).
+
+Portions of the code, documentation, and visualizations were written with help from [Claude](https://www.anthropic.com/claude) via Claude Code.

@@ -20,30 +20,30 @@
 // Positions: outliers at origin, three clusters orbit around.
 
 const POSITIONS = {
-  // C1 cluster (top)
-  1:  {x:    0, y: -145},
-  2:  {x:  -32, y: -130},
-  3:  {x:   30, y: -125},
-  4:  {x:  -12, y: -175},
-  5:  {x:  -58, y: -160},
-  6:  {x:   50, y: -165},
-  7:  {x:   28, y: -200},
-  8:  {x:  -40, y: -205},
-  // C2 cluster (bottom-right)
-  9:  {x:  155, y:   90},
-  10: {x:  190, y:  115},
-  11: {x:  130, y:  120},
-  12: {x:  185, y:   65},
-  13: {x:  215, y:  140},
-  14: {x:  125, y:   75},
-  // C3 cluster (bottom-left)
-  15: {x: -155, y:   90},
-  16: {x: -195, y:  115},
-  17: {x: -125, y:  120},
-  18: {x: -140, y:   65},
-  // Outliers (origin)
-  19: {x:  -25, y:   -5},
-  20: {x:   25, y:    5},
+  // C1 cluster (top, 8 nodes, spread ~120 radius)
+  1:  {x:    0, y: -190},
+  2:  {x:  -55, y: -170},
+  3:  {x:   50, y: -170},
+  4:  {x:  -20, y: -240},
+  5:  {x:  -90, y: -215},
+  6:  {x:   80, y: -220},
+  7:  {x:   40, y: -285},
+  8:  {x:  -65, y: -295},
+  // C2 cluster (bottom-right, 6 nodes, spread ~100)
+  9:  {x:  205, y:  120},
+  10: {x:  255, y:  150},
+  11: {x:  170, y:  155},
+  12: {x:  245, y:   85},
+  13: {x:  290, y:  180},
+  14: {x:  165, y:   95},
+  // C3 cluster (bottom-left, 4 nodes, spread ~80)
+  15: {x: -205, y:  120},
+  16: {x: -255, y:  155},
+  17: {x: -165, y:  165},
+  18: {x: -185, y:   85},
+  // Outliers near origin
+  19: {x:  -30, y:  -10},
+  20: {x:   30, y:   10},
 };
 
 const C1 = [1,2,3,4,5,6,7,8];
@@ -61,16 +61,39 @@ const NODES = Object.keys(POSITIONS).map(Number);
 
 // Edges grouped by provenance in the input:
 const INTRA = {
-  C1: [[1,2],[1,3],[1,4],[2,3],[2,4],[3,4],[1,5],[2,6],[3,7],[4,8],[5,6],[7,8]],
-  C2: [[9,10],[9,11],[10,11],[9,12],[10,13],[11,14],[12,14]],
+  // C1 is dense: K_5 on {1..5} plus a small tail {6,7,8} attached.
+  // Hubs 1 and 5 will dominate the degree tail so dedup and match_degree
+  // bite visibly on SBM-family visualizations.
+  C1: [
+    [1,2],[1,3],[1,4],[1,5],[1,6],
+    [2,3],[2,4],[2,5],[2,6],
+    [3,4],[3,5],[3,7],
+    [4,5],[4,8],
+    [5,8],
+    [6,7],[6,8],
+    [7,8],
+  ],
+  // C2 is K_4 on {9..12} plus {13,14}.
+  C2: [
+    [9,10],[9,11],[9,12],[9,13],
+    [10,11],[10,12],[10,14],
+    [11,12],[11,14],
+    [12,13],
+    [13,14],
+  ],
+  // C3 is deliberately sparse so its mincut is k=1.
   C3: [[15,16],[15,17],[16,18]],
 };
 const INTER = [
-  [1,9], [2,10], [5,12],      // C1-C2
-  [9,15], [11,16],             // C2-C3
-  [1,15], [4,17],              // C1-C3
+  [1,9], [2,10], [3,11], [5,12],   // C1-C2
+  [9,15], [11,16],                   // C2-C3
+  [1,15], [4,17],                    // C1-C3
 ];
-const OUT_EDGES = [[19,3],[19,10],[20,16],[20,5]];
+const OUT_EDGES = [[19,1],[19,9],[20,5],[20,16],[19,20]];
+// Total: 18 + 11 + 3 + 8 + 5 = 45 edges. Degrees: node 1 = 8 (biggest hub),
+// nodes 5, 9 = 7; nodes 2, 3, 4, 11 = 6. Long tail of low-degree nodes.
+// Dense C1 gives the SBM pages visible dedup loss, and match_degree has
+// several residual stubs to fill.
 
 // Flat input edge list with kind tags.
 const EDGES = [
@@ -141,21 +164,28 @@ const CY = {
         selector: "node",
         style: {
           "background-color": "data(color)",
+          "background-gradient-stop-colors": (ele) => {
+            const c = ele.data("color") || "#78b4ff";
+            return `${c} ${c}`;
+          },
           "width": "data(size)",
           "height": "data(size)",
-          "border-width": 1.5,
-          "border-color": "#121a36",
+          "border-width": 2,
+          "border-color": "#0b1120",
+          "border-opacity": 1,
           "label": lblOn ? "data(id)" : "",
           "font-family": "JetBrains Mono, monospace",
-          "font-size": 10,
-          "color": "#f4f6fb",
+          "font-size": 11,
+          "font-weight": "600",
+          "color": "#0b1120",
           "text-valign": "center",
           "text-halign": "center",
-          "text-outline-color": "#0b1120",
-          "text-outline-width": 2,
+          "text-outline-color": "data(color)",
+          "text-outline-width": 0,
           "overlay-padding": 6,
-          "transition-property": "background-color, opacity, border-color, width, height",
-          "transition-duration": 180,
+          "overlay-opacity": 0,
+          "transition-property": "background-color, opacity, border-color, border-width, width, height",
+          "transition-duration": 220,
           "transition-timing-function": "ease-in-out",
         },
       },
@@ -176,10 +206,12 @@ const CY = {
         style: {
           "width": "data(w)",
           "line-color": "data(color)",
-          "curve-style": "straight",
-          "opacity": 0.85,
+          "curve-style": "bezier",
+          "control-point-step-size": 25,
+          "line-cap": "round",
+          "opacity": 0.82,
           "transition-property": "line-color, opacity, width, line-style",
-          "transition-duration": 180,
+          "transition-duration": 220,
           "transition-timing-function": "ease-in-out",
         },
       },
@@ -212,7 +244,7 @@ const CY = {
         data: {
           id: String(n),
           color: opts.nodeColor ? opts.nodeColor(n) : COLORS[CLUSTER_OF[n]],
-          size: 22,
+          size: 26,
         },
         position: { x: POSITIONS[n].x, y: POSITIONS[n].y },
       }));
@@ -239,8 +271,11 @@ const CY = {
       autounselectify: true,
       autoungrabify: true,
     });
-    cy.fit(undefined, 30);
-    window.addEventListener("resize", () => cy.resize(), { passive: true });
+    cy.fit(undefined, 40);
+    window.addEventListener("resize", () => {
+      cy.resize();
+      cy.fit(undefined, 40);
+    }, { passive: true });
     return cy;
   },
 };
