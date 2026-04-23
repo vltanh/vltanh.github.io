@@ -266,6 +266,7 @@ const VIZ = {
     function classStr(base, extra) { return extra ? (base + " " + extra).trim() : base; }
 
     function draw() {
+      computeDupIndices();
       const linkSel = gLinks.selectAll("path.viz-edge").data(links, d => d.id);
       linkSel.exit().remove();
       const linkEnter = linkSel.enter().append("path")
@@ -335,13 +336,48 @@ const VIZ = {
       sim.alpha(0.3).restart();
     }
 
+    function computeDupIndices() {
+      // Group duplicate edges by unordered endpoint pair. Self-loops
+      // group by node id. Each link gets .dupIdx in [0, total-1] and
+      // .dupTotal so edgePath can fan them out.
+      const groups = {};
+      links.forEach(l => {
+        const a = l.source.id, b = l.target.id;
+        const key = (a === b) ? ("L|" + a) : (a < b ? (a + "|" + b) : (b + "|" + a));
+        (groups[key] = groups[key] || []).push(l);
+      });
+      Object.keys(groups).forEach(k => {
+        const arr = groups[k];
+        arr.forEach((l, i) => { l.dupIdx = i; l.dupTotal = arr.length; });
+      });
+    }
     function edgePath(d) {
       if (d.source === d.target) {
-        // self-loop rendered as small upward arc
-        const r = 18, x = d.source.x, y = d.source.y;
+        // self-loop rendered as small upward arc; multiple loops on the
+        // same node fan out in alternating widths.
+        const x = d.source.x, y = d.source.y;
+        const rBase = 18, step = 7;
+        const r = rBase + (d.dupIdx || 0) * step;
         return "M" + x + "," + y + " C" + (x - r) + "," + (y - r * 2.2) + " " + (x + r) + "," + (y - r * 2.2) + " " + (x + 0.01) + "," + (y - 0.01);
       }
-      return "M" + d.source.x + "," + d.source.y + "L" + d.target.x + "," + d.target.y;
+      const sx = d.source.x, sy = d.source.y, tx = d.target.x, ty = d.target.y;
+      const total = d.dupTotal || 1;
+      if (total <= 1) return "M" + sx + "," + sy + "L" + tx + "," + ty;
+      // Parallel edges: quadratic bezier through the midpoint shifted
+      // perpendicular by a per-duplicate amount. Center the fan so the
+      // "straight" path sits near the middle when total is odd.
+      const dx = tx - sx, dy = ty - sy;
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+      const nx = -dy / len, ny = dx / len;
+      const centered = (d.dupIdx || 0) - (total - 1) / 2;
+      const spread = 14;
+      const mx = (sx + tx) / 2 + nx * centered * spread;
+      const my = (sy + ty) / 2 + ny * centered * spread;
+      // Quadratic control = midpoint offset scaled x2 so the curve
+      // actually arcs through roughly that point.
+      const cx = (sx + tx) / 2 + nx * centered * spread * 2;
+      const cy = (sy + ty) / 2 + ny * centered * spread * 2;
+      return "M" + sx + "," + sy + " Q" + cx + "," + cy + " " + tx + "," + ty;
     }
     sim.on("tick", () => {
       gLinks.selectAll("path.viz-edge").attr("d", edgePath);
