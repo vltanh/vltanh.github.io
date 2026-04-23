@@ -364,19 +364,23 @@ const VIZ = {
       const total = d.dupTotal || 1;
       if (total <= 1) return "M" + sx + "," + sy + "L" + tx + "," + ty;
       // Parallel edges: quadratic bezier through a midpoint shifted
-      // perpendicular by a per-duplicate amount. Spread scales with edge
-      // length so short edges still visibly separate and long edges do
-      // not arc wildly. The curve passes through a point offset ~2x the
-      // midpoint shift (quadratic-bezier geometry) so the arc actually
-      // reaches the desired displacement.
-      const dx = tx - sx, dy = ty - sy;
-      const len = Math.sqrt(dx * dx + dy * dy) || 1;
-      const nx = -dy / len, ny = dx / len;
+      // perpendicular by a per-duplicate amount. The perpendicular must
+      // be computed from a CANONICAL direction (lower id → higher id),
+      // not d.source → d.target, because two duplicate links may list
+      // endpoints in opposite orders; using source/target directly flips
+      // the perpendicular and makes both arcs land on the same side.
+      // Spread scales with edge length so short edges still visibly
+      // separate and long edges do not arc wildly.
+      const lo = d.source.id < d.target.id ? d.source : d.target;
+      const hi = d.source.id < d.target.id ? d.target : d.source;
+      const cdx = hi.x - lo.x, cdy = hi.y - lo.y;
+      const len = Math.sqrt(cdx * cdx + cdy * cdy) || 1;
+      const nx = -cdy / len, ny = cdx / len;
       const centered = (d.dupIdx || 0) - (total - 1) / 2;
       const spread = Math.max(22, Math.min(42, len * 0.18));
-      const cx = (sx + tx) / 2 + nx * centered * spread * 2;
-      const cy = (sy + ty) / 2 + ny * centered * spread * 2;
-      return "M" + sx + "," + sy + " Q" + cx + "," + cy + " " + tx + "," + ty;
+      const mx = (lo.x + hi.x) / 2 + nx * centered * spread * 2;
+      const my = (lo.y + hi.y) / 2 + ny * centered * spread * 2;
+      return "M" + sx + "," + sy + " Q" + mx + "," + my + " " + tx + "," + ty;
     }
     sim.on("tick", () => {
       gLinks.selectAll("path.viz-edge").attr("d", edgePath);

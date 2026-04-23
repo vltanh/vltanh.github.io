@@ -145,6 +145,7 @@
   <div class="stage-num">profiling · block assignment</div>
   <h2>Three vectors, one matrix: that is the input contract.</h2>
   <p>Profile reads the reference network and its clustering and writes five CSVs. Two are label dictionaries (<code>node_id.csv</code>, <code>cluster_id.csv</code>). The other three carry the quantities the sampler will try to match: <code>assignment.csv</code> (block per node, this section), <code>degree.csv</code> (degree per node, next), and <code>edge_counts.csv</code> (the block matrix, the section after). Anything not in those three vectors, like mean degree, triangle count, or pairwise distances, is not in the contract.</p>
+  <p>Write \(b\) for the block assignment (\(b_u \in \{1, \ldots, B\}\) for node \(u\)), \(k\) for the degree sequence (\(k_u\) = degree of \(u\)), and \(e\) for the block-pair count matrix (\(e_{rs}\) defined in the block-matrix section below). The three sections that follow visualise \(b\), then \(k\), then \(e\), in that order.</p>
   <p>Outlier handling happens here too. Under the default <code>outlier_mode=combined</code>, every unclustered node and every size-1 cluster is folded into one pseudo-block labelled <code>__outliers__</code>, so the sampler never has to treat them as a special case. The flag <code>drop_outlier_outlier_edges</code> is off by default, so outlier-outlier edges survive into the pseudo-block's diagonal.</p>
 
   <div class="graph" id="g-assign">
@@ -182,7 +183,7 @@
 <section class="stage">
   <div class="stage-num">profiling · the block matrix</div>
   <h2>Count edges per block-pair. That is the only structure the sampler sees.</h2>
-  <p>With \(b\) the block assignment (\(b_u \in \{1,\ldots,B\}\)), \(k\) the degree sequence, and \(e\) the block-pair count matrix, read \(e_{rs}\) as a <em>stub</em> (half-edge) count: how many half-edges from block \(r\) land in block \(s\). For \(r \neq s\) that is also the number of edges between the two blocks and the matrix is symmetric \(e_{rs} = e_{sr}\). For \(r = s\), each intra-block edge has both of its half-edges inside \(r\), so it contributes twice:</p>
+  <p>Read \(e_{rs}\) as a <em>stub</em> (half-edge) count: how many half-edges from block \(r\) land in block \(s\). For \(r \neq s\) that is also the number of edges between the two blocks and the matrix is symmetric \(e_{rs} = e_{sr}\). For \(r = s\), each intra-block edge has both of its half-edges inside \(r\), so it contributes twice:</p>
   \[
     e_{rr} \;=\; 2 \cdot \bigl| \{\, \{u, v\} \in E \,:\, b_u = b_v = r \,\} \bigr|.
   \]
@@ -449,38 +450,63 @@ window.MathJax = {
   const MEAN_DEG    = EDGES_TOTAL * 2 / NODES.length;
   const OUT_COUNT   = OUT_N.length;
 
-  // Helper: render a dashed rectangle around each block's nodes, with a
-  // handwritten block label tucked against the top-left inside the rect.
-  // Expects a d3 svg selection where VIZ will later append its own layers.
-  function drawBlockRects(svg) {
+  // Helper: create one dashed rounded rectangle + handwritten label per
+  // block. Returns a callback that, given the force-sim `viz` handle,
+  // recomputes each rect's bounding box from the current node positions.
+  // Call it on every tick so the enclosure follows drags and relaxation.
+  function makeBlockRects(svg) {
     const layer = svg.append("g").attr("class", "block-rects");
-    BLOCK_NAMES.forEach((name, idx) => {
-      const nodes = BLOCK_NODES[name];
-      if (!nodes || nodes.length === 0) return;
-      const xs = nodes.map(n => NETGEN.POSITIONS[n].x);
-      const ys = nodes.map(n => NETGEN.POSITIONS[n].y);
-      const minX = d3.min(xs), maxX = d3.max(xs);
-      const minY = d3.min(ys), maxY = d3.max(ys);
-      const padX = 34, padY = 38;
-      const x = minX - padX, y = minY - padY;
-      const w = (maxX - minX) + 2 * padX;
-      const h = (maxY - minY) + 2 * padY;
+    const shapes = BLOCK_NAMES.map((name, idx) => {
+      const ids = BLOCK_NODES[name];
+      if (!ids || ids.length === 0) return null;
       const color = BLOCK_COLOR[name];
-      layer.append("rect")
-        .attr("x", x).attr("y", y).attr("width", w).attr("height", h)
+      const rect = layer.append("rect")
         .attr("rx", 10).attr("ry", 10)
         .attr("fill", color).attr("fill-opacity", 0.07)
         .attr("stroke", color).attr("stroke-width", 1.5)
         .attr("stroke-dasharray", "7 5")
         .attr("opacity", 0.92);
-      layer.append("text")
+      const label = layer.append("text")
         .attr("class", "block-ring-label")
-        .attr("x", x + 12).attr("y", y + 20)
         .attr("text-anchor", "start")
         .attr("fill", color)
         .attr("opacity", 0.95)
         .text(BLOCK_LABELS[idx]);
-    });
+      return { ids, rect, label };
+    }).filter(Boolean);
+
+    return function syncBlockRects(viz) {
+      const padX = 34, padY = 38;
+      shapes.forEach(s => {
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        s.ids.forEach(id => {
+          const n = viz.nodeById[String(id)];
+          if (!n) return;
+          if (n.x < minX) minX = n.x;
+          if (n.x > maxX) maxX = n.x;
+          if (n.y < minY) minY = n.y;
+          if (n.y > maxY) maxY = n.y;
+        });
+        if (!isFinite(minX)) return;
+        let x = minX - padX, y = minY - padY;
+        let w = (maxX - minX) + 2 * padX;
+        let h = (maxY - minY) + 2 * padY;
+        // Grow width so the label fits inside (e.g. "__outliers__"
+        // overflows the tight 2-node bounding rect otherwise).
+        const labelW = s.label.node().getComputedTextLength
+          ? s.label.node().getComputedTextLength() : 0;
+        const wanted = labelW + 24;
+        if (w < wanted) {
+          // Expand symmetrically around the cluster's x-centre so the
+          // rect does not drift off to one side.
+          const cx = (minX + maxX) / 2;
+          w = wanted;
+          x = cx - w / 2;
+        }
+        s.rect.attr("x", x).attr("y", y).attr("width", w).attr("height", h);
+        s.label.attr("x", x + 12).attr("y", y + 20);
+      });
+    };
   }
 
   // ── Profiling · block assignment (graph with dashed block rings) ──
@@ -492,12 +518,16 @@ window.MathJax = {
       .attr("class", "viz-svg")
       .attr("viewBox", "-320 -340 640 680")
       .attr("preserveAspectRatio", "xMidYMid meet");
-    drawBlockRects(svg);
+    const syncBlockRects = makeBlockRects(svg);
     const edges = EDGES.map(e => ({
       u: e.u, v: e.v, color: pickInputColor(e), w: 1.2,
     }));
     const viz = NETGEN.VIZ.init("g-assign-cy", { svg, showLabels: true, edges });
     NETGEN.makeTooltip(viz, document.getElementById("g-assign"));
+    // Live-bind the rects to current node positions: fires on every force
+    // tick and on drags (drags call sim.alphaTarget so ticks keep firing).
+    syncBlockRects(viz);
+    viz.sim.on("tick.blockRects", () => syncBlockRects(viz));
   })();
 
   // ── Profiling · degree sequence (horizontal bars + hover link) ──
@@ -831,9 +861,15 @@ window.MathJax = {
         };
       }).filter(Boolean);
       viz.setEdges(edges);
-      const n = deduped ? sample.stats.postEdges : sample.stats.preEdges;
       label.textContent = deduped ? "simple graph (post-dedup)" : "multigraph (pre-dedup)";
-      edgeCount.textContent = "edges: " + n;
+      const pre  = sample.stats.preEdges;
+      const post = sample.stats.postEdges;
+      if (deduped) {
+        const lostPct = pre > 0 ? ((pre - post) / pre * 100).toFixed(1) : "0.0";
+        edgeCount.textContent = "edges: " + pre + " → " + post + " (" + lostPct + "% lost)";
+      } else {
+        edgeCount.textContent = "edges: " + pre;
+      }
     }
 
     let deduped = false;
