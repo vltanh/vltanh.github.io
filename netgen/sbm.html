@@ -7,14 +7,14 @@
 <meta name="description" content="The degree-corrected stochastic block model, walked through stage by stage on a small synthetic graph. Interactive: click edges to see the block matrix fill in, toggle dedup on and off.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=Figtree:ital,wght@0,300..900;1,300..900&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./_shared.css">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./shared.css">
 <style>
 .blockmat{
   display:grid; gap:3px;
   grid-template-columns:repeat(5, minmax(0, 1fr));
   max-width:280px; margin:1rem auto;
-  font-family:'JetBrains Mono',ui-monospace,monospace;
+  font-family:'Special Elite','Courier New',monospace;
   font-size:.75rem;
 }
 .blockmat .cell{
@@ -31,25 +31,25 @@
   font-size:.68rem; letter-spacing:.1em; text-transform:uppercase;
 }
 .blockmat .cell.on{
-  background:var(--azure-3); color:var(--paper); border-color:var(--azure-3);
+  background:var(--cobalt); color:var(--ink); border-color:var(--cobalt);
 }
 .blockmat .cell.flash{ animation:flash 0.6s ease-out; }
 @keyframes flash{
-  0%{background:var(--paper); color:var(--ink);}
-  100%{background:var(--azure-3); color:var(--paper);}
+  0%{background:var(--hl-yellow); color:var(--paper);}
+  100%{background:var(--cobalt); color:var(--ink);}
 }
 </style>
 </head>
 <body>
 <main class="page">
 
-<header class="hdr">
-  <div class="kicker">netgen · sbm</div>
-  <h1><em>SBM</em></h1>
-  <p class="sub">Keep each node's degree, keep the block-to-block edge counts, roll the dice on everything else. The degree-corrected stochastic block model in its purest form.</p>
-</header>
-
 <div id="links"></div>
+
+<header class="hdr">
+  <div class="kicker">network-generation · sbm</div>
+  <h1><em>SBM</em></h1>
+  <p class="sub">The degree-corrected stochastic block model. Freezes the cluster assignment $$\mathcal{C}$$, the block-to-block edge counts, and the per-node degree sequence; the rest is random.</p>
+</header>
 
 <section class="hook">
   <p>You have a real network. You want a synthetic twin. The <em>stochastic block model</em> says: two things about G matter enough to freeze, and everything else is accident.</p>
@@ -89,7 +89,7 @@
   <div class="graph" id="g2">
     <div class="graph-chrome">
       <span>input &middot; click an edge</span>
-      <span class="right" id="g2-cell">cell: &mdash;</span>
+      <span class="right" id="g2-cell">cell: (none)</span>
     </div>
     <div class="graph-canvas" id="g2-cy"></div>
   </div>
@@ -144,26 +144,32 @@
 <div id="kin"></div>
 
 <footer class="footer">
-  <p>
-    <a href="./">all generators</a> &middot;
-    <a href="https://vltanh.me/projects/network-generation/">project page</a> &middot;
-    <a href="https://github.com/vltanh/network-generation/blob/main/docs/algorithms/sbm.md" target="_blank" rel="noopener">algorithm notes</a>
-  </p>
+  <p class="credit">typed by vltanh, doodled with Claude</p>
 </footer>
 
 </main>
 
 <script src="https://unpkg.com/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
-<script src="./_shared.js"></script>
+<script>
+window.MathJax = {
+  tex: {
+    inlineMath: [['\\(', '\\)'], ['$', '$'], ['$$', '$$']],
+    displayMath: [['\\[', '\\]']]
+  },
+  chtml: { scale: 1.0 }
+};
+</script>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script src="./shared.js"></script>
 <script>
 (function () {
   document.getElementById("links").innerHTML = NETGEN.linksRow({gen: "sbm"});
   document.getElementById("kin").innerHTML = NETGEN.kinSection({
     siblings: [
       { gen: "ec-sbm-v1", label: "ec-sbm-v1",
-        diff: "SBM plus a provably k-edge-connected core per cluster, plus an outlier SBM and a heap-greedy degree top-up." },
+        diff: "SBM with an edge-connectivity guarantee per cluster, delivered by a hand-built $$k$$-edge-connected core before sampling. Outliers are treated as singleton clusters; a naive greedy matcher fills any residual degree deficit." },
       { gen: "ec-sbm-v2", label: "ec-sbm-v2",
-        diff: "Cleaner residual accounting, a block-preserving 2-opt rewire, and a hybrid matcher. The one to reach for." },
+        diff: "Same edge-connectivity guarantee as v1, but outliers fold into a single block instead of singletons. Residual is accounted for in one SBM call, with a block-preserving rewire and hybrid degree-matching pass." },
     ],
   });
 
@@ -245,7 +251,7 @@
       setTimeout(() => {
         gm.querySelectorAll(".cell.flash").forEach(c => c.classList.remove("flash"));
       }, 700);
-      readout.textContent = `cell: (${NAMES[bu]}, ${NAMES[bv]}) — edge (${e.u}, ${e.v})`;
+      readout.textContent = `cell: (${NAMES[bu]}, ${NAMES[bv]}) &middot; edge (${e.u}, ${e.v})`;
       cy.edges().removeClass("hi");
       evt.target.addClass("hi");
     });

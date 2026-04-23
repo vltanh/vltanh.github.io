@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   netgen/_shared.js — shared data, constants, and helper widgets
+   netgen/shared.js : shared data, constants, and helper widgets
    for all 7 generator pages and the index.
 
    Exposes window.NETGEN with:
@@ -22,7 +22,7 @@
 const POSITIONS = {
   // C1 cluster (top, 8 nodes, spread ~120 radius)
   1:  {x:    0, y: -190},
-  2:  {x:  -55, y: -170},
+  2:  {x:  -55, y: -200},
   3:  {x:   50, y: -170},
   4:  {x:  -20, y: -240},
   5:  {x:  -90, y: -215},
@@ -38,7 +38,7 @@ const POSITIONS = {
   14: {x:  165, y:   95},
   // C3 cluster (bottom-left, 4 nodes, spread ~80)
   15: {x: -205, y:  120},
-  16: {x: -255, y:  155},
+  16: {x: -220, y:  155},
   17: {x: -165, y:  165},
   18: {x: -185, y:   85},
   // Outliers near origin
@@ -140,18 +140,25 @@ const CORE_EDGES = {
   C3: cliqueEdges(CORE_NODES.C3),   // 1 edge  (K_2)
 };
 
-// ── Color palette ────────────────────────────────────────────
+// ── Color palette (canvas + doodle) ──────────────────────────
+// Cluster fills are medium-value "colored-pencil" tones so dark
+// pen-ink labels stay legible on top. Edge-stage tokens stay
+// saturated-dark for contrast on cream paper.
 const COLORS = {
-  C1: "#78b4ff", C2: "#ffc66b", C3: "#6bffc9", OUT: "#ff6b7a",
-  edge_intra: {C1:"#78b4ff", C2:"#ffc66b", C3:"#6bffc9"},
-  edge_inter: "#3a66cc",
-  edge_stage2: "#a0ccff",
-  edge_stage3: "#c38bff",
-  edge_stage4: "#8494be",
-  edge_drop:   "#ff6b7a",
-  faint: "#4e5f8a",
-  paper:"#f4f6fb", paper_2:"#c0cceb", paper_3:"#8494be",
-  ink:"#0b1120", ink_2:"#121a36",
+  C1: "#7b9bd6", C2: "#e0a649", C3: "#8fbb70", OUT: "#e07c6a",
+  edge_intra: {C1:"#3559a0", C2:"#b4741d", C3:"#4e7a3a"},
+  edge_inter: "#3a3f4a",
+  edge_stage2: "#567ad8",
+  edge_stage3: "#7e468f",
+  edge_stage4: "#6b6a54",
+  edge_drop:   "#c92a2a",
+  faint: "#9a947a",
+  paper:"#1b2033", paper_2:"#2f3a54", paper_3:"#6b6a54", paper_4:"#9a947a",
+  ink:"#f3ecd7", ink_2:"#ede4c9",
+  azure:"#2a4aa8", azure_2:"#3d66c5", azure_3:"#567ad8",
+  cobalt:"#1a3478", mint:"#4e7a3a", amber:"#c7801e", orchid:"#7e468f",
+  signal:"#c92a2a",
+  hl_yellow:"#f6e15a",
 };
 
 // ── Cytoscape defaults ───────────────────────────────────────
@@ -165,23 +172,23 @@ const CY = {
         style: {
           "background-color": "data(color)",
           "background-gradient-stop-colors": (ele) => {
-            const c = ele.data("color") || "#78b4ff";
+            const c = ele.data("color") || "#7b9bd6";
             return `${c} ${c}`;
           },
           "width": "data(size)",
           "height": "data(size)",
           "border-width": 2,
-          "border-color": "#0b1120",
+          "border-color": "#1b2033",
           "border-opacity": 1,
           "label": lblOn ? "data(id)" : "",
-          "font-family": "JetBrains Mono, monospace",
+          "font-family": "Special Elite, Courier New, monospace",
           "font-size": 11,
-          "font-weight": "600",
-          "color": "#0b1120",
+          "font-weight": "400",
+          "color": "#1b2033",
           "text-valign": "center",
           "text-halign": "center",
-          "text-outline-color": "data(color)",
-          "text-outline-width": 0,
+          "text-outline-color": "#f3ecd7",
+          "text-outline-width": 1.5,
           "overlay-padding": 6,
           "overlay-opacity": 0,
           "transition-property": "background-color, opacity, border-color, border-width, width, height",
@@ -269,7 +276,7 @@ const CY = {
       minZoom: 0.5, maxZoom: 2.5,
       wheelSensitivity: 0.25,
       autounselectify: true,
-      autoungrabify: true,
+      autoungrabify: false,
     });
     cy.fit(undefined, 40);
     window.addEventListener("resize", () => {
@@ -280,23 +287,89 @@ const CY = {
   },
 };
 
-// ── Tooltip helper ───────────────────────────────────────────
+// ── Tooltip helper (rich node + edge stats) ──────────────────
+// Pre-compute intra/inter degree + local clustering coefficient
+// from the canonical EDGES, so every page gets the same figures
+// landing uses.
+const __adj = {};
+NODES.forEach(n => { __adj[n] = new Set(); });
+EDGES.forEach(({u, v}) => { __adj[u].add(v); __adj[v].add(u); });
+const __intraDeg = {}, __interDeg = {}, __localCC = {};
+NODES.forEach(n => { __intraDeg[n] = 0; __interDeg[n] = 0; });
+EDGES.forEach(({u, v}) => {
+  const same = CLUSTER_OF[u] === CLUSTER_OF[v] && CLUSTER_OF[u] !== "OUT";
+  if (same) { __intraDeg[u]++; __intraDeg[v]++; }
+  else      { __interDeg[u]++; __interDeg[v]++; }
+});
+NODES.forEach(n => {
+  const nbrs = [...__adj[n]];
+  const k = nbrs.length;
+  if (k < 2) { __localCC[n] = 0; return; }
+  let tri = 0;
+  for (let i = 0; i < k; i++) for (let j = i + 1; j < k; j++) {
+    if (__adj[nbrs[i]].has(nbrs[j])) tri++;
+  }
+  __localCC[n] = (2 * tri) / (k * (k - 1));
+});
+function __edgeKind(u, v) {
+  const cu = CLUSTER_OF[u], cv = CLUSTER_OF[v];
+  if (cu === "OUT" && cv === "OUT") return "outlier-outlier";
+  if (cu === "OUT" || cv === "OUT") return "clustered-outlier";
+  if (cu === cv) return "intra-cluster (" + cu + ")";
+  return "inter-cluster (" + cu + ", " + cv + ")";
+}
+
 function makeTooltip(cy, container) {
   const tip = document.createElement("div");
   tip.className = "cy-tooltip";
   container.appendChild(tip);
+  function place(rx, ry) {
+    const rect = container.getBoundingClientRect();
+    let x = rx + 14, y = ry + 14;
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    if (x + tw > rect.width - 8)  x = rx - tw - 12;
+    if (y + th > rect.height - 8) y = ry - th - 8;
+    tip.style.left = x + "px";
+    tip.style.top  = y + "px";
+  }
   cy.on("mouseover", "node", e => {
     const n = e.target;
-    const id = n.id();
-    const cl = CLUSTER_OF[id] || "?";
-    const deg = DEGREES[id];
-    tip.innerHTML = `node <b>${id}</b> &middot; ${cl} &middot; deg ${deg}`;
+    const id = parseInt(n.id(), 10);
+    const cl = CLUSTER_OF[id];
+    const type = cl === "OUT" ? "outlier" : "clustered";
+    const clLabel = cl === "OUT" ? "(none)" : cl;
+    const dTot = DEGREES[id] || 0;
+    const dInt = __intraDeg[id] || 0;
+    const dExt = __interDeg[id] || 0;
+    const cc   = __localCC[id] || 0;
+    const mu   = dTot > 0 ? dExt / dTot : 0;
+    tip.innerHTML =
+      '<div class="hd">node ' + id + ' &middot; ' + type + '</div>' +
+      '<div>cluster <b>' + clLabel + '</b></div>' +
+      '<div>degree <b>' + dTot + '</b> <span class="dim">(intra ' + dInt + ', inter ' + dExt + ')</span></div>' +
+      '<div>local cc <b>' + cc.toFixed(2) + '</b></div>' +
+      '<div>&mu;<sub>i</sub> <b>' + mu.toFixed(2) + '</b></div>';
     tip.classList.add("on");
     const { x, y } = n.renderedPosition();
-    tip.style.left = (x + 14) + "px";
-    tip.style.top = (y - 14) + "px";
+    place(x, y);
   });
-  cy.on("mouseout", "node", () => tip.classList.remove("on"));
+  cy.on("mouseover", "edge", e => {
+    const edge = e.target;
+    const src = edge.source().id();
+    const tgt = edge.target().id();
+    const kind = __edgeKind(parseInt(src, 10), parseInt(tgt, 10));
+    tip.innerHTML =
+      '<div class="hd">edge</div>' +
+      '<div><b>' + src + '</b>, <b>' + tgt + '</b></div>' +
+      '<div class="dim">' + kind + '</div>';
+    tip.classList.add("on");
+    const mid = edge.midpoint ? edge.midpoint() : null;
+    const rp = mid && mid.x != null ? mid : edge.renderedBoundingBox();
+    const rx = rp.x != null ? rp.x : (rp.x1 + rp.x2) / 2;
+    const ry = rp.y != null ? rp.y : (rp.y1 + rp.y2) / 2;
+    place(rx, ry);
+  });
+  cy.on("mouseout", "node edge", () => tip.classList.remove("on"));
   cy.on("pan zoom", () => tip.classList.remove("on"));
   return tip;
 }
@@ -346,49 +419,34 @@ function toggle(opts) {
   onChange(input.checked);
 }
 
-// ── Site-link bar HTML ───────────────────────────────────────
+// ── Top-nav bar (per-gen pages) ──────────────────────────────
+// Landing handles its own nav inline. Generator pages get a
+// flex bar: back-arrow on the left, small icon links (notes,
+// source) on the right. Rendered into <div id="links"></div>
+// which should sit at the very top of <main class="page">.
 function linksRow(opts = {}) {
-  const {
-    gen,           // 'sbm', 'ec-sbm-v1', etc., or null for main page
-    hasIndex = true,
-  } = opts;
+  const { gen } = opts;
+  if (!gen) return "";
   const REPO = "https://github.com/vltanh/network-generation";
-  const PROJECT = "https://vltanh.me/projects/network-generation/";
-  const links = [];
-  if (gen) {
-    links.push({
-      text: "algorithm notes",
-      href: `${REPO}/blob/main/docs/algorithms/${gen}.md`,
-      ext: true,
-      primary: true,
-    });
-  } else {
-    links.push({
-      text: "algorithm docs",
-      href: `${REPO}/tree/main/docs/algorithms`,
-      ext: true,
-      primary: true,
-    });
-  }
-  if (hasIndex) {
-    links.push({ text: "all generators", href: "./", ext: false, primary: false });
-  }
-  links.push({ text: "project page", href: PROJECT, ext: false, primary: true });
-  links.push({
-    text: "source",
-    href: REPO,
-    ext: true,
-    primary: false,
-    icon: `<svg height="12" width="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>`,
-  });
-  return `<nav class="site-links" aria-label="site links">${
-    links.map(l => {
-      const ext = l.ext ? ' target="_blank" rel="noopener"' : "";
-      const cls = "site-link" + (l.primary ? "" : " ghost");
-      const icon = l.icon || "";
-      return `<a class="${cls}" href="${l.href}"${ext}>${icon}${l.text}</a>`;
-    }).join("")
-  }</nav>`;
+  const NOTES = `${REPO}/blob/main/docs/algorithms/${gen}.md`;
+  return (
+    '<div class="top-nav">'
+    + '<a class="back-nav" href="./" aria-label="back to all generators">'
+    +   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>'
+    +   '<span>back</span>'
+    + '</a>'
+    + '<nav class="top-icons" aria-label="generator links">'
+    +   '<a href="' + NOTES + '" target="_blank" rel="noopener" aria-label="algorithm notes">'
+    +     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4.5v15A1.5 1.5 0 0 0 5.5 21H20V5H5.5A1.5 1.5 0 0 1 4 4.5Z"/><path d="M4 4.5A1.5 1.5 0 0 1 5.5 3H20v2"/><path d="M8 8h8M8 11.5h8M8 15h6"/></svg>'
+    +     '<span>notes</span>'
+    +   '</a>'
+    +   '<a href="' + REPO + '" target="_blank" rel="noopener" aria-label="github repository">'
+    +     '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>'
+    +     '<span>source</span>'
+    +   '</a>'
+    + '</nav>'
+    + '</div>'
+  );
 }
 
 // ── Kin-cards helper ─────────────────────────────────────────
@@ -401,6 +459,28 @@ function kinSection(opts) {
       <div class="diff">${s.diff}</div>
     </a>`).join("");
   return `<section class="kin"><h2>${title}</h2><div class="kin-grid">${cards}</div></section>`;
+}
+
+// ── Auto-inject back-to-top FAB on every page ────────────────
+function injectBackToTop() {
+  if (typeof document === "undefined") return;
+  if (document.querySelector(".back-to-top")) return;
+  const btt = document.createElement("button");
+  btt.className = "back-to-top";
+  btt.setAttribute("aria-label", "back to top");
+  btt.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20 Q 11 13 12 5"/><path d="M7 10 Q 9 8 12 5 Q 15 8 17 10"/></svg>';
+  btt.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+  document.body.appendChild(btt);
+  window.addEventListener("scroll", () => {
+    btt.classList.toggle("on", window.scrollY > 420);
+  }, { passive: true });
+}
+if (typeof document !== "undefined") {
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", injectBackToTop);
+  } else {
+    injectBackToTop();
+  }
 }
 
 // ── Export ────────────────────────────────────────────────────
