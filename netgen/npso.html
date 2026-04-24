@@ -167,7 +167,11 @@
   \[
     h_{ij} \;=\; \mathrm{arccosh}\bigl( \cosh r_i \cosh r_j \;-\; \sinh r_i \sinh r_j \cos d_\mathrm{ang}(\theta_i, \theta_j) \bigr).
   \]
-  <p>Close in radius AND close in angle gives a small \(h_{ij}\); a big radial gap or a diametric angular gap blows it up. One distance per candidate. The plot below is the sorted \(h_{ij}\) for one specific arrival (node \(i = N\) on this 20-node synthetic at the current embedding and \(T = 0.3\)); the dashed vertical marks \(R_i(T)\). Candidates to the left of the marker are "inside" the disk radius and will connect with high probability; candidates to the right are "outside".</p>
+  <p>Close in radius AND close in angle gives a small \(h_{ij}\); a big radial gap or a diametric angular gap blows it up. One distance per candidate. The disk below visualises this directly: hover any node \(i\) and a dashed red curve traces the boundary of \(i\)'s hyperbolic ball of radius \(R_i(T = 0.3)\). Other nodes turn azure when \(h_{ij} \leq R_i\) (they sit "inside" \(i\)'s connection cutoff) and grey when \(h_{ij} > R_i\). The hyperbolic ball is not a Euclidean disk on this rendering; far-from-origin nodes get pear-shaped balls because hyperbolic distance grows non-linearly along the radial axis.</p>
+  <div class="disk-panel" style="padding:.9rem 1rem">
+    <svg id="fd-hover" viewBox="-270 -270 540 540" preserveAspectRatio="xMidYMid meet"></svg>
+  </div>
+  <p>The strip below pivots on the same data, sorted ascending: \(h_{ij}\) for one fixed arrival (node \(i = N\) at \(T = 0.3\)); the dashed vertical marks \(R_i(T)\). Bars to the left of the marker are the candidates inside that ball.</p>
   <div class="disk-panel" style="padding:.9rem 1rem">
     <svg id="hij-strip" viewBox="0 0 640 180" preserveAspectRatio="xMidYMid meet"></svg>
   </div>
@@ -188,10 +192,6 @@
   </div>
   <p>At \(T \to 0\) the rule becomes "deterministic geometry": only pairs strictly inside the cutoff connect, every close triple closes into a triangle, clustering coefficient is high. At \(T \to 1\) the rule becomes "noise": almost every pair flips a near-fair coin regardless of distance, and clustering collapses. The empirical clustering coefficient \(cc(T)\) of one nPSO sample is a Monte Carlo average over these coin flips, so different draws at the same \(T\) give different values; the curve is noisy. That noise matters later when we try to search for a \(T\) that hits an input target.</p>
   <p>The three \(p(i, j)\) values above are the weights the next section uses to pick which \(m\) predecessors node \(i\) actually connects to.</p>
-  <p>One last sanity check. Hover any node on the disk below to draw its connection ball at \(T = 0.3\): a dashed red circle with radius scaled from that node's \(R_i(T)\). Predecessors falling inside the circle have \(p \to 1\); those outside have \(p \to 0\). The radius shrinks from outer rim to centre as \(t\) grows, because \(R_t(T)\) climbs with \(t\) faster than the disk's outer radius does.</p>
-  <div class="disk-panel" style="padding:.9rem 1rem">
-    <svg id="fd-hover" viewBox="-270 -270 540 540" preserveAspectRatio="xMidYMid meet"></svg>
-  </div>
 </section>
 
 <!-- ─────────── Generation · sampling m edges per arrival ─────────── -->
@@ -1257,10 +1257,55 @@ window.MathJax = {
       const den = s * M_PROF * (1 - BETA);
       return 2 * lnT - 2 * Math.log(num / den);
     }
-    // Map hyperbolic R to Euclidean disk units; same scale as the
-    // node radial scaling used by the embedding.
-    function visualR(R_hyp) {
-      return Math.max(2, (R_hyp / R_HYP_MAX) * (R_MAX - R_MIN) + R_MIN);
+    // Map hyperbolic radial coordinate to Euclidean disk units, same
+    // scaling the embedding uses for nodes (R_MIN at the centre,
+    // R_MAX at the rim, linear in r_hyp / R_HYP_MAX).
+    function rToDiskRadius(r_hyp) {
+      return R_MIN + (R_MAX - R_MIN) * (Math.max(0, r_hyp) / R_HYP_MAX);
+    }
+    // Boundary of the hyperbolic ball of radius R around node u with
+    // hyperbolic position (r_u, theta_u). Sweeps theta_b around the disk;
+    // for each angle, solves the closed-form quadratic for r_b on the
+    // boundary. A direction with no real solution (the ball does not
+    // reach that angle) is skipped, leaving an open path that closes
+    // on the visible arc only.
+    function hyperbolicBall(r_u, theta_u, R, nSamples = 180) {
+      const a = Math.cosh(r_u);
+      const sU = Math.sinh(r_u);
+      const sR = Math.sinh(R);
+      const K = Math.cosh(R);
+      const pts = [];
+      for (let k = 0; k <= nSamples; k++) {
+        const theta_b = -Math.PI + (k / nSamples) * 2 * Math.PI;
+        const dth = theta_b - theta_u;
+        const cosD = Math.cos(dth);
+        const sinD = Math.sin(dth);
+        const b = sU * cosD;
+        const denom = a * a - b * b;
+        const radTerm = sR * sR - sU * sU * sinD * sinD;
+        if (denom <= 0 || radTerm < 0) { pts.push(null); continue; }
+        const sqrtT = a * Math.sqrt(radTerm);
+        const sPlus  = (K * b + sqrtT) / denom;
+        const sMinus = (K * b - sqrtT) / denom;
+        const candidates = [sPlus, sMinus].filter((s) => s >= 0);
+        if (!candidates.length) { pts.push(null); continue; }
+        const sBest = Math.max(...candidates);
+        const r_b = Math.asinh(sBest);
+        const dr = rToDiskRadius(r_b);
+        pts.push([dr * Math.cos(theta_b), dr * Math.sin(theta_b)]);
+      }
+      return pts;
+    }
+    function ballPath(pts) {
+      let d = "", inSeg = false;
+      pts.forEach((p) => {
+        if (p === null) { inSeg = false; return; }
+        d += (inSeg ? "L" : "M") + p[0].toFixed(2) + "," + p[1].toFixed(2);
+        inSeg = true;
+      });
+      // Close only when the full sweep stayed inside.
+      if (pts[0] && pts[pts.length - 1]) d += "Z";
+      return d;
     }
 
     const viz = NETGEN.VIZ.init(null, {
@@ -1275,29 +1320,53 @@ window.MathJax = {
     });
     NETGEN.makeTooltip(viz, svg.node().closest(".disk-panel"));
 
-    let circle = null;
-    let label  = null;
+    let path = null;
+    let label = null;
     function clearOverlay() {
-      if (circle) { circle.remove(); circle = null; }
+      if (path) { path.remove(); path = null; }
       if (label) { label.remove(); label = null; }
+      viz.eachNode((n) => {
+        const nid = parseInt(n.id, 10);
+        n.color = CLUSTER_COLOR_BY_ID[SHARED.ASSIGNED[nid]] || COL.paper_3;
+      });
+      viz.clearAllNodeClass("_refresh_");
     }
     viz.onNodeHoverEnter((d) => {
       const id = parseInt(d.id, 10);
       const t = rankOf[id] + 1;
       const R = R_at(t, T_FIXED);
       if (!isFinite(R) || R <= 0) return;
+      const polar = SHARED.POLAR[id];   // {r (disk), r_hyp, theta}
+      if (!polar) return;
+      const pts = hyperbolicBall(polar.r_hyp, polar.theta, R);
+      const dStr = ballPath(pts);
+      if (!dStr) return;
+      clearOverlay();
+      path = overlay.append("path")
+        .attr("d", dStr)
+        .attr("fill", COL.signal).attr("fill-opacity", 0.08)
+        .attr("stroke", COL.signal).attr("stroke-width", 1.4)
+        .attr("stroke-dasharray", "4 3").attr("opacity", 0.9)
+        .attr("pointer-events", "none");
+      // Recolour nodes by their hyperbolic distance to the hovered one.
+      // Self stays at its cluster colour; inside-the-ball nodes go azure;
+      // outside nodes fade to grey. Strict h_ij <= R partition (not the
+      // soft Fermi-Dirac probability), to match the geometric story.
+      viz.eachNode((n) => {
+        const nid = parseInt(n.id, 10);
+        if (nid === id) {
+          n.color = CLUSTER_COLOR_BY_ID[SHARED.ASSIGNED[nid]] || COL.paper_3;
+          return;
+        }
+        const a = Math.min(id, nid), bId = Math.max(id, nid);
+        const h = SHARED.DISTS[`${a}-${bId}`];
+        n.color = (h != null && h <= R) ? COL.azure : COL.paper_3;
+      });
+      viz.clearAllNodeClass("_refresh_");
       const x = SHARED.POS_POLAR[id].x;
       const y = SHARED.POS_POLAR[id].y;
-      clearOverlay();
-      circle = overlay.append("circle")
-        .attr("cx", x).attr("cy", y)
-        .attr("r", visualR(R))
-        .attr("fill", COL.signal).attr("fill-opacity", 0.07)
-        .attr("stroke", COL.signal).attr("stroke-width", 1.4)
-        .attr("stroke-dasharray", "4 3").attr("opacity", 0.85)
-        .attr("pointer-events", "none");
       label = overlay.append("text")
-        .attr("x", x + 8).attr("y", y - 8)
+        .attr("x", x + 10).attr("y", y - 8)
         .attr("fill", COL.signal)
         .attr("font-family", "Caveat Brush, cursive").attr("font-size", 14)
         .attr("pointer-events", "none")
