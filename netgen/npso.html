@@ -40,6 +40,11 @@
 .readout .item b{ color:var(--azure); margin-left:.3rem; }
 .readout .item.target b{ color:var(--mint); }
 .readout .item.diff b{ color:var(--signal); }
+.graph-canvas{
+  height:auto;
+  aspect-ratio: 640 / 680;
+  max-height: 520px;
+}
 </style>
 </head>
 <body>
@@ -58,11 +63,25 @@
   <p>nPSO is the one exception. It gets triangles by embedding nodes in a <em>hyperbolic disk</em> and connecting nodes that are geometrically close. A temperature knob \(T \in (0, 1)\) controls how strictly "close" is enforced: small \(T\) means only very close pairs connect (high clustering), large \(T\) means random-ish (low clustering). Matching an empirical clustering coefficient means <em>searching for the right \(T\)</em>.</p>
 </section>
 
-<!-- ─────────── Stage 1 ─────────── -->
+<!-- ─────────── Profiling · outliers-as-singletons ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 1 · profile</div>
+  <div class="stage-num">profiling · outliers are singletons</div>
+  <h2>nPSO has no outlier category. Every node lives in a cluster.</h2>
+  <p>Under the default <code>outlier_mode=singleton</code>, a node that is not in a size-2+ community becomes its own 1-node cluster. The generator then treats every size-1 cluster like any other cluster: it gets an angular sector on the disk, a mixing proportion \(\rho_k = 1/N\), and shows up in the output <code>com.csv</code>. The graph below colours the 20-node synthetic by the resulting 5 clusters (3 real + 2 singletons): nothing is highlighted in red, because no node is special from nPSO's point of view.</p>
+  <div class="graph" id="g-input">
+    <div class="graph-chrome">
+      <span>input G &middot; coloured by the 5-cluster profile assignment</span>
+      <span class="right">com.csv</span>
+    </div>
+    <div class="graph-canvas" id="g-input-cy"></div>
+  </div>
+</section>
+
+<!-- ─────────── Profiling · the input contract ─────────── -->
+<section class="stage">
+  <div class="stage-num">profiling · the input contract</div>
   <h2>Fit every scalar the generator needs.</h2>
-  <p>Profile reads the reference network + clustering and distils them into a small, explicit contract. The default model is <strong>nPSO2</strong>, so alongside the scalars profile also emits a weight vector \(\rho_k = \text{size}_k / N\), one entry per mixture component.</p>
+  <p>Profile reads the reference network + clustering and distils them into a small, explicit contract. The default model is <strong>nPSO2</strong>, so alongside the scalars profile also emits a weight vector \(\rho_k = \text{size}_k / N\), one entry per mixture component (including the singleton outliers introduced above).</p>
   <table class="profile-table">
     <tbody>
       <tr><th>N</th><td class="val" id="prof-N">&middot;</td><td class="desc">Number of nodes.</td></tr>
@@ -90,9 +109,9 @@
   </div>
 </section>
 
-<!-- ─────────── Stage 2 ─────────── -->
+<!-- ─────────── Generation · the disk ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 2 · the disk</div>
+  <div class="stage-num">generation · the disk</div>
   <h2>Embed every node on the Poincar&eacute; disk.</h2>
   <p>Each node gets two polar coordinates. The <em>radial</em> position encodes popularity (hubs near the centre, low-degree nodes at the rim); the <em>angular</em> position encodes similarity (nearby angles = similar).</p>
   <p>Nodes are indexed in descending order by degree, so the biggest hub is \(t_i = 1\) and the lowest-degree node is \(t_i = N\). The rank appears as each node's label in the disk below.</p>
@@ -119,9 +138,9 @@
   </div>
 </section>
 
-<!-- ─────────── Stage 3 ─────────── -->
+<!-- ─────────── Generation · temperature ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 3 · temperature</div>
+  <div class="stage-num">generation · temperature</div>
   <h2>Drag $$T$$. Watch which edges get picked.</h2>
   <p>For each pair of nodes \((i, j)\), nPSO computes a hyperbolic distance \(h_{ij}\) on the Poincaré disk,</p>
   \[
@@ -153,9 +172,9 @@
   </div>
 </section>
 
-<!-- ─────────── Stage 4 ─────────── -->
+<!-- ─────────── Generation · the secant search ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 4 · the secant search</div>
+  <div class="stage-num">generation · the secant search</div>
   <h2>Bracket, bisect, secant, keep the best.</h2>
   <p>\(cc(T)\) trends downward in \(T\) but is not strictly monotone (see Stage 3). The code nonetheless treats this as 1D root-finding. Start with \([T_{\min}, T_{\max}] = [0, 1]\) and bisect. Residual signs drive the bracket update backwards from the textbook: \(cc &gt; \mathrm{target}\) means \(T\) is too small, so \(T_{\min}\) moves right; \(cc &lt; \mathrm{target}\) means \(T\) is too large, so \(T_{\max}\) moves left.</p>
   <p>Once both bracket ends have opposite-signed residuals, secant kicks in:</p>
@@ -297,14 +316,24 @@ window.MathJax = {
   // are ordered exactly the way profile_common.compute_comm_size does it
   // (size desc, cluster-id asc on ties), so index k here matches the
   // mixing-proportions entry k in derived.txt.
+  //
+  // Colour-wise: outliers-as-singletons use a neutral palette, not the
+  // site-wide outlier red. From nPSO's POV a singleton cluster is still
+  // a cluster, so the viz treats it as "just another colour".
+  const OUTLIER_CLUSTER_PALETTE = ["#9e7ec4", "#6fa6b0", "#c49a6c", "#78a06f"];
   const CLUSTER_DEFS = (function () {
     const raw = [
       { id: 'C1', nodes: C1, color: COL.C1, isOutlier: false },
       { id: 'C2', nodes: C2, color: COL.C2, isOutlier: false },
       { id: 'C3', nodes: C3, color: COL.C3, isOutlier: false },
     ];
-    OUT_N.forEach(n => {
-      raw.push({ id: 'OUT' + n, nodes: [n], color: COL.OUT, isOutlier: true });
+    OUT_N.forEach((n, i) => {
+      raw.push({
+        id: 'S' + n,
+        nodes: [n],
+        color: OUTLIER_CLUSTER_PALETTE[i % OUTLIER_CLUSTER_PALETTE.length],
+        isOutlier: true,
+      });
     });
     raw.sort((a, b) => (b.nodes.length - a.nodes.length) || (a.id < b.id ? -1 : 1));
     return raw;
@@ -353,6 +382,89 @@ window.MathJax = {
   document.getElementById("prof-gamma").textContent = GAMMA.toFixed(2);
   document.getElementById("prof-C").textContent     = C;
   document.getElementById("prof-tcc").textContent   = TARGET_CC.toFixed(3);
+
+  // ── Profiling · input graph coloured by 5-cluster assignment ──
+  // Singleton outliers get neutral (non-red) colours so the viewer sees
+  // that nPSO treats them as "just more clusters", not as a special
+  // category.
+  (function () {
+    const host = document.getElementById("g-input-cy");
+    if (!host) return;
+    host.innerHTML = "";
+    const svg = d3.select(host).append("svg")
+      .attr("class", "viz-svg")
+      .attr("viewBox", "-320 -340 640 680")
+      .attr("preserveAspectRatio", "xMidYMid meet");
+
+    // Per-node colour: walk CLUSTER_DEFS (which already includes singletons)
+    // and find the cluster containing the node. Precompute for speed.
+    const colourOf = {};
+    CLUSTER_DEFS.forEach(cd => cd.nodes.forEach(n => { colourOf[n] = cd.color; }));
+
+    // Block rects: one per cluster, dashed rounded rect with the cluster
+    // id in the top-left. Singletons get their own rect too, to reinforce
+    // "they are clusters".
+    const layer = svg.append("g").attr("class", "block-rects");
+    const rectsBy = CLUSTER_DEFS.map(cd => {
+      const rect = layer.append("rect")
+        .attr("rx", 10).attr("ry", 10)
+        .attr("fill", cd.color).attr("fill-opacity", 0.07)
+        .attr("stroke", cd.color).attr("stroke-width", 1.5)
+        .attr("stroke-dasharray", "7 5")
+        .attr("opacity", 0.92);
+      const label = layer.append("text")
+        .attr("class", "block-ring-label")
+        .attr("text-anchor", "start")
+        .attr("fill", cd.color)
+        .attr("opacity", 0.95)
+        .style("font-family", "Caveat Brush, cursive")
+        .style("font-size", "18px")
+        .text(cd.id + (cd.isOutlier ? " · singleton" : ""));
+      return { cd, rect, label };
+    });
+
+    const edges = NETGEN.EDGES.map(e => ({
+      u: e.u, v: e.v,
+      color: COL.paper_3,
+      w: 0.9,
+    }));
+    const viz = NETGEN.VIZ.init("g-input-cy", {
+      svg, showLabels: true, includeOutliers: true, edges,
+      nodeColor: (id) => colourOf[parseInt(id, 10)] || COL.paper_3,
+    });
+    NETGEN.makeTooltip(viz, document.getElementById("g-input"));
+
+    function syncRects() {
+      const padX = 30, padY = 34;
+      rectsBy.forEach(s => {
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        s.cd.nodes.forEach(id => {
+          const n = viz.nodeById[String(id)];
+          if (!n) return;
+          if (n.x < minX) minX = n.x;
+          if (n.x > maxX) maxX = n.x;
+          if (n.y < minY) minY = n.y;
+          if (n.y > maxY) maxY = n.y;
+        });
+        if (!isFinite(minX)) return;
+        let x = minX - padX, y = minY - padY;
+        let w = (maxX - minX) + 2 * padX;
+        let h = (maxY - minY) + 2 * padY;
+        const labelW = s.label.node().getComputedTextLength
+          ? s.label.node().getComputedTextLength() : 0;
+        const wanted = labelW + 18;
+        if (w < wanted) {
+          const cx = (minX + maxX) / 2;
+          w = wanted;
+          x = cx - w / 2;
+        }
+        s.rect.attr("x", x).attr("y", y).attr("width", w).attr("height", h);
+        s.label.attr("x", x + 10).attr("y", y + 18);
+      });
+    }
+    syncRects();
+    viz.sim.on("tick.inputRects", syncRects);
+  })();
 
   // ── Stage 1 plot: degree histogram + Hill fit ──────────────
   (function () {
