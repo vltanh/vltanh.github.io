@@ -1273,48 +1273,72 @@ window.MathJax = {
       return R_MIN + (R_MAX - R_MIN) * (Math.max(0, r_hyp) / R_HYP_MAX);
     }
     // Boundary of the hyperbolic ball of radius R around node u with
-    // hyperbolic position (r_u, theta_u). Sweeps theta_b around the disk;
-    // for each angle, solves the closed-form quadratic for r_b on the
-    // boundary. A direction with no real solution (the ball does not
-    // reach that angle) is skipped, leaving an open path that closes
-    // on the visible arc only.
+    // hyperbolic position (r_u, theta_u). Two cases:
+    //   R >= r_u: ball encloses the origin; sweep theta_b across the
+    //             full 2*pi, take the positive root at each angle.
+    //   R < r_u:  ball misses the origin; angular extent bounded by
+    //             phi_max = arcsin(sinh(R)/sinh(r_u)). Sweep phi in
+    //             [-phi_max, phi_max], take both roots (outer arc
+    //             plus inner arc reversed) to close the boundary.
     function hyperbolicBall(r_u, theta_u, R, nSamples = 180) {
       const a = Math.cosh(r_u);
       const sU = Math.sinh(r_u);
       const sR = Math.sinh(R);
       const K = Math.cosh(R);
-      const pts = [];
-      for (let k = 0; k <= nSamples; k++) {
-        const theta_b = -Math.PI + (k / nSamples) * 2 * Math.PI;
-        const dth = theta_b - theta_u;
-        const cosD = Math.cos(dth);
-        const sinD = Math.sin(dth);
+
+      function solveAt(phi) {
+        const cosD = Math.cos(phi);
+        const sinD = Math.sin(phi);
         const b = sU * cosD;
         const denom = a * a - b * b;
         const radTerm = sR * sR - sU * sU * sinD * sinD;
-        if (denom <= 0 || radTerm < 0) { pts.push(null); continue; }
+        if (denom <= 0 || radTerm < 0) return null;
         const sqrtT = a * Math.sqrt(radTerm);
-        const sPlus  = (K * b + sqrtT) / denom;
-        const sMinus = (K * b - sqrtT) / denom;
-        const candidates = [sPlus, sMinus].filter((s) => s >= 0);
-        if (!candidates.length) { pts.push(null); continue; }
-        const sBest = Math.max(...candidates);
-        const r_b = Math.asinh(sBest);
-        const dr = rToDiskRadius(r_b);
-        pts.push([dr * Math.cos(theta_b), dr * Math.sin(theta_b)]);
+        return {
+          sPlus:  (K * b + sqrtT) / denom,
+          sMinus: (K * b - sqrtT) / denom,
+          theta:  theta_u + phi,
+        };
       }
-      return pts;
+      function pointAt(s, theta_b) {
+        if (s < 0) return null;
+        const r_b = Math.asinh(s);
+        const dr = rToDiskRadius(r_b);
+        return [dr * Math.cos(theta_b), dr * Math.sin(theta_b)];
+      }
+
+      const outer = [], inner = [];
+      if (sR >= sU) {
+        // Origin inside the ball: full sweep, one positive root per phi.
+        for (let k = 0; k <= nSamples; k++) {
+          const phi = -Math.PI + (k / nSamples) * 2 * Math.PI;
+          const r = solveAt(phi);
+          if (!r) continue;
+          const pt = pointAt(r.sPlus >= 0 ? r.sPlus : r.sMinus, r.theta);
+          if (pt) outer.push(pt);
+        }
+        return outer;
+      }
+      // sR < sU: bounded angular extent.
+      const phiMax = Math.asin(sR / sU);
+      for (let k = 0; k <= nSamples; k++) {
+        const phi = -phiMax + (2 * phiMax) * (k / nSamples);
+        const r = solveAt(phi);
+        if (!r) continue;
+        const po = pointAt(r.sPlus, r.theta);
+        const pi = pointAt(r.sMinus, r.theta);
+        if (po) outer.push(po);
+        if (pi) inner.push(pi);
+      }
+      return outer.concat(inner.slice().reverse());
     }
     function ballPath(pts) {
-      let d = "", inSeg = false;
-      pts.forEach((p) => {
-        if (p === null) { inSeg = false; return; }
-        d += (inSeg ? "L" : "M") + p[0].toFixed(2) + "," + p[1].toFixed(2);
-        inSeg = true;
-      });
-      // Close only when the full sweep stayed inside.
-      if (pts[0] && pts[pts.length - 1]) d += "Z";
-      return d;
+      if (!pts.length) return "";
+      let d = "M" + pts[0][0].toFixed(2) + "," + pts[0][1].toFixed(2);
+      for (let k = 1; k < pts.length; k++) {
+        d += "L" + pts[k][0].toFixed(2) + "," + pts[k][1].toFixed(2);
+      }
+      return d + "Z";
     }
 
     const viz = NETGEN.VIZ.init(null, {
