@@ -181,15 +181,20 @@
   </div>
   <div class="disk-panel">
     <div class="widget-row" style="padding:0;border:none;margin:0 0 .8rem">
-      <div class="scrub">
+      <button class="btn" id="impl3-prev">← back</button>
+      <button class="btn primary" id="impl3-next">next →</button>
+      <button class="btn" id="impl3-reset">reset</button>
+      <button class="btn" id="impl3-end">skip to end</button>
+      <div class="scrub" style="margin-left:auto">
         <label>T</label>
-        <input type="range" id="T-slider" min="0.001" max="0.999" step="0.001" value="0.5">
-        <output id="T-val">0.500</output>
+        <input type="range" id="T-slider" min="0.001" max="0.999" step="0.001" value="0.3">
+        <output id="T-val">0.300</output>
       </div>
-      <button class="btn" id="T-reroll" type="button">random edges</button>
+      <button class="btn" id="T-reroll" type="button">random</button>
+      <span class="step-label">arrival <b id="impl3-cur">0</b> / <span id="impl3-total">19</span></span>
     </div>
-    <svg id="disk-T" viewBox="-270 -270 540 540" preserveAspectRatio="xMidYMid meet"></svg>
-    <div class="step-desc" style="margin-bottom:.6rem">Edge count is constant (impl 3 gives \(m(m+1)/2 + (N-m-1)m\) regardless of T). What the slider actually shows is the edge set rearranging: hubs near the centre stay connected to each other at any T (their pairwise \(p(i,j)\) is near 1 across the bracket), while the lower-rank periphery swaps neighbours as \(T\) rises and the Fermi-Dirac sigmoid flattens.</div>
+    <svg id="disk-impl3" viewBox="-270 -270 540 540" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="step-desc" id="impl3-desc"></div>
     <div class="readout">
       <span class="item target">target ccoeff <b id="target-cc">&middot;</b></span>
       <span class="item">achieved ccoeff <b id="ach">&middot;</b></span>
@@ -917,9 +922,14 @@ window.MathJax = {
     });
   })();
 
-  // ── Stage 2: T slider disk (VIZ + setEdges per T) ──
+  // ── Impl-3 step-through: one arrival per step ──
+  // Walks the implementation-3 edge sampler one arrival at a time.
+  // Each step advances the arrival index, adds that arrival's m edges
+  // (or all-predecessors edges for the seed K_{m+1}), and highlights
+  // the edges just placed. T slider adjusts the Fermi-Dirac temperature;
+  // "random" reseeds the per-arrival U_NODE uniforms.
   (function () {
-    const svg = d3.select("#disk-T");
+    const svg = d3.select("#disk-impl3");
     drawDiskDecorations(svg);
     const viz = NETGEN.VIZ.init(null, {
       svg,
@@ -939,14 +949,139 @@ window.MathJax = {
     const slider    = document.getElementById("T-slider");
     const tval      = document.getElementById("T-val");
     const rerollBtn = document.getElementById("T-reroll");
+    const descEl    = document.getElementById("impl3-desc");
+    const curEl     = document.getElementById("impl3-cur");
+    const totEl     = document.getElementById("impl3-total");
     document.getElementById("target-cc").textContent = TARGET_CC.toFixed(3);
 
-    // Stage 3 keeps its own edge-sample state, separate from SHARED, so
-    // the "random edges" button can reseed just the per-arrival U_NODE
-    // without re-rolling the angular embedding (that's stage 2's job)
-    // or disturbing the trajectory (stage 4).
+    totEl.textContent = String(sorted.length - 1);
+
     let localEmb = SHARED;
     let edgeNonce = 0;
+    let step = sorted.length - 1;   // start showing the final graph
+    let arrivals = [];
+
+    function R_of_T_at(t, T) {
+      // R_t(T) evaluated at 1-indexed arrival t.
+      const s = Math.sin(Math.PI * T);
+      if (s <= 0 || t < 2) return Infinity;
+      const lnT = Math.log(t);
+      if (Math.abs(BETA - 1) < 1e-9) {
+        return 2 * lnT - 2 * Math.log((2 * T * lnT) / (s * M_PROF));
+      }
+      const num = 2 * T * (1 - Math.exp(-(1 - BETA) * lnT));
+      const den = s * M_PROF * (1 - BETA);
+      return 2 * lnT - 2 * Math.log(num / den);
+    }
+
+    // Per-arrival edge list + per-candidate p(i,j) for the caption.
+    function computeArrival(i, T, emb) {
+      const newNode = sorted[i];
+      if (i === 0) return { newNode, placed: [], picks: [] };
+      const candidates = [], weights = [];
+      const R_i = R_of_T_at(i + 1, T);
+      for (let j = 0; j < i; j++) {
+        const other = sorted[j];
+        const a = Math.min(other, newNode), b = Math.max(other, newNode);
+        const d = emb.DISTS[`${a}-${b}`];
+        const p = 1 / (1 + Math.exp((d - R_i) / (2 * T)));
+        candidates.push(other);
+        weights.push(p);
+      }
+      const m = M_PROF;
+      if (candidates.length <= m) {
+        const placed = candidates.map((c, k) => [Math.min(newNode, c), Math.max(newNode, c), weights[k]]);
+        return {
+          newNode,
+          placed,
+          picks: candidates.map((c, k) => ({ node: c, p: weights[k] })),
+          autoAll: true,
+        };
+      }
+      const us = emb.U_NODE[i];
+      const wcopy = weights.slice(), ccopy = candidates.slice();
+      const picks = [];
+      for (let c = 0; c < m; c++) {
+        let sum = 0; for (const w of wcopy) sum += w;
+        if (sum <= 0) break;
+        const u = us[c] * sum;
+        let acc = 0, idx = 0;
+        for (let jj = 0; jj < wcopy.length; jj++) {
+          acc += wcopy[jj];
+          if (acc >= u) { idx = jj; break; }
+        }
+        picks.push({ node: ccopy[idx], p: wcopy[idx] });
+        ccopy.splice(idx, 1);
+        wcopy.splice(idx, 1);
+      }
+      const placed = picks.map(x => [
+        Math.min(newNode, x.node), Math.max(newNode, x.node), x.p,
+      ]);
+      return { newNode, placed, picks, autoAll: false };
+    }
+
+    function recomputeAll() {
+      const T = parseFloat(slider.value);
+      arrivals = sorted.map((_, i) => computeArrival(i, T, localEmb));
+    }
+
+    function render() {
+      const T = parseFloat(slider.value);
+      tval.textContent = T.toFixed(3);
+      // Build cumulative edge set. Edges added at step=k highlighted;
+      // older edges rendered faint-azure.
+      const edges = [];
+      const arrivedSet = new Set();
+      for (let i = 0; i <= step; i++) {
+        arrivedSet.add(sorted[i]);
+        const isLast = (i === step);
+        arrivals[i].placed.forEach((e, k) => {
+          edges.push({
+            u: e[0], v: e[1],
+            color: isLast ? COL.signal : COL.edge_stage2,
+            w: isLast ? 2.4 : 1.1,
+            id: `i3-${i}-${k}`,
+          });
+        });
+      }
+      viz.setEdges(edges);
+      viz.clearAllNodeClass("dim");
+      viz.eachNode(n => {
+        const id = parseInt(n.id, 10);
+        if (!arrivedSet.has(id)) viz.addNodeClass(n.id, "dim");
+      });
+      curEl.textContent = String(step);
+
+      // Caption describes the current arrival.
+      const a = arrivals[step];
+      const m = M_PROF;
+      const t = step + 1;
+      const V = step;
+      let txt;
+      if (step === 0) {
+        txt = `<span class="st">arrival \\(t=1\\)</span> &middot; node ${a.newNode} placed (degree rank ${rankOf[a.newNode] + 1}, the biggest hub). No predecessors, so \\(S_1 = \\emptyset\\).`;
+      } else if (a.autoAll) {
+        const list = a.picks.map(x => x.node).join(", ");
+        txt = `<span class="st">arrival \\(t=${t}\\)</span> &middot; node ${a.newNode} placed. \\(|V_t|=${V} \\leq m=${m}\\), so connect to <em>all</em> ${V} predecessor${V === 1 ? "" : "s"}: \\(S_t = \\{${list}\\}\\).`;
+      } else {
+        const picks = a.picks.map(x => `${x.node}&nbsp;(\\(p=${x.p.toFixed(3)}\\))`).join(", ");
+        txt = `<span class="st">arrival \\(t=${t}\\)</span> &middot; node ${a.newNode} placed. \\(|V_t|=${V} &gt; m=${m}\\); weighted pull picks \\(S_t\\) = {${picks}}.`;
+      }
+      descEl.innerHTML = txt;
+      if (window.MathJax && window.MathJax.typesetPromise) {
+        window.MathJax.typesetPromise([descEl]).catch(() => {});
+      }
+
+      // Stats readout: after the final arrival only.
+      const allEdges = edges.filter(e => true);
+      const cc = step === sorted.length - 1
+        ? globalCC(allEdges.map(e => [e.u, e.v]))
+        : null;
+      ach.textContent     = cc != null ? cc.toFixed(3) : "…";
+      nedgeEl.textContent = allEdges.length;
+      diffEl.textContent  = cc != null ? Math.abs(cc - TARGET_CC).toFixed(3) : "…";
+    }
+
     function rerollEdges() {
       edgeNonce += 1;
       const rngEdge = d3.randomLcg(edgeNonce * 9973 + 17);
@@ -957,29 +1092,29 @@ window.MathJax = {
         U_NODE.push(us);
       }
       localEmb = { ...SHARED, U_NODE };
-      update(parseFloat(slider.value));
+      recomputeAll();
+      render();
     }
 
-    function update(T) {
-      tval.textContent = T.toFixed(3);
-      const edges = edgesAtT(T, localEmb);
-      const cc    = globalCC(edges);
-      ach.textContent     = cc.toFixed(3);
-      nedgeEl.textContent = edges.length;
-      diffEl.textContent  = Math.abs(cc - TARGET_CC).toFixed(3);
-      viz.setEdges(edges.map(([u, v], i) => ({
-        u, v, color: COL.edge_stage2, w: 1.4, id: "t-" + i,
-      })));
-    }
-
-    slider.addEventListener("input", () => update(parseFloat(slider.value)));
+    slider.addEventListener("input", () => { recomputeAll(); render(); });
     rerollBtn.addEventListener("click", rerollEdges);
-    update(parseFloat(slider.value));
+    document.getElementById("impl3-prev").addEventListener("click", () => {
+      if (step > 0) { step -= 1; render(); }
+    });
+    document.getElementById("impl3-next").addEventListener("click", () => {
+      if (step < sorted.length - 1) { step += 1; render(); }
+    });
+    document.getElementById("impl3-reset").addEventListener("click", () => {
+      step = 0; render();
+    });
+    document.getElementById("impl3-end").addEventListener("click", () => {
+      step = sorted.length - 1; render();
+    });
+
+    recomputeAll();
+    render();
 
     onEmbeddingReroll((emb) => {
-      // Global reroll (stage 2 button) overrides any local edge state:
-      // fresh SHARED includes fresh POLAR + DISTS + U_NODE, so the
-      // local edgeNonce resets and we fall back to SHARED for both.
       edgeNonce = 0;
       localEmb = emb;
       viz.nodesData.forEach(n => {
@@ -992,7 +1127,8 @@ window.MathJax = {
         n.color = CLUSTER_COLOR_BY_ID[emb.ASSIGNED[nid]] || COL.paper_3;
       });
       viz.sim.alpha(0.3).restart();
-      update(parseFloat(slider.value));
+      recomputeAll();
+      render();
     });
   })();
 
