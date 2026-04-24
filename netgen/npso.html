@@ -1053,13 +1053,28 @@ window.MathJax = {
       });
     }
 
+    // Reference line at R = 0; below this, R is negative and the
+    // Fermi-Dirac sigmoid is below 1/2 for every pair (no candidate
+    // sits "inside" the cutoff).
+    const zeroLine = g.append("line")
+      .attr("stroke", COL.paper_3).attr("stroke-width", 1)
+      .attr("stroke-dasharray", "3 3").attr("opacity", 0.7);
+    const zeroLabel = g.append("text")
+      .attr("fill", COL.paper_3)
+      .attr("font-family", "Caveat Brush, cursive").attr("font-size", 13)
+      .text("R = 0");
+
     function draw() {
       const solid = sampleAt(BETA);
       const dashed = sampleAt(1);
       const all = solid.flat().concat(dashed.flat());
       if (!all.length) return;
-      const Rlo = Math.min(...all.map(p => p[1]));
-      const Rhi = Math.max(...all.map(p => p[1]));
+      let Rlo = Math.min(...all.map(p => p[1]));
+      let Rhi = Math.max(...all.map(p => p[1]));
+      // Make sure y = 0 is inside the visible range so the R = 0 line
+      // is always drawn even when both branches stay positive.
+      Rlo = Math.min(Rlo, 0);
+      Rhi = Math.max(Rhi, 0);
       const pad = (Rhi - Rlo) * 0.08 + 0.3;
       y.domain([Rlo - pad, Rhi + pad]);
       xAxisG.call(d3.axisBottom(x).ticks(6));
@@ -1068,6 +1083,11 @@ window.MathJax = {
       g.selectAll(".tick line").style("stroke", "#cdbf8d");
       g.selectAll(".tick text").style("fill", "#6b6a54")
         .style("font-family", "Special Elite, Courier New, monospace");
+      zeroLine
+        .attr("x1", 0).attr("x2", iw)
+        .attr("y1", y(0)).attr("y2", y(0));
+      zeroLabel
+        .attr("x", 4).attr("y", y(0) - 4);
       const line = d3.line().x(d => x(d[0])).y(d => y(d[1]));
       solid.forEach((pts, i) => curveSolid[i].attr("d", line(pts)));
       dashed.forEach((pts, i) => curveDashed[i].attr("d", line(pts)));
@@ -1362,7 +1382,10 @@ window.MathJax = {
       const t = rankOf[id] + 1;
       const T = currentT();
       const R = R_at(t, T);
-      if (!isFinite(R) || R <= 0) return;
+      // R <= 0 means the Fermi-Dirac sigmoid is below 1/2 for every
+      // pair, i.e., no node sits "inside" the cutoff. Skip drawing
+      // the ball; the empty disk is the right picture.
+      if (!isFinite(R) || R <= 0) { clearOverlay(); return; }
       const polar = SHARED.POLAR[id];
       if (!polar) return;
       const pts = hyperbolicBall(polar.r_hyp, polar.theta, R);
