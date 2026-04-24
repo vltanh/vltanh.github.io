@@ -242,19 +242,20 @@
   \[
     \texttt{int\_deg}[v] \mathrel{+}= 1, \quad \texttt{probs}[b_u, b_v] \mathrel{+}= 1.
   \]
-  <p>Inflation is the only reason the output's degree sequence ends up approximate. The attach below mirrors what <code>gen_kec_core.generate_cluster</code> actually emits on this synthetic (verified against the shipped Python at <code>PYTHONHASHSEED=0</code>). Step through.</p>
+  <p>Inflation is the only reason the output's degree sequence ends up approximate. The walker below mirrors <code>gen_kec_core.generate_cluster</code> arrival by arrival, in the same cluster-major order the shipped Python uses (clusters by size desc, nodes within each by post-exclusion target degree desc, id-asc tiebreak). At each arrival the caption lists every already-processed candidate's residual <code>int_deg</code> with the picked partners marked. Phase-1 arrivals (those with \(|V_t| \leq k\)) auto-attach to every predecessor and grow the \(K_{k+1}\) seed; phase-2 arrivals greedy-pick \(k\) partners by residual desc. Realization 1 is byte-verified against the shipped Python at <code>PYTHONHASHSEED=0</code>; <code>random</code> re-samples partner picks from the current arrival forward, leaving earlier scaffolding frozen.</p>
   <div class="graph" id="g-core">
     <div class="graph-chrome">
-      <span id="g-core-stage">step 0 &middot; nodes only</span>
-      <span class="right step-label">step <b id="g-core-cur">0</b> / <span id="g-core-total">6</span></span>
+      <span id="g-core-stage">step 0 &middot; stripped</span>
+      <span class="right step-label">arrival <b id="g-core-cur">0</b> / <span id="g-core-total">18</span></span>
     </div>
     <div class="graph-canvas" id="g-core-cy"></div>
     <div class="widget-row">
       <button class="btn" id="g-core-prev">← back</button>
       <button class="btn primary" id="g-core-next">next →</button>
       <button class="btn" id="g-core-reset">reset</button>
-      <button class="btn" id="g-core-reroll" title="try a different attach realization">random</button>
-      <span class="step-label" id="g-core-real">realization 1 of 3</span>
+      <button class="btn" id="g-core-end">skip to end</button>
+      <button class="btn" id="g-core-reroll" title="re-sample partner picks at the current arrival only">random</button>
+      <span class="step-label" id="g-core-real">initial realization &middot; random re-samples from current arrival forward</span>
     </div>
     <div class="step-desc" id="g-core-desc"></div>
   </div>
@@ -863,21 +864,29 @@ window.MathJax = {
     viz.sim.on("tick.blockRects", () => syncRects(viz));
   })();
 
-  // ── Generation · K_{k+1} step-through ──
+  // ── Generation · K_{k+1} per-arrival walker ──
+  // Mirrors gen_kec_core.generate_cluster called once per cluster (size
+  // desc), advancing one arrival at a time. Within each cluster, nodes
+  // arrive in post-exclusion target-degree desc (id-asc tiebreak). The
+  // first k+1 arrivals per cluster auto-attach to every predecessor (the
+  // K_{k+1} seed); subsequent arrivals greedy-pick k partners from the
+  // already-processed set by residual int_deg desc, with weighted-random
+  // fallback when greedy is starved. Realization 1 is byte-verified
+  // against the shipped Python at PYTHONHASHSEED=0; reroll cycles
+  // per-node variants for arrivals at or after the current step.
   (function () {
-    // Phase 2 attach patterns under weighted-random partner sampling
-    // (paper's recipe). Per-node variants: realization 1 is what shipped
-    // gen_kec_core emits at PYTHONHASHSEED=0 (verified via
-    // /tmp/verify_kec_core.py). Reroll is cumulative: clicking "random"
-    // advances variant indices only for nodes introduced at the current
-    // step or later, so earlier attaches stay frozen.
-    const C1_rem = [5, 6, 8, 7];
-    const C2_rem = [12, 13, 14];
-    const C3_rem = [17, 18];
-    // step in which each phase-2 node is introduced
-    const INTRO_STEP = { 5:3, 12:3, 17:3, 6:4, 13:4, 18:4, 8:5, 14:5, 7:6 };
-    // per-node attach variants (each must be k distinct partners from
-    // the nodes already processed by that iteration)
+    const KS = { C1: MINCUTS.C1, C2: MINCUTS.C2, C3: MINCUTS.C3 };
+    function clusterSorted(nodes) {
+      return nodes.slice().sort((a, b) =>
+        (DEGREES_EXCL[b] - DEGREES_EXCL[a]) || (a - b));
+    }
+    const ARRIVAL_SEQ = [
+      ...clusterSorted(C1).map(n => ({ node: n, cluster: "C1" })),
+      ...clusterSorted(C2).map(n => ({ node: n, cluster: "C2" })),
+      ...clusterSorted(C3).map(n => ({ node: n, cluster: "C3" })),
+    ];
+    const TOTAL_ARRIVALS = ARRIVAL_SEQ.length;
+
     const ATTACH_VARIANTS = {
       5:  [[1, 2, 3], [1, 2, 4], [1, 3, 4]],
       6:  [[1, 4, 5], [1, 3, 5], [2, 4, 5]],
@@ -889,7 +898,8 @@ window.MathJax = {
       17: [[15],      [16],      [16]],
       18: [[15],      [16],      [17]],
     };
-    // live variant index per node (starts at 0 for everyone)
+    const INTRO_ARRIVAL = {};
+    ARRIVAL_SEQ.forEach((a, i) => { INTRO_ARRIVAL[a.node] = i + 1; });
     const ATTACH_IDX = {};
     Object.keys(ATTACH_VARIANTS).forEach(n => { ATTACH_IDX[n] = 0; });
     function currentAttach() {
@@ -901,131 +911,152 @@ window.MathJax = {
     }
     let rollCount = 0;
 
-    function edgesAt(step) {
-      if (step < 2) return [];
-      const out = [];
-      BLOCK_NAMES.forEach(c => {
-        CORE_EDGES[c].forEach(([u, v]) => out.push({
-          u, v, color: COL.edge_stage2, w: 2.4,
-          id: `core-${c}-${edgeKey(u, v)}`,
-        }));
-      });
+    // Replay the linear arrival sequence to capture per-arrival picks
+    // and the residual int_deg snapshot just before each arrival's pull.
+    function buildTrace() {
       const ATTACH = currentAttach();
-      const maxAttach = step - 2;
-      for (let i = 0; i < maxAttach; i++) {
-        [C1_rem[i], C2_rem[i], C3_rem[i]].forEach(n => {
-          if (n == null) return;
-          ATTACH[n].forEach(p => out.push({
-            u: Math.min(n, p), v: Math.max(n, p),
-            color: COL.edge_stage2, w: 1.7,
-            id: `att-${n}-${p}`,
-          }));
+      const intDeg = {};
+      NODES.forEach(n => { intDeg[n] = DEGREES_EXCL[n] || 0; });
+      const trace = [];
+      const cumulative = [];
+      ARRIVAL_SEQ.forEach((a, i) => {
+        const u = a.node, c = a.cluster, k = KS[c];
+        const preds = ARRIVAL_SEQ.slice(0, i)
+          .filter(p => p.cluster === c)
+          .map(p => p.node);
+        const residualsBefore = {};
+        preds.forEach(p => { residualsBefore[p] = intDeg[p]; });
+        residualsBefore[u] = intDeg[u];
+        let partners, mode;
+        if (preds.length <= k) {
+          partners = preds.slice();
+          mode = "auto-all";
+        } else {
+          partners = (ATTACH[u] || []).slice();
+          mode = "greedy";
+        }
+        const newEdges = partners.map(p => [Math.min(u, p), Math.max(u, p)]);
+        newEdges.forEach(([x, y]) => {
+          intDeg[x] -= 1; intDeg[y] -= 1;
+          cumulative.push([x, y]);
         });
-      }
-      return out;
+        trace.push({
+          arrival: i + 1, node: u, cluster: c, k, mode,
+          preds, partners, newEdges,
+          residualsBefore,
+          cumulativeSnapshot: cumulative.slice(),
+        });
+      });
+      return trace;
+    }
+    let TRACE = buildTrace();
+
+    function edgesAt(step) {
+      if (step === 0) return [];
+      const t = TRACE[step - 1];
+      const newSet = new Set(t.newEdges.map(([u, v]) => edgeKey(u, v)));
+      return t.cumulativeSnapshot.map(([u, v]) => {
+        const isNew = newSet.has(edgeKey(u, v));
+        return {
+          u, v,
+          color: isNew ? COL.signal : COL.edge_stage2,
+          w: isNew ? 2.4 : 1.1,
+          id: `kec-${u}-${v}`,
+        };
+      });
     }
 
-    function nodeHighlight(step) {
-      const added = new Set();
-      const core = new Set([
-        ...CORE_NODES.C1, ...CORE_NODES.C2, ...CORE_NODES.C3,
-      ]);
+    function describeStep(step) {
       if (step === 0) {
-        return { added, core: new Set(),
-          dim: new Set([1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18]) };
+        return {
+          stage: "step 0 · stripped",
+          html: '<span class="st">step 0 · stripped</span> &middot; Outliers 19 and 20 dropped at profile time (v1 forces <code>excluded</code>). 18 nodes remain across C1 (8), C2 (6), C3 (4). Process clusters by size desc; within each, sort nodes by post-exclusion target degree desc (id-asc tiebreak).',
+        };
       }
-      if (step === 1) return { added, core, dim: new Set() };
-      const maxAttach = step - 2;
-      for (let i = 0; i < maxAttach; i++) {
-        if (C1_rem[i] != null) added.add(C1_rem[i]);
-        if (C2_rem[i] != null) added.add(C2_rem[i]);
-        if (C3_rem[i] != null) added.add(C3_rem[i]);
+      const t = TRACE[step - 1];
+      const v = t.preds.length;
+      const stage = `arrival ${t.arrival} · ${t.cluster} · node ${t.node}`;
+      const head = `<span class="st">arrival \\(t=${t.arrival}\\)</span> &middot; node ${t.node} placed in cluster ${t.cluster} (target deg ${DEGREES_EXCL[t.node]}, \\(k=${t.k}\\)).`;
+      let body;
+      if (t.mode === "auto-all") {
+        if (v === 0) {
+          body = `\\(|V_t|=0\\), no predecessors in ${t.cluster} yet. \\(K_{${t.k + 1}}\\) seed begins.`;
+        } else {
+          const list = `\\{${t.partners.join(", ")}\\}`;
+          body = `\\(|V_t|=${v} \\leq k=${t.k}\\), so connect to <em>all</em> ${v} predecessor${v === 1 ? "" : "s"}: \\(S_t = ${list}\\).`;
+          if (v === t.k) body += ` ${t.cluster}'s \\(K_{${t.k + 1}}\\) seed is now complete.`;
+        }
+      } else {
+        const sortedPreds = t.preds.slice().sort((a, b) =>
+          (t.residualsBefore[b] - t.residualsBefore[a]) || (a - b));
+        const fmt = (p) => `${p}&nbsp;(\\(r=${t.residualsBefore[p]}\\))`;
+        const pickedSet = new Set(t.partners);
+        const picksStr = t.partners.map(fmt).join(", ");
+        const others = sortedPreds.filter(p => !pickedSet.has(p)).map(fmt);
+        const othersStr = others.length ? "{" + others.join(", ") + "}" : "&empty;";
+        body = `\\(|V_t|=${v} > k=${t.k}\\); greedy picks top-\\(k\\) by residual \\(\\texttt{int\\_deg}\\): \\(S_t\\) = {${picksStr}}. Skipped: ${othersStr}.`;
       }
-      const newlyAdded = new Set();
-      if (step >= 3) {
-        if (C1_rem[maxAttach-1] != null) newlyAdded.add(C1_rem[maxAttach-1]);
-        if (C2_rem[maxAttach-1] != null) newlyAdded.add(C2_rem[maxAttach-1]);
-        if (C3_rem[maxAttach-1] != null) newlyAdded.add(C3_rem[maxAttach-1]);
-      }
-      return { added, core, dim: new Set(), newlyAdded };
-    }
-
-    function stepDesc(step) {
-      const A = currentAttach();
-      const set = (n) => "\\{" + A[n].join(", ") + "\\}";
-      return [
-        { label: "step 0 · stripped",
-          desc: "Outliers 19 and 20 dropped at profile time (v1's <code>excluded</code> mode). 18 nodes remain across C1 (8), C2 (6), C3 (4). Mincuts from <code>mincut.csv</code>: C1 k=3, C2 k=2, C3 k=1." },
-        { label: "step 1 · top-\\((k+1)\\) selected",
-          desc: "Sort each cluster by post-exclusion target degree desc, id-asc tiebreak. Pick top \\(k+1\\): C1 → \\{1, 2, 3, 4\\}, C2 → \\{9, 11, 10\\}, C3 → \\{15, 16\\}. The lower-degree members wait their turn in phase 2." },
-        { label: "step 2 · \\(K_{k+1}\\) cliques",
-          desc: "Wire each core into a complete subgraph. \\(K_4\\) in C1 (6 edges), \\(K_3\\) in C2 (3), \\(K_2\\) in C3 (1). Every cluster now has a \\(k\\)-edge-connected skeleton; no later edge can drop it below \\(k\\)." },
-        { label: "step 3 · first attach",
-          desc: "Each cluster's next node connects to \\(k\\) partners in its processed set, sampled with probability proportional to residual availability. C1: 5 → " + set(5) + ". C2: 12 → " + set(12) + ". C3: 17 → " + set(17) + "." },
-        { label: "step 4 · second attach",
-          desc: "C1: 6 → " + set(6) + ". C2: 13 → " + set(13) + ". C3: 18 → " + set(18) + ". C3 is fully wired." },
-        { label: "step 5 · third attach",
-          desc: "C1: 8 → " + set(8) + ". C2: 14 → " + set(14) + ". C2 done." },
-        { label: "step 6 · fourth attach",
-          desc: "C1: 7 → " + set(7) + ". C1 done. Every cluster carries its \\(K_{k+1}\\) seed plus an attach-by-availability tail." },
-      ][step];
+      return { stage, html: `${head} ${body}` };
     }
 
     const viz = NETGEN.VIZ.init("g-core-cy", {
       showLabels: true, includeOutliers: false, edges: [],
     });
+    NETGEN.makeTooltip(viz, document.getElementById("g-core"));
 
-    const descEl = document.getElementById("g-core-desc");
+    const descEl  = document.getElementById("g-core-desc");
     const stageEl = document.getElementById("g-core-stage");
-    const realEl = document.getElementById("g-core-real");
+    const realEl  = document.getElementById("g-core-real");
 
     let controller = null;
+
     function render(step) {
       viz.setEdges(edgesAt(step));
-      const h = nodeHighlight(step);
-      viz.clearAllNodeClass("core");
-      viz.clearAllNodeClass("newly");
       viz.clearAllNodeClass("dim");
+      viz.clearAllNodeClass("newly");
+      const arrived = new Set();
+      for (let i = 0; i < step; i++) arrived.add(TRACE[i].node);
       viz.eachNode(n => {
         const id = parseInt(n.id, 10);
-        if (h.dim && h.dim.has(id)) viz.addNodeClass(n.id, "dim");
-        if (h.core && h.core.has(id) && !(h.added && h.added.has(id)))
-          viz.addNodeClass(n.id, "core");
-        if (h.newlyAdded && h.newlyAdded.has(id))
-          viz.addNodeClass(n.id, "newly");
+        if (!arrived.has(id)) viz.addNodeClass(n.id, "dim");
       });
-      const sd = stepDesc(step);
-      descEl.innerHTML = `<span class="st">${sd.label}</span> &middot; ${sd.desc}`;
-      stageEl.textContent = sd.label;
+      if (step >= 1) viz.addNodeClass(TRACE[step - 1].node, "newly");
+      const sd = describeStep(step);
+      descEl.innerHTML = sd.html;
+      stageEl.textContent = sd.stage;
       realEl.textContent = rollCount === 0
-        ? "initial realization · random re-samples from current step forward"
-        : `reroll #${rollCount} · steps ≥ current re-sampled; earlier frozen`;
+        ? "initial realization · random re-samples from current arrival forward"
+        : `reroll #${rollCount} · arrivals at or after current re-sampled; earlier frozen`;
       if (window.MathJax && window.MathJax.typesetPromise) {
         window.MathJax.typesetPromise([descEl]).catch(() => {});
       }
     }
 
     controller = NETGEN.stepController({
-      prevBtn: document.getElementById("g-core-prev"),
-      nextBtn: document.getElementById("g-core-next"),
-      resetBtn: document.getElementById("g-core-reset"),
-      labelCur: document.getElementById("g-core-cur"),
+      prevBtn:    document.getElementById("g-core-prev"),
+      nextBtn:    document.getElementById("g-core-next"),
+      resetBtn:   document.getElementById("g-core-reset"),
+      labelCur:   document.getElementById("g-core-cur"),
       labelTotal: document.getElementById("g-core-total"),
-      total: 7,
-      onRender: render,
+      total:      TOTAL_ARRIVALS + 1,
+      onRender:   render,
     });
-
-    // Cumulative reroll: when user clicks random at step S, advance the
-    // variant index only for nodes whose INTRO_STEP >= S. Earlier
-    // attaches (introduced at steps < S) stay frozen so the step-through
-    // visibly reuses the earlier scaffolding.
+    document.getElementById("g-core-end").addEventListener("click", () => {
+      controller.set(TOTAL_ARRIVALS);
+    });
     document.getElementById("g-core-reroll").addEventListener("click", () => {
-      const S = Math.max(controller.idx, 3);  // step 3 is first attach
-      Object.keys(INTRO_STEP).forEach(n => {
-        if (INTRO_STEP[n] >= S) ATTACH_IDX[n] = (ATTACH_IDX[n] + 1)
-          % ATTACH_VARIANTS[n].length;
+      // Re-sample only the node introduced at the current step. Earlier
+      // and later arrivals stay frozen so the user can scrub back and
+      // forth without losing context.
+      const S = controller.idx;
+      if (S < 1) return;
+      Object.keys(ATTACH_VARIANTS).forEach(n => {
+        if (INTRO_ARRIVAL[n] === S) {
+          ATTACH_IDX[n] = (ATTACH_IDX[n] + 1) % ATTACH_VARIANTS[n].length;
+        }
       });
       rollCount += 1;
+      TRACE = buildTrace();
       render(controller.idx);
     });
   })();
