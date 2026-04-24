@@ -158,12 +158,18 @@
   \[
     R_t(T) \;=\; 2 \ln t \;-\; 2 \ln\!\left[\; \frac{2T \ln t}{\sin(\pi T)\, m} \;\right] \qquad (\beta = 1).
   \]
-  <p>Because \(t\) is the current arrival index, the disk grows one notch per arrival; every new vertex sees a fresh radius.</p>
+  <p>Because \(t\) is the current arrival index, the disk grows one notch per arrival; every new vertex sees a fresh radius. The plot below sweeps \(T\) across \((0, 1)\) at two values of \(t\): the first arrival that actually samples (\(t = m+1\)) and the last (\(t = N\)). The curve has a minimum somewhere in the interior; at the endpoints it blows up because \(T \to 0\) sends \(\ln(2T\ldots) \to -\infty\) and \(T \to 1\) sends \(\sin(\pi T) \to 0\).</p>
+  <div class="disk-panel" style="padding:.9rem 1rem">
+    <svg id="rt-curve" viewBox="0 0 640 210" preserveAspectRatio="xMidYMid meet"></svg>
+  </div>
   <p><strong>Step 2.</strong> For each candidate \(j\) already on the disk, compute the hyperbolic distance between \(i\) and \(j\):</p>
   \[
     h_{ij} \;=\; \mathrm{arccosh}\bigl( \cosh r_i \cosh r_j \;-\; \sinh r_i \sinh r_j \cos d_\mathrm{ang}(\theta_i, \theta_j) \bigr).
   \]
-  <p>Close in radius AND close in angle gives a small \(h_{ij}\); a big radial gap or a diametric angular gap blows it up. One distance per candidate.</p>
+  <p>Close in radius AND close in angle gives a small \(h_{ij}\); a big radial gap or a diametric angular gap blows it up. One distance per candidate. The plot below is the sorted \(h_{ij}\) for one specific arrival (node \(i = N\) on this 20-node synthetic at the current embedding and \(T = 0.3\)); the dashed vertical marks \(R_i(T)\). Candidates to the left of the marker are "inside" the disk radius and will connect with high probability; candidates to the right are "outside".</p>
+  <div class="disk-panel" style="padding:.9rem 1rem">
+    <svg id="hij-strip" viewBox="0 0 640 180" preserveAspectRatio="xMidYMid meet"></svg>
+  </div>
   <p><strong>Step 3.</strong> Plug the pair \((h_{ij}, R_i(T))\) into the Fermi-Dirac sigmoid to get the connection probability:</p>
   \[
     p(i, j) \;=\; \frac{1}{1 + \exp\!\bigl((h_{ij} - R_i(T)) / (2T)\bigr)}.
@@ -938,6 +944,171 @@ window.MathJax = {
       viz.clearAllNodeClass("_refresh_");
       viz.sim.alpha(0.3).restart();
     });
+  })();
+
+  // ── Step 1 viz: R_t(T) vs T at two values of t ──
+  // Two lines: t = m+1 (first arrival that triggers weighted sampling)
+  // and t = N (last arrival). Shows the U-shape bounded by the
+  // singularities at T -> 0 and T -> 1.
+  (function () {
+    const svg = d3.select("#rt-curve");
+    if (svg.empty()) return;
+    const W = 640, H = 210;
+    const PAD = { top: 18, right: 110, bottom: 36, left: 50 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+
+    function Rat(t, T) {
+      const s = Math.sin(Math.PI * T);
+      if (s <= 0 || t < 2) return NaN;
+      const lnT = Math.log(t);
+      if (Math.abs(BETA - 1) < 1e-9) {
+        return 2 * lnT - 2 * Math.log((2 * T * lnT) / (s * M_PROF));
+      }
+      const num = 2 * T * (1 - Math.exp(-(1 - BETA) * lnT));
+      const den = s * M_PROF * (1 - BETA);
+      return 2 * lnT - 2 * Math.log(num / den);
+    }
+
+    const ts = [M_PROF + 1, N_NODES];
+    const STEPS = 240;
+    const samples = ts.map((t) => {
+      const pts = [];
+      for (let k = 1; k < STEPS; k++) {
+        const T = k / STEPS;
+        const R = Rat(t, T);
+        if (isFinite(R)) pts.push([T, R]);
+      }
+      return { t, pts };
+    });
+
+    const allR = samples.flatMap((s) => s.pts.map((p) => p[1]));
+    const Rlo = Math.min(...allR);
+    const Rhi = Math.max(...allR);
+    // Clamp plot range to something sensible; ignore huge tails near
+    // singularities so the U-shape is legible.
+    const yLo = Math.max(Rlo - 0.5, 0);
+    const yHi = Math.min(Rhi, Rlo + 6);
+
+    const x = d3.scaleLinear().domain([0, 1]).range([0, iw]);
+    const y = d3.scaleLinear().domain([yLo, yHi]).range([ih, 0]);
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).ticks(6))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace");
+    g.append("g").call(d3.axisLeft(y).ticks(5))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+    svg.append("text").attr("x", W / 2).attr("y", H - 6)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace")
+      .style("font-size", "11px").text("T");
+    svg.append("text").attr("transform", "rotate(-90)")
+      .attr("x", -H / 2).attr("y", 14)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace")
+      .style("font-size", "11px").text("disk radius R_t(T)");
+
+    const colors = [COL.edge_stage2, COL.signal];
+    const labels = ["t = m+1", "t = N"];
+    samples.forEach((s, i) => {
+      const line = d3.line()
+        .defined((d) => d[1] >= yLo && d[1] <= yHi)
+        .x((d) => x(d[0])).y((d) => y(d[1]));
+      g.append("path")
+        .datum(s.pts).attr("d", line)
+        .attr("fill", "none").attr("stroke", colors[i])
+        .attr("stroke-width", 2);
+      svg.append("text")
+        .attr("x", W - PAD.right + 10).attr("y", PAD.top + 14 + i * 16)
+        .attr("fill", colors[i])
+        .attr("font-family", "Caveat Brush, cursive").attr("font-size", 14)
+        .text(`${labels[i]} = ${ts[i]}`);
+    });
+  })();
+
+  // ── Step 2 viz: h_ij distribution for one arrival, with R_i marker ──
+  // Sort h_ij ascending for the final arrival i = N on the current
+  // embedding; fixed T = 0.3 so the R_i marker is a single number.
+  (function () {
+    const svg = d3.select("#hij-strip");
+    if (svg.empty()) return;
+    const W = 640, H = 180;
+    const PAD = { top: 22, right: 18, bottom: 40, left: 40 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+
+    const iLast = sorted.length - 1;
+    const newNode = sorted[iLast];
+    const hs = [];
+    for (let j = 0; j < iLast; j++) {
+      const other = sorted[j];
+      const a = Math.min(other, newNode), b = Math.max(other, newNode);
+      hs.push({ j, h: SHARED.DISTS[`${a}-${b}`], node: other });
+    }
+    hs.sort((a, b) => a.h - b.h);
+    const Tfixed = 0.3;
+    const R_i = (function () {
+      const t = iLast + 1;
+      const s = Math.sin(Math.PI * Tfixed);
+      const lnT = Math.log(t);
+      if (Math.abs(BETA - 1) < 1e-9) {
+        return 2 * lnT - 2 * Math.log((2 * Tfixed * lnT) / (s * M_PROF));
+      }
+      const num = 2 * Tfixed * (1 - Math.exp(-(1 - BETA) * lnT));
+      const den = s * M_PROF * (1 - BETA);
+      return 2 * lnT - 2 * Math.log(num / den);
+    })();
+
+    const hMax = Math.max(d3.max(hs, (d) => d.h), R_i) * 1.1;
+    const x = d3.scaleLinear().domain([0, hMax]).range([0, iw]);
+    const y = d3.scaleBand().domain(hs.map((_, k) => k)).range([0, ih]).padding(0.25);
+
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).ticks(6))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+
+    svg.append("text").attr("x", W / 2).attr("y", H - 6)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace")
+      .style("font-size", "11px")
+      .text("hyperbolic distance h_{i,j} for arrival i = N, candidates sorted ascending");
+
+    // Dashed vertical at R_i
+    g.append("line")
+      .attr("x1", x(R_i)).attr("x2", x(R_i))
+      .attr("y1", 0).attr("y2", ih)
+      .attr("stroke", COL.signal).attr("stroke-width", 1.3)
+      .attr("stroke-dasharray", "4 3").attr("opacity", 0.75);
+    g.append("text")
+      .attr("x", x(R_i) + 4).attr("y", 12)
+      .attr("fill", COL.signal)
+      .attr("font-family", "Caveat Brush, cursive").attr("font-size", 14)
+      .text(`R_i = ${R_i.toFixed(2)} (T = ${Tfixed})`);
+
+    g.selectAll(".hbar").data(hs).enter().append("rect")
+      .attr("class", "hbar")
+      .attr("x", 0)
+      .attr("y", (_, k) => y(k))
+      .attr("height", y.bandwidth())
+      .attr("width", (d) => x(d.h))
+      .attr("fill", (d) => d.h < R_i ? COL.edge_stage2 : COL.paper_3)
+      .attr("opacity", 0.85);
+    g.selectAll(".hlbl").data(hs).enter().append("text")
+      .attr("class", "hlbl")
+      .attr("x", -4).attr("y", (_, k) => y(k) + y.bandwidth() / 2 + 3)
+      .attr("text-anchor", "end")
+      .attr("font-family", "Special Elite, Courier New, monospace")
+      .attr("font-size", 9.5)
+      .attr("fill", "#6b6a54")
+      .text((d) => d.node);
   })();
 
   // ── Fermi-Dirac sigmoid preview: p(h) at fixed R, varying T ──
