@@ -680,7 +680,7 @@ window.MathJax = {
         : (2 * recycle.length / shuffled_stubs.length);
       let success = false;
       if (!(recycle.length === 0 && kept.size === 0)) {
-        const maxTries = Math.max(4, Math.floor(shuffled_stubs.length / 2));
+        const maxTries = Math.max(4, shuffled_stubs.length);
         for (let t = 0; t < maxTries; t++) {
           let usedRecycle = false;
           let p2, p2Idx = -1;
@@ -737,13 +737,37 @@ window.MathJax = {
     if (REAL_CACHE.has(key)) return REAL_CACHE.get(key);
     const uRng = seededRng(u_seed * 1009 + 17);
     const U = {}; NODES.forEach(n => { U[n] = uRng(); });
+    // Per-node y_u = (1-xi) w_u, z_u = xi w_u, stochastically rounded.
     const split = {};
     NODES.forEach(n => {
       const w = DEGREES[n];
-      const zf = xi * w;
-      const z = Math.floor(zf) + (U[n] < (zf - Math.floor(zf)) ? 1 : 0);
-      split[n] = { w, y: w - z, z };
+      const yf = (1 - xi) * w;
+      const y = Math.floor(yf) + (U[n] < (yf - Math.floor(yf)) ? 1 : 0);
+      split[n] = { w, y, z: w - y };
     });
+    // Per-cluster leader adjustment: pick the max-w_u member (tie-break
+    // by id asc), flip its y parity by ±1 if cluster sum(y) is odd so
+    // the config model on y-stubs has an even stub count. Absorbed by z
+    // so per-node total w is preserved. Mirrors Julia's
+    //   w_internal[leader] = floor(maxw) + parity_flip.
+    const ADJUSTED_CLUSTERS = ["C1", "C2", "C3"];
+    ADJUSTED_CLUSTERS.forEach(cname => {
+      const members = BLOCK_NODES[cname];
+      const leader = members.slice().sort((a,b) => DEGREES[b] - DEGREES[a] || a - b)[0];
+      const sumY = members.reduce((a, n) => a + split[n].y, 0);
+      if (sumY % 2 === 1) {
+        if (split[leader].y < split[leader].w) { split[leader].y += 1; split[leader].z -= 1; }
+        else if (split[leader].y > 0) { split[leader].y -= 1; split[leader].z += 1; }
+      }
+    });
+    // Global z-parity: if odd, drop one stub from the biggest-z node.
+    // Julia pops from stubs[]; we adjust split + reduce that node's w.
+    const zSumBefore = NODES.reduce((a, n) => a + split[n].z, 0);
+    if (zSumBefore % 2 === 1) {
+      const maxZN = NODES.slice().sort((a,b) => split[b].z - split[a].z)[0];
+      split[maxZN].z -= 1;
+      split[maxZN].w -= 1;
+    }
     const seed = stub_seed;  // shuffle/rewire RNG
     // Cluster graphs (one rewire per cluster). Residue from a cluster's
     // rewire gets forwarded to the background pool, mirroring Julia's
