@@ -2132,6 +2132,38 @@ window.MathJax = {
       .text("best: T=0.125, cc=0.098");
   })();
 
+  // ── Sync every T slider on the page ──
+  // All five sliders (hover-ball, geodesic, sigmoid, heatmap, impl-3
+  // step-through) drive the same T. Drag any one and the rest follow,
+  // each firing its own input listener so the corresponding viz
+  // redraws. A `syncing` flag breaks the cycle.
+  (function () {
+    const ids = ["hover-T", "geo-T", "fd-T", "heat-T", "T-slider"];
+    let syncing = false;
+    ids.forEach((id) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener("input", () => {
+        if (syncing) return;
+        syncing = true;
+        const v = el.value;
+        ids.forEach((other) => {
+          if (other === id) return;
+          const o = document.getElementById(other);
+          if (!o) return;
+          // Snap to this slider's step granularity to avoid drift.
+          const step = parseFloat(o.step) || 0.01;
+          const snapped = (Math.round(parseFloat(v) / step) * step).toFixed(3);
+          if (o.value !== snapped) {
+            o.value = snapped;
+            o.dispatchEvent(new Event("input"));
+          }
+        });
+        syncing = false;
+      });
+    });
+  })();
+
 })();
 </script>
 </body>
