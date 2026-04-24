@@ -158,9 +158,17 @@
   \[
     R_t(T) \;=\; 2 \ln t \;-\; 2 \ln\!\left[\; \frac{2T \ln t}{\sin(\pi T)\, m} \;\right] \qquad (\beta = 1).
   \]
-  <p>Because \(t\) is the current arrival index, the disk grows one notch per arrival; every new vertex sees a fresh radius. The plot below sweeps \(T\) across \((0, 1)\) at two values of \(t\): the first arrival that actually samples (\(t = m+1\)) and the last (\(t = N\)). The curve has a minimum somewhere in the interior; at the endpoints it blows up because \(T \to 0\) sends \(\ln(2T\ldots) \to -\infty\) and \(T \to 1\) sends \(\sin(\pi T) \to 0\).</p>
+  <p>Because \(t\) is the current arrival index, the disk grows one notch per arrival; every new vertex sees a fresh radius. The plot below sweeps \(T\) across \((0, 1)\) at two values of \(t\): the first arrival that actually samples (\(t = m+1\)) and the last (\(t = N\)). Toggle the formula to compare the general-\(\beta\) branch with the \(\beta = 1\) L'Hopital limit (a different expression, not the general-\(\beta\) branch evaluated at \(\beta = 1\)).</p>
   <div class="disk-panel" style="padding:.9rem 1rem">
-    <svg id="rt-curve" viewBox="0 0 640 210" preserveAspectRatio="xMidYMid meet"></svg>
+    <svg id="rt-curve" viewBox="0 0 640 230" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="widget-row" style="padding:.2rem 0 0;border:none;margin:0">
+      <label class="toggle">
+        <input type="checkbox" id="rt-beta1">
+        <span class="toggle-track"></span>
+        <span>pretend \(\beta = 1\) (L'Hopital branch)</span>
+      </label>
+      <span class="step-label" id="rt-scalars">&middot;</span>
+    </div>
   </div>
   <p><strong>Step 2.</strong> For each candidate \(j\) already on the disk, compute the hyperbolic distance between \(i\) and \(j\):</p>
   \[
@@ -946,62 +954,41 @@ window.MathJax = {
     });
   })();
 
-  // ── Step 1 viz: R_t(T) vs T at two values of t ──
-  // Two lines: t = m+1 (first arrival that triggers weighted sampling)
-  // and t = N (last arrival). Shows the U-shape bounded by the
-  // singularities at T -> 0 and T -> 1.
+  // ── Step 1 viz: R_t(T) vs T at two values of t, with beta toggle ──
   (function () {
     const svg = d3.select("#rt-curve");
     if (svg.empty()) return;
-    const W = 640, H = 210;
-    const PAD = { top: 18, right: 110, bottom: 36, left: 50 };
+    const W = 640, H = 230;
+    const PAD = { top: 18, right: 118, bottom: 36, left: 52 };
     const iw = W - PAD.left - PAD.right;
     const ih = H - PAD.top - PAD.bottom;
     const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
 
-    function Rat(t, T) {
+    function Rat(t, T, beta) {
       const s = Math.sin(Math.PI * T);
       if (s <= 0 || t < 2) return NaN;
       const lnT = Math.log(t);
-      if (Math.abs(BETA - 1) < 1e-9) {
-        return 2 * lnT - 2 * Math.log((2 * T * lnT) / (s * M_PROF));
+      if (Math.abs(beta - 1) < 1e-9) {
+        const q = (2 * T * lnT) / (s * M_PROF);
+        return q > 0 ? 2 * lnT - 2 * Math.log(q) : NaN;
       }
-      const num = 2 * T * (1 - Math.exp(-(1 - BETA) * lnT));
-      const den = s * M_PROF * (1 - BETA);
-      return 2 * lnT - 2 * Math.log(num / den);
+      const num = 2 * T * (1 - Math.exp(-(1 - beta) * lnT));
+      const den = s * M_PROF * (1 - beta);
+      const q = num / den;
+      return q > 0 ? 2 * lnT - 2 * Math.log(q) : NaN;
     }
 
     const ts = [M_PROF + 1, N_NODES];
-    const STEPS = 240;
-    const samples = ts.map((t) => {
-      const pts = [];
-      for (let k = 1; k < STEPS; k++) {
-        const T = k / STEPS;
-        const R = Rat(t, T);
-        if (isFinite(R)) pts.push([T, R]);
-      }
-      return { t, pts };
-    });
-
-    const allR = samples.flatMap((s) => s.pts.map((p) => p[1]));
-    const Rlo = Math.min(...allR);
-    const Rhi = Math.max(...allR);
-    // Clamp plot range to something sensible; ignore huge tails near
-    // singularities so the U-shape is legible.
-    const yLo = Math.max(Rlo - 0.5, 0);
-    const yHi = Math.min(Rhi, Rlo + 6);
+    const colors = [COL.edge_stage2, COL.signal];
+    const labels = ["t = m+1", "t = N"];
+    const STEPS = 300;
 
     const x = d3.scaleLinear().domain([0, 1]).range([0, iw]);
-    const y = d3.scaleLinear().domain([yLo, yHi]).range([ih, 0]);
-    g.append("g").attr("transform", `translate(0,${ih})`)
-      .call(d3.axisBottom(x).ticks(6))
-      .selectAll("text").style("fill", "#6b6a54")
-        .style("font-family", "Special Elite, Courier New, monospace");
-    g.append("g").call(d3.axisLeft(y).ticks(5))
-      .selectAll("text").style("fill", "#6b6a54")
-        .style("font-family", "Special Elite, Courier New, monospace");
-    g.selectAll(".domain").style("stroke", "#b9a263");
-    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+    const y = d3.scaleLinear().domain([0, 1]).range([ih, 0]);    // updated per draw
+
+    const xAxisG = g.append("g").attr("transform", `translate(0,${ih})`);
+    const yAxisG = g.append("g");
+
     svg.append("text").attr("x", W / 2).attr("y", H - 6)
       .attr("text-anchor", "middle").style("fill", "#6b6a54")
       .style("font-family", "Special Elite, Courier New, monospace")
@@ -1012,22 +999,52 @@ window.MathJax = {
       .style("font-family", "Special Elite, Courier New, monospace")
       .style("font-size", "11px").text("disk radius R_t(T)");
 
-    const colors = [COL.edge_stage2, COL.signal];
-    const labels = ["t = m+1", "t = N"];
-    samples.forEach((s, i) => {
-      const line = d3.line()
-        .defined((d) => d[1] >= yLo && d[1] <= yHi)
-        .x((d) => x(d[0])).y((d) => y(d[1]));
-      g.append("path")
-        .datum(s.pts).attr("d", line)
-        .attr("fill", "none").attr("stroke", colors[i])
-        .attr("stroke-width", 2);
+    const curves = ts.map((t, i) =>
+      g.append("path").attr("fill", "none")
+        .attr("stroke", colors[i]).attr("stroke-width", 2)
+    );
+    const labelTexts = ts.map((t, i) =>
       svg.append("text")
-        .attr("x", W - PAD.right + 10).attr("y", PAD.top + 14 + i * 16)
+        .attr("x", W - PAD.right + 10).attr("y", PAD.top + 14 + i * 17)
         .attr("fill", colors[i])
         .attr("font-family", "Caveat Brush, cursive").attr("font-size", 14)
-        .text(`${labels[i]} = ${ts[i]}`);
-    });
+        .text(`${labels[i]} = ${ts[i]}`)
+    );
+
+    const scalarsEl = document.getElementById("rt-scalars");
+    const toggle = document.getElementById("rt-beta1");
+
+    function draw() {
+      const beta = toggle.checked ? 1 : BETA;
+      const samples = ts.map((t) => {
+        const pts = [];
+        for (let k = 1; k < STEPS; k++) {
+          const T = k / STEPS;
+          const R = Rat(t, T, beta);
+          if (isFinite(R)) pts.push([T, R]);
+        }
+        return pts;
+      });
+      const all = samples.flat();
+      if (!all.length) return;
+      const Rlo = Math.min(...all.map(p => p[1]));
+      const Rhi = Math.max(...all.map(p => p[1]));
+      const pad = (Rhi - Rlo) * 0.08 + 0.3;
+      y.domain([Rlo - pad, Rhi + pad]);
+      xAxisG.call(d3.axisBottom(x).ticks(6));
+      yAxisG.call(d3.axisLeft(y).ticks(6));
+      g.selectAll(".domain").style("stroke", "#b9a263");
+      g.selectAll(".tick line").style("stroke", "#cdbf8d");
+      g.selectAll(".tick text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace");
+      const line = d3.line().x(d => x(d[0])).y(d => y(d[1]));
+      samples.forEach((pts, i) => curves[i].attr("d", line(pts)));
+      const betaShown = beta === 1 ? "1" : BETA.toFixed(3);
+      scalarsEl.innerHTML = `N = ${N_NODES} &middot; m = ${M_PROF} &middot; &gamma; = ${GAMMA.toFixed(2)} &middot; &beta; = ${betaShown}`;
+    }
+
+    toggle.addEventListener("change", draw);
+    draw();
   })();
 
   // ── Step 2 viz: h_ij distribution for one arrival, with R_i marker ──
