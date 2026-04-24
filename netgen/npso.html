@@ -170,6 +170,13 @@
   <p>Close in radius AND close in angle gives a small \(h_{ij}\); a big radial gap or a diametric angular gap blows it up. One distance per candidate. The disk below visualises the hyperbolic geometry directly: hover any node \(i\) and a dashed red curve traces the boundary of \(i\)'s hyperbolic ball of radius \(R_i(T = 0.3)\). The ball is not a Euclidean circle on this rendering; far-from-origin nodes get pear-shaped balls because hyperbolic distance grows non-linearly along the radial axis.</p>
   <div class="disk-panel" style="padding:.9rem 1rem">
     <svg id="fd-hover" viewBox="-270 -270 540 540" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="widget-row" style="padding:.4rem 0 0;border:none;margin:0">
+      <div class="scrub">
+        <label>T</label>
+        <input type="range" id="hover-T" min="0.01" max="0.99" step="0.01" value="0.30">
+        <output id="hover-T-val">0.30</output>
+      </div>
+    </div>
   </div>
   <p>The strip below pivots on the same data, sorted ascending: \(h_{ij}\) for one fixed arrival (node \(i = N\) at \(T = 0.3\)); the dashed vertical marks \(R_i(T)\). Bars to the left of the marker are the candidates inside that ball.</p>
   <div class="disk-panel" style="padding:.9rem 1rem">
@@ -1245,7 +1252,9 @@ window.MathJax = {
     drawDiskDecorations(svg);
     const overlay = svg.append("g").attr("class", "fd-hover-layer");
 
-    const T_FIXED = 0.3;
+    const slider = document.getElementById("hover-T");
+    const sliderOut = document.getElementById("hover-T-val");
+    function currentT() { return parseFloat(slider.value); }
     function R_at(t, T) {
       const s = Math.sin(Math.PI * T);
       if (s <= 0 || t < 2) return NaN;
@@ -1322,16 +1331,17 @@ window.MathJax = {
 
     let path = null;
     let label = null;
+    let hoveredId = null;
     function clearOverlay() {
       if (path) { path.remove(); path = null; }
       if (label) { label.remove(); label = null; }
     }
-    viz.onNodeHoverEnter((d) => {
-      const id = parseInt(d.id, 10);
+    function drawBall(id) {
       const t = rankOf[id] + 1;
-      const R = R_at(t, T_FIXED);
+      const T = currentT();
+      const R = R_at(t, T);
       if (!isFinite(R) || R <= 0) return;
-      const polar = SHARED.POLAR[id];   // {r (disk), r_hyp, theta}
+      const polar = SHARED.POLAR[id];
       if (!polar) return;
       const pts = hyperbolicBall(polar.r_hyp, polar.theta, R);
       const dStr = ballPath(pts);
@@ -1351,8 +1361,17 @@ window.MathJax = {
         .attr("font-family", "Caveat Brush, cursive").attr("font-size", 14)
         .attr("pointer-events", "none")
         .text(`R_${t} ≈ ${R.toFixed(2)}`);
+    }
+    viz.onNodeHoverEnter((d) => {
+      hoveredId = parseInt(d.id, 10);
+      drawBall(hoveredId);
     });
-    viz.onNodeHoverLeave(() => clearOverlay());
+    viz.onNodeHoverLeave(() => { hoveredId = null; clearOverlay(); });
+    slider.addEventListener("input", () => {
+      sliderOut.value = currentT().toFixed(2);
+      if (hoveredId != null) drawBall(hoveredId);
+    });
+    sliderOut.value = currentT().toFixed(2);
 
     onEmbeddingReroll(() => {
       clearOverlay();
