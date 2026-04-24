@@ -169,14 +169,13 @@
       </div>
       <span class="step-label" id="hover-info" style="margin-left:auto">&middot;</span>
     </div>
-    <div class="step-desc" style="margin-top:.6rem"><span class="st">click</span> any node to lock the selection and draw its hyperbolic ball of radius \(R_t(T)\). Drag the \(T\) slider to scale the ball with temperature. The ball is not a Euclidean circle on this rendering: far-from-origin nodes get pear-shaped balls because hyperbolic distance grows non-linearly along the radial axis.</div>
+    <div class="step-desc" style="margin-top:.6rem"><span class="st">click</span> any node to set the source \(i\); the dashed red curve traces \(i\)'s hyperbolic ball of radius \(R_t(T)\). Drag the \(T\) slider to scale the ball with temperature. Far-from-origin sources get pear-shaped balls because hyperbolic distance grows non-linearly along the radial axis.</div>
   </div>
   <p><strong>Step 2.</strong> For each candidate \(j\) already on the disk, compute the hyperbolic distance between \(i\) and \(j\):</p>
   \[
     h_{ij} \;=\; \mathrm{arccosh}\bigl( \cosh r_i \cosh r_j \;-\; \sinh r_i \sinh r_j \cos d_\mathrm{ang}(\theta_i, \theta_j) \bigr).
   \]
   <p>Close in radius AND close in angle gives a small \(h_{ij}\); a big radial gap or a diametric angular gap blows it up. One distance per candidate.</p>
-  <p><span class="st" style="color:var(--azure);letter-spacing:.1em;text-transform:uppercase;font-family:'Special Elite',monospace;font-size:.78rem">how to use</span> &middot; first click on a node = pick the source and draw its ball; second click on a different node = draw the hyperbolic geodesic from source to target (the shortest path in the hyperbolic plane); third click = reset and start a new pick.</p>
   <div class="disk-panel" style="padding:.9rem 1rem">
     <svg id="fd-geodesic" viewBox="-270 -270 540 540" preserveAspectRatio="xMidYMid meet"></svg>
     <div class="widget-row" style="padding:.4rem 0 0;border:none;margin:0">
@@ -185,8 +184,9 @@
         <input type="range" id="geo-T" min="0.01" max="0.99" step="0.01" value="0.30">
         <output id="geo-T-val">0.30</output>
       </div>
-      <span class="step-label" id="geo-info" style="margin-left:auto">click a node to start</span>
+      <span class="step-label" id="geo-info" style="margin-left:auto">&middot;</span>
     </div>
+    <div class="step-desc" style="margin-top:.6rem"><span class="st">click</span> any node to set the source \(i\); a dashed red curve traces \(R_i(T)\). Click a <em>different</em> node to draw the hyperbolic geodesic from \(i\) to that target — the shortest path in the hyperbolic plane. Click any other node to start a new pick.</div>
   </div>
   <p><strong>Step 3.</strong> Plug the pair \((h_{ij}, R_i(T))\) into the Fermi-Dirac sigmoid to get the connection probability:</p>
   \[
@@ -214,7 +214,7 @@
       </div>
       <span class="step-label" id="heat-info" style="margin-left:auto">&middot;</span>
     </div>
-    <div class="step-desc" style="margin-top:.6rem"><span class="st">click</span> any node to lock the source \(i\); each cell of the polar grid then shades by \(p(i, j)\) for that location. Azure = high probability, cream = low. Dashed red = the \(p = 1/2\) contour, i.e. the same hyperbolic ball as in step 1. Drag the \(T\) slider to soften or sharpen the gradient.</div>
+    <div class="step-desc" style="margin-top:.6rem"><span class="st">click</span> any node to set the source \(i\); the polar grid shades by \(p(i, j)\) for every location. Azure = high probability, cream = low. Dashed red = the \(p = 1/2\) contour, the same hyperbolic ball as in step 1. Drag the \(T\) slider to soften or sharpen the gradient.</div>
   </div>
   <p>At \(T \to 0\) the rule becomes "deterministic geometry": only pairs strictly inside the cutoff connect, every close triple closes into a triangle, clustering coefficient is high. At \(T \to 1\) the rule becomes "noise": almost every pair flips a near-fair coin regardless of distance, and clustering collapses. The empirical clustering coefficient \(cc(T)\) of one nPSO sample is a Monte Carlo average over these coin flips, so different draws at the same \(T\) give different values; the curve is noisy. That noise matters later when we try to search for a \(T\) that hits an input target.</p>
   <p>The three \(p(i, j)\) values above are the weights the next section uses to pick which \(m\) predecessors node \(i\) actually connects to.</p>
@@ -1191,6 +1191,19 @@ window.MathJax = {
     return pts;
   }
 
+  // ── Shared selection bus: all three FD vizes pick from the same i ──
+  // Step 1's clicked node, step 2's first (source) node, and step 3's
+  // heatmap source all read from SELECTED_ID. Click in any panel to
+  // update; listeners re-render. Step 2's secondary (target) selection
+  // stays local to that panel.
+  let SELECTED_ID = sorted[sorted.length - 1];
+  const _selListeners = [];
+  function onSelectionChange(fn) { _selListeners.push(fn); }
+  function setSelected(id) {
+    SELECTED_ID = id;
+    _selListeners.forEach(fn => { try { fn(id); } catch (e) {} });
+  }
+
   // ── Hover-to-show-ball: each node draws its R_i(T) circle ──
   // Renders the same embedding as the disk above. On node hover, draw
   // a dashed red circle of radius scaled from R_i(T) at T = 0.3 around
@@ -1258,21 +1271,16 @@ window.MathJax = {
         .attr("stroke-dasharray", "4 3").attr("opacity", 0.9)
         .attr("pointer-events", "none");
     }
-    // Initial ball: last arrival (largest t, most candidates). Hover
-    // latches onto the hovered node and stays there until another node
-    // is hovered; hover-leave keeps the last selection.
-    let currentId = sorted[sorted.length - 1];
-
-    viz.onNodeTap((d) => {
-      currentId = parseInt(d.id, 10);
-      drawBall(currentId);
-    });
+    // Initial ball comes from the shared selection. Click latches the
+    // shared id; external selection changes also redraw here.
+    viz.onNodeTap((d) => setSelected(parseInt(d.id, 10)));
+    onSelectionChange(() => drawBall(SELECTED_ID));
     slider.addEventListener("input", () => {
       sliderOut.value = currentT().toFixed(2);
-      drawBall(currentId);
+      drawBall(SELECTED_ID);
     });
     sliderOut.value = currentT().toFixed(2);
-    drawBall(currentId);
+    drawBall(SELECTED_ID);
 
     onEmbeddingReroll(() => {
       clearOverlay();
@@ -1313,7 +1321,8 @@ window.MathJax = {
     });
     NETGEN.makeTooltip(viz, svg.node().closest(".disk-panel"));
 
-    let firstId = null;
+    // First (source) node comes from the shared selection. Second
+    // (target) node is local to this panel.
     let secondId = null;
     let pathBall = null;
     let pathGeo = null;
@@ -1323,13 +1332,14 @@ window.MathJax = {
       if (pathGeo)  { pathGeo.remove();  pathGeo = null; }
     }
     function setStatus() {
+      const firstId = SELECTED_ID;
       if (firstId == null) {
         infoEl.textContent = "click a node to start";
         return;
       }
       const t1 = rankOf[firstId] + 1;
       if (secondId == null) {
-        infoEl.textContent = `picked node ${t1} · click a second node`;
+        infoEl.textContent = `source node ${t1} · click a second node for the geodesic`;
         return;
       }
       const t2 = rankOf[secondId] + 1;
@@ -1371,6 +1381,7 @@ window.MathJax = {
     }
     function redraw() {
       clearLayer();
+      const firstId = SELECTED_ID;
       if (firstId == null) { setStatus(); return; }
       drawBallFor(firstId);
       if (secondId != null) drawGeodesicFor(firstId, secondId);
@@ -1378,17 +1389,24 @@ window.MathJax = {
     }
     viz.onNodeTap((d) => {
       const id = parseInt(d.id, 10);
-      if (firstId == null) { firstId = id; secondId = null; }
-      else if (secondId == null && id !== firstId) { secondId = id; }
-      else { firstId = id; secondId = null; }
-      redraw();
+      // First click on a different node = pick a target; otherwise
+      // (no target yet, or third click) treat as a new source on the
+      // shared bus.
+      if (secondId == null && id !== SELECTED_ID) {
+        secondId = id;
+        redraw();
+      } else {
+        secondId = null;
+        setSelected(id);
+      }
     });
+    onSelectionChange(() => { secondId = null; redraw(); });
     slider.addEventListener("input", () => {
       sliderOut.value = currentT().toFixed(2);
       redraw();
     });
     sliderOut.value = currentT().toFixed(2);
-    setStatus();
+    redraw();
   })();
 
   // ── Step 3: density heatmap of p(i, j) on the disk ──
@@ -1454,8 +1472,8 @@ window.MathJax = {
       return `rgb(${r}, ${g}, ${b})`;
     }
 
-    let currentId = sorted[sorted.length - 1];
     function redraw() {
+      const currentId = SELECTED_ID;
       const T = currentT();
       const t_u = rankOf[currentId] + 1;
       const R = FD_R_at(t_u, T);
@@ -1490,10 +1508,8 @@ window.MathJax = {
                   : (R <= 0 ? "≤ 0" : R.toFixed(2));
       infoEl.textContent = `node ${t_u} · R = ${Rstr}`;
     }
-    viz.onNodeTap((d) => {
-      currentId = parseInt(d.id, 10);
-      redraw();
-    });
+    viz.onNodeTap((d) => setSelected(parseInt(d.id, 10)));
+    onSelectionChange(() => redraw());
     slider.addEventListener("input", () => {
       sliderOut.value = currentT().toFixed(2);
       redraw();
