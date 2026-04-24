@@ -4,29 +4,91 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>EC-SBM v2</title>
-<meta name="description" content="EC-SBM v2 walks the four-stage pipeline on a small synthetic graph. The star: the block-preserving 2-opt rewire, step by step.">
+<meta name="description" content="Edge-connected SBM (v2). Same K_(k+1) core guarantee as v1, rebuilt around a single residual SBM call, a block-preserving 2-opt rewire, and a hybrid degree matcher that logs gridlock instead of dropping stubs silently.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="./shared.css">
 <style>
+.disk-panel{
+  padding:1rem; background:var(--ink-2); border:1px solid var(--rule);
+  border-radius:6px; margin:1rem 0;
+}
+.disk-panel svg{ width:100%; height:auto; display:block; }
 .step-desc{
   font-family:'Special Elite','Courier New',monospace;
   font-size:.78rem; color:var(--paper-2); margin-top:.6rem;
 }
 .step-desc .st{ color:var(--azure); letter-spacing:.1em; text-transform:uppercase; }
+.step-desc mjx-container{ font-size:1em !important; }
+.profile-table{ width:100%; border-collapse:collapse; margin:1rem 0; background:var(--ink-2); border:1px solid var(--rule); border-radius:4px; overflow:hidden; }
+.profile-table th, .profile-table td{ padding:.55rem .85rem; border-bottom:1px solid var(--rule); vertical-align:middle; text-align:left; }
+.profile-table tr:last-child th, .profile-table tr:last-child td{ border-bottom:none; }
+.profile-table th{ font-family:'Special Elite','Courier New',monospace; font-size:.72rem; letter-spacing:.15em; color:var(--paper-3); width:10%; white-space:nowrap; }
+.profile-table td.val{ font-family:'Special Elite','Courier New',monospace; font-size:1.05rem; color:var(--azure); font-variant-numeric:tabular-nums; width:14%; white-space:nowrap; }
+.profile-table td.desc{ color:var(--paper-2); font-size:.88rem; line-height:1.45; }
 .residual-table{
-  display:grid; grid-template-columns:repeat(4, 1fr); gap:2px;
-  max-width:480px; margin:1rem auto; font-family:'Special Elite','Courier New',monospace;
-  font-size:.72rem;
+  display:grid; grid-template-columns: 0.9fr 1fr 1fr 1fr; gap:3px;
+  max-width:520px; margin:1rem auto;
+  font-family:'Special Elite','Courier New',monospace; font-size:.78rem;
 }
-.residual-table .rc{ padding:.5rem; text-align:center; background:var(--ink-3);
+.residual-table .rc{
+  padding:.55rem .6rem; text-align:center; background:var(--ink-3);
   border:1px solid var(--rule); color:var(--paper-2);
 }
-.residual-table .rh{ background:transparent; border:none; color:var(--paper-3);
-  font-size:.66rem; letter-spacing:.1em; text-transform:uppercase;
+.residual-table .rh{
+  background:transparent; border:none; color:var(--paper-3);
+  font-size:.65rem; letter-spacing:.12em; text-transform:uppercase;
 }
 .residual-table .rc b{ color:var(--azure); }
+.residual-table .rc.diff b{ color:var(--mint); }
+.matcher-table{
+  width:100%; border-collapse:collapse; margin:1rem 0;
+  background:var(--ink-2); border:1px solid var(--rule); border-radius:4px;
+  overflow:hidden; font-size:.87rem;
+}
+.matcher-table th, .matcher-table td{
+  padding:.5rem .8rem; border-bottom:1px solid var(--rule);
+  vertical-align:top; text-align:left;
+}
+.matcher-table tr:last-child th, .matcher-table tr:last-child td{ border-bottom:none; }
+.matcher-table th{
+  font-family:'Special Elite','Courier New',monospace;
+  font-size:.72rem; letter-spacing:.12em; color:var(--paper-3);
+  width:20%; white-space:nowrap;
+}
+.matcher-table td.desc{ color:var(--paper-2); line-height:1.45; }
+.matcher-table tr.pref th{ color:var(--mint); }
+.matcher-table tr.pref td.desc{ color:var(--paper); }
+.readout{
+  display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:.8rem;
+  font-family:'Special Elite','Courier New',monospace; font-size:.78rem;
+}
+.readout .item{ color:var(--paper-3); }
+.readout .item b{ color:var(--azure); margin-left:.3rem; }
+.readout .item.diff b{ color:var(--signal); }
+.readout .item.good b{ color:var(--mint); }
+.block-ring-label{
+  font-family:'Caveat Brush', cursive;
+  font-size:20px;
+  letter-spacing:.04em;
+}
+.provenance-legend{
+  display:flex; gap:1.4rem; flex-wrap:wrap;
+  font-family:'Special Elite','Courier New',monospace;
+  font-size:.78rem; color:var(--paper-2);
+  margin-top:.6rem; justify-content:center;
+}
+.provenance-legend .sw{
+  display:inline-block; width:28px; height:3px; vertical-align:middle;
+  margin-right:.45rem; border-radius:1px;
+}
+.provenance-bar svg text{ font-family:'Special Elite','Courier New',monospace; }
+.graph-canvas{
+  height:auto;
+  aspect-ratio: 640 / 680;
+  max-height: 560px;
+}
 </style>
 </head>
 <body>
@@ -34,79 +96,95 @@
 
 <div id="links"></div>
 
-<div class="wip-banner" role="alert"><svg class="wip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 L22 21 L2 21 Z"/><line x1="12" y1="10" x2="12" y2="15"/><circle cx="12" cy="18" r="1" fill="currentColor" stroke="none"/></svg><strong class="wip-label">warning</strong><span class="wip-msg">work in progress &middot; expect rough edges and breaking changes.</span></div>
-
 <header class="hdr">
   <div class="kicker">network-generation · ec-sbm-v2</div>
   <h1><em>EC-SBM</em> v2</h1>
-  <p class="sub">Same edge-connectivity guarantee as v1, with two changes: outliers fold into a single block (v1 treats them as singleton clusters, which can regenerate community-like structure among them), and the residual is accounted for in a single SBM call with a block-preserving rewire plus hybrid degree-matching pass.</p>
+  <p class="sub">Same per-cluster \(k\)-edge-connectivity floor as v1. One SBM call on a proper residual (no overlay), a block-preserving 2-opt rewire, and a hybrid degree matcher that logs gridlock instead of dropping stubs.</p>
 </header>
 
 <section class="hook">
-  <p><a href="./ec-sbm-v1.html">v1</a> runs four stages, two SBM calls, and silently drops a handful of residual stubs along the way. v2 is what you get if you stare at v1 for an afternoon and rewrite the parts that annoyed you.</p>
-  <p>Three changes. Stage 2 is <em>constructive only</em>, no SBM overlay on mutated probs. Stage 3 is a single residual SBM over all blocks (real clusters plus a combined outlier block), which subsumes what v1 needed two SBM calls to express. Stage 4 gains a block-preserving 2-opt rewire and a menu of five matcher algorithms, so the "silent drop" bug is gone.</p>
+  <p><a href="./ec-sbm-v1.html">v1</a> gets the right cluster guarantees, but the bookkeeping is messy. Stage 2 builds \(K_{k+1}\) cores <em>and</em> runs an SBM on the decremented probs + degree arrays; the SBM can sample a pair the core already placed, dedup drops one, and the block's intra-count leaks below the profile. Stage 3 handles outliers through a separate SBM, and stage 4 runs a heap-greedy matcher that silently drops stubs when a hub runs out of valid partners.</p>
+  <p>v2 keeps the \(K_{k+1}\) cores and rebuilds the rest. Stage 2 is constructive-only; nothing else samples during the core phase. Stage 3 is a single residual SBM over every block (real clusters plus a combined outlier block), with invalid edges fed to a block-preserving 2-opt rewire that preserves both the block-pair counts and each node's block membership. Stage 4 offers five matcher algorithms, with a <code>hybrid</code> (rewire + true-greedy) default that logs gridlock rather than hiding it.</p>
+  <p>Every edge is owned by exactly one stage, and nothing disappears without a log line. The per-cluster edge-connectivity proof is inherited verbatim from v1.</p>
 </section>
 
-<!-- ─────────── Stage 0 ─────────── -->
+<!-- ─────────── Stage 1 · profile (same as v1) ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 0 · the question</div>
-  <h2>Can the degree sequence survive the block matrix?</h2>
-  <p>v1's pain: stage 2 mutates the degree array and the block matrix while building the K<sub>k+1</sub> cores, then hands those mutated arrays to the SBM, which samples more edges on top, and then dedup drops some of the collisions. At every step an edge might be added and an edge might disappear, and keeping track of who owes what to whom is a mess.</p>
-  <p>v2's answer: keep the constructive part honest, then compute the <em>residual</em> exactly, then hand the residual (and only the residual) to the SBM.</p>
-</section>
-
-<!-- ─────────── Stage 1 ─────────── -->
-<section class="stage">
-  <div class="stage-num">stage 1 · cores (same as v1)</div>
-  <h2>Build the k-edge-connected skeleton.</h2>
-  <p>Identical to v1's stage 2 <em>phase 1</em>. Sort each cluster's nodes by degree. Top $$k+1$$ form a complete subgraph. Walk remaining nodes in degree-desc order and wire each to $$k$$ top-processed partners. If a budget would block a required edge, inflate the budget rather than drop it.</p>
-  <p>What v2 does <em>not</em> do: call <code>gt.generate_sbm</code> here. Stage 2 ends with just the constructive edges. The SBM is deferred to stage 3.</p>
+  <div class="stage-num">profiling · same contract as v1</div>
+  <h2>Mincut + the SBM contract, outliers set aside.</h2>
+  <p>The profile stage is identical to v1: the five SBM tables plus <code>mincut.csv</code>, and <code>outlier_mode=excluded</code> drops unclustered nodes along with their incident edges. The outliers come back in stage 3 as a single combined block (v2's default <code>--gen-outlier-mode combined</code>), not one block per node the way v1's stage 3a treats them.</p>
   <div class="graph" id="g1">
     <div class="graph-chrome">
-      <span>stage 2 output (constructive only)</span>
-      <span class="right">azure = stage 2</span>
+      <span>input G after <code>outlier_mode=excluded</code> &middot; 18 nodes, 3 real clusters + 1 pending outlier block</span>
+      <span class="right">hover a node or block</span>
     </div>
     <div class="graph-canvas" id="g1-cy"></div>
   </div>
   <div class="callout">
-    <div class="tag">same guarantee, cleaner accounting</div>
-    <p>The $$K_{k+1}$$ core gives the same edge-connectivity proof as in v1. What differs is that this stage no longer runs two couples of books. Degrees get decremented, probs get decremented, nothing else.</p>
+    <div class="tag">why combined, not singleton</div>
+    <p>A size-1 cluster has no internal edges (no partner inside), so giving each outlier its own block adds rows and columns to the block matrix without filling any diagonal. Under <code>combined</code>, every outlier shares one block; the outlier-outlier diagonal cell captures the real edges they have among themselves; clustered-outlier cells capture the cross edges. One block means one residual-SBM cell per relation, which is all v2's stage 3 needs.</p>
   </div>
 </section>
 
-<!-- ─────────── Stage 2 ─────────── -->
+<!-- ─────────── Stage 2 · constructive core ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 2 · residual accounting</div>
-  <h2>Compute what the SBM still owes each block.</h2>
-  <p>For each block $$k$$, let $$D_k$$ be the sum of residual degrees (target minus stage-2 contribution, clamped at 0) and $$E^{\text{inter}}_k$$ be the row-sum of the inter-block probs for row $$k$$. The intra-block budget the SBM still needs to place is</p>
-  <p style="text-align:center;font-family:Special Elite,Courier New,monospace;color:var(--paper);background:var(--ink-3);border:1px solid var(--rule);padding:.8rem;border-radius:3px">
-    $$\text{diff} = D_k - E^{\text{inter}}_k$$
-  </p>
-  <p>If $$\text{diff} \geq 0$$, set $$\texttt{probs}[k,k] = \text{diff}$$ (bump up by 1 for parity if odd). If $$\text{diff} < 0$$, stage 2 already over-spent the intra-budget; add $$|\text{diff}|$$ back to <code>out_degs</code> and set $$\texttt{probs}[k,k] = 0$$. Outliers fold into one combined extra block under the default <code>--gen-outlier-mode combined</code>.</p>
-  <div class="residual-table">
-    <div class="rc rh">block</div>
-    <div class="rc rh">D_k</div>
-    <div class="rc rh">E_inter</div>
-    <div class="rc rh">diff (to sample)</div>
-    <div class="rc">C1</div><div class="rc">12</div><div class="rc">4</div><div class="rc"><b>8</b></div>
-    <div class="rc">C2</div><div class="rc">8</div><div class="rc">3</div><div class="rc"><b>5</b></div>
-    <div class="rc">C3</div><div class="rc">5</div><div class="rc">3</div><div class="rc"><b>2</b></div>
-    <div class="rc">OUT</div><div class="rc">4</div><div class="rc">4</div><div class="rc"><b>0</b></div>
+  <div class="stage-num">generation · the \(K_{k+1}\) core (unchanged from v1)</div>
+  <h2>Clique on top \((k+1)\) nodes, attach the rest, decrement the budgets.</h2>
+  <p>Same Python as v1's core phase: sort cluster nodes by degree desc, wire the top \(k+1\) into a complete subgraph, walk the remaining nodes in degree-desc order and attach each to \(k\) top-processed partners. <code>ensure_edge_capacity</code> inflates when a required edge would be blocked. The one change: stage 2 stops here. No <code>gt.generate_sbm</code> call, no overlay.</p>
+  <div class="graph" id="g2">
+    <div class="graph-chrome">
+      <span>stage 2 output &middot; constructive edges only (18)</span>
+      <span class="right">azure = core + attach</span>
+    </div>
+    <div class="graph-canvas" id="g2-cy"></div>
   </div>
   <div class="callout">
-    <div class="tag">every edge is owned by exactly one stage</div>
-    <p>Constructive edges belong to stage 2. Residual inter-block edges and the residual intra counts come from stage 3's SBM. Match-degree fills in whatever dedup or rewire removed. No double-accounting.</p>
+    <div class="tag">same proof, cleaner ledger</div>
+    <p>Per-cluster edge-connectivity \(\ge k(C)\) is still guaranteed by the \(K_{k+1}\) seed. What changes is that probs and deg are decremented by exactly the constructive contribution and nothing else; the residual that the SBM sees next is honest.</p>
   </div>
 </section>
 
-<!-- ─────────── Stage 3 ─────────── -->
+<!-- ─────────── Stage 3a · residual accounting ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 3 · residual SBM + rewire</div>
-  <h2>One SBM call, then a block-preserving 2-opt rewire.</h2>
-  <p>The residual SBM can still emit self-loops and parallel edges. v1 just dedupped them and accepted the degree loss. v2 tries to rewire instead: for each invalid edge, pick a <em>valid</em> edge from the same block-pair bucket and swap endpoints so that each node stays in its home block. The degrees are preserved; the block-pair edge counts are preserved; the collision is gone.</p>
+  <div class="stage-num">generation · residual accounting</div>
+  <h2>Compute what the SBM still owes each block.</h2>
+  <p>Before the SBM call, <code>prepare_sbm_inputs</code> rewrites the intra-block diagonal so the residual adds up. For each block \(k\) (the three real clusters plus the combined outlier block):</p>
+  \[
+    D_k \;=\; \max\!\left(0, \; \sum_{u \,:\, b_u = k} \bigl(k^{\text{target}}_u - k^{\text{stage2}}_u\bigr)\right),
+    \quad
+    E^{\text{inter}}_k \;=\; \sum_{s \neq k} \texttt{probs}[k, s].
+  \]
+  <p>Read \(D_k\) as "residual half-edges block \(k\) still owes" and \(E^{\text{inter}}_k\) as "inter-block half-edges block \(k\) is already committed to". The intra-block cell the SBM still needs to sample is</p>
+  \[
+    \text{diff}_k \;=\; D_k \;-\; E^{\text{inter}}_k.
+  \]
+  <p>If \(\text{diff}_k \ge 0\), set \(\texttt{probs}[k, k] = \text{diff}_k\) (bump by 1 if it is odd, to satisfy graph-tool's even-half-edges-per-block parity rule). If \(\text{diff}_k &lt; 0\), the core already over-spent the block's budget; add \(|\text{diff}_k|\) back to <code>out_degs</code> and set \(\texttt{probs}[k, k] = 0\) (the SBM can only add, never subtract).</p>
+  <p>On the synthetic, after the core phase has placed \(K_4\), \(K_3\), \(K_2\), and the attach-by-degree extensions, the residual looks like:</p>
+  <div class="residual-table">
+    <div class="rc rh">block</div>
+    <div class="rc rh">\(D_k\)</div>
+    <div class="rc rh">\(E^{\text{inter}}_k\)</div>
+    <div class="rc rh">\(\text{diff}_k\)</div>
+    <div class="rc">C1</div><div class="rc">12</div><div class="rc">4</div><div class="rc diff"><b>8</b></div>
+    <div class="rc">C2</div><div class="rc">8</div><div class="rc">3</div><div class="rc diff"><b>5</b></div>
+    <div class="rc">C3</div><div class="rc">5</div><div class="rc">3</div><div class="rc diff"><b>2</b></div>
+    <div class="rc">OUT</div><div class="rc">4</div><div class="rc">4</div><div class="rc diff"><b>0</b></div>
+  </div>
+  <div class="callout">
+    <div class="tag">every edge owned by one stage</div>
+    <p>Constructive edges belong to stage 2. Residual intra and inter come from stage 3's SBM. Match-degree covers whatever the rewire drops. No cell is "sampled twice", and nothing is "double-counted" because probs has already been decremented by what stage 2 placed.</p>
+  </div>
+</section>
+
+<!-- ─────────── Stage 3b · rewire step-through ─────────── -->
+<section class="stage">
+  <div class="stage-num">generation · SBM + block-preserving 2-opt rewire</div>
+  <h2>One SBM call, then swap endpoints to kill invalid edges.</h2>
+  <p>With the residual probs and the combined-outlier block assignment ready, v2 calls <code>gt.generate_sbm(b, probs, out_degs, micro_ers=True, micro_degs=True)</code> once. The sampler can still emit self-loops (two of the block's stubs landing on the same node) and parallel edges (two stubs for the same pair pairing up twice). v1 dedupped them and accepted the degree loss. v2 tries to fix each one via a 2-opt swap.</p>
+  <p>The swap: bucket every <em>valid</em> edge by its unordered block-pair \((A, B)\); for each invalid edge, pick a random valid edge in the same bucket and swap endpoints so each node stays in its home block. That preserves both the block-pair count and every node's block membership. Up to 10 retry passes with a stagnation detector. Unresolved invalids are dropped with a <code>WARN</code>.</p>
   <div class="graph" id="g3">
     <div class="graph-chrome">
-      <span id="g3-stage">step 0 · an invalid edge</span>
+      <span id="g3-stage">step 0 &middot; residual edges sampled</span>
       <span class="right step-label">step <b id="g3-cur">0</b> / <span id="g3-total">3</span></span>
     </div>
     <div class="graph-canvas" id="g3-cy"></div>
@@ -118,172 +196,363 @@
     <div class="step-desc" id="g3-desc"></div>
   </div>
   <div class="callout">
-    <div class="tag">the invariant of the swap</div>
-    <p>If the invalid edge $$(u, v)$$ has block-pair $$(A, B)$$ with $$A \neq B$$, the partner edge $$(x, y)$$ must also sit in bucket $$(A, B)$$. The swap pairs the A-side of each edge with the B-side of the other: $$(u_A, x_B)$$ and $$(x_A, u_B)$$. Both nodes stay in their home block, so the block matrix counts are invariant.</p>
+    <div class="tag">invariant of the swap</div>
+    <p>If the invalid edge \((u, v)\) has block-pair \((A, B)\) with \(A \neq B\), the partner edge \((x, y)\) must also sit in bucket \((A, B)\). Swap the \(A\)-side of each edge with the \(B\)-side of the other: \((u_A, x_B)\) and \((x_A, u_B)\). Both nodes stay in their home block, so the block-pair count is invariant. For intra-block \((A = A)\) there are two valid swaps; the code flips a coin.</p>
   </div>
 </section>
 
-<!-- ─────────── Stage 4 ─────────── -->
+<!-- ─────────── Stage 4 · matcher menu ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 4 · hybrid matcher</div>
-  <h2>Rewire phase first, then a true-greedy pass on whatever remains.</h2>
-  <p>After the residual SBM + rewire, some nodes are still short of their target degree. v1 runs a heap-greedy that silently drops stubs when a node's non-neighbor set runs out. v2's default is <code>--algorithm hybrid</code>: build a configuration-model stub pairing, rewire any invalid pairs (same 2-opt as stage 3), then hand the survivors to a dynamic true-greedy heap.</p>
-  <p>Rewire handles the bulk unbiased; true-greedy handles the stuck tail deterministically. Net effect: nearly zero silent drops on realistic inputs.</p>
+  <div class="stage-num">generation · match degree, with choices</div>
+  <h2>Five matchers, one default.</h2>
+  <p>After the residual SBM + rewire, some nodes are still short of their target. v2's <code>src/match_degree.py</code> ships five algorithms, selectable via <code>--algorithm</code>:</p>
+  <table class="matcher-table">
+    <thead>
+      <tr><th>algorithm</th><th>how it picks pairs</th><th>failure mode</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <th>greedy</th>
+        <td class="desc">v1's heap-based. Pop \(u\) with max residual, connect to <code>min(residual, non-neighbours)</code> partners via <code>set.pop()</code>.</td>
+        <td class="desc">Silent gridlock.</td>
+      </tr>
+      <tr>
+        <th>true_greedy</th>
+        <td class="desc">Max-heap with dynamic re-push. Pop \(u\), pick \(v\) via argmax over current degrees among valid targets, push updated residuals back.</td>
+        <td class="desc">Logs gridlock.</td>
+      </tr>
+      <tr>
+        <th>random_greedy</th>
+        <td class="desc">Weighted-random \(u\) (by residual), weighted-random \(v\) from valid targets.</td>
+        <td class="desc">Logs gridlock, useful for comparing bias against deterministic greedy.</td>
+      </tr>
+      <tr>
+        <th>rewire</th>
+        <td class="desc">Configuration-model pairing then 2-opt repair. Build a flat stub list (each node repeated <code>residual</code> times), shuffle, pair adjacent. Invalid pairs queue for the same <code>run_rewire_attempts</code> used in stage 3.</td>
+        <td class="desc">Logs gridlock.</td>
+      </tr>
+      <tr class="pref">
+        <th>hybrid (default)</th>
+        <td class="desc">Run <code>rewire</code> first, then <code>true_greedy</code> on whatever rewire could not place. Rewire handles the bulk unbiased; greedy handles the stuck tail deterministically.</td>
+        <td class="desc">Logs gridlock; drops near zero on realistic inputs.</td>
+      </tr>
+    </tbody>
+  </table>
   <div class="graph" id="g4">
     <div class="graph-chrome">
-      <span>final output (all four stages)</span>
-      <span class="right">orchid = stage 3 &middot; grey = stage 4</span>
+      <span>final output &middot; all three provenance bands</span>
+      <span class="right">orchid = residual SBM &middot; grey = match_degree</span>
     </div>
     <div class="graph-canvas" id="g4-cy"></div>
+    <div class="provenance-legend">
+      <span><span class="sw" style="background:#567ad8"></span>clustered (stage 2)</span>
+      <span><span class="sw" style="background:#7e468f"></span>outlier (stage 3)</span>
+      <span><span class="sw" style="background:#6b6a54"></span>match_degree (stage 4)</span>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────── Case study · dnc ─────────── -->
+<section class="stage">
+  <div class="stage-num">case study · dnc</div>
+  <h2>What you get on the shipped example.</h2>
+  <p>Default run on <code>dnc</code> + <code>sbm-flat-best+cc</code> at <code>--seed 1</code> with <code>--edge-correction rewire --match-degree-algorithm hybrid</code>:</p>
+  <table class="profile-table">
+    <thead>
+      <tr><th style="font-size:.62rem">stat</th><th style="font-size:.62rem">input</th><th style="font-size:.62rem">v2 output</th><th style="font-size:.62rem">note</th></tr>
+    </thead>
+    <tbody>
+      <tr><th>N</th><td class="val">906</td><td class="val">906</td><td class="desc">Exact.</td></tr>
+      <tr><th>edges</th><td class="val">10,429</td><td class="val">10,346</td><td class="desc">Within 0.8%. The 83-edge shortfall comes out of the stage-3 rewire's unresolved drops plus the hybrid matcher's residual gridlock.</td></tr>
+      <tr><th>mean degree</th><td class="val">23.02</td><td class="val">23.03</td><td class="desc">Follows the edge count.</td></tr>
+      <tr><th>global cc</th><td class="val">0.548</td><td class="val">0.513</td><td class="desc">Highest of the SBM family on this input (SBM: 0.341, v1: 0.424). Cores do most of the work; the residual-SBM-without-overlay keeps more of the core's triangles intact.</td></tr>
+      <tr><th>mean local cc</th><td class="val">0.494</td><td class="val">0.350</td><td class="desc">Same direction as global, slightly ahead of v1 (0.327).</td></tr>
+      <tr><th>clusters</th><td class="val">87</td><td class="val">87</td><td class="desc">Profile-stage passthrough.</td></tr>
+    </tbody>
+  </table>
+  <p>The provenance shift from v1 is the main visible difference. Same input, same mincut distribution, wildly different edge ownership:</p>
+  <div class="disk-panel provenance-bar">
+    <div class="step-desc" style="margin-bottom:.55rem"><span class="st">edge provenance · v1 vs v2</span> &middot; inclusive row ranges from each version's <code>sources.json</code>. In v1 the constructive + overlay band dominates (stage 2 did most of the sampling). In v2 the residual-SBM band dominates (stage 3 does most of the sampling, stage 2 just lays down the cores), and match_degree shrinks by ~3&times; because rewire + hybrid do more work upstream.</div>
+    <svg id="prov-bar" viewBox="0 0 640 210" preserveAspectRatio="xMidYMid meet"></svg>
   </div>
   <div class="callout">
-    <div class="tag">five matchers, one default</div>
-    <p><code>greedy</code> (v1's), <code>true_greedy</code> (dynamic re-push), <code>random_greedy</code> (weighted random), <code>rewire</code> (config-model + 2-opt), <code>hybrid</code> (rewire then true-greedy). The registry ships <code>true_greedy</code>; I would reach for <code>hybrid</code>.</p>
+    <div class="tag">why v2's global cc beats v1's on this input</div>
+    <p>Both versions place the same \(K_{k+1}\) cores. v1 then runs an SBM on the mutated probs and uses <code>remove_parallel_edges</code> for collisions; the sampler can land on core pairs, dedup drops one side, and the intra-block density (and therefore the local clustering inside that block) is shaved. v2's rewire keeps the block-pair count intact, so the core cliques' triangle structure stays in place and the global cc sits closer to the input's 0.548.</p>
+  </div>
+  <div class="callout warn">
+    <div class="tag">caveat: rewire can still strand a handful of edges</div>
+    <p>Rewire is not a complete repair. When no valid partner sits in the same bucket, an invalid edge stays invalid; after 10 retry passes or a stagnation break, those unresolved edges are dropped with a <code>WARN</code>. On dnc at this seed the total drop is tens of edges out of ten thousand, invisible in the stats table but present in <code>run.log</code>. For a matcher algorithm that refuses to drop, <code>--algorithm rewire</code> on stage 4 is still lossy in the same way (if rewire cannot resolve, true_greedy takes over under <code>hybrid</code>; in plain <code>rewire</code> mode the same stub vanishes).</p>
   </div>
 </section>
 
 <div id="kin"></div>
 
-<footer class="footer">
+<footer class="ack">
+  <p class="tools">drawn with <a href="https://d3js.org" target="_blank" rel="noopener">d3</a></p>
   <p class="credit">typed by vltanh, doodled with Claude</p>
 </footer>
 
 </main>
 
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 <script>
 window.MathJax = {
   tex: {
-    inlineMath: [['\\(', '\\)'], ['$', '$'], ['$$', '$$']],
+    inlineMath: [['\\(', '\\)']],
     displayMath: [['\\[', '\\]']]
   },
   chtml: { scale: 1.0 }
 };
 </script>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 <script src="./shared.js"></script>
 <script>
 (function () {
   document.getElementById("links").innerHTML = NETGEN.linksRow({gen: "ec-sbm-v2"});
+  // v2 is unpublished; no paper DOI. Point source at this repo's
+  // orchestration since v2's flag-bundle preset lives here.
+  (function () {
+    const icons = document.querySelector("#links .top-icons");
+    if (!icons) return;
+    const sourceLink = icons.querySelector('a[aria-label="github repository"]');
+    if (sourceLink) {
+      sourceLink.setAttribute("href",
+        "https://github.com/vltanh/network-generation/tree/main/configs/ec-sbm-v2.sh");
+      const span = sourceLink.querySelector("span");
+      if (span) span.textContent = "code";
+    }
+  })();
   document.getElementById("kin").innerHTML = NETGEN.kinSection({
+    title: "similarity",
     siblings: [
-      { gen: "sbm", label: "sbm",
-        diff: "No edge-connectivity guarantee, no constructive phase. Pure block-model sampling." },
-      { gen: "ec-sbm-v1", label: "ec-sbm-v1",
-        diff: "The predecessor. Same cores, but outliers are treated as singleton clusters; a naive greedy matcher fills the residual and can silently drop stubs." },
+      { gen: "sbm", label: "SBM",
+        diff: "The vanilla block model. Same \\((b, k, e)\\) contract but no edge-connectivity floor. v2 adds the \\(K_{k+1}\\) cores plus a residual-SBM accounting pass." },
+      { gen: "ec-sbm-v1", label: "EC-SBM v1",
+        diff: "Same cores, but stage 2 also runs an SBM (double-accounting through remove_parallel_edges), outliers get a separate SBM pass, and match_degree is a heap-greedy that silently drops stubs." },
     ],
   });
 
   const COL = NETGEN.COLORS;
+  const EDGES = NETGEN.EDGES;
+  const CLUSTER_OF = NETGEN.CLUSTER_OF;
+  const C1 = NETGEN.C1, C2 = NETGEN.C2, C3 = NETGEN.C3, OUT_N = NETGEN.OUT;
   const CORE_EDGES = NETGEN.CORE_EDGES;
+  const MINCUTS = NETGEN.MINCUTS;
   const OUT_EDGES = NETGEN.OUT_EDGES;
 
-  // ── Stage 1: constructive only (cores + attach). ──
+  function pickInputColor(e) {
+    if (e.kind === "outlier" || e.kind === "inter") return COL.edge_inter;
+    const c = CLUSTER_OF[e.u] || CLUSTER_OF[e.v];
+    return COL.edge_intra[c] || COL.edge_inter;
+  }
+
+  const BLOCK_NAMES = ["C1", "C2", "C3"];
+  const BLOCK_NODES = { C1, C2, C3 };
+  const BLOCK_COLOR = { C1: COL.C1, C2: COL.C2, C3: COL.C3 };
+
+  function makeBlockRects(svg, opts = {}) {
+    const layer = svg.append("g").attr("class", "block-rects");
+    const labelFn = opts.labelFn || ((name) => `${name} · k = ${MINCUTS[name]}`);
+    const shapes = BLOCK_NAMES.map((name) => {
+      const ids = BLOCK_NODES[name];
+      if (!ids || ids.length === 0) return null;
+      const color = BLOCK_COLOR[name];
+      const rect = layer.append("rect")
+        .attr("rx", 10).attr("ry", 10)
+        .attr("fill", color).attr("fill-opacity", 0.07)
+        .attr("stroke", color).attr("stroke-width", 1.5)
+        .attr("stroke-dasharray", "7 5")
+        .attr("opacity", 0.92);
+      const label = layer.append("text")
+        .attr("class", "block-ring-label")
+        .attr("text-anchor", "start")
+        .attr("fill", color)
+        .attr("opacity", 0.95)
+        .text(labelFn(name));
+      return { ids, rect, label };
+    }).filter(Boolean);
+    return function syncRects(viz) {
+      const padX = 34, padY = 38;
+      shapes.forEach(s => {
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        s.ids.forEach(id => {
+          const n = viz.nodeById[String(id)];
+          if (!n) return;
+          if (n.x < minX) minX = n.x;
+          if (n.x > maxX) maxX = n.x;
+          if (n.y < minY) minY = n.y;
+          if (n.y > maxY) maxY = n.y;
+        });
+        if (!isFinite(minX)) return;
+        let x = minX - padX, y = minY - padY;
+        let w = (maxX - minX) + 2 * padX;
+        let h = (maxY - minY) + 2 * padY;
+        const labelW = s.label.node().getComputedTextLength
+          ? s.label.node().getComputedTextLength() : 0;
+        const wanted = labelW + 24;
+        if (w < wanted) {
+          const cx = (minX + maxX) / 2;
+          w = wanted;
+          x = cx - w / 2;
+        }
+        s.rect.attr("x", x).attr("y", y).attr("width", w).attr("height", h);
+        s.label.attr("x", x + 12).attr("y", y + 20);
+      });
+    };
+  }
+
+  // ── Stage 1: profile with mincut labels on rects ──
   (function () {
-    const edges = [
-      ...CORE_EDGES.C1.map(([u,v]) => ({u,v, color: COL.edge_stage2, w: 2.2})),
-      ...CORE_EDGES.C2.map(([u,v]) => ({u,v, color: COL.edge_stage2, w: 2.2})),
-      ...CORE_EDGES.C3.map(([u,v]) => ({u,v, color: COL.edge_stage2, w: 2.2})),
-      [1,5],[2,5],[3,5],[1,6],[2,6],[4,6],[3,7],[4,7],[5,7],[1,8],[4,8],[5,8],
-      [9,12],[10,12],[9,13],[11,13],[10,14],[11,14],
-      [15,17],[16,18],
-    ].map(e => Array.isArray(e) ? ({u:e[0], v:e[1], color: COL.edge_stage2, w: 1.4}) : e);
-    NETGEN.CY.init("g1-cy", {
-      showLabels: true,
-      edges,
+    const host = document.getElementById("g1-cy");
+    if (!host) return;
+    host.innerHTML = "";
+    const svg = d3.select(host).append("svg")
+      .attr("class", "viz-svg")
+      .attr("viewBox", "-320 -340 640 680")
+      .attr("preserveAspectRatio", "xMidYMid meet");
+    const syncRects = makeBlockRects(svg);
+    const edges = EDGES.filter(e =>
+      CLUSTER_OF[e.u] !== "OUT" && CLUSTER_OF[e.v] !== "OUT"
+    ).map(e => ({
+      u: e.u, v: e.v, color: pickInputColor(e), w: 1.4,
+    }));
+    const viz = NETGEN.VIZ.init("g1-cy", {
+      svg, showLabels: true, includeOutliers: false, edges,
     });
+    NETGEN.makeTooltip(viz, document.getElementById("g1"));
+    syncRects(viz);
+    viz.sim.on("tick.blockRects", () => syncRects(viz));
   })();
 
-  // ── Stage 3: 2-opt rewire step-through ──
+  // ── Stage 2: constructive only (cores + attach, no overlay) ──
   (function () {
-    // Pick a "bad" edge, an invalid one (say a duplicate of (1,9)),
-    // and a valid partner edge (5,12). Both are in block-pair (C1, C2).
-    // Step 0: show both edges, the invalid one dashed-red.
-    // Step 1: highlight the invalid + partner, emphasize block-pair.
-    // Step 2: swap happens; new edges (1,12) and (5,9) replace (1,9) and (5,12).
-
-    const stage2 = [
-      ...CORE_EDGES.C1.map(([u,v]) => ({u,v, color: COL.edge_stage2, w: 1.5})),
-      ...CORE_EDGES.C2.map(([u,v]) => ({u,v, color: COL.edge_stage2, w: 1.5})),
-      ...CORE_EDGES.C3.map(([u,v]) => ({u,v, color: COL.edge_stage2, w: 1.5})),
+    const host = document.getElementById("g2-cy");
+    if (!host) return;
+    host.innerHTML = "";
+    const svg = d3.select(host).append("svg")
+      .attr("class", "viz-svg")
+      .attr("viewBox", "-320 -340 640 680")
+      .attr("preserveAspectRatio", "xMidYMid meet");
+    const syncRects = makeBlockRects(svg);
+    const edges = [];
+    BLOCK_NAMES.forEach(c => {
+      CORE_EDGES[c].forEach(([u, v]) => edges.push({
+        u, v, color: COL.edge_stage2, w: 2.2,
+      }));
+    });
+    [
       [1,5],[2,5],[3,5],[1,6],[2,6],[4,6],[3,7],[4,7],[5,7],[1,8],[4,8],[5,8],
       [9,12],[10,12],[9,13],[11,13],[10,14],[11,14],
       [15,17],[16,18],
-    ].map((e,i) => Array.isArray(e) ? ({u:e[0], v:e[1], color: COL.edge_stage2, w: 1.2, id:`g3-s2-${i}`}) : {...e, id:`g3-s2-${i}`});
+    ].forEach(([u, v]) => edges.push({
+      u, v, color: COL.edge_stage2, w: 1.4,
+    }));
+    const viz = NETGEN.VIZ.init("g2-cy", {
+      svg, showLabels: true, includeOutliers: false, edges,
+    });
+    NETGEN.makeTooltip(viz, document.getElementById("g2"));
+    syncRects(viz);
+    viz.sim.on("tick.blockRects", () => syncRects(viz));
+  })();
 
-    // Residual SBM edges: inter + outliers (stage 3 orchid).
-    const residual = [
-      { u:1, v:9, id:"g3-bad",      color: COL.edge_drop, w: 2.4, classes:"dashed thick" },   // invalid (duplicate of an existing (1,9))
-      { u:5, v:12, id:"g3-partner", color: COL.edge_stage3, w: 2.2 },
-      { u:2, v:10, id:"g3-r-3",     color: COL.edge_stage3, w: 1.6 },
-      { u:9, v:15, id:"g3-r-4",     color: COL.edge_stage3, w: 1.6 },
-      { u:11, v:16, id:"g3-r-5",    color: COL.edge_stage3, w: 1.6 },
-      { u:1, v:15, id:"g3-r-6",     color: COL.edge_stage3, w: 1.6 },
-      { u:4, v:17, id:"g3-r-7",     color: COL.edge_stage3, w: 1.6 },
+  // ── Stage 3b: rewire step-through ──
+  // The scenario: residual SBM samples a duplicate of an existing core
+  // edge (1, 9) [block-pair C1,C2] and a valid partner (5, 12) in the
+  // same bucket. Swap endpoints to (1, 12) and (5, 9); both nodes stay
+  // in their home blocks.
+  (function () {
+    const stage2 = [];
+    BLOCK_NAMES.forEach(c => {
+      CORE_EDGES[c].forEach(([u, v]) => stage2.push({
+        u, v, color: COL.edge_stage2, w: 1.5, id: `g3-c-${c}-${u}-${v}`,
+      }));
+    });
+    const ATTACH_FLAT = [
+      [1,5],[2,5],[3,5],[1,6],[2,6],[4,6],[3,7],[4,7],[5,7],[1,8],[4,8],[5,8],
+      [9,12],[10,12],[9,13],[11,13],[10,14],[11,14],
+      [15,17],[16,18],
+    ];
+    ATTACH_FLAT.forEach(([u, v], i) => stage2.push({
+      u, v, color: COL.edge_stage2, w: 1.2, id: `g3-a-${i}`,
+    }));
+
+    // Initial residual edges the SBM emits.
+    const initialResidual = [
+      { u: 1, v: 9,   id: "g3-bad",     color: COL.edge_drop,   w: 2.4, classes: "dashed thick" },
+      { u: 5, v: 12,  id: "g3-partner", color: COL.edge_stage3, w: 2.0 },
+      { u: 2, v: 10,  id: "g3-r-3",     color: COL.edge_stage3, w: 1.6 },
+      { u: 9, v: 15,  id: "g3-r-4",     color: COL.edge_stage3, w: 1.6 },
+      { u: 11, v: 16, id: "g3-r-5",     color: COL.edge_stage3, w: 1.6 },
+      { u: 1, v: 15,  id: "g3-r-6",     color: COL.edge_stage3, w: 1.6 },
+      { u: 4, v: 17,  id: "g3-r-7",     color: COL.edge_stage3, w: 1.6 },
     ];
 
-    const viz = NETGEN.CY.init("g3-cy", {
-      showLabels: true,
-      edges: [...stage2, ...residual],
+    const viz = NETGEN.VIZ.init("g3-cy", {
+      showLabels: true, includeOutliers: false,
+      edges: [...stage2, ...initialResidual],
     });
+    NETGEN.makeTooltip(viz, document.getElementById("g3"));
 
     const STEPS = [
       {
         label: "step 0 · residual edges sampled",
-        desc: "The residual SBM sampled inter-cluster edges (orchid). One of them (1,9) collides with an edge stage 2 already placed; that is the red-dashed invalid. To rewire it, we need a valid partner in the same block-pair bucket (C1, C2).",
+        desc: "The residual SBM drew 7 inter-cluster edges. One of them, (1, 9), duplicates an edge stage 2 already placed; that is the red-dashed invalid. The rewire loop needs a valid partner in the same block-pair bucket (C1, C2) to swap with.",
+        restoreBad: true,
+        removeIds: [],
+        addEdges: [],
         hi: [],
       },
       {
         label: "step 1 · pick a partner",
-        desc: "Random valid edge with block-pair (C1, C2): (5, 12). Invariant: both edges sit in the same bucket, so the swap preserves block counts.",
+        desc: "Random valid edge with block-pair (C1, C2): (5, 12). The invariant to check: both edges must sit in the same bucket, so the swap preserves block counts.",
+        restoreBad: true,
+        removeIds: [],
+        addEdges: [],
         hi: ["g3-bad", "g3-partner"],
       },
       {
         label: "step 2 · swap endpoints block-wise",
-        desc: "Replace (1, 9) and (5, 12) with (1, 12) and (5, 9). Each node stays in its home block. The invalid edge is gone; block-pair edge count is unchanged.",
-        hi: ["g3-swap-1", "g3-swap-2"],
+        desc: "Replace (1, 9) and (5, 12) with (1, 12) and (5, 9). Each node stays in its home block: 1 and 5 stay in C1, 9 and 12 stay in C2. The block-pair (C1, C2) count is unchanged, one valid edge replaces one invalid edge, and the duplicate is gone.",
+        restoreBad: false,
         removeIds: ["g3-bad", "g3-partner"],
         addEdges: [
-          { u:1, v:12, id:"g3-swap-1", color: COL.edge_stage3, w: 2.2 },
-          { u:5, v:9,  id:"g3-swap-2", color: COL.edge_stage3, w: 2.2 },
+          { u: 1, v: 12, id: "g3-swap-1", color: COL.edge_stage3, w: 2.2 },
+          { u: 5, v: 9,  id: "g3-swap-2", color: COL.edge_stage3, w: 2.2 },
         ],
+        hi: ["g3-swap-1", "g3-swap-2"],
       },
       {
-        label: "step 3 · done",
-        desc: "The rewire loop runs up to ten retry passes on all invalid edges. Unresolved ones are dropped with a WARN.",
-        hi: ["g3-swap-1", "g3-swap-2"],
+        label: "step 3 · done, accept",
+        desc: "After up to 10 retry passes with a stagnation detector, every invalid edge the rewire could fix has been fixed. Unresolved edges are dropped with a WARN line. On this synthetic the single invalid edge is resolved in one pass.",
+        restoreBad: false,
         removeIds: ["g3-bad", "g3-partner"],
         addEdges: [
-          { u:1, v:12, id:"g3-swap-1", color: COL.edge_stage3, w: 1.6 },
-          { u:5, v:9,  id:"g3-swap-2", color: COL.edge_stage3, w: 1.6 },
+          { u: 1, v: 12, id: "g3-swap-1", color: COL.edge_stage3, w: 1.6 },
+          { u: 5, v: 9,  id: "g3-swap-2", color: COL.edge_stage3, w: 1.6 },
         ],
+        hi: ["g3-swap-1", "g3-swap-2"],
       },
     ];
     document.getElementById("g3-total").textContent = STEPS.length - 1;
 
-    let lastAdded = [];
     function render(step) {
       const s = STEPS[step];
-
-      // Reset added edges from prior step.
-      lastAdded.forEach(id => viz.removeEdges(id));
-      lastAdded = [];
-
-      // Re-add the originally-present bad + partner if needed.
-      if (!viz.hasEdge("g3-bad")) {
-        viz.addEdge({ u:1, v:9, id:"g3-bad", color: COL.edge_drop, w: 2.4, classes:"dashed thick" });
+      // Ensure initial residual edges are present; (re)insert bad + partner
+      // when the step requires them, otherwise remove them.
+      if (s.restoreBad) {
+        if (!viz.hasEdge("g3-bad")) viz.addEdge({
+          u: 1, v: 9, id: "g3-bad", color: COL.edge_drop, w: 2.4, classes: "dashed thick",
+        });
+        if (!viz.hasEdge("g3-partner")) viz.addEdge({
+          u: 5, v: 12, id: "g3-partner", color: COL.edge_stage3, w: 2.0,
+        });
+        viz.removeEdges(["g3-swap-1", "g3-swap-2"]);
+      } else {
+        s.removeIds.forEach(id => viz.removeEdges(id));
+        s.addEdges.forEach(e => {
+          if (!viz.hasEdge(e.id)) viz.addEdge(e);
+        });
       }
-      if (!viz.hasEdge("g3-partner")) {
-        viz.addEdge({ u:5, v:12, id:"g3-partner", color: COL.edge_stage3, w: 2.2 });
-      }
-
-      // Now apply this step's removals + additions.
-      if (s.removeIds) s.removeIds.forEach(id => viz.removeEdges(id));
-      if (s.addEdges) s.addEdges.forEach(e => {
-        viz.addEdge({ u: e.u, v: e.v, id: e.id, color: e.color, w: e.w });
-        lastAdded.push(e.id);
-      });
-
       viz.clearAllEdgeClass("hi");
       viz.clearAllEdgeClass("fade");
       if (s.hi && s.hi.length) {
@@ -295,9 +564,12 @@ window.MathJax = {
           }
         });
       }
-
-      document.getElementById("g3-desc").innerHTML = `<span class="st">${s.label}</span> &middot; ${s.desc}`;
+      const descEl = document.getElementById("g3-desc");
+      descEl.innerHTML = `<span class="st">${s.label}</span> &middot; ${s.desc}`;
       document.getElementById("g3-stage").textContent = s.label;
+      if (window.MathJax && window.MathJax.typesetPromise) {
+        window.MathJax.typesetPromise([descEl]).catch(() => {});
+      }
     }
 
     NETGEN.stepController({
@@ -311,38 +583,130 @@ window.MathJax = {
     });
   })();
 
-  // ── Stage 4: final with all three provenance bands ──
+  // ── Stage 4: final output with 3 provenance bands ──
   (function () {
-    const stage2 = [
-      ...CORE_EDGES.C1.map(([u,v]) => ({u,v, color: COL.edge_stage2, w: 1.4})),
-      ...CORE_EDGES.C2.map(([u,v]) => ({u,v, color: COL.edge_stage2, w: 1.4})),
-      ...CORE_EDGES.C3.map(([u,v]) => ({u,v, color: COL.edge_stage2, w: 1.4})),
+    const stage2 = [];
+    BLOCK_NAMES.forEach(c => {
+      CORE_EDGES[c].forEach(([u, v]) => stage2.push({
+        u, v, color: COL.edge_stage2, w: 1.5, id: `g4-c-${c}-${u}-${v}`,
+      }));
+    });
+    const ATTACH_FLAT = [
       [1,5],[2,5],[3,5],[1,6],[2,6],[4,6],[3,7],[4,7],[5,7],[1,8],[4,8],[5,8],
       [9,12],[10,12],[9,13],[11,13],[10,14],[11,14],
       [15,17],[16,18],
-    ].map((e,i) => Array.isArray(e) ? ({u:e[0], v:e[1], color: COL.edge_stage2, w: 1.2, id:`g4-s2-${i}`}) : {...e, id:`g4-s2-${i}`});
+    ];
+    ATTACH_FLAT.forEach(([u, v], i) => stage2.push({
+      u, v, color: COL.edge_stage2, w: 1.2, id: `g4-s2-${i}`,
+    }));
 
+    // Stage 3 residual edges (post-rewire) plus OUT cross-edges that
+    // represent the combined-outlier-block cell getting sampled.
     const stage3 = [
       [1,12],[5,9],[2,10],[9,15],[11,16],[1,15],[4,17],
       ...OUT_EDGES,
-    ].map((e,i) => ({u:e[0], v:e[1], color: COL.edge_stage3, w: 1.6, id:`g4-s3-${i}`}));
+    ].map((e, i) => ({
+      u: e[0], v: e[1], color: COL.edge_stage3, w: 1.6, id: `g4-s3-${i}`,
+    }));
 
+    // Stage 4 hybrid top-ups, tuned to the same pool as v1 so the two
+    // final panels are comparable.
     const stage4 = [
-      // Hybrid matcher fills the residual: 7 top-up edges restoring the
-      // degree sequence that rewire + dedup nibbled at.
-      { u:5,  v:14, color: COL.edge_stage4, w: 2.2, id:"g4-s4-1" },
-      { u:1,  v:13, color: COL.edge_stage4, w: 2.2, id:"g4-s4-2" },
-      { u:8,  v:16, color: COL.edge_stage4, w: 2.2, id:"g4-s4-3" },
-      { u:11, v:17, color: COL.edge_stage4, w: 2.2, id:"g4-s4-4" },
-      { u:4,  v:13, color: COL.edge_stage4, w: 2.2, id:"g4-s4-5" },
-      { u:9,  v:18, color: COL.edge_stage4, w: 2.2, id:"g4-s4-6" },
-      { u:2,  v:14, color: COL.edge_stage4, w: 2.2, id:"g4-s4-7" },
+      { u: 5,  v: 14, color: COL.edge_stage4, w: 2.2, id: "g4-s4-1" },
+      { u: 1,  v: 13, color: COL.edge_stage4, w: 2.2, id: "g4-s4-2" },
+      { u: 8,  v: 16, color: COL.edge_stage4, w: 2.2, id: "g4-s4-3" },
+      { u: 11, v: 17, color: COL.edge_stage4, w: 2.2, id: "g4-s4-4" },
     ];
 
-    NETGEN.CY.init("g4-cy", {
+    const viz = NETGEN.VIZ.init("g4-cy", {
       showLabels: true,
       edges: [...stage2, ...stage3, ...stage4],
     });
+    NETGEN.makeTooltip(viz, document.getElementById("g4"));
+  })();
+
+  // ── Case study · dnc provenance comparison bar (v1 vs v2) ──
+  // Counts read directly from each version's sources.json on the
+  // shipped example at --seed 1.
+  (function () {
+    const svg = d3.select("#prov-bar");
+    svg.selectAll("*").remove();
+    const W = 640, H = 210;
+    const PAD = { top: 38, right: 18, bottom: 38, left: 76 };
+    const iw = W - PAD.left - PAD.right;
+    const rowH = 36;
+    const rowGap = 14;
+    const rows = [
+      { label: "v1", bands: [
+        { k: "clustered",    c: 7286, col: COL.edge_stage2 },
+        { k: "outlier",      c: 1016, col: COL.edge_stage3 },
+        { k: "match_degree", c: 2120, col: COL.edge_stage4 },
+      ]},
+      { label: "v2", bands: [
+        { k: "clustered",    c: 2202, col: COL.edge_stage2 },
+        { k: "outlier",      c: 7366, col: COL.edge_stage3 },
+        { k: "match_degree", c:  778, col: COL.edge_stage4 },
+      ]},
+    ];
+    // Shared horizontal scale so the lengths read as ratios.
+    const maxTotal = d3.max(rows, r => d3.sum(r.bands, b => b.c));
+
+    rows.forEach((row, ri) => {
+      const y0 = PAD.top + ri * (rowH + rowGap);
+      // Row label
+      svg.append("text")
+        .attr("x", PAD.left - 12).attr("y", y0 + rowH / 2 + 4)
+        .attr("text-anchor", "end")
+        .attr("font-family", "Special Elite, Courier New, monospace")
+        .attr("font-size", "12px")
+        .attr("fill", "#2f3a54")
+        .text(row.label);
+      let xacc = PAD.left;
+      const total = d3.sum(row.bands, b => b.c);
+      const scale = (iw / maxTotal);
+      row.bands.forEach((b, i) => {
+        const w = b.c * scale;
+        svg.append("rect")
+          .attr("x", xacc).attr("y", y0)
+          .attr("width", w).attr("height", rowH)
+          .attr("fill", b.col).attr("opacity", 0.92)
+          .attr("stroke", "#2f3a54").attr("stroke-width", 0.7);
+        const putInside = w > 110;
+        svg.append("text")
+          .attr("x", xacc + w / 2)
+          .attr("y", putInside ? y0 + rowH / 2 + 4 : y0 - 6)
+          .attr("text-anchor", "middle")
+          .attr("font-family", "Special Elite, Courier New, monospace")
+          .attr("font-size", "11px")
+          .attr("fill", putInside ? "#f3ecd7" : "#2f3a54")
+          .text(`${b.k} · ${b.c.toLocaleString()}`);
+        xacc += w;
+      });
+      // Row total on the right
+      svg.append("text")
+        .attr("x", xacc + 6).attr("y", y0 + rowH / 2 + 4)
+        .attr("text-anchor", "start")
+        .attr("font-family", "Special Elite, Courier New, monospace")
+        .attr("font-size", "11px")
+        .attr("fill", "#6b6a54")
+        .text(`= ${total.toLocaleString()}`);
+    });
+    // Title + footer
+    svg.append("text")
+      .attr("x", PAD.left + iw / 2).attr("y", PAD.top - 14)
+      .attr("text-anchor", "middle")
+      .attr("font-family", "Special Elite, Courier New, monospace")
+      .attr("font-size", "10.5px")
+      .attr("fill", "#6b6a54")
+      .style("letter-spacing", ".12em").style("text-transform", "uppercase")
+      .text("edge provenance bands · dnc · seed 1");
+    svg.append("text")
+      .attr("x", PAD.left + iw / 2).attr("y", H - 10)
+      .attr("text-anchor", "middle")
+      .attr("font-family", "Special Elite, Courier New, monospace")
+      .attr("font-size", "10px")
+      .attr("fill", "#6b6a54")
+      .text("v1 stage 2 also runs an SBM, inflating the clustered band · v2 stage 2 is constructive-only");
   })();
 
 })();
