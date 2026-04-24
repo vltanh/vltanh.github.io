@@ -148,16 +148,27 @@
 <!-- ─────────── Generation · the Fermi-Dirac rule ─────────── -->
 <section class="stage">
   <div class="stage-num">generation · the Fermi-Dirac rule</div>
-  <h2>Hyperbolic distance, disk radius, connection probability.</h2>
-  <p>For each pair of nodes \((i, j)\), nPSO computes a hyperbolic distance \(h_{ij}\) on the Poincaré disk,</p>
+  <h2>Close on the disk, likely connected.</h2>
+  <p>Zoom in on one arrival. Node \(i\) has just landed on the disk at polar coordinates \((r_i, \theta_i)\) and needs to decide, for each earlier arrival \(j \in \{1, \ldots, i-1\}\), how likely the pair \((i, j)\) is to be connected. The generator does this in three sequential computations.</p>
+  <p><strong>Step 1.</strong> Compute the disk's connection radius at this arrival, \(R_i(T)\). This scalar is a closed form in \(i\), \(m\), \(T\), and \(\beta = 1/(\gamma - 1)\); it does not depend on \(j\), so it is computed once per arrival:</p>
   \[
-    h_{ij} \;=\; \mathrm{arccosh}\bigl( \cosh r_i \cosh r_j \;-\; \sinh r_i \sinh r_j \cos d_\mathrm{ang}(\theta_i, \theta_j) \bigr),
+    R_t(T) \;=\; 2 \ln t \;-\; 2 \ln\!\left[\; \frac{2T \bigl(1 - e^{-(1 - \beta) \ln t}\bigr)}{\sin(\pi T)\, m\, (1 - \beta)} \;\right] \qquad (\beta \neq 1).
   \]
-  <p>and feeds it into a Fermi-Dirac coin flip against the current disk radius \(R_i(T)\):</p>
+  <p>The \(\beta = 1\) case is the L'Hopital limit of the same expression, not a "drop the \((1-\beta)\) factor" shortcut:</p>
+  \[
+    R_t(T) \;=\; 2 \ln t \;-\; 2 \ln\!\left[\; \frac{2T \ln t}{\sin(\pi T)\, m} \;\right] \qquad (\beta = 1).
+  \]
+  <p>Because \(t\) is the current arrival index, the disk grows one notch per arrival; every new vertex sees a fresh radius.</p>
+  <p><strong>Step 2.</strong> For each candidate \(j\) already on the disk, compute the hyperbolic distance between \(i\) and \(j\):</p>
+  \[
+    h_{ij} \;=\; \mathrm{arccosh}\bigl( \cosh r_i \cosh r_j \;-\; \sinh r_i \sinh r_j \cos d_\mathrm{ang}(\theta_i, \theta_j) \bigr).
+  \]
+  <p>Close in radius AND close in angle gives a small \(h_{ij}\); a big radial gap or a diametric angular gap blows it up. One distance per candidate.</p>
+  <p><strong>Step 3.</strong> Plug the pair \((h_{ij}, R_i(T))\) into the Fermi-Dirac sigmoid to get the connection probability:</p>
   \[
     p(i, j) \;=\; \frac{1}{1 + \exp\!\bigl((h_{ij} - R_i(T)) / (2T)\bigr)}.
   \]
-  <p>Pairs that are closer than \(R_i(T)\) on the disk have \(p \to 1\); pairs further out have \(p \to 0\); pairs right at the radius land at \(p = 1/2\). The plot below shows \(p\) as a function of \(h_{ij}\) with \(R_i(T)\) pinned at the dashed vertical. Drag the \(T\) slider to see the sigmoid go from a hard step at \(T \to 0\) to a shallow slope at \(T \to 1\):</p>
+  <p>Pairs closer than \(R_i(T)\) get \(p \to 1\); pairs further than \(R_i(T)\) get \(p \to 0\); pairs sitting right on the radius get \(p = 1/2\). \(T\) controls how <em>sharp</em> the transition is: small \(T\) means hard step at the radius, large \(T\) means gradual slope. The plot below shows \(p\) as a function of \(h_{ij}\) with the radius pinned at the dashed vertical. Drag the \(T\) slider to watch the sigmoid go from a hard step at \(T \to 0\) to a shallow slope at \(T \to 1\):</p>
   <div class="disk-panel" style="padding:.9rem 1rem">
     <svg id="fd-curve" viewBox="0 0 640 260" preserveAspectRatio="xMidYMid meet"></svg>
     <div class="widget-row" style="padding:0;border:none;margin:.2rem 0 0">
@@ -168,15 +179,8 @@
       </div>
     </div>
   </div>
-  <p>The radius itself is the paper's closed form, evaluated at the arrival of node \(i\):</p>
-  \[
-    R_t(T) \;=\; 2 \ln t \;-\; 2 \ln\!\left[\; \frac{2T \bigl(1 - e^{-(1 - \beta) \ln t}\bigr)}{\sin(\pi T)\, m\, (1 - \beta)} \;\right].
-  \]
-  <p>The \(\beta = 1\) case is the L'Hopital limit (not a "drop the \((1-\beta)\) factor" simplification):</p>
-  \[
-    R_t(T) \;=\; 2 \ln t \;-\; 2 \ln\!\left[\; \frac{2T \ln t}{\sin(\pi T)\, m} \;\right].
-  \]
-  <p>The \(t\) is the current arrival index, so the disk grows one notch per arrival and each new node sees a fresh radius. At \(T \to 0\) the sigmoid turns into a hard cutoff: every pair with \(h_{ij} &lt; R_i(T)\) connects and nothing else does. Triangles are plentiful because close triples all lie inside the cutoff. At \(T \to 1\) the sigmoid is shallow and most pairs flip a near-fair coin regardless of distance, so edges look random and triangle density collapses. \(cc(T)\) is the clustering coefficient of a specific nPSO sample at temperature \(T\); different draws at the same \(T\) give different values, so the curve is noisy.</p>
+  <p>At \(T \to 0\) the rule becomes "deterministic geometry": only pairs strictly inside the cutoff connect, every close triple closes into a triangle, clustering coefficient is high. At \(T \to 1\) the rule becomes "noise": almost every pair flips a near-fair coin regardless of distance, and clustering collapses. The empirical clustering coefficient \(cc(T)\) of one nPSO sample is a Monte Carlo average over these coin flips, so different draws at the same \(T\) give different values; the curve is noisy. That noise matters later when we try to search for a \(T\) that hits an input target.</p>
+  <p>The three \(p(i, j)\) values above are the weights the next section uses to pick which \(m\) predecessors node \(i\) actually connects to.</p>
 </section>
 
 <!-- ─────────── Generation · sampling m edges per arrival ─────────── -->
