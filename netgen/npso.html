@@ -1682,15 +1682,18 @@ window.MathJax = {
     }
 
     function rerollEdges() {
+      // Re-sample only the per-arrival uniforms at the currently-shown
+      // step. Earlier and later arrivals keep their stubs unchanged so
+      // the user can scrub back/forth without losing context. Step 0
+      // has no edges to randomize.
+      if (step < 1) return;
       edgeNonce += 1;
-      const rngEdge = d3.randomLcg(edgeNonce * 9973 + 17);
-      const U_NODE = [];
-      for (let i = 0; i < nodesAll.length; i++) {
-        const us = [];
-        for (let c = 0; c < M_PROF; c++) us.push(rngEdge());
-        U_NODE.push(us);
-      }
-      localEmb = { ...SHARED, U_NODE };
+      const rngEdge = d3.randomLcg(edgeNonce * 9973 + 17 + step * 31);
+      const fresh = [];
+      for (let c = 0; c < M_PROF; c++) fresh.push(rngEdge());
+      const U_NODE = (localEmb.U_NODE || SHARED.U_NODE).slice();
+      U_NODE[step] = fresh;
+      localEmb = { ...localEmb, U_NODE };
       recomputeAll();
       render();
     }
