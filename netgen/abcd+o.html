@@ -4,36 +4,104 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>ABCD+o</title>
-<meta name="description" content="ABCD+o: ABCD with an explicit outlier mega-cluster. Walked stage by stage on a small synthetic graph.">
+<meta name="description" content="ABCD+o (ABCD with outliers). Promotes the background nodes into an explicit cluster_id=1 mega-cluster; outliers are pinned to external-only stubs and cannot connect to each other.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="./shared.css">
 <style>
-.bars-panel{
-  padding:1rem;
-  background:var(--ink-2); border:1px solid var(--rule);
+.graph.g-with-side .side-caption{
+  font-family:'Special Elite','Courier New',monospace;
+  font-size:.76rem;
+  color:var(--paper-2);
+  padding:.15rem 0 .7rem;
+  margin-bottom:.55rem;
+  border-bottom:1px dashed rgba(139,117,65,.4);
+  line-height:1.45;
+}
+.graph.g-with-side .side-caption .st{
+  color:var(--azure);
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  margin-right:.25rem;
+}
+.graph.g-with-side .side-body{
+  display:grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: .4rem;
+}
+.graph.g-with-side .side-right{
+  display:flex; flex-direction:column;
+  align-items:stretch;
+  gap:.4rem;
+}
+.graph.g-with-side .side-right > svg{ width:100%; height:auto; }
+@media (max-width: 820px){
+  .graph.g-with-side .side-body{ grid-template-columns: 1fr; align-items: start; }
+}
+.viz-node.ringed{ stroke:#c7801e; stroke-width:3.4; }
+.deg-bar-row{ cursor:default; }
+.deg-bar-row.hot rect.hitbox{ fill: rgba(199, 128, 30, .15); }
+.deg-bar-row.hot rect.bar{ stroke:#c7801e; stroke-width:1.2; }
+.block-ring-label{
+  font-family:'Caveat Brush', cursive;
+  font-size:20px;
+  letter-spacing:.04em;
+}
+.disk-panel{
+  padding:1rem; background:var(--ink-2); border:1px solid var(--rule);
   border-radius:6px; margin:1rem 0;
 }
-.bars-panel svg{ width:100%; height:auto; display:block; }
+.disk-panel svg{ width:100%; height:auto; display:block; }
 .step-desc{
   font-family:'Special Elite','Courier New',monospace;
   font-size:.78rem; color:var(--paper-2); margin-top:.6rem;
 }
 .step-desc .st{ color:var(--azure); letter-spacing:.1em; text-transform:uppercase; }
-.warning-banner{
-  padding:.8rem 1rem; background:rgba(201,42,42,.09);
+.step-desc mjx-container{ font-size:1em !important; }
+.profile-table{ width:100%; border-collapse:collapse; margin:1rem 0; background:var(--ink-2); border:1px solid var(--rule); border-radius:4px; overflow:hidden; }
+.profile-table th, .profile-table td{ padding:.55rem .85rem; border-bottom:1px solid var(--rule); vertical-align:middle; text-align:left; }
+.profile-table tr:last-child th, .profile-table tr:last-child td{ border-bottom:none; }
+.profile-table th{ font-family:'Special Elite','Courier New',monospace; font-size:.72rem; letter-spacing:.15em; color:var(--paper-3); width:10%; white-space:nowrap; }
+.profile-table td.val{ font-family:'Special Elite','Courier New',monospace; font-size:1.05rem; color:var(--azure); font-variant-numeric:tabular-nums; width:14%; white-space:nowrap; }
+.profile-table td.desc{ color:var(--paper-2); font-size:.88rem; line-height:1.45; }
+.readout{
+  display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:.8rem;
+  font-family:'Special Elite','Courier New',monospace; font-size:.78rem;
+}
+.readout .item{ color:var(--paper-3); }
+.readout .item b{ color:var(--azure); margin-left:.3rem; }
+.readout .item.target b{ color:var(--mint); }
+.readout .item.diff b{ color:var(--signal); }
+.graph-canvas{
+  height:auto;
+  aspect-ratio: 640 / 680;
+  max-height: 560px;
+}
+.cs-bar-row{ cursor:default; }
+.cs-bar-row.hot rect.hitbox{ fill: rgba(199, 128, 30, .15); }
+.cs-bar-row.hot rect.bar{ stroke:#c7801e; stroke-width:1.4; }
+/* Warning-branch banner in the heuristic section. */
+.warn-banner{
+  padding:.85rem 1rem; background:rgba(201,42,42,.1);
   border-left:3px solid var(--signal);
-  border-radius:0 3px 3px 0; margin:1rem 0;
+  border-radius:0 3px 3px 0; margin:0;
   font-family:'Special Elite','Courier New',monospace;
   font-size:.82rem; color:var(--paper-2);
+  transition: opacity .25s ease;
 }
-.warning-banner.silent{ opacity:.4 }
-.warning-banner .tag{
+.warn-banner.silent{ opacity:.42 }
+.warn-banner .tag{
   color:var(--signal); font-weight:600;
   font-size:.66rem; letter-spacing:.2em; text-transform:uppercase;
   margin-bottom:.3rem; display:block;
 }
+/* Outlier-emphasis marker on the input graph's outlier nodes: a
+   dashed red ring around the node to echo the "outliers become a
+   single mega-cluster under cluster_id=1" framing. */
+.viz-node.outlier-mark{ stroke:#c92a2a; stroke-width:3.2; stroke-dasharray:3 3; }
 </style>
 </head>
 <body>
@@ -41,106 +109,215 @@
 
 <div id="links"></div>
 
-<div class="wip-banner" role="alert"><svg class="wip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 L22 21 L2 21 Z"/><line x1="12" y1="10" x2="12" y2="15"/><circle cx="12" cy="18" r="1" fill="currentColor" stroke="none"/></svg><strong class="wip-label">warning</strong><span class="wip-msg">work in progress &middot; expect rough edges and breaking changes.</span></div>
-
 <header class="hdr">
   <div class="kicker">network-generation · abcd+o</div>
   <h1><em>ABCD+o</em></h1>
-  <p class="sub">ABCD with an explicit outlier block. Outliers have <em>only</em> external stubs and cannot connect to each other.</p>
+  <p class="sub">ABCD with a cluster_id=1 outlier block. Outliers have only external stubs and cannot connect to each other; real clusters inherit the ABCD recipe verbatim.</p>
 </header>
 
 <section class="hook">
-  <p>Plain <a href="./abcd.html">ABCD</a> folds unclustered nodes into singletons which get filtered out of <code>com.csv</code>. For graphs where the "background" is real and meaningful (bots, sensors, drive-bys), that is a silent loss. ABCD+o promotes the background into a <em>first-class outlier block</em>, cluster_id=1, with two constraints baked into the sampler.</p>
-  <p><em>First</em>: outliers have $$d_i^{\text{int}} = 0$$. All their stubs are external. The model pins this: you do not get to argue.</p>
-  <p><em>Second</em>: outliers cannot pair with each other. The external configuration model is constrained so every outlier stub pairs with a non-outlier stub. Our input has an edge between outliers 19 and 20; that edge is dropped at profile time because the sampler cannot reproduce it.</p>
+  <p>Plain <a href="./abcd.html">ABCD</a> treats unclustered input nodes as 1-node singletons that get filtered out of <code>com.csv</code> at the end. That is fine when the background is noise, but when the "unclustered" set is meaningful (bots, sensors, drive-by users) the silent filter loses information. ABCD+o promotes the background into a <em>first-class block</em> with ID 1 and two extra constraints baked into the sampler.</p>
+  <p><em>First</em>: outliers have \(d^{\text{int}}_i = 0\). Every one of their stubs is external. You do not get to argue. The ABCD recipe applied inside an outlier "cluster" would scatter edges across the background, recreating the community the model is trying to deny.</p>
+  <p><em>Second</em>: outliers cannot pair with each other. The external configuration model is constrained so every outlier stub pairs with a non-outlier. Outlier-outlier edges that existed in the input are dropped at profile time because the sampler cannot reproduce them.</p>
 </section>
 
-<!-- ─────────── Stage 1 ─────────── -->
+<!-- ─────────── Profiling · degree sequence ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 1 · profile</div>
-  <h2>Count the outliers separately.</h2>
-  <p>The profile step writes four things instead of three: <code>degree.csv</code>, <code>cluster_sizes.csv</code> (real clusters only), <code>mixing_parameter.txt</code>, and <code>n_outliers.txt</code>. The outlier count is what the sampler prepends to the cluster-size list to become cluster_id=1. On our small input: two outliers, so cluster_sizes becomes $$[2, 8, 6, 4]$$ at the sampler's door.</p>
-  <div class="graph" id="g1">
+  <div class="stage-num">profiling · degree sequence</div>
+  <h2>Drop the outlier-outlier edges first; read what remains as each node's degree.</h2>
+  <p>ABCD+o is the one generator in the repo that flips <code>drop_outlier_outlier_edges</code> to <code>true</code> by default. The reason is an admissibility match: the sampler refuses OO edges, so counting them at profile time would hand the sampler a stub budget it cannot satisfy, and the realised \(\xi\) would drift. Dropping OO at profile time means the degree sequence the sampler sees is the sequence it can actually fulfil.</p>
+  <p>On our synthetic, the edge \((19, 20)\) is the only OO edge. Dropping it reduces \(d_{19}\) and \(d_{20}\) by one each. A real input like <code>dnc</code> drops more aggressively: outliers there often connect mostly to other outliers, so a handful of outliers end up with degree 0 after the drop and get silently dropped from the edge list.</p>
+  <div class="graph g-with-side" id="g-deg">
     <div class="graph-chrome">
-      <span>input G &middot; 2 outliers highlighted</span>
-      <span class="right">hover a node</span>
+      <span>input G + degree bars &middot; outliers ringed in red, OO edges dashed</span>
+      <span class="right">degree.csv</span>
     </div>
-    <div class="graph-canvas" id="g1-cy"></div>
-  </div>
-  <div class="callout">
-    <div class="tag">why drop_oo=true by default</div>
-    <p>The sampler cannot emit outlier-to-outlier edges. If the profile counted them in the degree sequence, the sampler would be asked to produce degrees it cannot fulfil, and $$\xi$$ would drift. Dropping OO edges at profile time makes the stats achievable. ABCD+o is the one generator in the repo that flips <code>drop_outlier_outlier_edges</code> to <code>true</code> by default.</p>
+    <div class="side-caption">
+      <span class="st">left</span>input graph. Outliers 19 and 20 ringed dashed red to match the mega-cluster framing; the \((19, 20)\) edge is dashed because profile drops it. &middot; <span class="st">right</span>degree sequence after drop_oo, sorted \(d_u\) desc, coloured by input block.
+    </div>
+    <div class="side-body">
+      <div class="graph-canvas" id="g-deg-cy"></div>
+      <div class="side-right">
+        <svg id="deg-seq" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+    </div>
   </div>
 </section>
 
-<!-- ─────────── Stage 2 ─────────── -->
+<!-- ─────────── Profiling · cluster sizes ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 2 · outlier constraint on ξ split</div>
-  <h2>Outliers are pinned: every stub is external.</h2>
-  <p>Plain ABCD splits each degree $$d_i^{\text{ext}} = \text{round}(\xi \cdot d_i)$$. ABCD+o overrides this for outliers: $$d_{19}^{\text{ext}} = d_{19} = 2$$ and $$d_{19}^{\text{int}} = 0$$, and the same for 20. Slide $$\xi$$ to see non-outliers repartition normally while outliers stay 100% red.</p>
-  <div class="bars-panel">
+  <div class="stage-num">profiling · cluster sizes + n_outliers</div>
+  <h2>Two files, one mega-cluster.</h2>
+  <p>Profile emits <code>cluster_sizes.csv</code> with the <em>real clusters only</em>, plus a separate <code>n_outliers.txt</code> holding the integer outlier count. Stage 2 concatenates the two: the outlier count is prepended to the size list so the sampler sees one flat list where entry 1 is the outlier mega-cluster and entries 2 onward are the real clusters, sorted size desc. After prepend, cluster_id=1 is always the outliers.</p>
+  <p>On our synthetic:</p>
+  <ul style="margin:.3rem 0 .7rem 1.2rem;font-size:.92rem;color:var(--paper-2);line-height:1.6">
+    <li><code>cluster_sizes.csv</code> (real clusters, sorted size desc): <code>[8, 6, 4]</code></li>
+    <li><code>n_outliers.txt</code>: <code>2</code></li>
+    <li>What the sampler sees after prepend: <code>[2, 8, 6, 4]</code>; cluster_id=1 is the outlier mega.</li>
+  </ul>
+  <p>On <code>dnc</code> the mega-cluster is size 355 (the full outlier pile) and the real list is <code>[52, 50, 36, 33, 33, ...]</code>, so the sampler sees <code>[355, 52, 50, 36, 33, 33, ...]</code> with 88 entries total. The mega-cluster towers over every real cluster.</p>
+  <div class="graph g-with-side" id="g-cs">
+    <div class="graph-chrome">
+      <span>input G + cluster sizes after prepend &middot; hover to link</span>
+      <span class="right">[2, 8, 6, 4]</span>
+    </div>
+    <div class="side-caption">
+      <span class="st">left</span>input graph. Outliers 19 and 20 enclosed by one dashed red ring, labelled \(\text{cluster\_id}=1\). &middot; <span class="st">right</span>the sampler's size list, sorted size desc; the size-2 mega-cluster (outliers) sits below the real clusters on this small synthetic but on <code>dnc</code> it sits at the top.
+    </div>
+    <div class="side-body">
+      <div class="graph-canvas" id="g-cs-cy"></div>
+      <div class="side-right">
+        <svg id="cs-seq" viewBox="0 0 340 260" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────── Profiling · mixing scalar ─────────── -->
+<section class="stage">
+  <div class="stage-num">profiling · the mixing scalar</div>
+  <h2>Still one number: \(\xi\), computed after drop_oo.</h2>
+  <p>Same formula as ABCD, different denominator. Let \(E^+\) be the edge count <em>after</em> dropping OO edges, and \(E^+_{\text{out}}\) the count of edges in \(E^+\) that leave the home cluster (with outliers pseudo-clustered as singletons at profile time). Then</p>
+  \[
+    \xi \;=\; \frac{E^+_{\text{out}}}{E^+}.
+  \]
+  <p>At profile time outliers are treated as singletons (not yet the mega-cluster); the mega-cluster idea kicks in only when stage 2 prepends the count. So an outlier-to-real edge still counts as inter here and lands in the numerator. The effect of the prepend on \(\xi\) is already baked into the number the sampler receives; dropping OO edges and leaving CO (clustered-outlier) edges in is the version of \(\xi\) the sampler can actually reproduce.</p>
+  <table class="profile-table">
+    <tbody>
+      <tr><th>N</th><td class="val" id="prof-N">&middot;</td><td class="desc">Total node count. Unchanged by drop_oo; outliers with zero remaining edges still appear in the list with degree 0 and get paired-over as no-ops.</td></tr>
+      <tr><th>degrees</th><td class="val" id="prof-deg">&middot;</td><td class="desc">Per-node degrees after drop_oo. Max degree unchanged on this synthetic because the hubs were not OO-adjacent.</td></tr>
+      <tr><th>cluster sizes</th><td class="val" id="prof-cs">&middot;</td><td class="desc">After the stage-2 prepend. Entry 1 is the outlier mega-cluster size.</td></tr>
+      <tr><th>n_outliers</th><td class="val" id="prof-nout">&middot;</td><td class="desc">The scalar that names cluster_id=1's size.</td></tr>
+      <tr><th>&xi;</th><td class="val" id="prof-xi">&middot;</td><td class="desc">After drop_oo. On our synthetic, \((19, 20)\) removal pulls \(\xi\) down slightly compared to what plain ABCD would report for the same graph.</td></tr>
+    </tbody>
+  </table>
+  <div class="callout">
+    <div class="tag">why drop_oo is on by default here (and only here)</div>
+    <p>The ABCD+o sampler refuses outlier-outlier edges by construction. If the profile counted them in the degree sequence, the sampler would be asked to produce degrees it cannot fulfil, and in practice it drops stubs until admissibility holds. That silent drop shows up in the output as a depressed \(\xi\) even when the target \(\xi\) was correctly passed. Profiling with drop_oo=true means the sampler's budget matches its capability, and the realised \(\xi\) tracks the target. Every other generator in the repo leaves drop_oo at <code>false</code>.</p>
+  </div>
+</section>
+
+<!-- ─────────── Generation · xi split ─────────── -->
+<section class="stage">
+  <div class="stage-num">generation · the \(\xi\) split with outlier pinning</div>
+  <h2>Outliers are pinned: every stub is external, regardless of \(\xi\).</h2>
+  <p>For non-outliers the ABCD rule applies: \(d^{\text{ext}}_i = \mathrm{round}(\xi \cdot d_i)\), \(d^{\text{int}}_i = d_i - d^{\text{ext}}_i\). For outliers (nodes in cluster_id=1) the sampler overrides:</p>
+  \[
+    d^{\text{ext}}_i \;=\; d_i, \qquad d^{\text{int}}_i \;=\; 0.
+  \]
+  <p>Slide \(\xi\) below and watch the non-outlier bars repartition while nodes 19 and 20 stay red for any value. They are locked. The only exception is exact \(\xi = 0\), where the ABCD rule would send everything internal; for consistency the viz still shows outliers as all-external even at \(\xi = 0\).</p>
+  <div class="disk-panel">
     <div class="widget-row" style="padding:0;border:none;margin:0 0 .8rem">
       <div class="scrub">
         <label>ξ</label>
-        <input type="range" id="xi-slider" min="0" max="1" step="0.01" value="0.333">
-        <output id="xi-val">0.33</output>
+        <input type="range" id="xi-slider" min="0" max="1" step="0.01" value="0.27">
+        <output id="xi-val">0.27</output>
       </div>
+      <button class="btn" id="xi-snap">snap to profile \(\xi\)</button>
+      <span class="step-label">default value is the synthetic's own profile \(\xi\) after drop_oo</span>
     </div>
     <svg id="xi-bars" viewBox="0 0 640 460" preserveAspectRatio="xMidYMid meet"></svg>
-    <div class="step-desc">
-      <span class="st">the right-most two bars</span> &middot; nodes 19 and 20. Their internal stub count is pinned to 0 regardless of $$\xi$$. They contribute only to the global external pool.
+    <div class="step-desc"><span class="st">reading the chart</span> &middot; one column per node, cluster-order on the x-axis. Lower stack is \(d^{\text{int}}_i\) (cluster colour); upper stack is \(d^{\text{ext}}_i\) (red). Outliers 19 and 20 at the right end are red top-to-bottom at any \(\xi\) by the outlier pinning rule. Their bar heights reflect their post-drop_oo degree (one less than on the ABCD page because \((19, 20)\) is gone).</div>
+    <div class="readout" style="justify-content:center">
+      <span class="item">total external stubs <b id="ext-tot">&middot;</b></span>
+      <span class="item">total stubs <b id="deg-tot">&middot;</b></span>
+      <span class="item target">target \(\xi\) <b id="xi-tgt">&middot;</b></span>
+      <span class="item diff">realised \(\xi\) <b id="xi-real">&middot;</b></span>
     </div>
   </div>
 </section>
 
-<!-- ─────────── Stage 3 ─────────── -->
+<!-- ─────────── Generation · configuration model ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 3 · external pairing with OO-exclusion</div>
-  <h2>Outlier stubs can only pair with non-outlier stubs.</h2>
-  <p>The external configuration model pairs stubs from a global pool. ABCD+o constrains this: every outlier stub must pair with a non-outlier stub. Exactly how the Julia sampler enforces the constraint (two-pool matching, rejection with retry, or another scheme) is an implementation detail inside the sampler; the contract it exposes is that no outlier-outlier edge can appear in the output.</p>
-  <div class="graph" id="g3">
+  <div class="stage-num">generation · configuration model with OO exclusion</div>
+  <h2>Internal pairing per real cluster. External pairing on the global pool, minus outlier-outlier.</h2>
+  <p>Three passes. <strong>Internal</strong>: for each <em>real</em> cluster (cluster_id &ge; 2), shuffle the \(d^{\text{int}}_i\) stubs of its members and pair adjacent. The outlier mega-cluster (cluster_id=1) sits this step out, because its members have \(d^{\text{int}} = 0\). <strong>External</strong>: shuffle the global pool of external stubs and pair adjacent, but with a rejection rule: any pair where both endpoints are outliers is dropped and re-attempted. <strong>Rewire</strong>: self-loops and parallels get swapped out the same way plain ABCD does.</p>
+  <p>Step through the phases below; reroll to resample.</p>
+  <div class="graph" id="g-cm">
     <div class="graph-chrome">
-      <span id="g3-stage">step 0 · internal pairing first</span>
-      <span class="right step-label">step <b id="g3-cur">0</b> / <span id="g3-total">2</span></span>
+      <span id="g-cm-stage">step 0 · stubs, no edges yet</span>
+      <span class="right step-label">step <b id="g-cm-cur">0</b> / <span id="g-cm-total">3</span></span>
     </div>
-    <div class="graph-canvas" id="g3-cy"></div>
+    <div class="graph-canvas" id="g-cm-cy"></div>
     <div class="widget-row">
-      <button class="btn" id="g3-prev">← back</button>
-      <button class="btn primary" id="g3-next">next →</button>
-      <button class="btn" id="g3-reset">reset</button>
+      <button class="btn" id="g-cm-prev">← back</button>
+      <button class="btn primary" id="g-cm-next">next →</button>
+      <button class="btn" id="g-cm-reset">reset</button>
+      <button class="btn" id="g-cm-reroll" type="button">random seed</button>
+      <span class="step-label">reroll reshuffles the stub lists</span>
     </div>
-    <div class="step-desc" id="g3-desc"></div>
+    <div class="step-desc" id="g-cm-desc"></div>
+  </div>
+  <div class="callout">
+    <div class="tag">rejection vs constraint</div>
+    <p>The sampler enforces OO exclusion by rejection inside the external pairing loop: draw two stubs at random from the pool; if both belong to outliers, put them back and redraw. The effect is the same as drawing from a restricted distribution where OO pairs have probability zero. On inputs with a large outlier share (e.g. <code>dnc</code> where 355 of 906 nodes are outliers and each contributes many external stubs), the rejection rate can climb; the sampler handles this cleanly but runtime grows roughly linearly with the outlier-stub fraction.</p>
   </div>
 </section>
 
-<!-- ─────────── Stage 4 ─────────── -->
+<!-- ─────────── Generation · warning branch ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 4 · the warning branch</div>
-  <h2>If $$\xi$$ is small, the outlier block might look like a community.</h2>
-  <p>At low $\xi$ with a large outlier block, the non-outlier side of the external pool is small, so many non-outliers end up with several outlier neighbours. Two outliers that share enough non-outlier neighbours look, to a modularity-style detector, like members of the same community, even though no outlier-outlier edge was ever drawn. The Julia sampler detects this pattern and writes <code>"outlier nodes form a community"</code> to stderr. The Python wrapper branches:</p>
-  <p>If the warning fires, keep cluster_id=1 rows in <code>com.csv</code>: the outliers <em>are</em> a community in the output. If it does not fire, filter cluster_id=1 out: outliers appear in <code>edge.csv</code> but not in <code>com.csv</code>. Slide $\xi$ below 0.10 to simulate the warning firing.</p>
-  <div class="bars-panel">
+  <div class="stage-num">generation · the warning branch</div>
+  <h2>At low \(\xi\), the outliers accidentally look like a community.</h2>
+  <p>There are no outlier-outlier edges in the output, but modularity-style detectors do not care about edges directly; they care about <em>shared neighbours</em>. Two outliers that connect to the same three non-outliers look similar to a detector, even when they share no edge. At low \(\xi\) with a large outlier mega-cluster, the non-outlier side of the external pool is small, and many non-outliers end up with several outlier neighbours, so outlier pairs share a lot of neighbours by coincidence.</p>
+  <p>The Julia sampler detects the pattern and writes <code>"outlier nodes form a community"</code> to stderr. The Python wrapper branches on that substring:</p>
+  <ul style="margin:.3rem 0 .7rem 1.2rem;font-size:.92rem;color:var(--paper-2);line-height:1.6">
+    <li><em>Warning fires</em>: keep cluster_id=1 rows in <code>com.csv</code>. The outliers appear as a real community in the output. Whatever downstream tool reads <code>com.csv</code> will see a big lump at ID 1.</li>
+    <li><em>Warning silent</em>: strip cluster_id=1 rows from <code>com.csv</code>. The outliers still appear in <code>edge.csv</code> (they have edges to real clusters) but carry no cluster label. This is the intended "outliers are outliers" path.</li>
+  </ul>
+  <p>Slide \(\xi\) below 0.10 to simulate the warning firing. In our shipped <code>dnc</code> run the warning is silent; cluster_id=1 gets stripped and <code>com.csv</code> has 551 rows, the clustered 551 out of 906 total.</p>
+  <div class="disk-panel">
     <div class="widget-row" style="padding:0;border:none;margin:0 0 .8rem">
       <div class="scrub">
         <label>ξ</label>
-        <input type="range" id="xi-warn" min="0" max="1" step="0.01" value="0.333">
-        <output id="xi-warn-val">0.33</output>
+        <input type="range" id="xi-warn" min="0" max="1" step="0.01" value="0.27">
+        <output id="xi-warn-val">0.27</output>
       </div>
     </div>
-    <div class="warning-banner silent" id="warn-banner">
+    <div class="warn-banner silent" id="warn-banner">
       <span class="tag">stderr heuristic</span>
-      <span id="warn-text">warning silent. cluster_id=1 filtered from com.csv. outliers visible in edge.csv only.</span>
+      <span id="warn-text">warning silent. cluster_id=1 filtered from com.csv. outliers appear in edge.csv only.</span>
     </div>
   </div>
   <div class="callout warn">
-    <div class="tag">branch affects semantics</div>
-    <p>Downstream tools that read <code>com.csv</code> see a different partition depending on whether the warning fired. The effect is load-bearing: a visualization of ABCD+o output should always surface the warning status, otherwise it is ambiguous whether an outlier node with no cluster_id is "an outlier by design" or "an outlier that got lifted and you forgot to check".</p>
+    <div class="tag">caveat: the heuristic is deterministic but not documented</div>
+    <p>The branch affects <code>com.csv</code>'s semantics, and it triggers on a stderr substring. Any downstream tool that reads <code>com.csv</code> without also reading the wrapper's log file cannot tell whether an outlier "got lifted" into cluster_id=1 or was silently dropped. Plot the warning status prominently next to any visualisation of ABCD+o output.</p>
+  </div>
+</section>
+
+<!-- ─────────── Case study · dnc ─────────── -->
+<section class="stage">
+  <div class="stage-num">case study · dnc</div>
+  <h2>What you get on the shipped example.</h2>
+  <p>Default run on <code>dnc</code> + <code>sbm-flat-best+cc</code> at <code>--seed 1</code> (<code>outlier_mode=singleton</code>, <code>drop_outlier_outlier_edges=true</code>, <code>n_outliers=355</code>):</p>
+  <table class="profile-table">
+    <thead>
+      <tr><th style="font-size:.62rem">stat</th><th style="font-size:.62rem">input</th><th style="font-size:.62rem">abcd+o output</th><th style="font-size:.62rem">note</th></tr>
+    </thead>
+    <tbody>
+      <tr><th>N (with edges)</th><td class="val">906</td><td class="val">673</td><td class="desc">233 of the 355 input outliers connected exclusively to other outliers; drop_oo leaves them with degree 0, the sampler has nothing to pair, and they are absent from <code>edge.csv</code>.</td></tr>
+      <tr><th>edges</th><td class="val">10,429</td><td class="val">10,070</td><td class="desc">Off by 3.4%. Most of the drop is profile-side (OO edges removed before the sampler sees them); the remainder is rewire attrition.</td></tr>
+      <tr><th>mean degree</th><td class="val">23.02</td><td class="val">29.93</td><td class="desc">Rises because the denominator (node count) shrinks faster than the numerator. On the 673 nodes that survived, degrees are close to their post-drop_oo target.</td></tr>
+      <tr><th>global \(\xi\)</th><td class="val">0.710</td><td class="val">0.710</td><td class="desc">Target \(\xi\) after drop_oo; hit essentially on the nose because the sampler's admissibility matches the profile's stub budget.</td></tr>
+      <tr><th>global cc</th><td class="val">0.548</td><td class="val">0.307</td><td class="desc">Not targeted. Same cc gap as ABCD.</td></tr>
+      <tr><th>mean local cc</th><td class="val">0.494</td><td class="val">0.339</td><td class="desc">Not targeted, but closer to the input than ABCD's 0.234. The outlier mega-cluster constraint nudges the geometry in a clustering-friendly direction: many non-outliers end up with several outlier neighbours, which share no edge but close triangles when the outliers pair with the same real cluster.</td></tr>
+      <tr><th>clusters</th><td class="val">87</td><td class="val">87</td><td class="desc">The warning fired silently on this run, so cluster_id=1 rows were stripped. Count matches input clustering.</td></tr>
+      <tr><th>com.csv rows</th><td class="val">551</td><td class="val">551</td><td class="desc">Same 551 clustered input nodes; the 355 outliers are labelled nowhere in <code>com.csv</code> (edge.csv still carries 122 of them because those had non-OO connections that survived drop_oo).</td></tr>
+    </tbody>
+  </table>
+  <div class="callout warn">
+    <div class="tag">caveat 1: drop_oo can delete nodes</div>
+    <p>On <code>dnc</code>, 233 of 906 nodes vanish from <code>edge.csv</code>. They were all outliers whose only edges were to other outliers; drop_oo zeros their degrees and the sampler has nothing to pair. If your downstream pipeline expects one row per input node in the edge list, ABCD+o silently breaks that invariant on outlier-heavy inputs.</p>
+  </div>
+  <div class="callout warn">
+    <div class="tag">caveat 2: cluster_id=1 is not always there</div>
+    <p>The semantics of <code>com.csv</code> depend on whether the "outlier nodes form a community" heuristic fired. On <code>dnc</code> it did not, so <code>com.csv</code> has 551 rows and no cluster_id=1. On inputs with low \(\xi\) and a dense outlier block, the warning fires, cluster_id=1 rows appear, and any code that joined on cluster_id will see a new community with 355 members. Always read <code>run.log</code> alongside <code>com.csv</code>.</p>
   </div>
 </section>
 
 <div id="kin"></div>
 
-<footer class="footer">
+<footer class="ack">
+  <p class="tools">drawn with <a href="https://d3js.org" target="_blank" rel="noopener">d3</a></p>
   <p class="credit">typed by vltanh, doodled with Claude</p>
 </footer>
 
@@ -150,7 +327,7 @@
 <script>
 window.MathJax = {
   tex: {
-    inlineMath: [['\\(', '\\)'], ['$', '$'], ['$$', '$$']],
+    inlineMath: [['\\(', '\\)']],
     displayMath: [['\\[', '\\]']]
   },
   chtml: { scale: 1.0 }
@@ -161,12 +338,44 @@ window.MathJax = {
 <script>
 (function () {
   document.getElementById("links").innerHTML = NETGEN.linksRow({gen: "abcd+o"});
+  (function () {
+    const icons = document.querySelector("#links .top-icons");
+    if (!icons) return;
+    const extras = [
+      {
+        href: "https://doi.org/10.1007/s41109-023-00552-9",
+        label: "paper",
+        svg: '<path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/>',
+      },
+    ];
+    const sourceLink = icons.querySelector('a[aria-label="github repository"]');
+    if (sourceLink) {
+      sourceLink.setAttribute("href",
+        "https://github.com/vltanh/network-generation/tree/main/src/abcd%2Bo");
+      const span = sourceLink.querySelector("span");
+      if (span) span.textContent = "code";
+    }
+    extras.forEach(x => {
+      const a = document.createElement("a");
+      a.href = x.href;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.setAttribute("aria-label", x.label);
+      a.innerHTML =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+        + 'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" '
+        + 'aria-hidden="true">' + x.svg + '</svg>'
+        + '<span>' + x.label + '</span>';
+      icons.appendChild(a);
+    });
+  })();
   document.getElementById("kin").innerHTML = NETGEN.kinSection({
+    title: "similarity",
     siblings: [
-      { gen: "abcd", label: "abcd",
-        diff: "The base variant. No explicit outlier block; unclustered nodes fold into singletons and drop from com.csv." },
-      { gen: "lfr", label: "lfr",
-        diff: "Same configuration-model family, but fits and resamples power laws instead of taking your empirical sequences." },
+      { gen: "abcd", label: "ABCD",
+        diff: "The base sampler. No explicit outlier block; unclustered nodes fold into size-1 pseudo-clusters that get filtered from com.csv without the warning-branch semantics." },
+      { gen: "lfr", label: "LFR",
+        diff: "Same configuration-model recipe, but LFR resamples the degree sequence from a fitted power law and has no outlier block at all." },
     ],
   });
 
@@ -174,183 +383,622 @@ window.MathJax = {
   const EDGES = NETGEN.EDGES;
   const CLUSTER_OF = NETGEN.CLUSTER_OF;
   const DEGREES = NETGEN.DEGREES;
-  const OUT_NODES = new Set(NETGEN.OUT);
+  const NODES = NETGEN.NODES;
+  const C1 = NETGEN.C1, C2 = NETGEN.C2, C3 = NETGEN.C3, OUT_N = NETGEN.OUT;
+  const OUT_SET = new Set(OUT_N);
+
+  // ── Under ABCD+o, drop OO edges at profile time. On our synthetic
+  // that removes the single (19, 20) edge. Record the kept-edge set
+  // once and derive per-node degrees from it. ──
+  const KEPT_EDGES = EDGES.filter(e => {
+    return !(OUT_SET.has(e.u) && OUT_SET.has(e.v));
+  });
+  const OO_EDGES = EDGES.filter(e => OUT_SET.has(e.u) && OUT_SET.has(e.v));
+  const DEG_KEPT = {};
+  NODES.forEach(n => { DEG_KEPT[n] = 0; });
+  KEPT_EDGES.forEach(({u, v}) => { DEG_KEPT[u]++; DEG_KEPT[v]++; });
+
+  // Mega-cluster framing: the 4 blocks after stage-2 prepend are
+  // cluster_id = 1 (outliers), 2 (C1), 3 (C2), 4 (C3). The sampler's
+  // size-sorted list [2, 8, 6, 4] orders them C1, C2, {19,20}, C3;
+  // but we keep the prepended order for pedagogical clarity (ID 1 is
+  // always the outlier mega).
+  const BLOCK_NAMES  = ["cluster_id=1 (outliers)", "C1", "C2", "C3"];
+  const BLOCK_SHORT  = ["OUT", "C1", "C2", "C3"];
+  const BLOCK_NODES  = { "OUT": OUT_N, "C1": C1, "C2": C2, "C3": C3 };
+  const BLOCK_COLOR  = { "OUT": COL.OUT, "C1": COL.C1, "C2": COL.C2, "C3": COL.C3 };
+  const BLOCK_SIZE   = { "OUT": OUT_N.length, "C1": C1.length, "C2": C2.length, "C3": C3.length };
 
   function pickInputColor(e) {
-    if (e.kind === "outlier") return COL.edge_drop;
+    if (OUT_SET.has(e.u) && OUT_SET.has(e.v)) return COL.edge_drop;  // OO, dashed later
+    if (OUT_SET.has(e.u) || OUT_SET.has(e.v)) return COL.orchid;      // clustered-outlier (CO)
     if (e.kind === "inter") return COL.edge_inter;
     const c = CLUSTER_OF[e.u] || CLUSTER_OF[e.v];
     return COL.edge_intra[c] || COL.edge_inter;
   }
 
-  // ── Stage 1: input graph, outliers emphasized ──
+  // ξ after drop_oo for our synthetic: count inter edges (with
+  // outliers as singletons at profile time) divided by kept edges.
+  let INTER_KEPT = 0;
+  KEPT_EDGES.forEach(e => {
+    const cu = CLUSTER_OF[e.u], cv = CLUSTER_OF[e.v];
+    // under profile-time singleton treatment every outlier-touching
+    // edge is inter
+    if (cu === "OUT" || cv === "OUT" || cu !== cv) INTER_KEPT++;
+  });
+  const SYNTHETIC_XI = INTER_KEPT / KEPT_EDGES.length;
+
+  // ── Populate profile-table readouts ──
   (function () {
-    const edges = EDGES.map(e => ({ u: e.u, v: e.v, color: pickInputColor(e), w: 1.4 }));
-    const viz = NETGEN.CY.init("g1-cy", {
-      showLabels: true,
-      nodeColor: (n) => OUT_NODES.has(n) ? COL.edge_drop : COL[CLUSTER_OF[n]],
-      edges,
-    });
-    // Outlier halo: larger radius + hi class.
-    viz.setNodeStyle(19, { r: 16 });
-    viz.setNodeStyle(20, { r: 16 });
-    viz.addNodeClass(19, "hi");
-    viz.addNodeClass(20, "hi");
-    NETGEN.makeTooltip(viz, document.getElementById("g1"));
+    const degs = NODES.map(n => DEG_KEPT[n]).sort((a, b) => b - a);
+    document.getElementById("prof-N").textContent = degs.length;
+    document.getElementById("prof-deg").textContent =
+      degs.length + " entries · max " + degs[0] + " · drop_oo cut " + OO_EDGES.length + " edge";
+    // Real clusters (drop singleton outliers): sorted size desc.
+    const realSizes = [C1.length, C2.length, C3.length].sort((a, b) => b - a);
+    const afterPrepend = [OUT_N.length, ...realSizes];
+    document.getElementById("prof-cs").textContent = "[" + afterPrepend.join(", ") + "]";
+    document.getElementById("prof-nout").textContent = OUT_N.length;
+    document.getElementById("prof-xi").textContent = SYNTHETIC_XI.toFixed(3);
   })();
 
-  // ── Stage 2: xi bars with outliers pinned to all-external ──
+  // ── Block-enclosure helper with a dashed outlier-red ring around
+  //    the two outlier nodes, labelled "cluster_id=1", plus one real
+  //    ring per real cluster.
+  function makeBlockRects(svg, opts = {}) {
+    const layer = svg.append("g").attr("class", "block-rects");
+    const showOutlierMega = opts.showOutlierMega !== false;
+    const shapes = [];
+    Object.keys(BLOCK_NODES).forEach(short => {
+      if (short === "OUT" && !showOutlierMega) return;
+      const ids = BLOCK_NODES[short];
+      if (!ids || ids.length === 0) return;
+      const color = short === "OUT" ? COL.signal : BLOCK_COLOR[short];
+      const rect = layer.append("rect")
+        .attr("rx", 10).attr("ry", 10)
+        .attr("fill", color).attr("fill-opacity", 0.07)
+        .attr("stroke", color).attr("stroke-width", short === "OUT" ? 1.8 : 1.5)
+        .attr("stroke-dasharray", "7 5")
+        .attr("opacity", 0.92);
+      const labelText = short === "OUT" ? "cluster_id=1" : short;
+      const label = layer.append("text")
+        .attr("class", "block-ring-label")
+        .attr("text-anchor", "start")
+        .attr("fill", color)
+        .attr("opacity", 0.95)
+        .text(labelText);
+      shapes.push({ short, ids, rect, label });
+    });
+
+    return function syncBlockRects(viz) {
+      shapes.forEach(s => {
+        const padX = 34, padY = 38;
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        s.ids.forEach(id => {
+          const n = viz.nodeById[String(id)];
+          if (!n) return;
+          if (n.x < minX) minX = n.x;
+          if (n.x > maxX) maxX = n.x;
+          if (n.y < minY) minY = n.y;
+          if (n.y > maxY) maxY = n.y;
+        });
+        if (!isFinite(minX)) return;
+        let x = minX - padX, y = minY - padY;
+        let w = (maxX - minX) + 2 * padX;
+        let h = (maxY - minY) + 2 * padY;
+        const labelW = s.label.node().getComputedTextLength
+          ? s.label.node().getComputedTextLength() : 0;
+        const wanted = labelW + 24;
+        if (w < wanted) {
+          const cx = (minX + maxX) / 2;
+          w = wanted;
+          x = cx - w / 2;
+        }
+        s.rect.attr("x", x).attr("y", y).attr("width", w).attr("height", h);
+        s.label.attr("x", x + 12).attr("y", y + 20);
+      });
+    };
+  }
+
+  function markOutliers(viz) {
+    OUT_N.forEach(id => viz.addNodeClass(id, "outlier-mark"));
+  }
+
+  // ── Profiling · degree sequence (graph + horizontal deg bars) ──
+  (function () {
+    const host = document.getElementById("g-deg-cy");
+    if (!host) return;
+    const edges = KEPT_EDGES.map(e => ({
+      u: e.u, v: e.v, color: pickInputColor(e), w: 1.2,
+    }));
+    // Render the dropped OO edge as a faded dashed line for context.
+    OO_EDGES.forEach(e => {
+      edges.push({
+        u: e.u, v: e.v, color: COL.edge_drop, w: 1.3,
+        id: "oo-drop-" + e.u + "-" + e.v,
+        classes: "dashed fade",
+      });
+    });
+    const viz = NETGEN.VIZ.init("g-deg-cy", { showLabels: true, edges });
+    NETGEN.makeTooltip(viz, document.getElementById("g-deg"));
+    markOutliers(viz);
+
+    const svg = d3.select("#deg-seq");
+    svg.selectAll("*").remove();
+    const W = 340, H = 420;
+    const PAD = { top: 12, right: 42, bottom: 28, left: 38 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+
+    const ordered = NODES.slice().sort((a, b) => DEG_KEPT[b] - DEG_KEPT[a] || a - b);
+    const maxDeg  = d3.max(NODES, n => DEG_KEPT[n]) || 1;
+    const y = d3.scaleBand().domain(ordered.map(String)).range([0, ih]).padding(0.22);
+    const x = d3.scaleLinear().domain([0, maxDeg + 1]).range([0, iw]);
+
+    g.append("g").call(d3.axisLeft(y).tickSize(0).tickPadding(6))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace")
+        .style("font-size", "10px");
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).ticks(4))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace")
+        .style("font-size", "10px");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+    svg.append("text").attr("x", W / 2).attr("y", H - 4)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px")
+      .text("degree d_i (post drop_oo)");
+
+    const gBars = g.append("g").attr("class", "deg-seq-bars");
+    ordered.forEach(n => {
+      const row = gBars.append("g")
+        .attr("class", "deg-bar-row")
+        .attr("data-id", String(n))
+        .attr("transform", `translate(0,${y(String(n))})`);
+      row.append("rect").attr("class", "hitbox")
+        .attr("x", -PAD.left + 4).attr("y", 0)
+        .attr("width", iw + PAD.left + PAD.right - 8)
+        .attr("height", y.bandwidth())
+        .attr("fill", "transparent");
+      const barColor = OUT_SET.has(n) ? COL.OUT : COL[CLUSTER_OF[n]];
+      row.append("rect").attr("class", "bar")
+        .attr("x", 0).attr("y", 0)
+        .attr("width", x(DEG_KEPT[n]))
+        .attr("height", y.bandwidth())
+        .attr("fill", barColor)
+        .attr("stroke", OUT_SET.has(n) ? COL.signal : "transparent")
+        .attr("stroke-dasharray", OUT_SET.has(n) ? "3 3" : "")
+        .attr("opacity", 0.92);
+      row.append("text").attr("class", "dlbl")
+        .attr("x", x(DEG_KEPT[n]) + 5)
+        .attr("y", y.bandwidth() / 2)
+        .attr("dominant-baseline", "central")
+        .attr("font-family", "Special Elite, Courier New, monospace")
+        .attr("font-size", "10px")
+        .attr("fill", "#2f3a54")
+        .text(DEG_KEPT[n]);
+    });
+
+    function setRowHot(id, on) {
+      gBars.select('.deg-bar-row[data-id="' + id + '"]').classed("hot", on);
+    }
+    gBars.on("mouseover", function (ev) {
+      const el = ev.target.closest(".deg-bar-row");
+      if (!el) return;
+      const id = el.getAttribute("data-id");
+      setRowHot(id, true);
+      viz.addNodeClass(id, "ringed");
+    });
+    gBars.on("mouseout", function (ev) {
+      const el = ev.target.closest(".deg-bar-row");
+      if (!el) return;
+      const id = el.getAttribute("data-id");
+      setRowHot(id, false);
+      viz.removeNodeClass(id, "ringed");
+    });
+    viz.onNodeHoverEnter(function (d) {
+      setRowHot(d.id, true);
+      viz.addNodeClass(d.id, "ringed");
+    });
+    viz.onNodeHoverLeave(function (d) {
+      setRowHot(d.id, false);
+      viz.removeNodeClass(d.id, "ringed");
+    });
+  })();
+
+  // ── Profiling · cluster sizes (graph w/ mega-cluster ring + bars) ──
+  (function () {
+    const host = document.getElementById("g-cs-cy");
+    if (!host) return;
+    host.innerHTML = "";
+    const svg = d3.select(host).append("svg")
+      .attr("class", "viz-svg")
+      .attr("viewBox", "-320 -340 640 680")
+      .attr("preserveAspectRatio", "xMidYMid meet");
+    const syncBlockRects = makeBlockRects(svg);
+    const edges = KEPT_EDGES.map(e => ({
+      u: e.u, v: e.v, color: pickInputColor(e), w: 1.1,
+    }));
+    OO_EDGES.forEach(e => {
+      edges.push({
+        u: e.u, v: e.v, color: COL.edge_drop, w: 1.1,
+        id: "cs-oo-" + e.u + "-" + e.v, classes: "dashed fade",
+      });
+    });
+    const viz = NETGEN.VIZ.init("g-cs-cy", { svg, showLabels: true, edges });
+    NETGEN.makeTooltip(viz, document.getElementById("g-cs"));
+    markOutliers(viz);
+    syncBlockRects(viz);
+    viz.sim.on("tick.blockRects", () => syncBlockRects(viz));
+
+    // Side bars: 4 rows (mega + 3 real), sorted size desc.
+    const bsvg = d3.select("#cs-seq");
+    bsvg.selectAll("*").remove();
+    const W = 340, H = 260;
+    const PAD = { top: 12, right: 56, bottom: 28, left: 110 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+    const g = bsvg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+
+    const rows = Object.keys(BLOCK_NODES)
+      .sort((a, b) => BLOCK_SIZE[b] - BLOCK_SIZE[a] || a.localeCompare(b));
+    const maxSize = d3.max(Object.keys(BLOCK_SIZE), n => BLOCK_SIZE[n]) || 1;
+    const y = d3.scaleBand().domain(rows).range([0, ih]).padding(0.22);
+    const x = d3.scaleLinear().domain([0, maxSize + 1]).range([0, iw]);
+
+    const labelFor = (n) => (n === "OUT" ? "id=1 (OUT)" : n);
+    g.append("g").call(d3.axisLeft(y).tickSize(0).tickPadding(6).tickFormat(labelFor))
+      .selectAll("text").style("fill", "#2f3a54")
+        .style("font-family", "Special Elite, Courier New, monospace")
+        .style("font-size", "10.5px");
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).ticks(4))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace")
+        .style("font-size", "10px");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+    bsvg.append("text").attr("x", W / 2).attr("y", H - 4)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px")
+      .text("cluster size s_C");
+
+    const gBars = g.append("g").attr("class", "cs-seq-bars");
+    rows.forEach(name => {
+      const row = gBars.append("g")
+        .attr("class", "cs-bar-row")
+        .attr("data-name", name)
+        .attr("transform", `translate(0,${y(name)})`);
+      row.append("rect").attr("class", "hitbox")
+        .attr("x", -PAD.left + 4).attr("y", 0)
+        .attr("width", iw + PAD.left + PAD.right - 8)
+        .attr("height", y.bandwidth())
+        .attr("fill", "transparent");
+      const isOut = name === "OUT";
+      row.append("rect").attr("class", "bar")
+        .attr("x", 0).attr("y", 0)
+        .attr("width", x(BLOCK_SIZE[name]))
+        .attr("height", y.bandwidth())
+        .attr("fill", isOut ? COL.signal : BLOCK_COLOR[name])
+        .attr("fill-opacity", isOut ? 0.75 : 0.92)
+        .attr("stroke", isOut ? COL.signal : "transparent")
+        .attr("stroke-dasharray", isOut ? "3 3" : "");
+      row.append("text").attr("class", "dlbl")
+        .attr("x", x(BLOCK_SIZE[name]) + 5)
+        .attr("y", y.bandwidth() / 2)
+        .attr("dominant-baseline", "central")
+        .attr("font-family", "Special Elite, Courier New, monospace")
+        .attr("font-size", "10px")
+        .attr("fill", "#2f3a54")
+        .text(BLOCK_SIZE[name]);
+    });
+
+    function setRowHot(name, on) {
+      gBars.select('.cs-bar-row[data-name="' + name + '"]').classed("hot", on);
+      const ids = BLOCK_NODES[name];
+      if (!ids) return;
+      ids.forEach(id => {
+        if (on) viz.addNodeClass(id, "ringed");
+        else viz.removeNodeClass(id, "ringed");
+      });
+    }
+    gBars.on("mouseover", function (ev) {
+      const el = ev.target.closest(".cs-bar-row");
+      if (!el) return;
+      setRowHot(el.getAttribute("data-name"), true);
+    });
+    gBars.on("mouseout", function (ev) {
+      const el = ev.target.closest(".cs-bar-row");
+      if (!el) return;
+      setRowHot(el.getAttribute("data-name"), false);
+    });
+    viz.onNodeHoverEnter(function (d) {
+      const nid = parseInt(d.id, 10);
+      const name = OUT_SET.has(nid) ? "OUT" : CLUSTER_OF[nid];
+      setRowHot(name, true);
+    });
+    viz.onNodeHoverLeave(function (d) {
+      const nid = parseInt(d.id, 10);
+      const name = OUT_SET.has(nid) ? "OUT" : CLUSTER_OF[nid];
+      setRowHot(name, false);
+    });
+  })();
+
+  // ── xi slider + per-node stacked stub bars, outliers pinned ──
   (function () {
     const svg = d3.select("#xi-bars");
-    const NODES_SORTED = [
-      ...NETGEN.C1, ...NETGEN.C2, ...NETGEN.C3, ...NETGEN.OUT,
-    ];
+    svg.selectAll("*").remove();
+    const NODES_SORTED = [...C1, ...C2, ...C3, ...OUT_N];
     const W = 640, H = 460;
-    const PADDING = { top: 20, right: 20, bottom: 30, left: 40 };
-    const innerW = W - PADDING.left - PADDING.right;
-    const innerH = H - PADDING.top - PADDING.bottom;
+    const PAD = { top: 20, right: 20, bottom: 30, left: 40 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
 
     const x = d3.scaleBand()
       .domain(NODES_SORTED.map(String))
-      .range([0, innerW])
+      .range([0, iw])
       .padding(0.15);
-    const maxDeg = d3.max(Object.values(DEGREES));
-    const y = d3.scaleLinear().domain([0, maxDeg]).range([innerH, 0]);
+    const maxDeg = d3.max(Object.values(DEG_KEPT));
+    const y = d3.scaleLinear().domain([0, maxDeg]).range([ih, 0]);
 
-    const g = svg.append("g").attr("transform", `translate(${PADDING.left},${PADDING.top})`);
-
-    g.append("g").attr("transform", `translate(0,${innerH})`)
-      .call(d3.axisBottom(x).tickSize(0).tickPadding(8))
-      .selectAll("text").style("fill", "#6b6a54").style("font-family","Special Elite, Courier New, monospace").style("font-size","10px");
+    const g = svg.append("g")
+      .attr("transform", `translate(${PAD.left},${PAD.top})`);
     g.append("g")
-      .call(d3.axisLeft(y).ticks(maxDeg).tickSize(-innerW).tickFormat(d => d))
-      .selectAll("text").style("fill", "#6b6a54").style("font-family","Special Elite, Courier New, monospace").style("font-size","10px");
+      .attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).tickSize(0).tickPadding(8))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace")
+        .style("font-size", "10px");
+    g.append("g")
+      .call(d3.axisLeft(y).ticks(maxDeg).tickSize(-iw).tickFormat(d => d))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace")
+        .style("font-size", "10px");
     g.selectAll(".domain").style("stroke", "#b9a263");
     g.selectAll(".tick line").style("stroke", "#cdbf8d");
+    svg.append("text")
+      .attr("x", W / 2).attr("y", H - 8)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace")
+      .style("font-size", "10.5px").text("node (cluster-sorted; outliers at the right)");
 
-    const bars = g.selectAll(".bar")
-      .data(NODES_SORTED)
-      .join("g").attr("class", "bar")
+    const bars = g.selectAll(".bar").data(NODES_SORTED).join("g")
+      .attr("class", "bar")
       .attr("transform", d => `translate(${x(String(d))},0)`);
-
-    bars.append("rect").attr("class","internal")
-      .attr("x", 0).attr("y", innerH)
+    bars.append("rect").attr("class", "internal")
+      .attr("x", 0).attr("y", ih)
       .attr("width", x.bandwidth()).attr("height", 0)
-      .attr("fill", d => COL[CLUSTER_OF[d]])
-      .attr("opacity", 0.9);
-    bars.append("rect").attr("class","external")
-      .attr("x", 0).attr("y", innerH)
+      .attr("fill", d => OUT_SET.has(d) ? COL.OUT : COL[CLUSTER_OF[d]])
+      .attr("opacity", 0.92);
+    bars.append("rect").attr("class", "external")
+      .attr("x", 0).attr("y", ih)
       .attr("width", x.bandwidth()).attr("height", 0)
-      .attr("fill", COL.edge_drop)
-      .attr("opacity", 0.75);
-    // pin outlier label overlay
-    bars.filter(d => OUT_NODES.has(d))
-      .append("rect")
-      .attr("x", -1).attr("y", -5).attr("width", x.bandwidth()+2).attr("height", innerH+5)
-      .attr("fill", "none").attr("stroke", COL.edge_drop).attr("stroke-width", 1)
-      .attr("stroke-dasharray", "2 2");
+      .attr("fill", COL.edge_drop).attr("opacity", 0.78);
+    // dashed outlier marker frame
+    bars.filter(d => OUT_SET.has(d)).append("rect")
+      .attr("x", -1).attr("y", -4)
+      .attr("width", x.bandwidth() + 2).attr("height", ih + 6)
+      .attr("fill", "none").attr("stroke", COL.signal).attr("stroke-width", 1)
+      .attr("stroke-dasharray", "3 3");
+    bars.append("text").attr("class", "dlbl")
+      .attr("x", x.bandwidth() / 2)
+      .attr("text-anchor", "middle")
+      .attr("font-family", "Special Elite, Courier New, monospace")
+      .attr("font-size", "9.5px")
+      .attr("fill", "#2f3a54");
 
-    const val = document.getElementById("xi-val");
     const slider = document.getElementById("xi-slider");
+    const lbl = document.getElementById("xi-val");
+    const sumExt = document.getElementById("ext-tot");
+    const sumDeg = document.getElementById("deg-tot");
+    const xiTgt  = document.getElementById("xi-tgt");
+    const xiReal = document.getElementById("xi-real");
+    const snapBtn = document.getElementById("xi-snap");
 
     function update(xi) {
-      val.textContent = xi.toFixed(2);
+      lbl.textContent = xi.toFixed(2);
+      let totExt = 0, totDeg = 0;
       bars.each(function (nid) {
-        const d = DEGREES[nid];
-        let dExt, dInt;
-        if (OUT_NODES.has(nid)) {
-          dExt = d; dInt = 0;   // outlier pinning
+        const d = DEG_KEPT[nid];
+        let ext, intr;
+        if (OUT_SET.has(nid)) {
+          ext = d; intr = 0;  // outlier pinning
         } else {
-          dExt = Math.round(xi * d);
-          dInt = d - dExt;
+          ext = Math.round(xi * d);
+          intr = d - ext;
         }
+        totExt += ext; totDeg += d;
         d3.select(this).select(".internal")
           .transition().duration(200)
-          .attr("y", y(dInt)).attr("height", innerH - y(dInt));
+          .attr("y", y(intr)).attr("height", ih - y(intr));
         d3.select(this).select(".external")
           .transition().duration(200)
-          .attr("y", y(dInt + dExt)).attr("height", y(dInt) - y(dInt + dExt));
+          .attr("y", y(intr + ext))
+          .attr("height", y(intr) - y(intr + ext));
+        d3.select(this).select(".dlbl")
+          .attr("y", y(d) - 3)
+          .text(intr + "·" + ext);
       });
+      sumExt.textContent = totExt;
+      sumDeg.textContent = totDeg;
+      xiTgt.textContent = xi.toFixed(3);
+      xiReal.textContent = (totExt / totDeg).toFixed(3);
     }
     slider.addEventListener("input", () => update(parseFloat(slider.value)));
+    snapBtn.addEventListener("click", () => {
+      slider.value = SYNTHETIC_XI.toFixed(2);
+      update(parseFloat(slider.value));
+    });
     update(parseFloat(slider.value));
   })();
 
-  // ── Stage 3: external pairing with OO-exclusion ──
+  // ── Generation · configuration model step-through w/ OO exclusion ──
   (function () {
-    const INT_C1 = [[1,2],[1,3],[2,4],[3,4],[5,6],[5,7],[6,8],[7,8]];
-    const INT_C2 = [[9,10],[9,11],[10,12],[11,13],[12,14]];
-    const INT_C3 = [[15,16],[15,17],[16,18]];
-    // External: outliers 19, 20 pair with non-outliers only.
-    const EXT_NORM = [[1,9],[2,15],[3,10],[4,16],[5,11],[6,17],[7,18],[8,12],[13,14]];
-    const EXT_OUT  = [[19,3],[19,10],[20,16],[20,5]];
+    const XI = SYNTHETIC_XI;
 
-    const viz = NETGEN.CY.init("g3-cy", {
-      showLabels: true,
-      nodeColor: (n) => OUT_NODES.has(n) ? COL.edge_drop : COL[CLUSTER_OF[n]],
-      edges: [],
-    });
-    viz.setNodeStyle(19, { r: 16 });
-    viz.setNodeStyle(20, { r: 16 });
-    viz.addNodeClass(19, "hi");
-    viz.addNodeClass(20, "hi");
-
-    const STEPS = [
-      {
-        label: "step 0 · internal pairing first",
-        desc: "Config model per cluster on internal stubs (outliers have none). Azure intra-C1, amber C2, mint C3.",
-        edges: [
-          ...INT_C1.map(([u,v]) => ({u,v, color: COL.edge_intra.C1, w: 1.6})),
-          ...INT_C2.map(([u,v]) => ({u,v, color: COL.edge_intra.C2, w: 1.6})),
-          ...INT_C3.map(([u,v]) => ({u,v, color: COL.edge_intra.C3, w: 1.6})),
-        ],
-      },
-      {
-        label: "step 1 · external pairing (non-outlier)",
-        desc: "Non-outlier external stubs pair globally. Cobalt inter-cluster edges.",
-        edges: [
-          ...INT_C1.map(([u,v]) => ({u,v, color: COL.edge_intra.C1, w: 1.4})),
-          ...INT_C2.map(([u,v]) => ({u,v, color: COL.edge_intra.C2, w: 1.4})),
-          ...INT_C3.map(([u,v]) => ({u,v, color: COL.edge_intra.C3, w: 1.4})),
-          ...EXT_NORM.map(([u,v]) => ({u,v, color: COL.edge_inter, w: 1.6})),
-        ],
-      },
-      {
-        label: "step 2 · outlier stubs pair (OO-exclusion)",
-        desc: "Outlier stubs pair with non-outliers only. Any attempted outlier-outlier pair is rejected by the constraint and retried.",
-        edges: [
-          ...INT_C1.map(([u,v]) => ({u,v, color: COL.edge_intra.C1, w: 1.4})),
-          ...INT_C2.map(([u,v]) => ({u,v, color: COL.edge_intra.C2, w: 1.4})),
-          ...INT_C3.map(([u,v]) => ({u,v, color: COL.edge_intra.C3, w: 1.4})),
-          ...EXT_NORM.map(([u,v]) => ({u,v, color: COL.edge_inter, w: 1.2})),
-          ...EXT_OUT.map(([u,v]) => ({u,v, color: COL.orchid || "#7e468f", w: 2.2})),
-        ],
-      },
-    ];
-    document.getElementById("g3-total").textContent = STEPS.length - 1;
-
-    function render(step) {
-      const s = STEPS[step];
-      viz.setEdges(s.edges.map((e, i) => ({
-        u: e.u, v: e.v, color: e.color, w: e.w,
-        id: `g3-e-${step}-${i}`,
-      })));
-      document.getElementById("g3-desc").innerHTML = `<span class="st">${s.label}</span> &middot; ${s.desc}`;
-      document.getElementById("g3-stage").textContent = s.label;
+    function buildSplit() {
+      const split = {};
+      NODES.forEach(n => {
+        const d = DEG_KEPT[n];
+        let ext;
+        if (OUT_SET.has(n)) ext = d;
+        else ext = Math.round(XI * d);
+        split[n] = { d, ext, intr: d - ext };
+      });
+      return split;
+    }
+    function seededRng(seed) { return d3.randomLcg(seed); }
+    function shuffleInPlace(arr, rng) {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+      }
+    }
+    function pairExternal(stubs, rng) {
+      // Rejection loop: if both ends are outliers, swap the second
+      // with a non-outlier stub later in the list and retry.
+      const out = [];
+      let cursor = 0;
+      while (cursor + 1 < stubs.length) {
+        let u = stubs[cursor], v = stubs[cursor + 1];
+        if (OUT_SET.has(u) && OUT_SET.has(v)) {
+          // look ahead for a non-outlier to swap in
+          let swapped = false;
+          for (let k = cursor + 2; k < stubs.length; k++) {
+            if (!OUT_SET.has(stubs[k])) {
+              stubs[cursor + 1] = stubs[k];
+              stubs[k] = v;
+              v = stubs[cursor + 1];
+              swapped = true;
+              break;
+            }
+          }
+          if (!swapped) {
+            // OO residual we cannot resolve: drop the pair.
+            cursor += 2;
+            continue;
+          }
+        }
+        out.push({ u, v });
+        cursor += 2;
+      }
+      return out;
     }
 
-    NETGEN.stepController({
-      prevBtn: document.getElementById("g3-prev"),
-      nextBtn: document.getElementById("g3-next"),
-      resetBtn: document.getElementById("g3-reset"),
-      labelCur: document.getElementById("g3-cur"),
-      labelTotal: document.getElementById("g3-total"),
-      total: STEPS.length,
-      onRender: render,
+    function sample(seed) {
+      const split = buildSplit();
+      const rng = seededRng(seed);
+      const internal = [];
+      ["C1", "C2", "C3"].forEach(name => {
+        const ids = BLOCK_NODES[name];
+        const stubs = [];
+        ids.forEach(n => { for (let k = 0; k < split[n].intr; k++) stubs.push(n); });
+        shuffleInPlace(stubs, rng);
+        for (let k = 0; k + 1 < stubs.length; k += 2) {
+          internal.push({ u: stubs[k], v: stubs[k+1], cluster: name });
+        }
+      });
+      const extStubs = [];
+      NODES.forEach(n => { for (let k = 0; k < split[n].ext; k++) extStubs.push(n); });
+      shuffleInPlace(extStubs, rng);
+      const external = pairExternal(extStubs, rng);
+      // Tag collisions (self-loops, parallels).
+      const seen = new Map();
+      function tagPair(e) {
+        const a = Math.min(e.u, e.v), b = Math.max(e.u, e.v);
+        const key = a + "|" + b;
+        if (a === b) e.loop = true;
+        else if (seen.has(key)) e.multi = true;
+        else seen.set(key, 1);
+      }
+      internal.forEach(tagPair);
+      external.forEach(tagPair);
+      return { split, internal, external };
+    }
+
+    const viz = NETGEN.VIZ.init("g-cm-cy", {
+      showLabels: true, edges: [],
+    });
+    markOutliers(viz);
+
+    function render(step, S) {
+      const edges = [];
+      if (step >= 1) {
+        S.internal.forEach((e, i) => {
+          const bad = (e.loop || e.multi);
+          edges.push({
+            u: e.u, v: e.v,
+            color: bad ? COL.edge_drop : (COL.edge_intra[e.cluster] || COL.edge_stage2),
+            w: bad ? 1.6 : 1.5,
+            id: "cm-int-" + i,
+            classes: bad ? "cm-bad" : "",
+          });
+        });
+      }
+      if (step >= 2) {
+        S.external.forEach((e, i) => {
+          const bad = (e.loop || e.multi);
+          const bothOut = OUT_SET.has(e.u) && OUT_SET.has(e.v);
+          edges.push({
+            u: e.u, v: e.v,
+            color: bad ? COL.edge_drop
+                   : (OUT_SET.has(e.u) || OUT_SET.has(e.v) ? COL.orchid : COL.edge_inter),
+            w: bad ? 1.6 : 1.5,
+            id: "cm-ext-" + i,
+            classes: bad ? "cm-bad" : "",
+          });
+        });
+      }
+      if (step >= 3) {
+        const clean = edges.filter(e => !e.classes.includes("cm-bad"));
+        viz.setEdges(clean);
+      } else {
+        viz.setEdges(edges);
+      }
+
+      const stepLabel = [
+        "step 0 · stubs, no edges yet",
+        "step 1 · internal pairing per real cluster",
+        "step 2 · external pairing with OO rejection",
+        "step 3 · rewire leaves the simple graph",
+      ][step];
+      document.getElementById("g-cm-stage").textContent = stepLabel;
+      const STEP_DESCS = [
+        "Starting state. Each non-outlier carries \\(d^{\\text{int}}_i = d_i - \\mathrm{round}(\\xi d_i)\\) internal stubs and the rest external. Outliers carry zero internal stubs (pinning) and their full degree external. The mega-cluster has no inside to pair on, so it sits out step 1 entirely.",
+        "Inside each <em>real</em> cluster (cluster_id &ge; 2), shuffle internal stubs, pair adjacent. Cluster colour for clean pairings; red-dashed for self-loops and parallels. The outlier mega-cluster has no edges here.",
+        "Pool every node's external stubs into one list, shuffle, pair. Rejection rule: any outlier-outlier pair triggers a swap with a later non-outlier stub. If no non-outlier is available, the residual OO pair is dropped; that shows up in the output as missing stubs on the two outliers. Plum edges are clustered-outlier; cobalt are non-outlier inter.",
+        "Rewire resolves self-loops and parallels by endpoint swap. Here we just drop the red-dashed flags to show the post-rewire endpoint state.",
+      ];
+      const descEl = document.getElementById("g-cm-desc");
+      descEl.innerHTML = '<span class="st">' + stepLabel + "</span> &middot; " + STEP_DESCS[step];
+      if (window.MathJax && window.MathJax.typesetPromise) {
+        window.MathJax.typesetPromise([descEl]).catch(() => {});
+      }
+    }
+
+    let currSeed = 1;
+    let S = sample(currSeed);
+
+    const controller = NETGEN.stepController({
+      prevBtn: document.getElementById("g-cm-prev"),
+      nextBtn: document.getElementById("g-cm-next"),
+      resetBtn: document.getElementById("g-cm-reset"),
+      labelCur: document.getElementById("g-cm-cur"),
+      labelTotal: document.getElementById("g-cm-total"),
+      total: 4,
+      onRender: (idx) => render(idx, S),
+    });
+    document.getElementById("g-cm-reroll").addEventListener("click", () => {
+      currSeed += 1;
+      S = sample(currSeed);
+      render(controller.idx, S);
     });
   })();
 
-  // ── Stage 4: warning-branch slider ──
+  // ── Generation · the warning branch slider ──
   (function () {
     const slider = document.getElementById("xi-warn");
     const val = document.getElementById("xi-warn-val");
@@ -361,10 +1009,10 @@ window.MathJax = {
       val.textContent = xi.toFixed(2);
       if (xi < 0.10) {
         banner.classList.remove("silent");
-        text.innerHTML = '<b>warning fired.</b> "outlier nodes form a community"; cluster_id=1 kept in com.csv. Outliers appear as a real community.';
+        text.innerHTML = '<b>warning fired.</b> "outlier nodes form a community"; cluster_id=1 kept in com.csv. Outliers appear as a real community downstream.';
       } else {
         banner.classList.add("silent");
-        text.innerHTML = "warning silent. cluster_id=1 filtered from com.csv. outliers visible in edge.csv only.";
+        text.innerHTML = "warning silent. cluster_id=1 filtered from com.csv. Outliers appear in edge.csv only.";
       }
     }
     slider.addEventListener("input", () => update(parseFloat(slider.value)));
