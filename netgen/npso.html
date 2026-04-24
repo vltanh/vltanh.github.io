@@ -157,7 +157,18 @@
   \[
     p(i, j) \;=\; \frac{1}{1 + \exp\!\bigl((h_{ij} - R_i(T)) / (2T)\bigr)}.
   \]
-  <p>Pairs that are closer than \(R_i(T)\) on the disk have \(p \to 1\); pairs further out have \(p \to 0\); pairs right at the radius land at \(p = 1/2\). The radius itself is the paper's closed form, evaluated at the arrival of node \(i\):</p>
+  <p>Pairs that are closer than \(R_i(T)\) on the disk have \(p \to 1\); pairs further out have \(p \to 0\); pairs right at the radius land at \(p = 1/2\). The plot below shows \(p\) as a function of \(h_{ij}\) with \(R_i(T)\) pinned at the dashed vertical. Drag the \(T\) slider to see the sigmoid go from a hard step at \(T \to 0\) to a shallow slope at \(T \to 1\):</p>
+  <div class="disk-panel" style="padding:.9rem 1rem">
+    <svg id="fd-curve" viewBox="0 0 640 260" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="widget-row" style="padding:0;border:none;margin:.2rem 0 0">
+      <div class="scrub">
+        <label>T</label>
+        <input type="range" id="fd-T" min="0.01" max="0.99" step="0.01" value="0.3">
+        <output id="fd-T-val">0.30</output>
+      </div>
+    </div>
+  </div>
+  <p>The radius itself is the paper's closed form, evaluated at the arrival of node \(i\):</p>
   \[
     R_t(T) \;=\; 2 \ln t \;-\; 2 \ln\!\left[\; \frac{2T \bigl(1 - e^{-(1 - \beta) \ln t}\bigr)}{\sin(\pi T)\, m\, (1 - \beta)} \;\right].
   \]
@@ -923,6 +934,90 @@ window.MathJax = {
       viz.clearAllNodeClass("_refresh_");
       viz.sim.alpha(0.3).restart();
     });
+  })();
+
+  // ── Fermi-Dirac sigmoid preview: p(h) at fixed R, varying T ──
+  // Didactic plot. R is pinned at its value at t = N (full disk) and
+  // the curve shows p(h) over h in [0, 2R]. Slider drags T in
+  // (0.01, 0.99); at T -> 0 the sigmoid becomes a step at h = R.
+  (function () {
+    const svg = d3.select("#fd-curve");
+    if (svg.empty()) return;
+    const W = 640, H = 260;
+    const PAD = { top: 18, right: 18, bottom: 42, left: 52 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+
+    const R = R_of_T(0.3);   // reference radius; fixed for the viz
+    const hMax = 2 * R;
+    const x = d3.scaleLinear().domain([0, hMax]).range([0, iw]);
+    const y = d3.scaleLinear().domain([0, 1]).range([ih, 0]);
+
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).ticks(6))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace");
+    g.append("g").call(d3.axisLeft(y).ticks(5))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+
+    svg.append("text").attr("x", W/2).attr("y", H - 8)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "11px")
+      .text("hyperbolic distance \\(h_{ij}\\)");
+    svg.append("text").attr("transform","rotate(-90)")
+      .attr("x", -H/2).attr("y", 14)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "11px")
+      .text("connection probability \\(p(i,j)\\)");
+
+    // Dashed vertical at h = R
+    g.append("line")
+      .attr("x1", x(R)).attr("x2", x(R))
+      .attr("y1", 0).attr("y2", ih)
+      .attr("stroke", COL.signal).attr("stroke-width", 1.2)
+      .attr("stroke-dasharray", "4 3").attr("opacity", 0.7);
+    g.append("text").attr("x", x(R) + 6).attr("y", 14)
+      .attr("fill", COL.signal)
+      .attr("font-family", "Caveat Brush, cursive").attr("font-size", 14)
+      .text("h = R");
+    // Dashed horizontal at p = 0.5
+    g.append("line")
+      .attr("x1", 0).attr("x2", iw)
+      .attr("y1", y(0.5)).attr("y2", y(0.5))
+      .attr("stroke", COL.paper_3).attr("stroke-width", 0.9)
+      .attr("stroke-dasharray", "2 3").attr("opacity", 0.6);
+    g.append("text").attr("x", iw - 6).attr("y", y(0.5) - 4)
+      .attr("text-anchor", "end")
+      .attr("fill", COL.paper_3)
+      .attr("font-family", "Caveat Brush, cursive").attr("font-size", 13)
+      .text("p = 1/2");
+
+    const curve = g.append("path")
+      .attr("fill", "none")
+      .attr("stroke", COL.azure)
+      .attr("stroke-width", 2.1);
+
+    const slider = document.getElementById("fd-T");
+    const tval = document.getElementById("fd-T-val");
+    function update() {
+      const T = parseFloat(slider.value);
+      tval.textContent = T.toFixed(2);
+      const pts = [];
+      const STEPS = 240;
+      for (let k = 0; k <= STEPS; k++) {
+        const h = (k / STEPS) * hMax;
+        const p = 1 / (1 + Math.exp((h - R) / (2 * T)));
+        pts.push([h, p]);
+      }
+      const line = d3.line().x(d => x(d[0])).y(d => y(d[1]));
+      curve.attr("d", line(pts));
+    }
+    slider.addEventListener("input", update);
+    update();
   })();
 
   // ── Impl-3 step-through: one arrival per step ──
