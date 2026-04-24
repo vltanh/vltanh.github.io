@@ -244,25 +244,24 @@
   <div class="stage-num">profiling · the minimum edge cut</div>
   <h2>One new scalar per cluster: \(k(C)\).</h2>
   <p>Same profile addition as v1. <code>mincut.csv</code> records the minimum edge cut of each cluster's induced subgraph in the input, measured via <a href="https://pypi.org/project/pymincut/" target="_blank" rel="noopener"><code>pymincut</code></a>'s Nagamochi-Ono-Ibaraki algorithm with a bucket-queue heap. Singleton clusters get \(k = 0\).</p>
-  <p>A minimum edge cut is not always a ring of edges around one low-degree vertex. When a cluster has two tightly-connected regions joined by a thin bridge, cutting the bridge is cheaper. The didactic example below: two \(K_4\) cliques linked by two bridges. Removing the bridges partitions the cluster into two equal halves, each internally \(K_4\)-connected.</p>
-  <div class="graph" id="g-mincut-demo">
-    <div class="graph-chrome">
-      <span>didactic example &middot; two \(K_4\) cliques linked by 2 bridges</span>
-      <span class="right">\(k = 2\) &middot; red-dashed = one min cut</span>
-    </div>
-    <svg id="demo-cut" viewBox="-240 -130 480 260" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto"></svg>
-  </div>
-  <p>On this synthetic, each cluster's mincut is shown below. They all happen to be trivial (cuts around a single low-degree vertex). Real inputs often have internal cuts like the didactic example above.</p>
+  <p>Each cluster's mincut on this synthetic, highlighted in red-dashed on the graph below. All three cuts here isolate a single low-degree vertex; a less uniform input would surface a non-trivial internal cut.</p>
   <table class="profile-table">
     <thead>
       <tr><th>cluster</th><th>nodes</th><th>min deg in C</th><th>\(k(C)\)</th><th>one minimum cut</th></tr>
     </thead>
     <tbody>
-      <tr><th>C1</th><td class="val">8</td><td class="val">3</td><td class="val">3</td><td class="desc">{(3, 7), (6, 7), (7, 8)} isolates node 7.</td></tr>
-      <tr><th>C2</th><td class="val">6</td><td class="val">2</td><td class="val">2</td><td class="desc">{(9, 13), (12, 13)} isolates node 13.</td></tr>
-      <tr><th>C3</th><td class="val">4</td><td class="val">1</td><td class="val">1</td><td class="desc">{(16, 18)} isolates node 18.</td></tr>
+      <tr><th>C1</th><td class="val">8</td><td class="val">3</td><td class="val">3</td><td class="desc">{(3, 7), (6, 7), (7, 8)}.</td></tr>
+      <tr><th>C2</th><td class="val">6</td><td class="val">2</td><td class="val">2</td><td class="desc">{(9, 13), (12, 13)}.</td></tr>
+      <tr><th>C3</th><td class="val">4</td><td class="val">1</td><td class="val">1</td><td class="desc">{(16, 18)}.</td></tr>
     </tbody>
   </table>
+  <div class="graph" id="g-mincut">
+    <div class="graph-chrome">
+      <span>input G &middot; red-dashed = one minimum edge cut per cluster</span>
+      <span class="right">mincut.csv</span>
+    </div>
+    <div class="graph-canvas" id="g-mincut-cy"></div>
+  </div>
 </section>
 
 <!-- ─────────── Generation · K_{k+1} core, same as v1 ─────────── -->
@@ -784,81 +783,38 @@ window.MathJax = {
     });
   })();
 
-  // ── Profile · mincut didactic example (two K_4 cliques + 2 bridges) ──
+  // ── Profile · minimum edge cut on the canon synthetic ──
   (function () {
-    const svg = d3.select("#demo-cut");
-    if (svg.empty()) return;
-    svg.selectAll("*").remove();
-    const L = [
-      {id:"A1", x:-160, y:-60}, {id:"A2", x:-160, y:60},
-      {id:"A3", x:-80,  y:-60}, {id:"A4", x:-80,  y:60},
-    ];
-    const R = [
-      {id:"B1", x: 80,  y:-60}, {id:"B2", x: 80,  y:60},
-      {id:"B3", x: 160, y:-60}, {id:"B4", x: 160, y:60},
-    ];
-    const Lset = new Set(L.map(n => n.id));
-    const nodes = [...L, ...R];
-    const nodeById = {};
-    nodes.forEach(n => { nodeById[n.id] = n; });
-    function kEdges(xs) {
-      const out = [];
-      for (let i = 0; i < xs.length; i++)
-        for (let j = i+1; j < xs.length; j++)
-          out.push([xs[i].id, xs[j].id]);
-      return out;
-    }
-    const intra = [...kEdges(L), ...kEdges(R)];
-    const bridges = [["A3", "B1"], ["A4", "B2"]];
-    [{cls:"A", ns:L, color:"#7b9bd6"}, {cls:"B", ns:R, color:"#e0a649"}].forEach(c => {
-      const xs = c.ns.map(n => n.x), ys = c.ns.map(n => n.y);
-      const minX = Math.min(...xs), maxX = Math.max(...xs);
-      const minY = Math.min(...ys), maxY = Math.max(...ys);
-      const padX = 34, padY = 34;
-      svg.append("rect")
-        .attr("x", minX - padX).attr("y", minY - padY)
-        .attr("width", (maxX - minX) + 2*padX)
-        .attr("height", (maxY - minY) + 2*padY)
-        .attr("rx", 10).attr("ry", 10)
-        .attr("fill", c.color).attr("fill-opacity", 0.07)
-        .attr("stroke", c.color).attr("stroke-width", 1.5)
-        .attr("stroke-dasharray", "7 5");
-      svg.append("text")
-        .attr("x", minX - padX + 10).attr("y", minY - padY + 20)
-        .attr("font-family", "Caveat Brush, cursive").attr("font-size", 20)
-        .attr("fill", c.color).text(`${c.cls} (K_4)`);
+    const host = document.getElementById("g-mincut-cy");
+    if (!host) return;
+    host.innerHTML = "";
+    const svg = d3.select(host).append("svg")
+      .attr("class", "viz-svg")
+      .attr("viewBox", "-320 -340 640 680")
+      .attr("preserveAspectRatio", "xMidYMid meet");
+    const syncRects = makeBlockRects(svg);
+    const cutSet = new Set();
+    BLOCK_NAMES.forEach(c => {
+      (MIN_CUT_EDGES[c] || []).forEach(([u, v]) => cutSet.add(edgeKey(u, v)));
     });
-    svg.selectAll(".edge-intra").data(intra).enter().append("line")
-      .attr("x1", d => nodeById[d[0]].x).attr("y1", d => nodeById[d[0]].y)
-      .attr("x2", d => nodeById[d[1]].x).attr("y2", d => nodeById[d[1]].y)
-      .attr("stroke", d => Lset.has(d[0]) ? "#3559a0" : "#b4741d")
-      .attr("stroke-width", 1.5).attr("opacity", 0.65);
-    svg.selectAll(".edge-bridge").data(bridges).enter().append("line")
-      .attr("x1", d => nodeById[d[0]].x).attr("y1", d => nodeById[d[0]].y)
-      .attr("x2", d => nodeById[d[1]].x).attr("y2", d => nodeById[d[1]].y)
-      .attr("stroke", "#c92a2a").attr("stroke-width", 3.4)
-      .attr("stroke-dasharray", "8 5");
-    svg.append("line")
-      .attr("x1", 0).attr("y1", -120).attr("x2", 0).attr("y2", 120)
-      .attr("stroke", "#c92a2a").attr("stroke-width", 0.8)
-      .attr("stroke-dasharray", "2 4").attr("opacity", 0.55);
-    svg.append("text")
-      .attr("x", 0).attr("y", -126)
-      .attr("text-anchor", "middle")
-      .attr("font-family", "Caveat Brush, cursive").attr("font-size", 16)
-      .attr("fill", "#c92a2a")
-      .text("cut here");
-    const g = svg.selectAll(".nd").data(nodes).enter().append("g")
-      .attr("transform", d => `translate(${d.x},${d.y})`);
-    g.append("circle").attr("r", 14)
-      .attr("fill", d => Lset.has(d.id) ? "#7b9bd6" : "#e0a649")
-      .attr("stroke", "#1b2033").attr("stroke-width", 1.5);
-    g.append("text").attr("text-anchor", "middle").attr("dominant-baseline", "central")
-      .attr("fill", "#1b2033")
-      .attr("font-family", "Special Elite, Courier New, monospace")
-      .attr("font-size", "11")
-      .attr("pointer-events", "none")
-      .text(d => d.id);
+    const edges = EDGES.filter(e =>
+      CLUSTER_OF[e.u] !== "OUT" && CLUSTER_OF[e.v] !== "OUT" &&
+      CLUSTER_OF[e.u] === CLUSTER_OF[e.v]
+    ).map(e => {
+      const isCut = cutSet.has(edgeKey(e.u, e.v));
+      return {
+        u: e.u, v: e.v,
+        color: isCut ? COL.signal : pickInputColor(e),
+        w: isCut ? 3 : 1.2,
+        classes: isCut ? "cut" : "",
+      };
+    });
+    const viz = NETGEN.VIZ.init("g-mincut-cy", {
+      svg, showLabels: true, includeOutliers: false, edges,
+    });
+    NETGEN.makeTooltip(viz, document.getElementById("g-mincut"));
+    syncRects(viz);
+    viz.sim.on("tick.blockRects", () => syncRects(viz));
   })();
 
   // ── Generation · K_{k+1} step-through (same scaffolding as v1) ──
