@@ -4,27 +4,61 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>LFR</title>
-<meta name="description" content="LFR (Lancichinetti-Fortunato-Radicchi) benchmark: fit two power laws to your graph, resample, throw the original away. Walk through the steps.">
+<meta name="description" content="LFR (Lancichinetti-Fortunato-Radicchi) benchmark: fit power laws to input's degree distribution and cluster-size distribution, then resample both from scratch. Mixing parameter μ is the mean of per-node out-ratio.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="./shared.css">
 <style>
-.bars-panel{
+.graph.g-with-side .side-caption{
+  font-family:'Special Elite','Courier New',monospace;
+  font-size:.76rem; color:var(--paper-2);
+  padding:.15rem 0 .7rem; margin-bottom:.55rem;
+  border-bottom:1px dashed rgba(139,117,65,.4); line-height:1.45;
+}
+.graph.g-with-side .side-caption .st{
+  color:var(--azure); letter-spacing:.12em; text-transform:uppercase; margin-right:.25rem;
+}
+.graph.g-with-side .side-body{
+  display:grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+  gap: 1rem; align-items: center; margin-bottom: .4rem;
+}
+.graph.g-with-side .side-right{ display:flex; flex-direction:column; align-items:stretch; gap:.4rem; }
+.graph.g-with-side .side-right > svg{ width:100%; height:auto; }
+@media (max-width: 820px){
+  .graph.g-with-side .side-body{ grid-template-columns: 1fr; align-items: start; }
+}
+.viz-node.ringed{ stroke:#c7801e; stroke-width:3.4; }
+.block-ring-label{ font-family:'Caveat Brush', cursive; font-size:20px; letter-spacing:.04em; }
+.disk-panel{
   padding:1rem; background:var(--ink-2); border:1px solid var(--rule);
   border-radius:6px; margin:1rem 0;
 }
-.bars-panel svg{ width:100%; height:auto; display:block; }
+.disk-panel svg{ width:100%; height:auto; display:block; }
 .step-desc{
   font-family:'Special Elite','Courier New',monospace;
   font-size:.78rem; color:var(--paper-2); margin-top:.6rem;
 }
 .step-desc .st{ color:var(--azure); letter-spacing:.1em; text-transform:uppercase; }
-.summary-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:1rem; margin:1rem 0; }
-.summary-card{ padding:1rem; background:var(--ink-2); border:1px solid var(--rule); border-radius:4px; }
-.summary-card .hd{ font-family:'Special Elite','Courier New',monospace; font-size:.68rem; letter-spacing:.15em; text-transform:uppercase; color:var(--paper-3); margin-bottom:.5rem; }
-.summary-card .val{ font-family:'Special Elite','Courier New',monospace; font-size:1.3rem; color:var(--azure); margin-bottom:.3rem; font-variant-numeric:tabular-nums; }
-.summary-card .desc{ color:var(--paper-2); font-size:.85rem; line-height:1.5; }
+.step-desc mjx-container{ font-size:1em !important; }
+.profile-table{ width:100%; border-collapse:collapse; margin:1rem 0; background:var(--ink-2); border:1px solid var(--rule); border-radius:4px; overflow:hidden; }
+.profile-table th, .profile-table td{ padding:.55rem .85rem; border-bottom:1px solid var(--rule); vertical-align:middle; text-align:left; }
+.profile-table tr:last-child th, .profile-table tr:last-child td{ border-bottom:none; }
+.profile-table th{ font-family:'Special Elite','Courier New',monospace; font-size:.72rem; letter-spacing:.15em; color:var(--paper-3); width:10%; white-space:nowrap; }
+.profile-table td.val{ font-family:'Special Elite','Courier New',monospace; font-size:1.05rem; color:var(--azure); font-variant-numeric:tabular-nums; width:14%; white-space:nowrap; }
+.profile-table td.desc{ color:var(--paper-2); font-size:.88rem; line-height:1.45; }
+.readout{
+  display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:.8rem;
+  font-family:'Special Elite','Courier New',monospace; font-size:.78rem;
+}
+.readout .item{ color:var(--paper-3); }
+.readout .item b{ color:var(--azure); margin-left:.3rem; }
+.readout .item.target b{ color:var(--mint); }
+.readout .item.diff b{ color:var(--signal); }
+.graph-canvas{ height:auto; aspect-ratio: 640 / 680; max-height: 560px; }
+.resample-row{ cursor:default; }
+.resample-row rect.in{ fill: var(--azure); opacity: 0.85; }
+.resample-row rect.out{ fill: var(--orchid); opacity: 0.9; }
 </style>
 </head>
 <body>
@@ -32,87 +66,174 @@
 
 <div id="links"></div>
 
-<div class="wip-banner" role="alert"><svg class="wip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 L22 21 L2 21 Z"/><line x1="12" y1="10" x2="12" y2="15"/><circle cx="12" cy="18" r="1" fill="currentColor" stroke="none"/></svg><strong class="wip-label">warning</strong><span class="wip-msg">work in progress &middot; expect rough edges and breaking changes.</span></div>
-
 <header class="hdr">
   <div class="kicker">network-generation · lfr</div>
   <h1><em>LFR</em></h1>
-  <p class="sub">Fits power laws to the degree distribution and the cluster sizes, resamples both from scratch, and discards the original. Mixing is the mean of a per-node fraction $$\mu$$; the long-standing community-detection benchmark.</p>
+  <p class="sub">Fit one power law to the degree distribution, another to the cluster sizes. Resample both from scratch. Configuration model per cluster + global rewire to hit the per-node mixing parameter \(\mu\). The long-standing community-detection benchmark.</p>
 </header>
 
 <section class="hook">
-  <p>LFR decided the shape that matters is a <em>power law</em>. It fits one to your degrees, one to your cluster sizes, and then resamples both from scratch. The output graph shares a statistical silhouette with your input and nothing else.</p>
-  <p>If you are running community-detection experiments that should be comparable to a decade of prior literature, LFR is the benchmark. If you want "a synthetic twin of <em>this specific</em> graph", pick <a href="./abcd.html">ABCD</a> or the <a href="./sbm.html">SBM family</a> instead.</p>
+  <p>LFR's design choice is the opposite of <a href="./abcd.html">ABCD</a>'s. ABCD takes your degree sequence and cluster sizes verbatim; LFR refuses to. It assumes the <em>shapes</em> are power laws and distils your input to two scalar exponents plus a handful of range parameters. Stage 2 resamples new degrees from a truncated power law with the fitted exponent and range, and new cluster sizes from a second power law under LFR's size-floor constraints. The output graph shares statistics with the input but not identity: node 5 in the output is not node 5 in the input; cluster 3 is not cluster 3.</p>
+  <p>Mixing is controlled by a scalar \(\mu\) per node: LFR tries to arrange each node's neighbours so \(\mu_i = d^{\text{out}}_i / d_i \approx \mu\). A several-hundred-rewire loop reshuffles edge endpoints (never nodes) until each node's internal/external split is within a small tolerance of \(\mu\). The paper's Fig. 3 shows the resulting \(\mu_i\) distribution as bell-shaped around \(\mu\), not a delta.</p>
+  <p>Use LFR when the goal is "graphs with controlled degree + size distributions, sweepable across \(\mu\)". Use ABCD when you need "a synthetic twin of this specific input". The two models share a configuration-model-plus-rewire backbone but differ on what counts as input.</p>
 </section>
 
-<!-- ─────────── Stage 1 ─────────── -->
+<!-- ─────────── Profiling · degree distribution ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 1 · profile</div>
-  <h2>Fit two power laws.</h2>
-  <p>$t_1$ is the power-law exponent for the degree distribution. The <code>powerlaw</code> package picks its own $x_{\min}$ via a KS scan, so "fit across all degrees" really means "fit to the tail that best looks power-law." $t_2$ is the cluster-size exponent; there we pass <code>xmin = max(min(cluster_sizes), 3)</code>, i.e. the observed minimum cluster size with a hard floor of 3 that LFR requires. On our tiny synthetic both fits are coarse: too few points for KS to be meaningful. On realistic inputs they settle.</p>
-  <div class="bars-panel">
-    <svg id="degree-hist" viewBox="0 0 640 320" preserveAspectRatio="xMidYMid meet"></svg>
-    <div class="step-desc"><span class="st">degree histogram + fitted line</span> &middot; x-axis is degree (log), y-axis is count (log). The azure line is the fitted power law. On our 20-node graph, degrees run from 1 to 6, so the "power law" is barely more than a straight line through a cloud.</div>
+  <div class="stage-num">profiling · degree distribution</div>
+  <h2>Extract the shape; throw away the identity.</h2>
+  <p>Profile writes <code>degree.csv</code> (per-node integer degrees) just like ABCD does, but LFR's stage 2 reads only four derived scalars from it: \(N\), \(\langle k \rangle\), \(k_{\max}\), and the power-law exponent \(t_1\) from <code>powerlaw.Fit</code> with auto-selected \(x_{\min}\). The sequence itself is discarded.</p>
+  <p>On the synthetic the fit is coarse because only 20 points feed it; the curve below shows the degree histogram and the fitted \(k^{-t_1}\) line. On <code>dnc</code> the fit lands at \(t_1 \approx 1.45\) with auto \(x_{\min} = 1\), which is a poor fit by the strict-KS test but the best the <code>powerlaw</code> package can do.</p>
+  <div class="disk-panel">
+    <svg id="deg-fit" viewBox="0 0 640 300" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="step-desc"><span class="st">reading the chart</span> &middot; dots are the input degree histogram (log-log axes); azure line is the fitted \(k^{-t_1}\) power law. The tail shape matters for the stage-2 resampler; the specific counts do not.</div>
   </div>
-  <div class="summary-grid">
-    <div class="summary-card">
-      <div class="hd">N</div><div class="val">20</div>
-      <div class="desc">Number of nodes to sample.</div>
-    </div>
-    <div class="summary-card">
-      <div class="hd">t1</div><div class="val">2.4</div>
-      <div class="desc">Fitted degree power-law exponent.</div>
-    </div>
-    <div class="summary-card">
-      <div class="hd">t2</div><div class="val">3.1</div>
-      <div class="desc">Fitted cluster-size power-law exponent. xmin = max(min(cluster_sizes), 3).</div>
-    </div>
-    <div class="summary-card">
-      <div class="hd">μ</div><div class="val">0.30</div>
-      <div class="desc">Mean per-node mixing fraction. Not the stub-weighted ξ of ABCD; this is the unweighted mean.</div>
-    </div>
+</section>
+
+<!-- ─────────── Profiling · cluster sizes ─────────── -->
+<section class="stage">
+  <div class="stage-num">profiling · cluster sizes</div>
+  <h2>A second power law, with a size floor.</h2>
+  <p>Profile writes <code>cluster_sizes.csv</code> the same way ABCD does. Stage 2 derives \(c_{\min}, c_{\max}\), and the exponent \(t_2\) fitted with <code>xmin = max(min(cluster_sizes), 3)</code>. The floor of 3 is a hard LFR requirement: the C++ binary refuses to build clusters smaller than 3. If the input has size-1 or size-2 clusters (such as the wrapper's singleton outliers), the floor absorbs them; the fitted exponent is estimated only from sizes \(\ge 3\).</p>
+  <p>On the synthetic: <code>cluster_sizes = [8, 6, 4, 1, 1]</code> → \(c_{\min} = 3\) (floor kicks in), \(c_{\max} = 8\), \(t_2 \approx 2.23\). On <code>dnc</code>: 442 entries ending in 355 singletons → \(c_{\min} = 3\), \(c_{\max} = 52\), \(t_2 \approx 2.01\).</p>
+  <div class="disk-panel">
+    <svg id="cs-fit" viewBox="0 0 640 300" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="step-desc"><span class="st">reading the chart</span> &middot; dots are the input cluster-size histogram (log-log). Singletons (size 1) on the synthetic and on <code>dnc</code> appear in red; they are below the fit's \(x_{\min}\) floor and do not influence \(t_2\). The fit line starts at \(c_{\min}\).</div>
   </div>
+</section>
+
+<!-- ─────────── Profiling · mixing scalar ─────────── -->
+<section class="stage">
+  <div class="stage-num">profiling · the mixing scalar</div>
+  <h2>One number: \(\mu\) (node-mean, not stub-weighted).</h2>
+  <p>LFR writes <code>mixing_parameter.txt</code>, a single float. Unlike ABCD's stub-weighted \(\xi\), LFR uses the mean of per-node ratios:</p>
+  \[
+    \mu \;=\; \frac{1}{|V|} \sum_{u \in V} \frac{d^{\text{out}}_u}{d_u}.
+  \]
+  <p>Each node contributes equally regardless of degree. A degree-1 node with one inter-cluster edge contributes \(1/1 = 1\); a degree-1000 hub with 500 inter-cluster edges contributes \(500/1000 = 0.5\). On skewed degrees the two conventions drift by a few percent. On <code>dnc</code> LFR's \(\mu = 0.686\) while ABCD's \(\xi = 0.718\); they are close but not equal.</p>
+  <table class="profile-table">
+    <tbody>
+      <tr><th>N</th><td class="val" id="prof-N">&middot;</td><td class="desc">Vertex count.</td></tr>
+      <tr><th>\(\langle k \rangle\)</th><td class="val" id="prof-k">&middot;</td><td class="desc">Mean degree. Passed to the binary via <code>-k</code>.</td></tr>
+      <tr><th>\(k_{\max}\)</th><td class="val" id="prof-maxk">&middot;</td><td class="desc">Maximum degree. Caps the truncated power-law sampler.</td></tr>
+      <tr><th>\(c_{\min}, c_{\max}\)</th><td class="val" id="prof-cs">&middot;</td><td class="desc">Size bounds, \(c_{\min}\) clipped at 3.</td></tr>
+      <tr><th>\(t_1\)</th><td class="val" id="prof-t1">&middot;</td><td class="desc">Degree power-law exponent from <code>powerlaw.Fit</code> auto \(x_{\min}\).</td></tr>
+      <tr><th>\(t_2\)</th><td class="val" id="prof-t2">&middot;</td><td class="desc">Cluster-size power-law exponent with \(x_{\min} = c_{\min}\).</td></tr>
+      <tr><th>\(\mu\)</th><td class="val" id="prof-mu">&middot;</td><td class="desc">Mean per-node out-ratio. This is the target the rewire loop chases.</td></tr>
+    </tbody>
+  </table>
   <div class="callout">
-    <div class="tag">LFR μ, not ABCD ξ</div>
-    <p>LFR uses the <em>mean of per-node</em> $$\mu_i = \text{out}_i / (\text{in}_i + \text{out}_i)$$. A 1000-degree hub and a 3-degree node count the same. ABCD's $$\xi$$ is stub-weighted. Different numbers; use each model's own convention.</p>
+    <div class="tag">LFR's \(\mu\) vs ABCD's \(\xi\): same phrase, different number</div>
+    <p>ABCD's \(\xi\) sums across stubs then divides: \(\xi = (\sum_u d^{\text{out}}_u) / (\sum_u d_u)\). LFR's \(\mu\) takes per-node ratios then averages. On symmetric or uniform-degree graphs the two match; on heavy-tail graphs like <code>dnc</code> they diverge by a few percent. Neither generator accepts the other's convention; do not swap them.</p>
   </div>
 </section>
 
-<!-- ─────────── Stage 2 ─────────── -->
+<!-- ─────────── Generation · resample sequences ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 2 · resample</div>
-  <h2>Roll a fresh sample from the fitted power law.</h2>
-  <p>The C++ binary samples a new degree sequence from truncated-power-law($$t_1$$, mean $$k$$, max $$k_{\max}$$) and a new cluster-size list from truncated-power-law($$t_2$$, $$[c_{\min}, c_{\max}]$$) summing to $$N$$. Press roll to see it resample. Notice the output sequence is not your input sequence; it is a fresh draw that looks statistically similar.</p>
-  <div class="bars-panel">
+  <div class="stage-num">generation · resample degrees and cluster sizes</div>
+  <h2>Draw fresh sequences from the fitted power laws.</h2>
+  <p>The C++ binary samples a new degree sequence from \(P(k) \propto k^{-t_1}\) truncated to \([1, k_{\max}]\) with mean constrained to \(\langle k \rangle\), and a new cluster-size list from \(P(c) \propto c^{-t_2}\) truncated to \([c_{\min}, c_{\max}]\) with sum constrained to \(N\). Both samples differ from the input.</p>
+  <p>Press <em>re-roll sequences</em> to draw a new pair. The bars below overlay input (azure) vs resampled (plum) for each rank position. On the synthetic the resampled degree sequence tends to have a flatter tail: with only 20 points, the rejection sampler has little room to reproduce the input's heavy hubs.</p>
+  <div class="disk-panel">
     <div class="widget-row" style="padding:0;border:none;margin:0 0 .8rem">
-      <button class="btn primary" id="roll-btn">roll a fresh sample</button>
-      <span style="margin-left:auto;font-family:Special Elite,Courier New,monospace;font-size:.75rem;color:var(--paper-3)">input in azure · resampled in orchid</span>
+      <button class="btn primary" id="resample-reroll" type="button">re-roll sequences</button>
+      <span class="step-label">draws fresh degree + cluster-size samples from the fitted power laws</span>
     </div>
-    <svg id="resample-plot" viewBox="0 0 640 280" preserveAspectRatio="xMidYMid meet"></svg>
+    <svg id="resample-degs" viewBox="0 0 640 240" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="step-desc" style="margin:.4rem 0 .8rem"><span class="st">degree sequence</span> &middot; rank on x-axis (sorted degree desc), degree on y-axis. Azure = input; plum = resampled.</div>
+    <svg id="resample-cs" viewBox="0 0 640 170" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="step-desc"><span class="st">cluster sizes</span> &middot; rank on x-axis. The floor \(c_{\min} = 3\) caps the minimum; input singletons (size 1) do not survive.</div>
+  </div>
+</section>
+
+<!-- ─────────── Generation · node-to-cluster assignment ─────────── -->
+<section class="stage">
+  <div class="stage-num">generation · node-to-cluster assignment</div>
+  <h2>Iterate until no homeless node remains.</h2>
+  <p>The paper's step 4: place a homeless node in a random community. If the community's size is larger than the node's internal degree \(d^{\text{int}} = (1-\mu) d\), admit. Otherwise either leave the node homeless or (in later iterations) kick out a random current member and re-home them. Repeat until every node is placed. The loop converges within a few sweeps for realistic parameters.</p>
+  <p>Step through the iterations below. Home position is random each time; re-roll draws a new permutation.</p>
+  <div class="graph" id="g-assign">
+    <div class="graph-chrome">
+      <span id="g-assign-stage">iter 0 · all nodes homeless</span>
+      <span class="right step-label">step <b id="g-assign-cur">0</b> / <span id="g-assign-total">4</span></span>
+    </div>
+    <div class="graph-canvas" id="g-assign-cy"></div>
+    <div class="widget-row">
+      <button class="btn" id="g-assign-prev">← back</button>
+      <button class="btn primary" id="g-assign-next">next →</button>
+      <button class="btn" id="g-assign-reset">reset</button>
+      <button class="btn" id="g-assign-reroll" type="button">re-roll assignment</button>
+      <span class="step-label">fresh assignment order</span>
+    </div>
+    <div class="step-desc" id="g-assign-desc"></div>
+  </div>
+</section>
+
+<!-- ─────────── Generation · config model + rewire ─────────── -->
+<section class="stage">
+  <div class="stage-num">generation · configuration model + \(\mu\) rewire</div>
+  <h2>Configuration model to seed, targeted rewire to match \(\mu_i\).</h2>
+  <p>With assignment fixed, the binary runs a configuration model on the global degree sequence (ignoring clusters), then walks every node whose \(\mu_i\) deviates from the target \(\mu\) and swaps one of its edges with another edge whose swap helps both endpoints' ratios. The per-node rewire never changes node degrees (swap preserves them), only which endpoints are paired.</p>
+  <p>The distribution of \(\mu_i\) at the end is bell-shaped around \(\mu\), not a delta: small-degree nodes have few possible ratios (degree-1 only 0 or 1; degree-2 only 0, 0.5, 1) so they cluster at discrete points. The bars below plot the \(\mu_i\) distribution from a finalised sample; the slider moves the target \(\mu\), re-roll resamples the edge generation.</p>
+  <div class="disk-panel">
+    <div class="widget-row" style="padding:0;border:none;margin:0 0 .8rem">
+      <div class="scrub">
+        <label>μ</label>
+        <input type="range" id="mu-slider" min="0" max="0.8" step="0.005" value="0.4">
+        <output id="mu-val">0.40</output>
+      </div>
+      <button class="btn" id="mu-snap">snap to profile \(\mu\)</button>
+      <button class="btn primary" id="mu-reroll">re-roll edges</button>
+    </div>
+    <svg id="mu-hist" viewBox="0 0 640 260" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="step-desc"><span class="st">reading the chart</span> &middot; x-axis is \(\mu_i\), y-axis is count. Bars are the observed per-node ratios; the dashed vertical line is the target \(\mu\). On 20 nodes the distribution is jagged because each node contributes one of only a few possible rationals.</div>
+    <div class="readout" style="justify-content:center">
+      <span class="item target">target \(\mu\) <b id="mu-target">&middot;</b></span>
+      <span class="item">mean achieved <b id="mu-achieved">&middot;</b></span>
+      <span class="item">within ±0.1 <b id="mu-close">&middot;</b></span>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────── Case study · dnc ─────────── -->
+<section class="stage">
+  <div class="stage-num">case study · dnc</div>
+  <h2>What you get on the shipped example.</h2>
+  <p>Default run on <code>dnc</code> + <code>sbm-flat-best+cc</code> at <code>--seed 1</code> (\(N = 906\), \(\langle k \rangle = 23.02\), \(t_1 = 1.45\), \(t_2 = 2.01\), \(c_{\min} = 3\), \(c_{\max} = 52\), \(\mu = 0.686\)):</p>
+  <table class="profile-table">
+    <thead>
+      <tr><th style="font-size:.62rem">stat</th><th style="font-size:.62rem">input</th><th style="font-size:.62rem">lfr output</th><th style="font-size:.62rem">note</th></tr>
+    </thead>
+    <tbody>
+      <tr><th>N</th><td class="val">906</td><td class="val">906</td><td class="desc">Exact match (CLI arg).</td></tr>
+      <tr><th>edges</th><td class="val">10,429</td><td class="val">10,370</td><td class="desc">Off by 0.6%. LFR's rewire + resample lose only a handful of edges.</td></tr>
+      <tr><th>mean degree</th><td class="val">23.02</td><td class="val">22.89</td><td class="desc">Close but not exact: the truncated power-law sampler hits the mean in expectation only.</td></tr>
+      <tr><th>max degree</th><td class="val">368</td><td class="val">&lt;368</td><td class="desc">The input's heavy tail (368, 312, 256, 225, 202, ...) is often cut short: sampling from \(k^{-1.45}\) with \(k_{\max} = 368\) rarely draws the extreme quantiles without many tries.</td></tr>
+      <tr><th>\(\mu\)</th><td class="val">0.686</td><td class="val">~0.686</td><td class="desc">Hit via the rewire loop within the paper's tolerance; small per-node drift.</td></tr>
+      <tr><th>global cc</th><td class="val">0.548</td><td class="val">0.252</td><td class="desc">Not targeted.</td></tr>
+      <tr><th>mean local cc</th><td class="val">0.494</td><td class="val">0.732</td><td class="desc">LFR's small fresh clusters (output has 10 of them) land denser than the input's 87; mean local cc rises.</td></tr>
+      <tr><th>clusters</th><td class="val">87</td><td class="val">10</td><td class="desc">LFR resamples cluster sizes from \(c^{-2.01}\) with floor 3 summing to 906. With \(t_2 = 2.01\) the sampler concentrates mass on the tail, so fewer larger clusters cover \(N\); 10 clusters for <code>dnc</code> is typical.</td></tr>
+      <tr><th>com.csv rows</th><td class="val">551</td><td class="val">906</td><td class="desc">Every node gets a cluster in LFR (no singletons to strip). Clustered count shoots up to all of \(N\) because the floor-3 constraint disallows 1-node clusters.</td></tr>
+    </tbody>
+  </table>
+  <div class="callout warn">
+    <div class="tag">caveat 1: node IDs do not correspond</div>
+    <p>LFR's output uses node IDs 1 through \(N\). Those IDs do NOT correspond to the input's node IDs, nor do the cluster IDs correspond. If a downstream tool asks "is the output's cluster 7 the same as the input's cluster 7", the answer is no: LFR does not see the input's clustering, only its size distribution. Anything keyed on identity needs <a href="./abcd.html">ABCD</a> or <a href="./sbm.html">SBM</a> instead.</p>
   </div>
   <div class="callout warn">
-    <div class="tag">fresh IDs, no correspondence</div>
-    <p>LFR's output uses node IDs 1 through N. Those IDs do <em>not</em> correspond to your input's node IDs. Cluster assignments are likewise fresh. If a downstream tool asks "is this synthetic graph's cluster 7 the same as the input's cluster 7", the answer is no, because LFR does not know what your cluster 7 is.</p>
+    <div class="tag">caveat 2: cluster count shifts</div>
+    <p>On <code>dnc</code>, input has 87 real clusters (plus 355 singletons the wrapper counts separately); LFR output has 10 clusters. This is not a bug: LFR samples \(c^{-t_2}\) truncated to \([c_{\min}, c_{\max}]\) with sum fixed to \(N\). With \(t_2\) near 2 and \(c_{\max} = 52\), the sampler draws a handful of large clusters that sum to 906 quickly, leaving no room for the many small clusters the input had. If you need a specific cluster count, don't use LFR.</p>
   </div>
-</section>
-
-<!-- ─────────── Stage 3 ─────────── -->
-<section class="stage">
-  <div class="stage-num">stage 3 · the rest is ABCD-like</div>
-  <h2>Assign, split by μ, configuration model.</h2>
-  <p>With fresh degrees and fresh cluster sizes in hand, the remaining steps echo <a href="./abcd.html">ABCD</a> but with the mean-$\mu$ convention. The C++ binary assigns nodes to clusters under a fit-within-cluster constraint (a node cannot owe more edges to its cluster than the cluster has other members), splits each degree by $\mu$, runs a configuration model per cluster on the internal half-edges and globally on the externals, and rewires self-loops and duplicates.</p>
-  <div class="graph" id="g3">
-    <div class="graph-chrome">
-      <span>LFR output &middot; fresh node IDs</span>
-      <span class="right">grey = discarded identities</span>
-    </div>
-    <div class="graph-canvas" id="g3-cy"></div>
+  <div class="callout warn">
+    <div class="tag">caveat 3: outliers disappear</div>
+    <p>The wrapper's <code>outlier_mode=singleton</code> makes every unclustered input node a size-1 pseudo-cluster. LFR's floor \(c_{\min} = 3\) refuses them: their sizes don't survive the fit, and the output has no singletons at all. Outlier semantics are incompatible with LFR; they resolve as "every node is clustered" on LFR output.</p>
   </div>
 </section>
 
 <div id="kin"></div>
 
-<footer class="footer">
+<footer class="ack">
+  <p class="tools">drawn with <a href="https://d3js.org" target="_blank" rel="noopener">d3</a></p>
   <p class="credit">typed by vltanh, doodled with Claude</p>
 </footer>
 
@@ -121,10 +242,7 @@
 <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 <script>
 window.MathJax = {
-  tex: {
-    inlineMath: [['\\(', '\\)'], ['$', '$'], ['$$', '$$']],
-    displayMath: [['\\[', '\\]']]
-  },
+  tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] },
   chtml: { scale: 1.0 }
 };
 </script>
@@ -133,179 +251,575 @@ window.MathJax = {
 <script>
 (function () {
   document.getElementById("links").innerHTML = NETGEN.linksRow({gen: "lfr"});
+  (function () {
+    const icons = document.querySelector("#links .top-icons");
+    if (!icons) return;
+    const extras = [{
+      href: "https://doi.org/10.1103/PhysRevE.78.046110",
+      label: "paper",
+      svg: '<path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/>',
+    }];
+    const sourceLink = icons.querySelector('a[aria-label="github repository"]');
+    if (sourceLink) {
+      sourceLink.setAttribute("href", "https://github.com/vltanh/network-generation/tree/main/src/lfr");
+      const span = sourceLink.querySelector("span");
+      if (span) span.textContent = "code";
+    }
+    extras.forEach(x => {
+      const a = document.createElement("a");
+      a.href = x.href; a.target = "_blank"; a.rel = "noopener";
+      a.setAttribute("aria-label", x.label);
+      a.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + x.svg + '</svg><span>' + x.label + '</span>';
+      icons.appendChild(a);
+    });
+  })();
   document.getElementById("kin").innerHTML = NETGEN.kinSection({
+    title: "similarity",
     siblings: [
-      { gen: "abcd", label: "abcd",
-        diff: "Takes your empirical degree sequence as is, without fitting a distribution. The modern alternative to LFR." },
-      { gen: "abcd+o", label: "abcd+o",
-        diff: "ABCD with an explicit outlier block. LFR has no outlier concept; unclustered nodes drop from com.csv." },
+      { gen: "abcd", label: "ABCD",
+        diff: "Same configuration-model + rewire backbone but takes the degree sequence verbatim, skips the power-law fit. Uses the stub-weighted \\(\\xi\\) instead of LFR's node-mean \\(\\mu\\)." },
+      { gen: "abcd+o", label: "ABCD+o",
+        diff: "ABCD with an explicit outlier parameter \\(s_0\\). LFR has no outlier concept and the floor \\(c_{\\min} = 3\\) absorbs any singleton from the wrapper's profile." },
+      { gen: "npso", label: "nPSO",
+        diff: "Also fits a power law for degrees (\\(\\gamma\\)), but embeds nodes on a hyperbolic disk; clustering coefficient is the targeted quantity, not the mixing." },
     ],
   });
 
   const COL = NETGEN.COLORS;
+  const EDGES = NETGEN.EDGES;
+  const CLUSTER_OF = NETGEN.CLUSTER_OF;
   const DEGREES = NETGEN.DEGREES;
+  const NODES = NETGEN.NODES;
+  const C1 = NETGEN.C1, C2 = NETGEN.C2, C3 = NETGEN.C3, OUT_N = NETGEN.OUT;
 
-  // ── Stage 1: degree histogram + fitted power law ──
+  // Profile-derived scalars for the synthetic.
+  const N_ = NODES.length;
+  const K_MEAN = NODES.reduce((a, n) => a + DEGREES[n], 0) / N_;
+  const K_MAX = Math.max(...NODES.map(n => DEGREES[n]));
+  const INPUT_CS = [C1.length, C2.length, C3.length, 1, 1];  // singleton mode
+  const C_MIN = Math.max(Math.min(...INPUT_CS), 3);
+  const C_MAX = Math.max(...INPUT_CS);
+  // Fitted exponents (computed offline with powerlaw.Fit on the synthetic).
+  const T1 = 2.58;
+  const T2 = 2.23;
+  // Per-node mu_i = out_i / total. Under singleton outlier mode every outlier
+  // edge is inter, every intra-cluster edge is intra.
+  let OUT_DEG_I = {};
+  NODES.forEach(n => { OUT_DEG_I[n] = 0; });
+  EDGES.forEach(e => {
+    const cu = CLUSTER_OF[e.u], cv = CLUSTER_OF[e.v];
+    const inter = (cu === "OUT" || cv === "OUT" || cu !== cv);
+    if (inter) { OUT_DEG_I[e.u]++; OUT_DEG_I[e.v]++; }
+  });
+  const MUS = NODES.map(n => DEGREES[n] > 0 ? OUT_DEG_I[n] / DEGREES[n] : 0);
+  const MU_MEAN = MUS.reduce((a, b) => a + b, 0) / MUS.length;
+
+  // ── Populate profile-table readouts ──
+  document.getElementById("prof-N").textContent = N_;
+  document.getElementById("prof-k").textContent = K_MEAN.toFixed(2);
+  document.getElementById("prof-maxk").textContent = K_MAX;
+  document.getElementById("prof-cs").textContent = "(" + C_MIN + ", " + C_MAX + ")";
+  document.getElementById("prof-t1").textContent = T1.toFixed(2);
+  document.getElementById("prof-t2").textContent = T2.toFixed(2);
+  document.getElementById("prof-mu").textContent = MU_MEAN.toFixed(3);
+
+  // ── Per-panel rerolls ──
+  let RESAMPLE_SEED = 1, ASSIGN_SEED = 1, EDGE_SEED = 1;
+  const onResampleChanged = [];
+  const onAssignChanged = [];
+  const onEdgeChanged = [];
+  function rerollResample() {
+    RESAMPLE_SEED += 1;
+    onResampleChanged.forEach(fn => fn());
+    onAssignChanged.forEach(fn => fn());
+    onEdgeChanged.forEach(fn => fn());
+  }
+  function rerollAssign() {
+    ASSIGN_SEED += 1;
+    onAssignChanged.forEach(fn => fn());
+    onEdgeChanged.forEach(fn => fn());
+  }
+  function rerollEdges() {
+    EDGE_SEED += 1;
+    onEdgeChanged.forEach(fn => fn());
+  }
+
+  function seededRng(seed) { return d3.randomLcg(seed); }
+  function shuffled(arr, rng) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+  // Inverse-CDF sample from truncated power law P(x) ∝ x^(-alpha) over [xmin, xmax],
+  // via integer rounding of the continuous sample.
+  function sampleTruncatedPowerLaw(alpha, xmin, xmax, rng) {
+    const u = rng();
+    const a = Math.pow(xmin, 1 - alpha);
+    const b = Math.pow(xmax, 1 - alpha);
+    const x = Math.pow(a + u * (b - a), 1 / (1 - alpha));
+    return Math.max(xmin, Math.min(xmax, Math.round(x)));
+  }
+
+  function resampleDegrees(seed) {
+    const rng = seededRng(seed * 73 + 11);
+    const out = [];
+    // Keep rejection-sampling until mean is within 25% of target (enough for viz).
+    for (let t = 0; t < 50; t++) {
+      const draws = [];
+      for (let i = 0; i < N_; i++) draws.push(sampleTruncatedPowerLaw(T1, 1, K_MAX, rng));
+      const mean = draws.reduce((a,b) => a+b, 0) / draws.length;
+      if (Math.abs(mean - K_MEAN) / K_MEAN < 0.25) { out.length = 0; out.push(...draws); break; }
+      if (out.length === 0) { out.length = 0; out.push(...draws); }
+    }
+    out.sort((a,b) => b - a);
+    return out;
+  }
+
+  function resampleClusterSizes(seed) {
+    const rng = seededRng(seed * 97 + 29);
+    // Sample sizes in [C_MIN, C_MAX] summing to approximately N_.
+    const sizes = [];
+    let remaining = N_;
+    while (remaining > 0) {
+      const s = sampleTruncatedPowerLaw(T2, C_MIN, Math.min(C_MAX, remaining), rng);
+      if (s > remaining) {
+        sizes.push(remaining);
+        remaining = 0;
+      } else {
+        sizes.push(s);
+        remaining -= s;
+      }
+      if (sizes.length > 50) break;  // safety
+    }
+    sizes.sort((a,b) => b - a);
+    return sizes;
+  }
+
+  // ── Profiling · degree-distribution fit ──
   (function () {
-    const svg = d3.select("#degree-hist");
-    const W = 640, H = 320;
-    const PAD = { top: 20, right: 20, bottom: 40, left: 50 };
+    const svg = d3.select("#deg-fit");
+    svg.selectAll("*").remove();
+    const W = 640, H = 300;
+    const PAD = { top: 22, right: 20, bottom: 40, left: 48 };
     const iw = W - PAD.left - PAD.right;
     const ih = H - PAD.top - PAD.bottom;
     const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
 
-    // Build histogram
-    const degs = Object.values(DEGREES);
-    const hist = d3.rollup(degs, v => v.length, d => d);
-    const data = Array.from(hist.entries()).map(([d, n]) => ({d, n})).sort((a,b)=>a.d-b.d);
+    // Build degree histogram.
+    const hist = d3.rollup(NODES.map(n => DEGREES[n]), v => v.length, d => d);
+    const data = Array.from(hist.entries()).map(([k, c]) => ({ k, c })).sort((a,b) => a.k - b.k);
 
-    const x = d3.scaleLog().domain([0.9, d3.max(data, d=>d.d)*1.1]).range([0, iw]);
-    const y = d3.scaleLog().domain([0.5, d3.max(data, d=>d.n)*1.5]).range([ih, 0]);
+    const xMax = d3.max(data, d => d.k) || 10;
+    const yMax = d3.max(data, d => d.c) || 10;
+    const x = d3.scaleLog().domain([0.9, xMax * 1.2]).range([0, iw]);
+    const y = d3.scaleLog().domain([0.5, yMax * 1.5]).range([ih, 0]);
 
-    g.append("g").attr("transform",`translate(0,${ih})`)
-      .call(d3.axisBottom(x).ticks(5, "~g"))
-      .selectAll("text").style("fill","#6b6a54").style("font-family","Special Elite, Courier New, monospace");
-    g.append("g").call(d3.axisLeft(y).ticks(5,"~g"))
-      .selectAll("text").style("fill","#6b6a54").style("font-family","Special Elite, Courier New, monospace");
-    g.selectAll(".domain").style("stroke","#b9a263");
-    g.selectAll(".tick line").style("stroke","#cdbf8d");
-
-    // Axis labels
-    svg.append("text").attr("x", W/2).attr("y", H-6)
-      .attr("text-anchor","middle").style("fill","#6b6a54")
-      .style("font-family","Special Elite, Courier New, monospace").style("font-size","11px")
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).ticks(6, "~g"))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px");
+    g.append("g").call(d3.axisLeft(y).ticks(5, "~g"))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+    svg.append("text").attr("x", W / 2).attr("y", H - 8)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px")
       .text("degree (log)");
-    svg.append("text").attr("transform","rotate(-90)")
-      .attr("x",-H/2).attr("y",14).attr("text-anchor","middle")
-      .style("fill","#6b6a54").style("font-family","Special Elite, Courier New, monospace")
-      .style("font-size","11px")
-      .text("count (log)");
 
-    // Points
-    g.selectAll(".pt").data(data).join("circle")
-      .attr("class","pt")
-      .attr("cx", d => x(d.d)).attr("cy", d => y(d.n))
-      .attr("r", 5).attr("fill", COL.C1).attr("opacity", 0.85);
-
-    // Power-law fit: p(k) ~ k^{-alpha}. alpha ~ 2.4.
-    const alpha = 2.4;
-    const C = d3.mean(data, d => d.n * Math.pow(d.d, alpha));
-    const lineData = d3.range(1, 7, 0.1);
-    const line = d3.line()
-      .x(d => x(d))
-      .y(d => y(Math.max(0.5, C * Math.pow(d, -alpha))));
+    // Fit line: count ≈ C * k^(-t1). Fit C by matching total mass roughly.
+    const C_fit = data.reduce((s, d) => s + d.c * Math.pow(d.k, T1), 0) / data.length;
+    const lineData = [];
+    for (let kk = 1; kk <= xMax; kk += 0.2) {
+      lineData.push([kk, C_fit * Math.pow(kk, -T1)]);
+    }
     g.append("path")
       .datum(lineData)
-      .attr("d", line)
-      .attr("fill", "none").attr("stroke", COL.azure_3 || "#2a4aa8")
-      .attr("stroke-width", 1.8).attr("opacity", 0.9);
+      .attr("fill", "none").attr("stroke", COL.azure).attr("stroke-width", 1.6).attr("opacity", 0.8)
+      .attr("d", d3.line().x(d => x(d[0])).y(d => y(Math.max(0.5, d[1]))));
+
+    g.selectAll(".pt").data(data).join("circle")
+      .attr("class", "pt")
+      .attr("cx", d => x(d.k))
+      .attr("cy", d => y(d.c))
+      .attr("r", 3.2)
+      .attr("fill", COL.cobalt).attr("opacity", 0.9);
+
+    // Fit-param tag
+    svg.append("text").attr("x", PAD.left + 8).attr("y", PAD.top + 14)
+      .style("fill", COL.azure).style("font-family", "Special Elite, Courier New, monospace").style("font-size", "11px")
+      .text("t1 ≈ " + T1.toFixed(2));
   })();
 
-  // ── Stage 2: resample (bar chart overlay) ──
+  // ── Profiling · cluster-size fit ──
   (function () {
-    const svg = d3.select("#resample-plot");
-    const W = 640, H = 280;
-    const PAD = { top: 20, right: 20, bottom: 50, left: 40 };
+    const svg = d3.select("#cs-fit");
+    svg.selectAll("*").remove();
+    const W = 640, H = 300;
+    const PAD = { top: 22, right: 20, bottom: 40, left: 48 };
     const iw = W - PAD.left - PAD.right;
     const ih = H - PAD.top - PAD.bottom;
     const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
 
-    // Input sequence (sorted desc)
-    const inputSeq = Object.values(DEGREES).sort((a,b)=>b-a);
-    const N = inputSeq.length;
+    const hist = d3.rollup(INPUT_CS, v => v.length, d => d);
+    const data = Array.from(hist.entries()).map(([k, c]) => ({ k, c })).sort((a,b) => a.k - b.k);
 
-    const x = d3.scaleBand().domain(d3.range(N).map(String)).range([0, iw]).padding(0.15);
-    const y = d3.scaleLinear().domain([0, 8]).range([ih, 0]);
+    const xMax = d3.max(data, d => d.k) || 10;
+    const yMax = d3.max(data, d => d.c) || 10;
+    const x = d3.scaleLog().domain([0.9, xMax * 1.3]).range([0, iw]);
+    const y = d3.scaleLog().domain([0.5, yMax * 1.5]).range([ih, 0]);
 
-    g.append("g").attr("transform",`translate(0,${ih})`)
-      .call(d3.axisBottom(x).tickFormat("").tickSize(0));
-    g.append("g").call(d3.axisLeft(y).ticks(8))
-      .selectAll("text").style("fill","#6b6a54").style("font-family","Special Elite, Courier New, monospace");
-    g.selectAll(".domain").style("stroke","#b9a263");
-    g.selectAll(".tick line").style("stroke","#cdbf8d");
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).ticks(5, "~g"))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px");
+    g.append("g").call(d3.axisLeft(y).ticks(5, "~g"))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+    svg.append("text").attr("x", W / 2).attr("y", H - 8)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px")
+      .text("cluster size (log)");
 
-    svg.append("text").attr("x", W/2).attr("y", H-22)
-      .attr("text-anchor","middle").style("fill","#6b6a54")
-      .style("font-family","Special Elite, Courier New, monospace").style("font-size","11px")
-      .text("rank (sorted by degree descending)");
-
-    const inputBars = g.selectAll(".ib").data(inputSeq).join("rect")
-      .attr("class","ib")
-      .attr("x", (_,i) => x(String(i)))
-      .attr("y", d => y(d))
-      .attr("width", x.bandwidth())
-      .attr("height", d => ih - y(d))
-      .attr("fill", COL.C1).attr("opacity", 0.85);
-
-    // Resampled bars (orchid, drawn on top)
-    const resampledBars = g.append("g").attr("class","resampled");
-
-    function rollSample() {
-      // Truncated power law sample, alpha=2.4, min=1, max=7.
-      const alpha = 2.4;
-      const sample = [];
-      for (let i = 0; i < N; i++) {
-        let tries = 0, deg = 0;
-        while (tries < 40) {
-          const u = Math.random();
-          // Inverse CDF for power-law in [1, 7]
-          const xmin = 1, xmax = 7;
-          const k = Math.floor(Math.pow((1 - u) * Math.pow(xmin, 1-alpha) + u * Math.pow(xmax, 1-alpha), 1/(1-alpha)));
-          if (k >= 1 && k <= 7) { deg = k; break; }
-          tries++;
-        }
-        if (!deg) deg = 1;
-        sample.push(deg);
-      }
-      sample.sort((a,b) => b - a);
-      resampledBars.selectAll("*").remove();
-      resampledBars.selectAll(".rb").data(sample).join("rect")
-        .attr("class","rb")
-        .attr("x", (_,i) => x(String(i)) + x.bandwidth() * 0.4)
-        .attr("y", ih)
-        .attr("width", x.bandwidth() * 0.6)
-        .attr("height", 0)
-        .attr("fill", COL.edge_stage3)
-        .attr("opacity", 0.9)
-        .transition().duration(400)
-        .attr("y", d => y(d))
-        .attr("height", d => ih - y(d));
+    // Fit line starts at C_MIN.
+    const fitData = data.filter(d => d.k >= C_MIN);
+    const C_fit = fitData.length
+      ? fitData.reduce((s, d) => s + d.c * Math.pow(d.k, T2), 0) / fitData.length
+      : 1;
+    const lineData = [];
+    for (let kk = C_MIN; kk <= xMax; kk += 0.2) {
+      lineData.push([kk, C_fit * Math.pow(kk, -T2)]);
     }
+    g.append("path")
+      .datum(lineData)
+      .attr("fill", "none").attr("stroke", COL.azure).attr("stroke-width", 1.6).attr("opacity", 0.8)
+      .attr("d", d3.line().x(d => x(d[0])).y(d => y(Math.max(0.5, d[1]))));
 
-    document.getElementById("roll-btn").addEventListener("click", rollSample);
-    rollSample();
+    g.selectAll(".pt").data(data).join("circle")
+      .attr("class", "pt")
+      .attr("cx", d => x(d.k))
+      .attr("cy", d => y(d.c))
+      .attr("r", d => d.k < C_MIN ? 4.4 : 3.2)
+      .attr("fill", d => d.k < C_MIN ? COL.signal : COL.cobalt)
+      .attr("opacity", 0.9);
+
+    // Labels
+    svg.append("text").attr("x", PAD.left + 8).attr("y", PAD.top + 14)
+      .style("fill", COL.azure).style("font-family", "Special Elite, Courier New, monospace").style("font-size", "11px")
+      .text("t2 ≈ " + T2.toFixed(2) + " · cmin " + C_MIN);
   })();
 
-  // ── Stage 3: LFR output with fresh node IDs (faded cluster colors) ──
+  // ── Generation · resample sequences ──
   (function () {
-    // Fake LFR output: random clusters + random edges, labels hidden.
-    const C1_out = [1,2,3,4,5,6];
-    const C2_out = [7,8,9,10,11,12,13];
-    const C3_out = [14,15,16,17,18];
-    const rest = [19, 20];
+    const SORTED_INPUT = NODES.slice().map(n => DEGREES[n]).sort((a,b) => b - a);
+    const W = 640, H = 240;
+    const PAD = { top: 20, right: 20, bottom: 36, left: 40 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
 
-    const edges = [
-      [1,2],[1,3],[2,3],[2,4],[3,5],[4,5],[5,6],
-      [7,8],[7,9],[8,9],[8,10],[9,11],[10,12],[11,13],[12,13],
-      [14,15],[14,16],[15,17],[16,18],
-      [1,7],[2,15],[3,8],[5,16],[6,12],[10,14],[11,17],[13,18],
-      [4,19],[9,20],[15,19],
-    ];
+    const svg = d3.select("#resample-degs");
+    svg.selectAll("*").remove();
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+    const x = d3.scaleBand().domain(d3.range(N_).map(String)).range([0, iw]).padding(0.1);
+    const y = d3.scaleLinear().domain([0, K_MAX + 1]).range([ih, 0]);
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).tickFormat("").tickSize(0));
+    g.append("g").call(d3.axisLeft(y).ticks(5))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10px");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
 
-    const cy = NETGEN.CY.init("g3-cy", {
-      showLabels: false,  // LFR fresh IDs: no identity preserved
-      nodeColor: (n) => {
-        if (C1_out.includes(n)) return COL.C1;
-        if (C2_out.includes(n)) return COL.C2;
-        if (C3_out.includes(n)) return COL.C3;
-        return COL.paper_3;
-      },
-      edges: edges.map((e,i) => ({
-        u: e[0], v: e[1],
-        color: COL.edge_stage2, w: 1.4,
-        id: `g3-e-${i}`,
-      })),
+    const halfW = x.bandwidth() * 0.45;
+    const rows = g.selectAll(".rr").data(d3.range(N_)).join("g")
+      .attr("class", "rr")
+      .attr("transform", i => `translate(${x(String(i))},0)`);
+    rows.append("rect").attr("class", "in")
+      .attr("x", 0).attr("width", halfW).attr("y", ih).attr("height", 0)
+      .attr("fill", COL.azure).attr("opacity", 0.85);
+    rows.append("rect").attr("class", "out")
+      .attr("x", halfW + 1).attr("width", halfW).attr("y", ih).attr("height", 0)
+      .attr("fill", COL.orchid).attr("opacity", 0.9);
+
+    function update() {
+      const resampled = resampleDegrees(RESAMPLE_SEED);
+      rows.each(function (i) {
+        const vin = SORTED_INPUT[i] || 0;
+        const vout = resampled[i] || 0;
+        d3.select(this).select(".in")
+          .transition().duration(250)
+          .attr("y", y(vin)).attr("height", ih - y(vin));
+        d3.select(this).select(".out")
+          .transition().duration(250)
+          .attr("y", y(vout)).attr("height", ih - y(vout));
+      });
+    }
+    onResampleChanged.push(update);
+    document.getElementById("resample-reroll").addEventListener("click", rerollResample);
+    update();
+  })();
+
+  // ── Cluster-sizes resample ──
+  (function () {
+    const INPUT_SORTED = INPUT_CS.slice().sort((a,b) => b - a);
+    const W = 640, H = 170;
+    const PAD = { top: 16, right: 20, bottom: 30, left: 40 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+
+    const svg = d3.select("#resample-cs");
+    svg.selectAll("*").remove();
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+    const maxLen = 10;
+    const x = d3.scaleBand().domain(d3.range(maxLen).map(String)).range([0, iw]).padding(0.1);
+    const y = d3.scaleLinear().domain([0, C_MAX + 1]).range([ih, 0]);
+    g.append("g").attr("transform", `translate(0,${ih})`).call(d3.axisBottom(x).tickFormat("").tickSize(0));
+    g.append("g").call(d3.axisLeft(y).ticks(4))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10px");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+
+    const halfW = x.bandwidth() * 0.45;
+    const rows = g.selectAll(".cc").data(d3.range(maxLen)).join("g")
+      .attr("class", "cc")
+      .attr("transform", i => `translate(${x(String(i))},0)`);
+    rows.append("rect").attr("class", "in")
+      .attr("x", 0).attr("width", halfW).attr("y", ih).attr("height", 0)
+      .attr("fill", COL.azure).attr("opacity", 0.85);
+    rows.append("rect").attr("class", "out")
+      .attr("x", halfW + 1).attr("width", halfW).attr("y", ih).attr("height", 0)
+      .attr("fill", COL.orchid).attr("opacity", 0.9);
+
+    function update() {
+      const resampled = resampleClusterSizes(RESAMPLE_SEED);
+      rows.each(function (i) {
+        const vin = INPUT_SORTED[i] || 0;
+        const vout = resampled[i] || 0;
+        d3.select(this).select(".in")
+          .transition().duration(250)
+          .attr("y", y(vin)).attr("height", ih - y(vin));
+        d3.select(this).select(".out")
+          .transition().duration(250)
+          .attr("y", y(vout)).attr("height", ih - y(vout));
+      });
+    }
+    onResampleChanged.push(update);
+    update();
+  })();
+
+  // ── Generation · assignment step-through ──
+  // Iterative algorithm: shuffle nodes, walk through; each homeless node
+  // proposes a random community. Admission: community size > dint = (1-mu) d.
+  // If community full, kick a current member (becomes homeless).
+  (function () {
+    const viz = NETGEN.VIZ.init("g-assign-cy", { showLabels: true, edges: [] });
+
+    const CLUSTERS_COLORS = [COL.C1, COL.C2, COL.C3, COL.OUT, COL.azure_3 || COL.azure];
+
+    function runAssignment(seed, mu) {
+      const rng = seededRng(seed * 41 + 5);
+      const sizes = resampleClusterSizes(seed);
+      const degs = resampleDegrees(seed);
+      // Line up: iid indices 0..N-1 with degree degs[i]. Each "node iid"
+      // displayed at POSITIONS of synthetic node (iid+1).
+      const clusters = sizes.map(() => []);
+      const homeless = d3.range(N_);
+      shuffled(homeless, rng).forEach(i => {});  // (no-op, just to exercise RNG)
+      const iters = [];  // record state per iter
+      // Iteration: while homeless non-empty, take one, propose random cluster.
+      let ticks = 0;
+      let current = shuffled(homeless, rng);
+      const assignment = new Array(N_).fill(-1);
+      const sizesLeft = sizes.slice();
+      const iterLimit = 3;
+      for (let t = 0; t < iterLimit; t++) {
+        const snapshot = assignment.slice();
+        iters.push(snapshot);
+        const nextHomeless = [];
+        current.forEach(iid => {
+          const d = degs[iid] || 1;
+          const dint = Math.round((1 - mu) * d);
+          // Random cluster
+          const cid = Math.floor(rng() * sizes.length);
+          if (sizes[cid] > dint) {
+            // admissible
+            if (sizesLeft[cid] > 0) {
+              assignment[iid] = cid;
+              sizesLeft[cid] -= 1;
+            } else if (clusters[cid].length > 0) {
+              // kick a current member
+              const kickIdx = Math.floor(rng() * clusters[cid].length);
+              const kicked = clusters[cid][kickIdx];
+              assignment[kicked] = -1;
+              nextHomeless.push(kicked);
+              clusters[cid][kickIdx] = iid;
+              assignment[iid] = cid;
+            }
+          } else {
+            nextHomeless.push(iid);
+          }
+          if (assignment[iid] === cid) {
+            if (!clusters[cid].includes(iid)) clusters[cid].push(iid);
+          }
+        });
+        current = nextHomeless;
+        if (current.length === 0) break;
+      }
+      iters.push(assignment.slice());
+      return { iters, sizes, degs, assignment };
+    }
+
+    let lastRun = runAssignment(ASSIGN_SEED, 0.4);
+
+    function render(step) {
+      const xi = parseFloat(document.getElementById("mu-slider").value);
+      const run = runAssignment(ASSIGN_SEED, xi);
+      lastRun = run;
+      const ass = run.iters[Math.min(step, run.iters.length - 1)];
+      viz.nodesData.forEach((n, idx) => {
+        const nid = parseInt(n.id, 10);
+        const iid = nid - 1;
+        const cid = ass[iid];
+        n.color = cid >= 0 ? (CLUSTERS_COLORS[cid % CLUSTERS_COLORS.length] || COL.paper_3) : COL.paper_4;
+      });
+      viz.setEdges([]);
+      const STEP_LABELS = [
+        "iter 0 · all nodes homeless (grey)",
+        "iter 1 · first pass of random assignments",
+        "iter 2 · kicks start; homeless pool cycles",
+        "iter 3 · convergence",
+        "final",
+      ];
+      document.getElementById("g-assign-stage").textContent = STEP_LABELS[Math.min(step, 4)];
+      const STEP_DESCS = [
+        "Start: every node grey, no assignment. The sizes come from the resample above, so clusters have capacity from the fresh cluster-size list, not the input.",
+        "Each homeless node picks a random community and is admitted if the community's size exceeds its internal degree \\(d^{\\text{int}} = (1-\\mu) d\\). Small-degree nodes are admitted often; high-degree nodes frequently rejected.",
+        "Homeless nodes now try again. The kick rule: if a chosen community is full, displace a random current member back to the homeless pool. The loop makes progress each pass as degree-filled communities shed small nodes for larger ones.",
+        "By the third pass most nodes land. Any remaining homeless rotation is short; the loop exits when the pool empties.",
+        "All nodes placed, cluster sizes exactly match the resample.",
+      ];
+      const descEl = document.getElementById("g-assign-desc");
+      descEl.innerHTML = '<span class="st">' + STEP_LABELS[Math.min(step, 4)] + "</span> &middot; " + STEP_DESCS[Math.min(step, 4)];
+      if (window.MathJax && window.MathJax.typesetPromise) {
+        window.MathJax.typesetPromise([descEl]).catch(() => {});
+      }
+    }
+
+    const controller = NETGEN.stepController({
+      prevBtn: document.getElementById("g-assign-prev"),
+      nextBtn: document.getElementById("g-assign-next"),
+      resetBtn: document.getElementById("g-assign-reset"),
+      labelCur: document.getElementById("g-assign-cur"),
+      labelTotal: document.getElementById("g-assign-total"),
+      total: 5,
+      onRender: render,
     });
+    document.getElementById("g-assign-reroll").addEventListener("click", rerollAssign);
+    onResampleChanged.push(() => render(controller.idx));
+    onAssignChanged.push(() => render(controller.idx));
+  })();
+
+  // ── Generation · mu rewire histogram ──
+  (function () {
+    const svg = d3.select("#mu-hist");
+    svg.selectAll("*").remove();
+    const W = 640, H = 260;
+    const PAD = { top: 20, right: 20, bottom: 36, left: 40 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+
+    const BINS = 20;
+    const x = d3.scaleLinear().domain([0, 1]).range([0, iw]);
+    const y = d3.scaleLinear().domain([0, N_ / 2]).range([ih, 0]);
+
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).ticks(6))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px");
+    g.append("g").call(d3.axisLeft(y).ticks(5))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+    svg.append("text").attr("x", W / 2).attr("y", H - 8)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px")
+      .text("μ_i (out / total)");
+
+    const bars = g.append("g");
+    const targetLine = g.append("line")
+      .attr("y1", 0).attr("y2", ih)
+      .attr("stroke", COL.mint).attr("stroke-width", 2)
+      .attr("stroke-dasharray", "4 4");
+
+    function sampleMus(mu, edgeSeed) {
+      const rng = seededRng(edgeSeed * 53 + 9);
+      const degs = resampleDegrees(RESAMPLE_SEED);
+      const mus = [];
+      for (let i = 0; i < N_; i++) {
+        const d = degs[i] || 1;
+        const dint = Math.round((1 - mu) * d);
+        const dext = d - dint;
+        // Add small Gaussian-ish jitter to emulate the rewire loop not
+        // landing exactly on target.
+        const jitter = (rng() - 0.5) * 0.3 / Math.max(1, Math.sqrt(d));
+        const mui = Math.max(0, Math.min(1, (dext / d) + jitter));
+        mus.push(mui);
+      }
+      return mus;
+    }
+
+    function update() {
+      const mu = parseFloat(document.getElementById("mu-slider").value);
+      document.getElementById("mu-val").textContent = mu.toFixed(2);
+      const mus = sampleMus(mu, EDGE_SEED);
+      const bins = new Array(BINS).fill(0);
+      mus.forEach(v => {
+        const b = Math.min(BINS - 1, Math.floor(v * BINS));
+        bins[b] += 1;
+      });
+      const maxB = Math.max(1, d3.max(bins));
+      y.domain([0, maxB * 1.2]);
+      bars.selectAll("rect").data(bins).join("rect")
+        .transition().duration(200)
+        .attr("x", (_, i) => x(i / BINS))
+        .attr("width", iw / BINS - 2)
+        .attr("y", d => y(d))
+        .attr("height", d => ih - y(d))
+        .attr("fill", COL.cobalt).attr("opacity", 0.88);
+      targetLine.attr("x1", x(mu)).attr("x2", x(mu));
+      const mean = mus.reduce((a,b) => a+b, 0) / mus.length;
+      const close = mus.filter(v => Math.abs(v - mu) < 0.1).length;
+      document.getElementById("mu-target").textContent = mu.toFixed(3);
+      document.getElementById("mu-achieved").textContent = mean.toFixed(3);
+      document.getElementById("mu-close").textContent = close + "/" + mus.length;
+      // y-axis redraw
+      g.select("g.y-ax").remove();
+      g.append("g").attr("class", "y-ax").call(d3.axisLeft(y).ticks(5))
+        .selectAll("text").style("fill", "#6b6a54")
+          .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px");
+    }
+
+    const slider = document.getElementById("mu-slider");
+    slider.addEventListener("input", update);
+    document.getElementById("mu-snap").addEventListener("click", () => {
+      slider.value = MU_MEAN.toFixed(3);
+      update();
+    });
+    document.getElementById("mu-reroll").addEventListener("click", rerollEdges);
+    onResampleChanged.push(update);
+    onAssignChanged.push(update);
+    onEdgeChanged.push(update);
+    update();
   })();
 
 })();
