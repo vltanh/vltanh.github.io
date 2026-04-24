@@ -866,58 +866,40 @@ window.MathJax = {
   // ── Generation · K_{k+1} step-through ──
   (function () {
     // Phase 2 attach patterns under weighted-random partner sampling
-    // (paper's recipe). The shipped Python falls back to weighted-random
-    // only when greedy runs out; both modes emit a valid k-edge-connected
-    // core. Realization 1 is what gen_kec_core emits at PYTHONHASHSEED=0
-    // (verified). 2 and 3 are alternate tiebreak / random resolutions.
+    // (paper's recipe). Per-node variants: realization 1 is what shipped
+    // gen_kec_core emits at PYTHONHASHSEED=0 (verified via
+    // /tmp/verify_kec_core.py). Reroll is cumulative: clicking "random"
+    // advances variant indices only for nodes introduced at the current
+    // step or later, so earlier attaches stay frozen.
     const C1_rem = [5, 6, 8, 7];
     const C2_rem = [12, 13, 14];
     const C3_rem = [17, 18];
-    const ATTACH_REALIZATIONS = [
-      {
-        label: "realization 1 of 3",
-        attach: {
-          5:  [1, 2, 3],
-          6:  [1, 4, 5],
-          8:  [1, 2, 3],
-          7:  [1, 4, 5],
-          12: [9, 11],
-          13: [9, 12],
-          14: [10, 11],
-          17: [15],
-          18: [15],
-        },
-      },
-      {
-        label: "realization 2 of 3",
-        attach: {
-          5:  [1, 2, 4],
-          6:  [1, 3, 5],
-          8:  [1, 4, 5],
-          7:  [1, 2, 3],
-          12: [9, 10],
-          13: [11, 12],
-          14: [9, 12],
-          17: [16],
-          18: [16],
-        },
-      },
-      {
-        label: "realization 3 of 3",
-        attach: {
-          5:  [1, 3, 4],
-          6:  [2, 4, 5],
-          8:  [2, 3, 4],
-          7:  [1, 3, 5],
-          12: [10, 11],
-          13: [9, 10],
-          14: [12, 13],
-          17: [16],
-          18: [17],
-        },
-      },
-    ];
-    let coreReal = 0;
+    // step in which each phase-2 node is introduced
+    const INTRO_STEP = { 5:3, 12:3, 17:3, 6:4, 13:4, 18:4, 8:5, 14:5, 7:6 };
+    // per-node attach variants (each must be k distinct partners from
+    // the nodes already processed by that iteration)
+    const ATTACH_VARIANTS = {
+      5:  [[1, 2, 3], [1, 2, 4], [1, 3, 4]],
+      6:  [[1, 4, 5], [1, 3, 5], [2, 4, 5]],
+      7:  [[1, 4, 5], [1, 2, 3], [1, 3, 5]],
+      8:  [[1, 2, 3], [1, 4, 5], [2, 3, 4]],
+      12: [[9, 11],   [9, 10],   [10, 11]],
+      13: [[9, 12],   [11, 12],  [9, 10]],
+      14: [[10, 11],  [9, 12],   [12, 13]],
+      17: [[15],      [16],      [16]],
+      18: [[15],      [16],      [17]],
+    };
+    // live variant index per node (starts at 0 for everyone)
+    const ATTACH_IDX = {};
+    Object.keys(ATTACH_VARIANTS).forEach(n => { ATTACH_IDX[n] = 0; });
+    function currentAttach() {
+      const a = {};
+      Object.keys(ATTACH_VARIANTS).forEach(n => {
+        a[n] = ATTACH_VARIANTS[n][ATTACH_IDX[n] % ATTACH_VARIANTS[n].length];
+      });
+      return a;
+    }
+    let rollCount = 0;
 
     function edgesAt(step) {
       if (step < 2) return [];
@@ -928,7 +910,7 @@ window.MathJax = {
           id: `core-${c}-${edgeKey(u, v)}`,
         }));
       });
-      const ATTACH = ATTACH_REALIZATIONS[coreReal].attach;
+      const ATTACH = currentAttach();
       const maxAttach = step - 2;
       for (let i = 0; i < maxAttach; i++) {
         [C1_rem[i], C2_rem[i], C3_rem[i]].forEach(n => {
@@ -969,7 +951,7 @@ window.MathJax = {
     }
 
     function stepDesc(step) {
-      const A = ATTACH_REALIZATIONS[coreReal].attach;
+      const A = currentAttach();
       const set = (n) => "\\{" + A[n].join(", ") + "\\}";
       return [
         { label: "step 0 · stripped",
@@ -1015,7 +997,9 @@ window.MathJax = {
       const sd = stepDesc(step);
       descEl.innerHTML = `<span class="st">${sd.label}</span> &middot; ${sd.desc}`;
       stageEl.textContent = sd.label;
-      realEl.textContent = ATTACH_REALIZATIONS[coreReal].label;
+      realEl.textContent = rollCount === 0
+        ? "initial realization · random re-samples from current step forward"
+        : `reroll #${rollCount} · steps ≥ current re-sampled; earlier frozen`;
       if (window.MathJax && window.MathJax.typesetPromise) {
         window.MathJax.typesetPromise([descEl]).catch(() => {});
       }
@@ -1031,8 +1015,17 @@ window.MathJax = {
       onRender: render,
     });
 
+    // Cumulative reroll: when user clicks random at step S, advance the
+    // variant index only for nodes whose INTRO_STEP >= S. Earlier
+    // attaches (introduced at steps < S) stay frozen so the step-through
+    // visibly reuses the earlier scaffolding.
     document.getElementById("g-core-reroll").addEventListener("click", () => {
-      coreReal = (coreReal + 1) % ATTACH_REALIZATIONS.length;
+      const S = Math.max(controller.idx, 3);  // step 3 is first attach
+      Object.keys(INTRO_STEP).forEach(n => {
+        if (INTRO_STEP[n] >= S) ATTACH_IDX[n] = (ATTACH_IDX[n] + 1)
+          % ATTACH_VARIANTS[n].length;
+      });
+      rollCount += 1;
       render(controller.idx);
     });
   })();
