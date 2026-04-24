@@ -1291,21 +1291,15 @@ window.MathJax = {
     NETGEN.makeTooltip(viz, svg.node().closest(".disk-panel"));
 
     let path = null;
-    let hoveredId = null;
     function clearOverlay() {
       if (path) { path.remove(); path = null; }
     }
     const infoEl = document.getElementById("hover-info");
     function setInfo(id, R) {
       if (!infoEl) return;
-      const t = rankOf[id] + 1;
-      const tag = (id === hoveredId) ? "hover" : "default";
       const Rstr = (R == null || !isFinite(R)) ? "—"
                   : (R <= 0 ? "≤ 0 (no ball)" : R.toFixed(2));
-      infoEl.innerHTML = `showing node <b>${id}</b> &middot; \\(t = ${t}\\) &middot; \\(R = ${Rstr}\\) &middot; ${tag}`;
-      if (window.MathJax && window.MathJax.typesetPromise) {
-        window.MathJax.typesetPromise([infoEl]).catch(() => {});
-      }
+      infoEl.textContent = `node ${id} · R = ${Rstr}`;
     }
     function drawBall(id) {
       const t = rankOf[id] + 1;
@@ -1329,25 +1323,21 @@ window.MathJax = {
         .attr("stroke-dasharray", "4 3").attr("opacity", 0.9)
         .attr("pointer-events", "none");
     }
-    // Default ball: last arrival (largest t, most candidates) so the
-    // viz has something on screen even before the user hovers.
-    const defaultId = sorted[sorted.length - 1];
-    function shownId() { return hoveredId != null ? hoveredId : defaultId; }
+    // Initial ball: last arrival (largest t, most candidates). Hover
+    // latches onto the hovered node and stays there until another node
+    // is hovered; hover-leave keeps the last selection.
+    let currentId = sorted[sorted.length - 1];
 
     viz.onNodeHoverEnter((d) => {
-      hoveredId = parseInt(d.id, 10);
-      drawBall(hoveredId);
-    });
-    viz.onNodeHoverLeave(() => {
-      hoveredId = null;
-      drawBall(defaultId);
+      currentId = parseInt(d.id, 10);
+      drawBall(currentId);
     });
     slider.addEventListener("input", () => {
       sliderOut.value = currentT().toFixed(2);
-      drawBall(shownId());
+      drawBall(currentId);
     });
     sliderOut.value = currentT().toFixed(2);
-    drawBall(defaultId);
+    drawBall(currentId);
 
     onEmbeddingReroll(() => {
       clearOverlay();
