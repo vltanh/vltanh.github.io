@@ -73,13 +73,15 @@ const INTRA = {
     [6,7],[6,8],
     [7,8],
   ],
-  // C2 is K_4 on {9..12} plus {13,14}.
+  // C2 is K_4 on {9..12} plus a trailing pair {13, 14}. Node 13 hangs
+  // off the K_4 by edges (9,13) and (12,13); node 14 by (10,14) and
+  // (11,14). The induced subgraph has min cut = 2, achieved by
+  // isolating either node 13 or node 14.
   C2: [
     [9,10],[9,11],[9,12],[9,13],
     [10,11],[10,12],[10,14],
     [11,12],[11,14],
     [12,13],
-    [13,14],
   ],
   // C3 is deliberately sparse so its mincut is k=1.
   C3: [[15,16],[15,17],[16,18]],
@@ -108,20 +110,52 @@ const DEGREES = {};
 NODES.forEach(n => DEGREES[n] = 0);
 EDGES.forEach(({u,v}) => { DEGREES[u]++; DEGREES[v]++; });
 
+// Post-exclusion degrees: count only intra + inter edges (drop every
+// outlier-incident edge). EC-SBM v1 + v2 both force outlier_mode=excluded
+// at profile time, so their `degree.csv` + the phase-1 `topK` use these
+// counts, not the full DEGREES above.
+const DEGREES_EXCL = {};
+NODES.forEach(n => DEGREES_EXCL[n] = 0);
+EDGES.forEach(({u,v}) => {
+  if (CLUSTER_OF[u] === "OUT" || CLUSTER_OF[v] === "OUT") return;
+  DEGREES_EXCL[u]++; DEGREES_EXCL[v]++;
+});
+
 const MINCUTS = { C1: 3, C2: 2, C3: 1 };
 
-// Top-(k+1) nodes per cluster by degree desc, id asc tiebreak
-function topK(cluster_nodes, k) {
+// A concrete minimum edge cut set per cluster. Each one achieves the
+// cluster's MINCUTS[c] by isolating the lowest-degree node inside the
+// cluster. Useful for "best edge cut set" visualizations.
+//   - C1 (k=3): isolate node 7 (intra-deg 3) via {(3,7),(6,7),(7,8)}
+//   - C2 (k=2): isolate node 13 (intra-deg 2) via {(9,13),(12,13)}
+//   - C3 (k=1): isolate node 18 (intra-deg 1) via {(16,18)}
+// Each edge set is listed with lo-id first.
+const MIN_CUT_EDGES = {
+  C1: [[3,7],[6,7],[7,8]],
+  C2: [[9,13],[12,13]],
+  C3: [[16,18]],
+};
+// Node that gets isolated by the corresponding MIN_CUT_EDGES set.
+const MIN_CUT_ISOLATE = { C1: 7, C2: 13, C3: 18 };
+
+// Top-(k+1) nodes per cluster by degree desc, id asc tiebreak. Takes
+// the degree map as an argument so EC-SBM pages (post-exclusion) and
+// SBM / landing (full degrees) agree without forking.
+function topK(cluster_nodes, k, degMap) {
+  const d = degMap || DEGREES;
   return cluster_nodes
-    .map(n => ({n, d: DEGREES[n]}))
+    .map(n => ({n, d: d[n]}))
     .sort((a,b) => (b.d - a.d) || (a.n - b.n))
     .slice(0, k+1)
     .map(o => o.n);
 }
+// Use POST-EXCLUSION degrees: v1 + v2 both profile under excluded mode,
+// so their top-(k+1) core ranks match what gen_kec_core would produce
+// on a real run.
 const CORE_NODES = {
-  C1: topK(C1, MINCUTS.C1),  // 4 nodes
-  C2: topK(C2, MINCUTS.C2),  // 3 nodes
-  C3: topK(C3, MINCUTS.C3),  // 2 nodes
+  C1: topK(C1, MINCUTS.C1, DEGREES_EXCL),  // 4 nodes
+  C2: topK(C2, MINCUTS.C2, DEGREES_EXCL),  // 3 nodes
+  C3: topK(C3, MINCUTS.C3, DEGREES_EXCL),  // 2 nodes
 };
 
 // K_{k+1} core edges (complete subgraph on CORE_NODES per cluster)
@@ -683,7 +717,8 @@ if (typeof document !== "undefined") {
 
 // ── Export ────────────────────────────────────────────────────
 global.NETGEN = {
-  POSITIONS, NODES, EDGES, CLUSTER_OF, DEGREES, MINCUTS,
+  POSITIONS, NODES, EDGES, CLUSTER_OF, DEGREES, DEGREES_EXCL, MINCUTS,
+  MIN_CUT_EDGES, MIN_CUT_ISOLATE,
   C1, C2, C3, OUT, INTRA, INTER, OUT_EDGES,
   CORE_NODES, CORE_EDGES, topK, cliqueEdges,
   COLORS, CY, VIZ,
