@@ -163,11 +163,6 @@
     <svg id="rt-curve" viewBox="0 0 640 230" preserveAspectRatio="xMidYMid meet"></svg>
     <div class="step-desc" style="margin-top:.6rem">\(R_t(T)\) swept across \(T \in (0, 1)\) at two arrival indices: \(t = m+1\) (the first arrival that actually samples; why \(m+1\) and not earlier is discussed in the next section) and \(t = N\). Solid lines use the page's actual \(\beta\); dashed lines show the same \(t\) under the \(\beta = 1\) L'Hopital branch.</div>
   </div>
-  <p><strong>Step 2.</strong> For each candidate \(j\) already on the disk, compute the hyperbolic distance between \(i\) and \(j\):</p>
-  \[
-    h_{ij} \;=\; \mathrm{arccosh}\bigl( \cosh r_i \cosh r_j \;-\; \sinh r_i \sinh r_j \cos d_\mathrm{ang}(\theta_i, \theta_j) \bigr).
-  \]
-  <p>Close in radius AND close in angle gives a small \(h_{ij}\); a big radial gap or a diametric angular gap blows it up. One distance per candidate.</p>
   <div class="disk-panel" style="padding:.9rem 1rem">
     <svg id="fd-hover" viewBox="-270 -270 540 540" preserveAspectRatio="xMidYMid meet"></svg>
     <div class="widget-row" style="padding:.4rem 0 0;border:none;margin:0">
@@ -178,7 +173,23 @@
       </div>
       <span class="step-label" id="hover-info" style="margin-left:auto">&middot;</span>
     </div>
-    <div class="step-desc" style="margin-top:.6rem">Hover any node \(i\) to see its hyperbolic ball of radius \(R_i(T)\) traced as a dashed red curve. The ball is not a Euclidean circle on this rendering: far-from-origin nodes get pear-shaped balls because hyperbolic distance grows non-linearly along the radial axis. Drag the slider to scale \(R_i\) with temperature.</div>
+    <div class="step-desc" style="margin-top:.6rem">Hover any node to see its hyperbolic ball of radius \(R_t(T)\) traced as a dashed red curve. The ball is not a Euclidean circle on this rendering: far-from-origin nodes get pear-shaped balls because hyperbolic distance grows non-linearly along the radial axis. Drag the slider to scale the ball with temperature.</div>
+  </div>
+  <p><strong>Step 2.</strong> For each candidate \(j\) already on the disk, compute the hyperbolic distance between \(i\) and \(j\):</p>
+  \[
+    h_{ij} \;=\; \mathrm{arccosh}\bigl( \cosh r_i \cosh r_j \;-\; \sinh r_i \sinh r_j \cos d_\mathrm{ang}(\theta_i, \theta_j) \bigr).
+  \]
+  <p>Close in radius AND close in angle gives a small \(h_{ij}\); a big radial gap or a diametric angular gap blows it up. One distance per candidate. Click any two nodes on the disk below: the first click latches a node and draws its ball, the second click draws the hyperbolic geodesic from the first node to the second (the shortest path in the hyperbolic plane). A third click resets the selection and starts again.</p>
+  <div class="disk-panel" style="padding:.9rem 1rem">
+    <svg id="fd-geodesic" viewBox="-270 -270 540 540" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="widget-row" style="padding:.4rem 0 0;border:none;margin:0">
+      <div class="scrub">
+        <label>T</label>
+        <input type="range" id="geo-T" min="0.01" max="0.99" step="0.01" value="0.30">
+        <output id="geo-T-val">0.30</output>
+      </div>
+      <span class="step-label" id="geo-info" style="margin-left:auto">click a node to start</span>
+    </div>
   </div>
   <p><strong>Step 3.</strong> Plug the pair \((h_{ij}, R_i(T))\) into the Fermi-Dirac sigmoid to get the connection probability:</p>
   \[
@@ -194,6 +205,19 @@
         <output id="fd-T-val">0.30</output>
       </div>
     </div>
+  </div>
+  <p>Same picture on the disk: hover any node to colour the rest of the disk by \(p(i, \cdot)\) instead of by a hard cutoff. The hyperbolic ball boundary becomes a soft gradient that hugs the dashed cutoff line at low \(T\) and diffuses across the disk at high \(T\).</p>
+  <div class="disk-panel" style="padding:.9rem 1rem">
+    <svg id="fd-heatmap" viewBox="-270 -270 540 540" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="widget-row" style="padding:.4rem 0 0;border:none;margin:0">
+      <div class="scrub">
+        <label>T</label>
+        <input type="range" id="heat-T" min="0.01" max="0.99" step="0.01" value="0.30">
+        <output id="heat-T-val">0.30</output>
+      </div>
+      <span class="step-label" id="heat-info" style="margin-left:auto">&middot;</span>
+    </div>
+    <div class="step-desc" style="margin-top:.6rem">Polar grid; each cell shaded by the value of \(p(i, j)\) for that location relative to the selected \(i\). Azure = high probability, cream = low. Dashed red = the \(p = 1/2\) contour, i.e. the same hyperbolic ball as in step 1.</div>
   </div>
   <p>At \(T \to 0\) the rule becomes "deterministic geometry": only pairs strictly inside the cutoff connect, every close triple closes into a triangle, clustering coefficient is high. At \(T \to 1\) the rule becomes "noise": almost every pair flips a near-fair coin regardless of distance, and clustering collapses. The empirical clustering coefficient \(cc(T)\) of one nPSO sample is a Monte Carlo average over these coin flips, so different draws at the same \(T\) give different values; the curve is noisy. That noise matters later when we try to search for a \(T\) that hits an input target.</p>
   <p>The three \(p(i, j)\) values above are the weights the next section uses to pick which \(m\) predecessors node \(i\) actually connects to.</p>
@@ -1178,6 +1202,136 @@ window.MathJax = {
     update();
   })();
 
+  // ── Shared Fermi-Dirac helpers (used by hover, geodesic, heatmap) ──
+  function FD_R_at(t, T) {
+    const s = Math.sin(Math.PI * T);
+    if (s <= 0 || t < 2) return NaN;
+    const lnT = Math.log(t);
+    if (Math.abs(BETA - 1) < 1e-9) {
+      return 2 * lnT - 2 * Math.log((2 * T * lnT) / (s * M_PROF));
+    }
+    const num = 2 * T * (1 - Math.exp(-(1 - BETA) * lnT));
+    const den = s * M_PROF * (1 - BETA);
+    return 2 * lnT - 2 * Math.log(num / den);
+  }
+  // 0-floored radial scaling (lets boundaries pass through origin).
+  function FD_rToDisk(r_hyp) {
+    return R_MAX * (Math.max(0, r_hyp) / R_HYP_MAX);
+  }
+  function FD_hyperbolicBall(r_u, theta_u, R, nSamples = 180) {
+    const a = Math.cosh(r_u);
+    const sU = Math.sinh(r_u);
+    const sR = Math.sinh(R);
+    const K = Math.cosh(R);
+    function solveAt(phi) {
+      const cosD = Math.cos(phi);
+      const sinD = Math.sin(phi);
+      const b = sU * cosD;
+      const denom = a * a - b * b;
+      const radTerm = sR * sR - sU * sU * sinD * sinD;
+      if (denom <= 0 || radTerm < 0) return null;
+      const sqrtT = a * Math.sqrt(radTerm);
+      return {
+        sPlus:  (K * b + sqrtT) / denom,
+        sMinus: (K * b - sqrtT) / denom,
+        theta:  theta_u + phi,
+      };
+    }
+    function pointAt(s, theta_b) {
+      if (s < 0) return null;
+      const r_b = Math.asinh(s);
+      const dr = FD_rToDisk(r_b);
+      return [dr * Math.cos(theta_b), dr * Math.sin(theta_b)];
+    }
+    const outer = [], inner = [];
+    if (sR >= sU) {
+      for (let k = 0; k <= nSamples; k++) {
+        const phi = -Math.PI + (k / nSamples) * 2 * Math.PI;
+        const r = solveAt(phi);
+        if (!r) continue;
+        const pt = pointAt(r.sPlus >= 0 ? r.sPlus : r.sMinus, r.theta);
+        if (pt) outer.push(pt);
+      }
+      return outer;
+    }
+    const phiMax = Math.asin(sR / sU);
+    for (let k = 0; k <= nSamples; k++) {
+      const phi = -phiMax + (2 * phiMax) * (k / nSamples);
+      const r = solveAt(phi);
+      if (!r) continue;
+      const po = pointAt(r.sPlus, r.theta);
+      const pi = pointAt(r.sMinus, r.theta);
+      if (po) outer.push(po);
+      if (pi) inner.push(pi);
+    }
+    return outer.concat(inner.slice().reverse());
+  }
+  function FD_ballPath(pts) {
+    if (!pts.length) return "";
+    let d = "M" + pts[0][0].toFixed(2) + "," + pts[0][1].toFixed(2);
+    for (let k = 1; k < pts.length; k++) {
+      d += "L" + pts[k][0].toFixed(2) + "," + pts[k][1].toFixed(2);
+    }
+    return d + "Z";
+  }
+  // Hyperbolic geodesic between two points (r1, t1) and (r2, t2)
+  // expressed in (r_hyp, theta) polar coords. Routes through the
+  // Poincaré disk model where geodesics are arcs of Euclidean circles
+  // perpendicular to the unit circle (or straight lines through origin).
+  // Returns sample points already mapped to disk Euclidean coords using
+  // FD_rToDisk.
+  function FD_geodesic(r1, t1, r2, t2, nSamples = 80) {
+    function embed(r, th) {
+      const re = Math.tanh(r / 2);
+      return { x: re * Math.cos(th), y: re * Math.sin(th) };
+    }
+    const E1 = embed(r1, t1), E2 = embed(r2, t2);
+    const cross = E1.x * E2.y - E1.y * E2.x;
+    const collinear = Math.abs(cross) < 1e-9;
+    let arcCenter = null, arcRadius = null, phi1 = 0, dphi = 0;
+    if (!collinear) {
+      const Mx = (E1.x + E2.x) / 2, My = (E1.y + E2.y) / 2;
+      const Dx = E2.x - E1.x, Dy = E2.y - E1.y;
+      const dLen = Math.sqrt(Dx * Dx + Dy * Dy);
+      const Nx = -Dy / dLen, Ny = Dx / dLen;
+      const halfD2 = (dLen / 2) * (dLen / 2);
+      const M2 = Mx * Mx + My * My;
+      const MdotN = Mx * Nx + My * Ny;
+      if (Math.abs(MdotN) < 1e-9) {
+        // Degenerate; fall back to straight line through origin.
+      } else {
+        const s = (halfD2 + 1 - M2) / (2 * MdotN);
+        arcCenter = { x: Mx + s * Nx, y: My + s * Ny };
+        arcRadius = Math.sqrt(halfD2 + s * s);
+        phi1 = Math.atan2(E1.y - arcCenter.y, E1.x - arcCenter.x);
+        const phi2 = Math.atan2(E2.y - arcCenter.y, E2.x - arcCenter.x);
+        dphi = phi2 - phi1;
+        while (dphi > Math.PI) dphi -= 2 * Math.PI;
+        while (dphi < -Math.PI) dphi += 2 * Math.PI;
+      }
+    }
+    const pts = [];
+    for (let k = 0; k <= nSamples; k++) {
+      const u = k / nSamples;
+      let Ex, Ey;
+      if (arcCenter) {
+        const phi = phi1 + u * dphi;
+        Ex = arcCenter.x + arcRadius * Math.cos(phi);
+        Ey = arcCenter.y + arcRadius * Math.sin(phi);
+      } else {
+        Ex = E1.x + u * (E2.x - E1.x);
+        Ey = E1.y + u * (E2.y - E1.y);
+      }
+      const re = Math.sqrt(Ex * Ex + Ey * Ey);
+      if (re >= 1) continue;
+      const r_hyp = 2 * Math.atanh(re);
+      const theta = Math.atan2(Ey, Ex);
+      const dr = FD_rToDisk(r_hyp);
+      pts.push([dr * Math.cos(theta), dr * Math.sin(theta)]);
+    }
+    return pts;
+  }
+
   // ── Hover-to-show-ball: each node draws its R_i(T) circle ──
   // Renders the same embedding as the disk above. On node hover, draw
   // a dashed red circle of radius scaled from R_i(T) at T = 0.3 around
@@ -1192,93 +1346,9 @@ window.MathJax = {
     const slider = document.getElementById("hover-T");
     const sliderOut = document.getElementById("hover-T-val");
     function currentT() { return parseFloat(slider.value); }
-    function R_at(t, T) {
-      const s = Math.sin(Math.PI * T);
-      if (s <= 0 || t < 2) return NaN;
-      const lnT = Math.log(t);
-      if (Math.abs(BETA - 1) < 1e-9) {
-        return 2 * lnT - 2 * Math.log((2 * T * lnT) / (s * M_PROF));
-      }
-      const num = 2 * T * (1 - Math.exp(-(1 - BETA) * lnT));
-      const den = s * M_PROF * (1 - BETA);
-      return 2 * lnT - 2 * Math.log(num / den);
-    }
-    // Map hyperbolic radial coordinate to Euclidean disk units. Nodes
-    // use a R_MIN floor so they don't pile up at the centre, but the
-    // ball boundary needs to pass through the actual origin when its
-    // inner arc dips that close — otherwise the floor turns into a
-    // circular notch around the centre. Ball uses a 0-floored scaling.
-    function rToDiskRadius(r_hyp) {
-      return R_MAX * (Math.max(0, r_hyp) / R_HYP_MAX);
-    }
-    // Boundary of the hyperbolic ball of radius R around node u with
-    // hyperbolic position (r_u, theta_u). Two cases:
-    //   R >= r_u: ball encloses the origin; sweep theta_b across the
-    //             full 2*pi, take the positive root at each angle.
-    //   R < r_u:  ball misses the origin; angular extent bounded by
-    //             phi_max = arcsin(sinh(R)/sinh(r_u)). Sweep phi in
-    //             [-phi_max, phi_max], take both roots (outer arc
-    //             plus inner arc reversed) to close the boundary.
-    function hyperbolicBall(r_u, theta_u, R, nSamples = 180) {
-      const a = Math.cosh(r_u);
-      const sU = Math.sinh(r_u);
-      const sR = Math.sinh(R);
-      const K = Math.cosh(R);
-
-      function solveAt(phi) {
-        const cosD = Math.cos(phi);
-        const sinD = Math.sin(phi);
-        const b = sU * cosD;
-        const denom = a * a - b * b;
-        const radTerm = sR * sR - sU * sU * sinD * sinD;
-        if (denom <= 0 || radTerm < 0) return null;
-        const sqrtT = a * Math.sqrt(radTerm);
-        return {
-          sPlus:  (K * b + sqrtT) / denom,
-          sMinus: (K * b - sqrtT) / denom,
-          theta:  theta_u + phi,
-        };
-      }
-      function pointAt(s, theta_b) {
-        if (s < 0) return null;
-        const r_b = Math.asinh(s);
-        const dr = rToDiskRadius(r_b);
-        return [dr * Math.cos(theta_b), dr * Math.sin(theta_b)];
-      }
-
-      const outer = [], inner = [];
-      if (sR >= sU) {
-        // Origin inside the ball: full sweep, one positive root per phi.
-        for (let k = 0; k <= nSamples; k++) {
-          const phi = -Math.PI + (k / nSamples) * 2 * Math.PI;
-          const r = solveAt(phi);
-          if (!r) continue;
-          const pt = pointAt(r.sPlus >= 0 ? r.sPlus : r.sMinus, r.theta);
-          if (pt) outer.push(pt);
-        }
-        return outer;
-      }
-      // sR < sU: bounded angular extent.
-      const phiMax = Math.asin(sR / sU);
-      for (let k = 0; k <= nSamples; k++) {
-        const phi = -phiMax + (2 * phiMax) * (k / nSamples);
-        const r = solveAt(phi);
-        if (!r) continue;
-        const po = pointAt(r.sPlus, r.theta);
-        const pi = pointAt(r.sMinus, r.theta);
-        if (po) outer.push(po);
-        if (pi) inner.push(pi);
-      }
-      return outer.concat(inner.slice().reverse());
-    }
-    function ballPath(pts) {
-      if (!pts.length) return "";
-      let d = "M" + pts[0][0].toFixed(2) + "," + pts[0][1].toFixed(2);
-      for (let k = 1; k < pts.length; k++) {
-        d += "L" + pts[k][0].toFixed(2) + "," + pts[k][1].toFixed(2);
-      }
-      return d + "Z";
-    }
+    const R_at = FD_R_at;
+    const hyperbolicBall = FD_hyperbolicBall;
+    const ballPath = FD_ballPath;
 
     const viz = NETGEN.VIZ.init(null, {
       svg,
@@ -1358,6 +1428,219 @@ window.MathJax = {
       });
       viz.sim.alpha(0.3).restart();
     });
+  })();
+
+  // ── Step 2: click-to-pick two nodes; ball + hyperbolic geodesic ──
+  (function () {
+    const svg = d3.select("#fd-geodesic");
+    if (svg.empty()) return;
+    drawDiskDecorations(svg);
+    const overlay = svg.append("g").attr("class", "fd-geo-layer");
+
+    const slider = document.getElementById("geo-T");
+    const sliderOut = document.getElementById("geo-T-val");
+    const infoEl = document.getElementById("geo-info");
+    function currentT() { return parseFloat(slider.value); }
+
+    const viz = NETGEN.VIZ.init(null, {
+      svg,
+      positions: SHARED.POS_POLAR,
+      nodeR: 10,
+      pinned: true,
+      showLabels: true,
+      labelText: (d) => String(rankOf[parseInt(d.id, 10)] + 1),
+      nodeColor: (id) => CLUSTER_COLOR_BY_ID[SHARED.ASSIGNED[parseInt(id, 10)]] || COL.paper_3,
+      edges: [],
+    });
+    NETGEN.makeTooltip(viz, svg.node().closest(".disk-panel"));
+
+    let firstId = null;
+    let secondId = null;
+    let pathBall = null;
+    let pathGeo = null;
+
+    function clearLayer() {
+      if (pathBall) { pathBall.remove(); pathBall = null; }
+      if (pathGeo)  { pathGeo.remove();  pathGeo = null; }
+    }
+    function setStatus() {
+      if (firstId == null) {
+        infoEl.textContent = "click a node to start";
+        return;
+      }
+      const t1 = rankOf[firstId] + 1;
+      if (secondId == null) {
+        infoEl.textContent = `picked node ${t1} · click a second node`;
+        return;
+      }
+      const t2 = rankOf[secondId] + 1;
+      const a = Math.min(firstId, secondId), b = Math.max(firstId, secondId);
+      const h = SHARED.DISTS[`${a}-${b}`];
+      infoEl.textContent = `node ${t1} → node ${t2} · h = ${h != null ? h.toFixed(2) : "—"}`;
+    }
+    function drawBallFor(id) {
+      const t = rankOf[id] + 1;
+      const T = currentT();
+      const R = FD_R_at(t, T);
+      if (!isFinite(R) || R <= 0) return;
+      const polar = SHARED.POLAR[id];
+      if (!polar) return;
+      const pts = FD_hyperbolicBall(polar.r_hyp, polar.theta, R);
+      const dStr = FD_ballPath(pts);
+      if (!dStr) return;
+      pathBall = overlay.append("path")
+        .attr("d", dStr)
+        .attr("fill", COL.signal).attr("fill-opacity", 0.08)
+        .attr("stroke", COL.signal).attr("stroke-width", 1.4)
+        .attr("stroke-dasharray", "4 3").attr("opacity", 0.9)
+        .attr("pointer-events", "none");
+    }
+    function drawGeodesicFor(id1, id2) {
+      const p1 = SHARED.POLAR[id1], p2 = SHARED.POLAR[id2];
+      if (!p1 || !p2) return;
+      const pts = FD_geodesic(p1.r_hyp, p1.theta, p2.r_hyp, p2.theta);
+      if (!pts.length) return;
+      let d = "M" + pts[0][0].toFixed(2) + "," + pts[0][1].toFixed(2);
+      for (let k = 1; k < pts.length; k++) {
+        d += "L" + pts[k][0].toFixed(2) + "," + pts[k][1].toFixed(2);
+      }
+      pathGeo = overlay.append("path")
+        .attr("d", d)
+        .attr("fill", "none")
+        .attr("stroke", COL.cobalt).attr("stroke-width", 2.4)
+        .attr("opacity", 0.95).attr("pointer-events", "none");
+    }
+    function redraw() {
+      clearLayer();
+      if (firstId == null) { setStatus(); return; }
+      drawBallFor(firstId);
+      if (secondId != null) drawGeodesicFor(firstId, secondId);
+      setStatus();
+    }
+    viz.onNodeTap((d) => {
+      const id = parseInt(d.id, 10);
+      if (firstId == null) { firstId = id; secondId = null; }
+      else if (secondId == null && id !== firstId) { secondId = id; }
+      else { firstId = id; secondId = null; }
+      redraw();
+    });
+    slider.addEventListener("input", () => {
+      sliderOut.value = currentT().toFixed(2);
+      redraw();
+    });
+    sliderOut.value = currentT().toFixed(2);
+    setStatus();
+  })();
+
+  // ── Step 3: density heatmap of p(i, j) on the disk ──
+  (function () {
+    const svg = d3.select("#fd-heatmap");
+    if (svg.empty()) return;
+    drawDiskDecorations(svg);
+    const heatLayer = svg.append("g").attr("class", "fd-heat-cells");
+    const contourLayer = svg.append("g").attr("class", "fd-heat-contour");
+
+    const slider = document.getElementById("heat-T");
+    const sliderOut = document.getElementById("heat-T-val");
+    const infoEl = document.getElementById("heat-info");
+    function currentT() { return parseFloat(slider.value); }
+
+    const viz = NETGEN.VIZ.init(null, {
+      svg,
+      positions: SHARED.POS_POLAR,
+      nodeR: 10,
+      pinned: true,
+      showLabels: true,
+      labelText: (d) => String(rankOf[parseInt(d.id, 10)] + 1),
+      nodeColor: (id) => CLUSTER_COLOR_BY_ID[SHARED.ASSIGNED[parseInt(id, 10)]] || COL.paper_3,
+      edges: [],
+    });
+    NETGEN.makeTooltip(viz, svg.node().closest(".disk-panel"));
+
+    // Pre-build the polar grid once (geometry is static; only the
+    // colours change with selection / T).
+    const N_R = 32, N_TH = 96;
+    const cellSpec = [];
+    for (let i = 0; i < N_R; i++) {
+      const r0 = (i / N_R) * R_HYP_MAX;
+      const r1 = ((i + 1) / N_R) * R_HYP_MAX;
+      const r_mid = (r0 + r1) / 2;
+      for (let j = 0; j < N_TH; j++) {
+        const th0 = -Math.PI + (j / N_TH) * 2 * Math.PI;
+        const th1 = -Math.PI + ((j + 1) / N_TH) * 2 * Math.PI;
+        const th_mid = (th0 + th1) / 2;
+        const dr0 = FD_rToDisk(r0), dr1 = FD_rToDisk(r1);
+        const cos0 = Math.cos(th0), sin0 = Math.sin(th0);
+        const cos1 = Math.cos(th1), sin1 = Math.sin(th1);
+        const d = "M" + (dr0 * cos0).toFixed(2) + "," + (dr0 * sin0).toFixed(2)
+                + "L" + (dr0 * cos1).toFixed(2) + "," + (dr0 * sin1).toFixed(2)
+                + "L" + (dr1 * cos1).toFixed(2) + "," + (dr1 * sin1).toFixed(2)
+                + "L" + (dr1 * cos0).toFixed(2) + "," + (dr1 * sin0).toFixed(2)
+                + "Z";
+        cellSpec.push({ r_mid, th_mid, d });
+      }
+    }
+    const cells = heatLayer.selectAll("path.heat-cell").data(cellSpec)
+      .enter().append("path").attr("class", "heat-cell")
+      .attr("d", (c) => c.d)
+      .attr("stroke", "none");
+
+    function lerpColor(t) {
+      // Cream (paper-3 tinted) -> azure as t goes 0 -> 1.
+      const c0 = [243, 236, 215];   // ink (#f3ecd7)
+      const c1 = [42, 74, 168];     // azure (#2a4aa8)
+      const r = Math.round(c0[0] + t * (c1[0] - c0[0]));
+      const g = Math.round(c0[1] + t * (c1[1] - c0[1]));
+      const b = Math.round(c0[2] + t * (c1[2] - c0[2]));
+      return `rgb(${r}, ${g}, ${b})`;
+    }
+
+    let currentId = sorted[sorted.length - 1];
+    function redraw() {
+      const T = currentT();
+      const t_u = rankOf[currentId] + 1;
+      const R = FD_R_at(t_u, T);
+      const polar = SHARED.POLAR[currentId];
+      const a = Math.cosh(polar.r_hyp);
+      const sU = Math.sinh(polar.r_hyp);
+      cells.attr("fill", (c) => {
+        let dth = c.th_mid - polar.theta;
+        while (dth > Math.PI)  dth -= 2 * Math.PI;
+        while (dth < -Math.PI) dth += 2 * Math.PI;
+        const arg = a * Math.cosh(c.r_mid) - sU * Math.sinh(c.r_mid) * Math.cos(dth);
+        const h = arg >= 1 ? Math.acosh(arg) : 0;
+        const p = isFinite(R) && R > 0
+          ? 1 / (1 + Math.exp((h - R) / (2 * T)))
+          : 0;
+        return lerpColor(p);
+      }).attr("opacity", 0.55);
+
+      contourLayer.selectAll("*").remove();
+      if (isFinite(R) && R > 0) {
+        const pts = FD_hyperbolicBall(polar.r_hyp, polar.theta, R);
+        const dStr = FD_ballPath(pts);
+        if (dStr) {
+          contourLayer.append("path")
+            .attr("d", dStr)
+            .attr("fill", "none")
+            .attr("stroke", COL.signal).attr("stroke-width", 1.4)
+            .attr("stroke-dasharray", "4 3").attr("opacity", 0.85);
+        }
+      }
+      const Rstr = (R == null || !isFinite(R)) ? "—"
+                  : (R <= 0 ? "≤ 0" : R.toFixed(2));
+      infoEl.textContent = `node ${t_u} · R = ${Rstr}`;
+    }
+    viz.onNodeHoverEnter((d) => {
+      currentId = parseInt(d.id, 10);
+      redraw();
+    });
+    slider.addEventListener("input", () => {
+      sliderOut.value = currentT().toFixed(2);
+      redraw();
+    });
+    sliderOut.value = currentT().toFixed(2);
+    redraw();
   })();
 
   // ── Impl-3 step-through: one arrival per step ──
