@@ -176,6 +176,7 @@
         <input type="range" id="hover-T" min="0.01" max="0.99" step="0.01" value="0.30">
         <output id="hover-T-val">0.30</output>
       </div>
+      <span class="step-label" id="hover-info" style="margin-left:auto">&middot;</span>
     </div>
     <div class="step-desc" style="margin-top:.6rem">Hover any node \(i\) to see its hyperbolic ball of radius \(R_i(T)\) traced as a dashed red curve. The ball is not a Euclidean circle on this rendering: far-from-origin nodes get pear-shaped balls because hyperbolic distance grows non-linearly along the radial axis. Drag the slider to scale \(R_i\) with temperature.</div>
   </div>
@@ -1294,6 +1295,18 @@ window.MathJax = {
     function clearOverlay() {
       if (path) { path.remove(); path = null; }
     }
+    const infoEl = document.getElementById("hover-info");
+    function setInfo(id, R) {
+      if (!infoEl) return;
+      const t = rankOf[id] + 1;
+      const tag = (id === hoveredId) ? "hover" : "default";
+      const Rstr = (R == null || !isFinite(R)) ? "—"
+                  : (R <= 0 ? "≤ 0 (no ball)" : R.toFixed(2));
+      infoEl.innerHTML = `showing node <b>${id}</b> &middot; \\(t = ${t}\\) &middot; \\(R = ${Rstr}\\) &middot; ${tag}`;
+      if (window.MathJax && window.MathJax.typesetPromise) {
+        window.MathJax.typesetPromise([infoEl]).catch(() => {});
+      }
+    }
     function drawBall(id) {
       const t = rankOf[id] + 1;
       const T = currentT();
@@ -1301,7 +1314,8 @@ window.MathJax = {
       // R <= 0 means the Fermi-Dirac sigmoid is below 1/2 for every
       // pair, i.e., no node sits "inside" the cutoff. Skip drawing
       // the ball; the empty disk is the right picture.
-      if (!isFinite(R) || R <= 0) { clearOverlay(); return; }
+      if (!isFinite(R) || R <= 0) { clearOverlay(); setInfo(id, R); return; }
+      setInfo(id, R);
       const polar = SHARED.POLAR[id];
       if (!polar) return;
       const pts = hyperbolicBall(polar.r_hyp, polar.theta, R);
