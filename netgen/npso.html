@@ -188,6 +188,10 @@
   </div>
   <p>At \(T \to 0\) the rule becomes "deterministic geometry": only pairs strictly inside the cutoff connect, every close triple closes into a triangle, clustering coefficient is high. At \(T \to 1\) the rule becomes "noise": almost every pair flips a near-fair coin regardless of distance, and clustering collapses. The empirical clustering coefficient \(cc(T)\) of one nPSO sample is a Monte Carlo average over these coin flips, so different draws at the same \(T\) give different values; the curve is noisy. That noise matters later when we try to search for a \(T\) that hits an input target.</p>
   <p>The three \(p(i, j)\) values above are the weights the next section uses to pick which \(m\) predecessors node \(i\) actually connects to.</p>
+  <p>One last sanity check. Hover any node on the disk below to draw its connection ball at \(T = 0.3\): a dashed red circle with radius scaled from that node's \(R_i(T)\). Predecessors falling inside the circle have \(p \to 1\); those outside have \(p \to 0\). The radius shrinks from outer rim to centre as \(t\) grows, because \(R_t(T)\) climbs with \(t\) faster than the disk's outer radius does.</p>
+  <div class="disk-panel" style="padding:.9rem 1rem">
+    <svg id="fd-hover" viewBox="-270 -270 540 540" preserveAspectRatio="xMidYMid meet"></svg>
+  </div>
 </section>
 
 <!-- ─────────── Generation · sampling m edges per arrival ─────────── -->
@@ -1228,6 +1232,92 @@ window.MathJax = {
     }
     slider.addEventListener("input", update);
     update();
+  })();
+
+  // ── Hover-to-show-ball: each node draws its R_i(T) circle ──
+  // Renders the same embedding as the disk above. On node hover, draw
+  // a dashed red circle of radius scaled from R_i(T) at T = 0.3 around
+  // the hovered node. Visualises "which predecessors fall inside the
+  // cutoff" without committing to a specific edge sample.
+  (function () {
+    const svg = d3.select("#fd-hover");
+    if (svg.empty()) return;
+    drawDiskDecorations(svg);
+    const overlay = svg.append("g").attr("class", "fd-hover-layer");
+
+    const T_FIXED = 0.3;
+    function R_at(t, T) {
+      const s = Math.sin(Math.PI * T);
+      if (s <= 0 || t < 2) return NaN;
+      const lnT = Math.log(t);
+      if (Math.abs(BETA - 1) < 1e-9) {
+        return 2 * lnT - 2 * Math.log((2 * T * lnT) / (s * M_PROF));
+      }
+      const num = 2 * T * (1 - Math.exp(-(1 - BETA) * lnT));
+      const den = s * M_PROF * (1 - BETA);
+      return 2 * lnT - 2 * Math.log(num / den);
+    }
+    // Map hyperbolic R to Euclidean disk units; same scale as the
+    // node radial scaling used by the embedding.
+    function visualR(R_hyp) {
+      return Math.max(2, (R_hyp / R_HYP_MAX) * (R_MAX - R_MIN) + R_MIN);
+    }
+
+    const viz = NETGEN.VIZ.init(null, {
+      svg,
+      positions: SHARED.POS_POLAR,
+      nodeR: 10,
+      pinned: true,
+      showLabels: true,
+      labelText: (d) => String(rankOf[parseInt(d.id, 10)] + 1),
+      nodeColor: (id) => CLUSTER_COLOR_BY_ID[SHARED.ASSIGNED[parseInt(id, 10)]] || COL.paper_3,
+      edges: [],
+    });
+    NETGEN.makeTooltip(viz, svg.node().closest(".disk-panel"));
+
+    let circle = null;
+    let label  = null;
+    function clearOverlay() {
+      if (circle) { circle.remove(); circle = null; }
+      if (label) { label.remove(); label = null; }
+    }
+    viz.onNodeHoverEnter((d) => {
+      const id = parseInt(d.id, 10);
+      const t = rankOf[id] + 1;
+      const R = R_at(t, T_FIXED);
+      if (!isFinite(R) || R <= 0) return;
+      const x = SHARED.POS_POLAR[id].x;
+      const y = SHARED.POS_POLAR[id].y;
+      clearOverlay();
+      circle = overlay.append("circle")
+        .attr("cx", x).attr("cy", y)
+        .attr("r", visualR(R))
+        .attr("fill", COL.signal).attr("fill-opacity", 0.07)
+        .attr("stroke", COL.signal).attr("stroke-width", 1.4)
+        .attr("stroke-dasharray", "4 3").attr("opacity", 0.85)
+        .attr("pointer-events", "none");
+      label = overlay.append("text")
+        .attr("x", x + 8).attr("y", y - 8)
+        .attr("fill", COL.signal)
+        .attr("font-family", "Caveat Brush, cursive").attr("font-size", 14)
+        .attr("pointer-events", "none")
+        .text(`R_${t} ≈ ${R.toFixed(2)}`);
+    });
+    viz.onNodeHoverLeave(() => clearOverlay());
+
+    onEmbeddingReroll(() => {
+      clearOverlay();
+      viz.nodesData.forEach(n => {
+        const nid = parseInt(n.id, 10);
+        const p = SHARED.POS_POLAR[nid];
+        if (!p) return;
+        n.homeX = p.x; n.homeY = p.y;
+        n.fx = p.x; n.fy = p.y;
+        n.x = p.x;   n.y = p.y;
+        n.color = CLUSTER_COLOR_BY_ID[SHARED.ASSIGNED[nid]] || COL.paper_3;
+      });
+      viz.sim.alpha(0.3).restart();
+    });
   })();
 
   // ── Impl-3 step-through: one arrival per step ──
