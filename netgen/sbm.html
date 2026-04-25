@@ -423,29 +423,6 @@ window.MathJax = {
     return COL.edge_intra[c] || COL.edge_inter;
   }
 
-  // Shared input fixture: input graph + singleton-mode 5-cluster colour
-  // + cluster enclosure boxes via makeBlockRects.
-  (function () {
-    const host = document.getElementById("g-shared-input-cy");
-    if (!host) return;
-    host.innerHTML = "";
-    const svg = d3.select(host).append("svg")
-      .attr("class", "viz-svg")
-      .attr("viewBox", "-320 -340 640 680")
-      .attr("preserveAspectRatio", "xMidYMid meet");
-    const syncBlockRects = makeBlockRects(svg);
-    const edges = EDGES.map(e => ({
-      u: e.u, v: e.v, color: pickInputColor(e), w: 1.4,
-    }));
-    const viz = NETGEN.VIZ.init("g-shared-input-cy", {
-      svg, showLabels: true, edges,
-      nodeColor: (id) => COL[CLUSTER_OF[id]] || COL.OUT,
-    });
-    NETGEN.makeTooltip(viz, document.getElementById("g-shared-input"));
-    syncBlockRects(viz);
-    viz.sim.on("tick.blockRects", () => syncBlockRects(viz));
-  })();
-
   // ── Block indexing for the synthetic (combined outlier pseudo-block). ──
   // Mirrors profile_common.compute_comm_size: sorted by size desc, id asc on
   // ties. On this graph C1(8) > C2(6) > C3(4) > OUT(2), so the order is
@@ -486,6 +463,32 @@ window.MathJax = {
   const EDGES_TOTAL = EDGES.length;
   const MEAN_DEG    = EDGES_TOTAL * 2 / NODES.length;
   const OUT_COUNT   = OUT_N.length;
+
+  // Shared input fixture: input graph + singleton-mode 5-cluster colour
+  // + cluster enclosure boxes via makeBlockRects. Must run after
+  // BLOCK_NAMES / BLOCK_LABELS / BLOCK_NODES / BLOCK_COLOR are defined
+  // above; const declarations are NOT hoisted, so positioning this IIFE
+  // earlier crashes the page (TDZ on BLOCK_NAMES).
+  (function () {
+    const host = document.getElementById("g-shared-input-cy");
+    if (!host) return;
+    host.innerHTML = "";
+    const svg = d3.select(host).append("svg")
+      .attr("class", "viz-svg")
+      .attr("viewBox", "-320 -340 640 680")
+      .attr("preserveAspectRatio", "xMidYMid meet");
+    const syncBlockRects = makeBlockRects(svg);
+    const edges = EDGES.map(e => ({
+      u: e.u, v: e.v, color: pickInputColor(e), w: 1.4,
+    }));
+    const viz = NETGEN.VIZ.init("g-shared-input-cy", {
+      svg, showLabels: true, edges,
+      nodeColor: (id) => COL[CLUSTER_OF[id]] || COL.OUT,
+    });
+    NETGEN.makeTooltip(viz, document.getElementById("g-shared-input"));
+    syncBlockRects(viz);
+    viz.sim.on("tick.blockRects", () => syncBlockRects(viz));
+  })();
 
   // Helper: create one dashed rounded rectangle + handwritten label per
   // block. Returns a callback that, given the force-sim `viz` handle,
