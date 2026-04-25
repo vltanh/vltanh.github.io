@@ -81,6 +81,21 @@
 .graph-canvas{
   height:auto; aspect-ratio: 640 / 680; max-height: 560px;
 }
+.pseudo{
+  font-family:'Special Elite','Courier New',monospace;
+  color:var(--paper);
+  background:var(--ink-3);
+  border:1px solid var(--rule);
+  padding:.7rem .9rem;
+  border-radius:3px;
+  margin:.6rem 0;
+  font-size:.85rem;
+  line-height:1.55;
+  white-space:pre;
+  overflow-x:auto;
+}
+.pseudo .kw{ color:var(--orchid); font-weight:bold; }
+.pseudo .cm{ color:var(--paper-3); font-style:italic; }
 </style>
 </head>
 <body>
@@ -99,20 +114,18 @@
   <p>That last word, "blocked", is where the algorithm choices matter. The same residual can be drained five different ways, and they disagree on which pairs to try, in what order, and what to do when a deficit cannot be closed cleanly. The choices show up as different output degree sequences and different counts of unplaced stubs.</p>
 </section>
 
-<!-- ─────────── Stage 1 · the input contract ─────────── -->
+<!-- ─────────── input contract ─────────── -->
 <section class="stage">
   <div class="stage-num">input contract</div>
   <h2>Two edgelists in. Top-up edges out.</h2>
   <p>The CLI is generator-agnostic:</p>
-  <div style="font-family:'Special Elite','Courier New',monospace;color:var(--paper);background:var(--ink-3);border:1px solid var(--rule);padding:.8rem;border-radius:3px;margin:.6rem 0;font-size:.85rem;line-height:1.6">
-    python src/match_degree.py \\<br>
-    &nbsp;&nbsp;--input-edgelist  &lt;current.csv&gt; \\<br>
-    &nbsp;&nbsp;--ref-edgelist    &lt;target.csv&gt; \\<br>
-    &nbsp;&nbsp;--match-degree-algorithm  greedy|true_greedy|random_greedy|rewire|hybrid \\<br>
-    &nbsp;&nbsp;--output-folder   &lt;dir&gt; \\<br>
-    &nbsp;&nbsp;--seed            &lt;int&gt; \\<br>
-    &nbsp;&nbsp;[--remap]
-  </div>
+  <div class="pseudo">python src/match_degree.py \
+  --input-edgelist  &lt;current.csv&gt; \
+  --ref-edgelist    &lt;target.csv&gt; \
+  --match-degree-algorithm  greedy|true_greedy|random_greedy|rewire|hybrid \
+  --output-folder   &lt;dir&gt; \
+  --seed            &lt;int&gt; \
+  [--remap]</div>
   <p>The two inputs share a node set. For each node \(u\), the residual deficit is</p>
   \[
     r_u \;=\; \max\bigl(0, \,d_u^{\text{ref}} - d_u^{\text{input}}\bigr),
@@ -124,9 +137,9 @@
   </div>
 </section>
 
-<!-- ─────────── Stage 2 · the five algorithms ─────────── -->
+<!-- ─────────── overview table ─────────── -->
 <section class="stage">
-  <div class="stage-num">the five algorithms</div>
+  <div class="stage-num">the five algorithms · overview</div>
   <h2>Different ways to drain the same deficit pile.</h2>
   <p>All five algorithms share the same outer loop: pick a node \(u\) with positive deficit, pick a partner \(v\) such that \((u, v)\) is not already an edge and \(v\) has positive deficit, add the edge, decrement both. They differ on the picking order and on what they do when the loop stalls.</p>
   <table class="matcher-table">
@@ -161,61 +174,238 @@
       </tr>
     </tbody>
   </table>
-  <p>Greedy and true_greedy are deterministic given a seed; random_greedy and rewire are stochastic; hybrid is a deterministic-then-stochastic composition. On dense inputs all five converge; on long-tail-degree inputs with hubs, greedy is the one that silently drops stubs, true_greedy is the one that gridlocks loudly, and hybrid is the one that drains the tail without bias.</p>
+  <p>Greedy and true_greedy are deterministic given a seed; random_greedy and rewire are stochastic; hybrid is a deterministic-then-stochastic composition. The five sections below walk each algorithm step by step on the same residual: <code>{6: 1, 8: 1, 10: 2, 11: 1, 13: 2, 17: 1, 18: 1}</code> over the 20-node fixture (3 real clusters + 2 outliers, 40 base edges).</p>
 </section>
 
-<!-- ─────────── Stage 3 · live walker ─────────── -->
+<!-- ─────────── algorithm · greedy ─────────── -->
 <section class="stage">
-  <div class="stage-num">live walker on the 20-node fixture</div>
-  <h2>Same residual, five different drain orders.</h2>
-  <p>The toy graph below is the shared 20-node synthetic this site uses for every generator (3 real clusters + 2 outliers, 40 edges). Pretend an upstream stage left a residual deficit on six nodes: <code>{6: 1, 8: 1, 10: 2, 11: 1, 13: 2, 17: 1, 18: 1}</code>, totalling 9 stubs (so 4 or 5 top-up edges, depending on parity and gridlock).</p>
-  <p>Toggle <em>apply match_degree</em> to see the deficit pile (faint-red tail on each bar) shrink. Use the <em>algorithm</em> dropdown to switch matchers; <em>random</em> cycles realisations within an algorithm. The match edges placed are highlighted in the graph at left.</p>
-  <div class="graph g-with-side" id="g-match">
+  <div class="stage-num">algorithm · greedy</div>
+  <h2>Heap pop, partner via <code>set.pop()</code>.</h2>
+  <p>v1's matcher. Pops the node with the most missing stubs and drains it via Python's <code>set.pop()</code>. The Python docs claim <code>set.pop()</code> returns "an arbitrary element", but for sets of small integers the implementation is effectively deterministic: <code>hash(n) == n</code>, the underlying hash table iterates in slot order, and small ints hash to their own slot. The end result is that greedy drains candidates roughly in <em>id-ascending</em> order, not randomly. The naming hides the determinism; the algorithm is more "id-sorted greedy" than "random greedy". Once \(u\)'s deficit is zero or partners run out, move on; unplaced stubs disappear without a log line.</p>
+  <div class="pseudo"><span class="kw">def</span> greedy(residual, adj):
+    heap = max-heap of (residual[u], u) for u with residual[u] &gt; 0
+    <span class="kw">while</span> heap not empty:
+        u = heap.pop()
+        candidates = {v : v != u, v not in adj[u], residual[v] &gt; 0}
+        <span class="kw">while</span> residual[u] &gt; 0 <span class="kw">and</span> candidates:
+            v = candidates.pop()  <span class="cm"># int hash table → id-ascending in practice</span>
+            adj[u].add(v); adj[v].add(u)
+            residual[u] -= 1; residual[v] -= 1
+        <span class="cm"># residual[u] &gt; 0 here means u was starved. dropped silently.</span></div>
+  <p>Walk the steps below. Each step pops one \(u\) and drains it; the caption names the partner picked at each draw. The "deterministic; same output every run" tag is the consequence of the int-hash-table behaviour above. Gridlock surfaces as a "starved" event with no log message.</p>
+  <div class="graph g-with-side" id="g-greedy">
     <div class="graph-chrome">
-      <span id="g-match-label">before match_degree &middot; residual deficits visible</span>
-      <span class="right" id="g-match-count">placed: 0 &middot; gridlocked: 0</span>
+      <span id="g-greedy-stage">step 0 &middot; initial deficit</span>
+      <span class="right step-label">step <b id="g-greedy-cur">0</b> / <span id="g-greedy-total">0</span></span>
     </div>
     <div class="side-caption">
-      <span class="st">left</span>20-node synthetic; grey = match_degree edges &middot; <span class="st">right</span>per-node degree bars. Azure = base graph, grey = match_degree, faint red tail = residual deficit.
+      <span class="st">left</span>20-node graph; grey = match edges placed so far &middot; <span class="st">right</span>per-node degree bars. Faint red tail = current residual deficit.
     </div>
     <div class="side-body">
-      <div class="graph-canvas" id="g-match-cy"></div>
+      <div class="graph-canvas" id="g-greedy-cy"></div>
       <div class="side-right">
-        <svg id="match-bars" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet"></svg>
+        <svg id="g-greedy-bars" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet"></svg>
       </div>
     </div>
     <div class="widget-row">
-      <label class="toggle">
-        <input type="checkbox" id="g-match-toggle">
-        <span class="toggle-track"></span>
-        <span>apply match_degree</span>
-      </label>
-      <label style="font-family:'Special Elite',monospace;font-size:.78rem;color:var(--paper-2);">
-        algorithm
-        <select id="g-match-alg" style="margin-left:.4rem">
-          <option value="hybrid" selected>hybrid</option>
-          <option value="true_greedy">true_greedy</option>
-          <option value="rewire">rewire</option>
-          <option value="random_greedy">random_greedy</option>
-          <option value="greedy">greedy</option>
-        </select>
-      </label>
-      <button class="btn" id="g-match-reroll" title="resample">random</button>
-      <span class="step-label" id="g-match-real">realization 1</span>
+      <button class="btn" id="g-greedy-prev">← back</button>
+      <button class="btn primary" id="g-greedy-next">next →</button>
+      <button class="btn" id="g-greedy-reset">reset</button>
+      <button class="btn" id="g-greedy-end">skip to end</button>
+      <span class="step-label" id="g-greedy-real">deterministic; same output every run</span>
     </div>
-    <div class="provenance-legend">
-      <span><span class="sw" style="background:#567ad8"></span>base graph</span>
-      <span><span class="sw" style="background:#6b6a54"></span>match_degree edge</span>
-      <span><span class="sw" style="background:#c92a2a"></span>residual deficit</span>
-    </div>
+    <div class="step-desc" id="g-greedy-desc">click <em>next</em> to advance.</div>
   </div>
   <div class="callout warn">
-    <div class="tag">caveat: silent gridlock in greedy</div>
-    <p>A node with residual 3 and only one valid partner leaves the heap with residual 2. Those two stubs vanish without a log line. On a small synthetic you rarely see this. On dense inputs with long-tailed degree distributions, a handful of hubs silently come out short, and the degree-sequence target starts drifting below the profile's. <code>true_greedy</code>, <code>rewire</code>, and <code>hybrid</code> all log the same situation as a <code>WARN</code> with the count of unplaced stubs.</p>
+    <div class="tag">caveat: silent gridlock</div>
+    <p>If a node is starved (no valid partner with deficit), greedy drops the remaining stubs without logging. The achieved degree drifts below the target, and downstream tools cannot tell whether a node "really" lost edges or just got starved by the matcher. The four other algorithms below all log gridlock as a <code>WARN</code>.</p>
   </div>
 </section>
 
-<!-- ─────────── Stage 4 · --remap mode ─────────── -->
+<!-- ─────────── algorithm · true_greedy ─────────── -->
+<section class="stage">
+  <div class="stage-num">algorithm · true_greedy</div>
+  <h2>Heap pop, partner via <code>argmax</code> over current degrees.</h2>
+  <p>Same outer pop as greedy, but the partner pick is deterministic: among valid targets (node not yet adjacent, has positive deficit), pick the one with the highest <em>current achieved degree</em>. Tie-break by id ascending. After each pair, push updated residuals back into the heap so subsequent pops see fresh values.</p>
+  <div class="pseudo"><span class="kw">def</span> true_greedy(residual, adj, deg):
+    heap = max-heap of (residual[u], u) for u with residual[u] &gt; 0
+    <span class="kw">while</span> heap not empty:
+        u = heap.pop()
+        <span class="kw">while</span> residual[u] &gt; 0:
+            valid = {v : v != u, v not in adj[u], residual[v] &gt; 0}
+            <span class="kw">if not</span> valid: <span class="kw">break</span>
+            v = argmax(valid, key=lambda v: deg[v])  <span class="cm"># id-asc tiebreak</span>
+            adj[u].add(v); adj[v].add(u)
+            residual[u] -= 1; residual[v] -= 1
+            deg[u] += 1; deg[v] += 1
+            heap.push(residual[v], v)
+        <span class="kw">if</span> residual[u] &gt; 0:
+            log.warn(f"gridlock at u={u}, {residual[u]} stubs unplaced")</div>
+  <p>Picking by max current degree biases toward already-popular nodes, which is fine for top-up because those are the ones with the most candidate partners. The deterministic tiebreak and explicit gridlock log are the two changes from <code>greedy</code>.</p>
+  <div class="graph g-with-side" id="g-truegreedy">
+    <div class="graph-chrome">
+      <span id="g-truegreedy-stage">step 0 &middot; initial deficit</span>
+      <span class="right step-label">step <b id="g-truegreedy-cur">0</b> / <span id="g-truegreedy-total">0</span></span>
+    </div>
+    <div class="side-caption">
+      <span class="st">left</span>20-node graph; grey = match edges placed so far &middot; <span class="st">right</span>per-node degree bars. Faint red tail = current residual deficit.
+    </div>
+    <div class="side-body">
+      <div class="graph-canvas" id="g-truegreedy-cy"></div>
+      <div class="side-right">
+        <svg id="g-truegreedy-bars" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+    </div>
+    <div class="widget-row">
+      <button class="btn" id="g-truegreedy-prev">← back</button>
+      <button class="btn primary" id="g-truegreedy-next">next →</button>
+      <button class="btn" id="g-truegreedy-reset">reset</button>
+      <button class="btn" id="g-truegreedy-end">skip to end</button>
+      <span class="step-label" id="g-truegreedy-real">deterministic; no reroll</span>
+    </div>
+    <div class="step-desc" id="g-truegreedy-desc">click <em>next</em> to advance.</div>
+  </div>
+</section>
+
+<!-- ─────────── algorithm · random_greedy ─────────── -->
+<section class="stage">
+  <div class="stage-num">algorithm · random_greedy</div>
+  <h2>Weighted-random pop, weighted-random partner.</h2>
+  <p>Both picks are randomised. \(u\) is drawn proportional to its current residual; \(v\) is drawn uniformly from the valid set. Useful when comparing matcher bias against the deterministic algorithms: the same input run with several seeds reveals how much of the output depends on which deterministic ordering greedy and true_greedy lock in.</p>
+  <div class="pseudo"><span class="kw">def</span> random_greedy(residual, adj, rng):
+    <span class="kw">while</span> any(residual[u] &gt; 0):
+        u = rng.choice(nodes, weights=residual)  <span class="cm"># residual-weighted</span>
+        valid = {v : v != u, v not in adj[u], residual[v] &gt; 0}
+        <span class="kw">if not</span> valid:
+            log.warn(f"gridlock at u={u}, {residual[u]} stubs unplaced")
+            residual[u] = 0  <span class="cm"># abandon this node</span>
+            <span class="kw">continue</span>
+        v = rng.choice(valid)  <span class="cm"># uniform among valid targets</span>
+        adj[u].add(v); adj[v].add(u)
+        residual[u] -= 1; residual[v] -= 1</div>
+  <p>Each <em>random</em> click reseeds and reruns the algorithm; step through to see how the picks differ across seeds. Step counts vary because gridlock-and-abandon makes the algorithm length depend on which u happens to get starved.</p>
+  <div class="graph g-with-side" id="g-randgreedy">
+    <div class="graph-chrome">
+      <span id="g-randgreedy-stage">step 0 &middot; initial deficit</span>
+      <span class="right step-label">step <b id="g-randgreedy-cur">0</b> / <span id="g-randgreedy-total">0</span></span>
+    </div>
+    <div class="side-caption">
+      <span class="st">left</span>20-node graph; grey = match edges placed so far &middot; <span class="st">right</span>per-node degree bars. Faint red tail = current residual deficit.
+    </div>
+    <div class="side-body">
+      <div class="graph-canvas" id="g-randgreedy-cy"></div>
+      <div class="side-right">
+        <svg id="g-randgreedy-bars" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+    </div>
+    <div class="widget-row">
+      <button class="btn" id="g-randgreedy-prev">← back</button>
+      <button class="btn primary" id="g-randgreedy-next">next →</button>
+      <button class="btn" id="g-randgreedy-reset">reset</button>
+      <button class="btn" id="g-randgreedy-end">skip to end</button>
+      <button class="btn" id="g-randgreedy-reroll" title="reseed the random draws">random</button>
+      <span class="step-label" id="g-randgreedy-real">seed 1</span>
+    </div>
+    <div class="step-desc" id="g-randgreedy-desc">click <em>next</em> to advance.</div>
+  </div>
+</section>
+
+<!-- ─────────── algorithm · rewire ─────────── -->
+<section class="stage">
+  <div class="stage-num">algorithm · rewire</div>
+  <h2>Configuration-model pairing, then 2-opt repair on invalid pairs.</h2>
+  <p>The unbiased one. Build a flat stub list (each node \(u\) appears <code>residual[u]</code> times), shuffle, pair adjacent entries. Some pairs are invalid (self-loop, already an edge, or duplicate within this pairing). Queue them, then run a 2-opt swap pass that repairs each invalid pair against a random valid edge in the queue. Stagnation detector after a fixed retry budget.</p>
+  <div class="pseudo"><span class="kw">def</span> rewire(residual, adj, rng):
+    stubs = [u for u in nodes for _ in range(residual[u])]
+    rng.shuffle(stubs)
+    pairs, invalid = [], []
+    <span class="kw">for</span> i <span class="kw">in</span> range(0, len(stubs), 2):
+        u, v = stubs[i], stubs[i + 1]
+        <span class="kw">if</span> u == v <span class="kw">or</span> v in adj[u]:
+            invalid.append((u, v))
+        <span class="kw">else</span>:
+            pairs.append((u, v))
+            adj[u].add(v); adj[v].add(u)
+    <span class="cm"># 2-opt repair phase</span>
+    <span class="kw">for</span> attempt <span class="kw">in</span> range(MAX_RETRIES):
+        <span class="kw">if not</span> invalid: <span class="kw">break</span>
+        u, v = invalid.pop()
+        x, y = rng.choice(pairs)  <span class="cm"># try swapping with valid edge (x, y)</span>
+        <span class="kw">if</span> can_swap(u, v, x, y, adj):
+            adj[u].add(y); adj[y].add(u)
+            adj[x].add(v); adj[v].add(x)
+            adj[x].discard(y); adj[y].discard(x)
+            pairs.remove((x, y)); pairs.extend([(u, y), (x, v)])
+        <span class="kw">else</span>:
+            invalid.append((u, v))  <span class="cm"># requeue</span>
+    <span class="kw">if</span> invalid:
+        log.warn(f"rewire: {len(invalid)} pairs unresolved after {MAX_RETRIES}")</div>
+  <p>The shuffle is the source of variation across seeds. On dense inputs almost every pairing is valid on the first pass; the repair queue is short. On long-tailed inputs with hubs, several pairs land invalid (the same hub gets two stubs that pair together); the repair phase walks them.</p>
+  <div class="graph g-with-side" id="g-rewire">
+    <div class="graph-chrome">
+      <span id="g-rewire-stage">step 0 &middot; stubs ready, no pairs yet</span>
+      <span class="right step-label">step <b id="g-rewire-cur">0</b> / <span id="g-rewire-total">0</span></span>
+    </div>
+    <div class="side-caption">
+      <span class="st">left</span>20-node graph; grey = pairs placed so far &middot; <span class="st">right</span>per-node degree bars. Faint red tail = current residual deficit.
+    </div>
+    <div class="side-body">
+      <div class="graph-canvas" id="g-rewire-cy"></div>
+      <div class="side-right">
+        <svg id="g-rewire-bars" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+    </div>
+    <div class="widget-row">
+      <button class="btn" id="g-rewire-prev">← back</button>
+      <button class="btn primary" id="g-rewire-next">next →</button>
+      <button class="btn" id="g-rewire-reset">reset</button>
+      <button class="btn" id="g-rewire-end">skip to end</button>
+      <button class="btn" id="g-rewire-reroll" title="reseed the shuffle">random</button>
+      <span class="step-label" id="g-rewire-real">seed 1</span>
+    </div>
+    <div class="step-desc" id="g-rewire-desc">click <em>next</em> to advance.</div>
+  </div>
+</section>
+
+<!-- ─────────── algorithm · hybrid ─────────── -->
+<section class="stage">
+  <div class="stage-num">algorithm · hybrid (default)</div>
+  <h2><code>rewire</code>, then <code>true_greedy</code> on what is left.</h2>
+  <p>The default and the recommended one. Run <code>rewire</code> first to drain the bulk unbiased; whatever stubs are still unplaced after rewire's repair budget go to <code>true_greedy</code> for a deterministic finishing pass. Almost every realistic deficit drains to zero this way; what cannot is logged.</p>
+  <div class="pseudo"><span class="kw">def</span> hybrid(residual, adj, rng):
+    rewire(residual, adj, rng)              <span class="cm"># phase 1: stochastic bulk drain</span>
+    <span class="kw">if</span> any(residual[u] &gt; 0):
+        true_greedy(residual, adj, deg)     <span class="cm"># phase 2: deterministic tail</span>
+    <span class="kw">if</span> any(residual[u] &gt; 0):
+        log.warn(f"hybrid: {sum(residual)} stubs unplaced after both phases")</div>
+  <p>Walk the two phases below. Phase 1 (rewire) is highlighted; phase 2 (true_greedy on the remainder) picks up from rewire's residual.</p>
+  <div class="graph g-with-side" id="g-hybrid">
+    <div class="graph-chrome">
+      <span id="g-hybrid-stage">step 0 &middot; initial deficit</span>
+      <span class="right step-label">step <b id="g-hybrid-cur">0</b> / <span id="g-hybrid-total">0</span></span>
+    </div>
+    <div class="side-caption">
+      <span class="st">left</span>20-node graph; grey = match edges placed so far &middot; <span class="st">right</span>per-node degree bars. Faint red tail = current residual deficit.
+    </div>
+    <div class="side-body">
+      <div class="graph-canvas" id="g-hybrid-cy"></div>
+      <div class="side-right">
+        <svg id="g-hybrid-bars" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+    </div>
+    <div class="widget-row">
+      <button class="btn" id="g-hybrid-prev">← back</button>
+      <button class="btn primary" id="g-hybrid-next">next →</button>
+      <button class="btn" id="g-hybrid-reset">reset</button>
+      <button class="btn" id="g-hybrid-end">skip to end</button>
+      <button class="btn" id="g-hybrid-reroll" title="reseed the rewire phase">random</button>
+      <span class="step-label" id="g-hybrid-real">seed 1</span>
+    </div>
+    <div class="step-desc" id="g-hybrid-desc">click <em>next</em> to advance.</div>
+  </div>
+</section>
+
+<!-- ─────────── --remap mode ─────────── -->
 <section class="stage">
   <div class="stage-num">the --remap option</div>
   <h2>For gens that emit fresh node IDs, pair by degree rank instead of by ID.</h2>
@@ -256,9 +446,6 @@ window.MathJax = {
   (function () {
     const icons = document.querySelector("#links .top-icons");
     if (!icons) return;
-    // matcher is a shared utility, not a per-generator algorithm. No
-    // dedicated docs page; the notes link would 404. Strip it and
-    // point the github icon at src/match_degree.py.
     const notesLink = icons.querySelector('a[aria-label="algorithm notes"]');
     if (notesLink) notesLink.remove();
     const sourceLink = icons.querySelector('a[aria-label="github repository"]');
@@ -287,117 +474,439 @@ window.MathJax = {
 
   function edgeKey(u, v) { return Math.min(u, v) + "-" + Math.max(u, v); }
 
-  // Base edges = the 20-node input graph itself, projected as the "current"
-  // graph. Pretend an upstream stage left this exact graph minus a few stubs
-  // per node; the deficit table below describes which stubs are missing.
+  // ── Common state: base graph + deficit + adjacency snapshot ──
   const baseEdges = EDGES.map(e => ({
     u: e.u, v: e.v, color: COL.edge_stage2, w: 1.4,
     id: `m-base-${edgeKey(e.u, e.v)}`,
   }));
-
-  // Hand-authored residual deficit. Mix of degree-rich (10, 13) and degree-
-  // poor (6, 8, 17, 18) nodes so greedy gridlocks while hybrid drains
-  // cleanly. Sum is even (= 9) so a parity stub is unmatchable.
   const DEFICIT = { 6: 1, 8: 1, 10: 2, 11: 1, 13: 2, 17: 1, 18: 1 };
-  // Effective per-node target = DEGREES[n] + DEFICIT[n].
   function targetDeg(n) { return (DEGREES[n] || 0) + (DEFICIT[n] || 0); }
 
-  // Per-algorithm match realizations on the deficit set above. Each entry
-  // is a list of (u, v) pairs to add. <code>gridlock</code> annotates how
-  // many stubs were left unplaced (only relevant for greedy; the others
-  // gridlock-and-log the same number, but the log is here as a comment).
-  const EXISTING = new Set(baseEdges.map(e => edgeKey(e.u, e.v)));
-  function isFresh(u, v) { return !EXISTING.has(edgeKey(u, v)); }
+  // adj[u] = Set of neighbours in the base graph
+  const adjBase = {};
+  NODES.forEach(n => { adjBase[n] = new Set(); });
+  EDGES.forEach(e => { adjBase[e.u].add(e.v); adjBase[e.v].add(e.u); });
 
-  // Hand-walked drain orders. Verified by spot-check against the deficit set:
-  // every pair below is non-existing in the base graph and both endpoints
-  // have positive deficit when the pair is added.
-  const ALG_REALIZATIONS = {
-    hybrid: [
-      { label: "hybrid · realization 1 (rewire + true_greedy)",
-        edges: [[10, 13], [6, 11], [8, 18], [13, 17]], gridlock: 1 },
-      { label: "hybrid · realization 2 (rewire + true_greedy)",
-        edges: [[10, 18], [13, 17], [6, 11], [8, 13]], gridlock: 1 },
-      { label: "hybrid · realization 3 (rewire + true_greedy)",
-        edges: [[8, 13], [10, 18], [6, 17], [10, 11]], gridlock: 1 },
-    ],
-    true_greedy: [
-      { label: "true_greedy · realization 1",
-        edges: [[10, 13], [10, 18], [6, 13], [8, 11]], gridlock: 1 },
-      { label: "true_greedy · realization 2",
-        edges: [[10, 13], [11, 13], [10, 18], [6, 17]], gridlock: 1 },
-    ],
-    rewire: [
-      { label: "rewire · realization 1",
-        edges: [[10, 13], [6, 18], [8, 17], [11, 13]], gridlock: 1 },
-      { label: "rewire · realization 2",
-        edges: [[10, 18], [13, 17], [6, 11], [8, 13]], gridlock: 1 },
-    ],
-    random_greedy: [
-      { label: "random_greedy · realization 1",
-        edges: [[10, 18], [11, 13], [6, 17], [8, 13]], gridlock: 1 },
-      { label: "random_greedy · realization 2",
-        edges: [[10, 17], [13, 18], [8, 11], [6, 13]], gridlock: 1 },
-    ],
-    greedy: [
-      { label: "greedy · realization 1 (silent gridlock)",
-        edges: [[10, 13], [10, 18], [6, 11], [8, 13]], gridlock: 1 },
-      { label: "greedy · realization 2 (silent gridlock)",
-        edges: [[10, 13], [11, 13], [6, 18], [8, 17]], gridlock: 1 },
-    ],
-  };
-
-  const viz = NETGEN.VIZ.init("g-match-cy", {
-    showLabels: true,
-    edges: baseEdges,
-    nodeColor: (id) => {
-      const c = CLUSTER_OF[id];
-      return COL[c] || COL.paper_3;
-    },
-  });
-  NETGEN.makeTooltip(viz, document.getElementById("g-match"));
-
-  const labelEl = document.getElementById("g-match-label");
-  const countEl = document.getElementById("g-match-count");
-  const realEl = document.getElementById("g-match-real");
-  const algEl = document.getElementById("g-match-alg");
-
-  let applied = false;
-  let real = 0;
-  let currentMatchEdges = [];
-
-  function countByNode(edges) {
+  // ── Helpers: LCG PRNG, shallow clone of residual / adj ──
+  function makeLCG(seed) {
+    let s = (seed >>> 0) || 1;
+    return () => {
+      s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+      return s / 4294967296;
+    };
+  }
+  function cloneResidual(r) { const c = {}; for (const k in r) c[k] = r[k]; return c; }
+  function cloneAdj(adj) {
     const c = {};
-    edges.forEach(e => {
-      const u = e.u == null ? e[0] : e.u;
-      const v = e.v == null ? e[1] : e.v;
-      c[u] = (c[u] || 0) + 1; c[v] = (c[v] || 0) + 1;
+    for (const k in adj) c[k] = new Set(adj[k]);
+    return c;
+  }
+  function residualSum(r) {
+    let s = 0;
+    for (const k in r) s += r[k];
+    return s;
+  }
+  function nodesWithResidual(r) {
+    const out = [];
+    for (const k in r) if (r[k] > 0) out.push(parseInt(k, 10));
+    return out;
+  }
+
+  // ── Algorithm: greedy ──
+  // CPython's set.pop() iterates the underlying hash table in slot order;
+  // for sets of small ints, hash(n) == n and the slot layout puts elements
+  // back in id-ascending order. Faithful simulation: pick the smallest id
+  // from the candidate set every time. Deterministic, no seed.
+  function runGreedy() {
+    const residual = cloneResidual(DEFICIT);
+    const adj = cloneAdj(adjBase);
+    const edges = [];
+    const steps = [];
+    steps.push({
+      action: "init", residual: cloneResidual(residual),
+      edges: [], msg: `initial deficit: ${nodesWithResidual(residual).map(n => `${n}:${residual[n]}`).join(", ")}.`,
     });
+    while (true) {
+      const remaining = nodesWithResidual(residual);
+      if (remaining.length === 0) break;
+      // Pop u: max residual, id-asc tiebreak.
+      remaining.sort((a, b) => (residual[b] - residual[a]) || (a - b));
+      const u = remaining[0];
+      // Drain u via deterministic id-asc set.pop() simulation
+      while (residual[u] > 0) {
+        const candidates = [];
+        for (const k in residual) {
+          const v = parseInt(k, 10);
+          if (v === u) continue;
+          if (residual[v] <= 0) continue;
+          if (adj[u].has(v)) continue;
+          candidates.push(v);
+        }
+        if (candidates.length === 0) {
+          const lost = residual[u];
+          steps.push({
+            action: "gridlock_silent", u, residual: cloneResidual(residual),
+            edges: edges.slice(),
+            msg: `u=${u} starved: ${lost} stub(s) unplaced. greedy drops them silently.`,
+          });
+          residual[u] = 0;
+          break;
+        }
+        // CPython set.pop() on int sets is effectively id-ascending.
+        candidates.sort((a, b) => a - b);
+        const v = candidates[0];
+        adj[u].add(v); adj[v].add(u);
+        edges.push([u, v]);
+        residual[u] -= 1; residual[v] -= 1;
+        steps.push({
+          action: "add", u, v, residual: cloneResidual(residual),
+          edges: edges.slice(),
+          msg: `pop u=${u}. set.pop() of {${candidates.join(", ")}} returns smallest id v=${v}; added (${u}, ${v}).`,
+        });
+      }
+    }
+    steps.push({
+      action: "done", residual: cloneResidual(residual), edges: edges.slice(),
+      msg: `done. ${edges.length} edge(s) placed; ${residualSum(residual)} stub(s) lost.`,
+    });
+    return steps;
+  }
+
+  // ── Algorithm: true_greedy ──
+  function runTrueGreedy(seed) {
+    const residual = cloneResidual(DEFICIT);
+    const adj = cloneAdj(adjBase);
+    const deg = {};
+    NODES.forEach(n => { deg[n] = (DEGREES[n] || 0); });
+    const edges = [];
+    const steps = [];
+    steps.push({
+      action: "init", residual: cloneResidual(residual),
+      edges: [], msg: `initial deficit: ${nodesWithResidual(residual).map(n => `${n}:${residual[n]}`).join(", ")}.`,
+    });
+    while (true) {
+      const remaining = nodesWithResidual(residual);
+      if (remaining.length === 0) break;
+      remaining.sort((a, b) => (residual[b] - residual[a]) || (a - b));
+      const u = remaining[0];
+      while (residual[u] > 0) {
+        // valid = nodes with deficit, not yet adjacent, not u itself
+        const valid = [];
+        for (const k in residual) {
+          const v = parseInt(k, 10);
+          if (v === u) continue;
+          if (residual[v] <= 0) continue;
+          if (adj[u].has(v)) continue;
+          valid.push(v);
+        }
+        if (valid.length === 0) {
+          steps.push({
+            action: "gridlock_logged", u, residual: cloneResidual(residual),
+            edges: edges.slice(),
+            msg: `u=${u} starved: ${residual[u]} stub(s) unplaced. WARN logged.`,
+          });
+          residual[u] = 0;
+          break;
+        }
+        // argmax over current degree, id-asc tiebreak
+        valid.sort((a, b) => (deg[b] - deg[a]) || (a - b));
+        const v = valid[0];
+        adj[u].add(v); adj[v].add(u);
+        edges.push([u, v]);
+        residual[u] -= 1; residual[v] -= 1;
+        deg[u] += 1; deg[v] += 1;
+        steps.push({
+          action: "add", u, v, residual: cloneResidual(residual),
+          edges: edges.slice(),
+          msg: `pop u=${u}; argmax over deg picks v=${v} (deg ${deg[v] - 1}→${deg[v]}); added (${u}, ${v}).`,
+        });
+      }
+    }
+    steps.push({
+      action: "done", residual: cloneResidual(residual), edges: edges.slice(),
+      msg: `done. ${edges.length} edge(s) placed; ${residualSum(residual)} stub(s) logged as gridlocked.`,
+    });
+    return steps;
+  }
+
+  // ── Algorithm: random_greedy ──
+  function runRandomGreedy(seed) {
+    const rng = makeLCG(seed);
+    const residual = cloneResidual(DEFICIT);
+    const adj = cloneAdj(adjBase);
+    const edges = [];
+    const steps = [];
+    steps.push({
+      action: "init", residual: cloneResidual(residual),
+      edges: [], msg: `initial deficit: ${nodesWithResidual(residual).map(n => `${n}:${residual[n]}`).join(", ")}.`,
+    });
+    function weightedPick(items, weights) {
+      let total = 0;
+      for (const w of weights) total += w;
+      if (total <= 0) return null;
+      let r = rng() * total;
+      for (let i = 0; i < items.length; i++) {
+        r -= weights[i];
+        if (r <= 0) return items[i];
+      }
+      return items[items.length - 1];
+    }
+    let safety = 200;
+    while (safety-- > 0) {
+      const remaining = nodesWithResidual(residual);
+      if (remaining.length === 0) break;
+      const weights = remaining.map(n => residual[n]);
+      const u = weightedPick(remaining, weights);
+      const valid = [];
+      for (const k in residual) {
+        const v = parseInt(k, 10);
+        if (v === u) continue;
+        if (residual[v] <= 0) continue;
+        if (adj[u].has(v)) continue;
+        valid.push(v);
+      }
+      if (valid.length === 0) {
+        steps.push({
+          action: "gridlock_logged", u, residual: cloneResidual(residual),
+          edges: edges.slice(),
+          msg: `u=${u} starved: ${residual[u]} stub(s) abandoned. WARN logged.`,
+        });
+        residual[u] = 0;
+        continue;
+      }
+      const v = valid[Math.floor(rng() * valid.length)];
+      adj[u].add(v); adj[v].add(u);
+      edges.push([u, v]);
+      residual[u] -= 1; residual[v] -= 1;
+      steps.push({
+        action: "add", u, v, residual: cloneResidual(residual),
+        edges: edges.slice(),
+        msg: `weighted-random u=${u} (residual ${residual[u] + 1}); uniform v=${v} from ${valid.length} valid; added (${u}, ${v}).`,
+      });
+    }
+    steps.push({
+      action: "done", residual: cloneResidual(residual), edges: edges.slice(),
+      msg: `done. ${edges.length} edge(s) placed; ${residualSum(residual)} stub(s) logged as gridlocked.`,
+    });
+    return steps;
+  }
+
+  // ── Algorithm: rewire ──
+  // Phase 1: build stub list, shuffle, pair adjacent. Phase 2: 2-opt repair.
+  // Steps emitted per phase to make the walker explicit.
+  function runRewire(seed) {
+    const rng = makeLCG(seed);
+    const residual = cloneResidual(DEFICIT);
+    const adj = cloneAdj(adjBase);
+    const edges = [];
+    const steps = [];
+    steps.push({
+      action: "init", residual: cloneResidual(residual),
+      edges: [], msg: `initial deficit: ${nodesWithResidual(residual).map(n => `${n}:${residual[n]}`).join(", ")}.`,
+    });
+    // Build stubs
+    const stubs = [];
+    for (const k in residual) {
+      const u = parseInt(k, 10);
+      for (let i = 0; i < residual[u]; i++) stubs.push(u);
+    }
+    // Fisher-Yates shuffle
+    for (let i = stubs.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [stubs[i], stubs[j]] = [stubs[j], stubs[i]];
+    }
+    steps.push({
+      action: "shuffle", residual: cloneResidual(residual),
+      edges: edges.slice(),
+      msg: `phase 1: built ${stubs.length} stubs and shuffled. order: [${stubs.join(", ")}].`,
+    });
+    // Phase 1: pair adjacent
+    const invalid = [];
+    for (let i = 0; i + 1 < stubs.length; i += 2) {
+      const u = stubs[i], v = stubs[i + 1];
+      if (u === v || adj[u].has(v)) {
+        invalid.push([u, v]);
+        steps.push({
+          action: "pair_invalid", u, v, residual: cloneResidual(residual),
+          edges: edges.slice(),
+          msg: `phase 1 pair (${u}, ${v}): ${u === v ? "self-loop" : "already adjacent"}; queued for repair.`,
+        });
+      } else {
+        adj[u].add(v); adj[v].add(u);
+        edges.push([u, v]);
+        residual[u] -= 1; residual[v] -= 1;
+        steps.push({
+          action: "add", u, v, residual: cloneResidual(residual),
+          edges: edges.slice(),
+          msg: `phase 1 pair (${u}, ${v}): valid; added.`,
+        });
+      }
+    }
+    // Phase 2: 2-opt repair
+    let attempts = 0;
+    const MAX_ATTEMPTS = 12;
+    while (invalid.length > 0 && attempts < MAX_ATTEMPTS) {
+      attempts++;
+      const [u, v] = invalid.pop();
+      // Try to repair by swapping with a placed pair (x, y).
+      if (edges.length === 0) {
+        steps.push({
+          action: "repair_skip", u, v, residual: cloneResidual(residual),
+          edges: edges.slice(),
+          msg: `attempt ${attempts}: invalid (${u}, ${v}); no placed pair to swap against, requeue.`,
+        });
+        invalid.unshift([u, v]);
+        if (attempts >= MAX_ATTEMPTS) break;
+        continue;
+      }
+      const idx = Math.floor(rng() * edges.length);
+      const [x, y] = edges[idx];
+      // Try (u, y) and (x, v). Both must be: distinct, not already in adj.
+      const ok1 = u !== y && !adj[u].has(y);
+      const ok2 = x !== v && !adj[x].has(v);
+      if (ok1 && ok2) {
+        adj[x].delete(y); adj[y].delete(x);
+        adj[u].add(y); adj[y].add(u);
+        adj[x].add(v); adj[v].add(x);
+        edges.splice(idx, 1);
+        edges.push([u, y]); edges.push([x, v]);
+        residual[u] -= 1; residual[v] -= 1;
+        steps.push({
+          action: "repair_swap", u, v, x, y, residual: cloneResidual(residual),
+          edges: edges.slice(),
+          msg: `attempt ${attempts}: 2-opt swap. invalid (${u}, ${v}) + valid (${x}, ${y}) → (${u}, ${y}) + (${x}, ${v}).`,
+        });
+      } else {
+        steps.push({
+          action: "repair_fail", u, v, x, y, residual: cloneResidual(residual),
+          edges: edges.slice(),
+          msg: `attempt ${attempts}: tried (${x}, ${y}); swap blocked by ${ok1 ? "" : "(u, y) collision "}${ok2 ? "" : "(x, v) collision"}; requeue.`,
+        });
+        invalid.unshift([u, v]);
+      }
+    }
+    if (invalid.length > 0) {
+      steps.push({
+        action: "gridlock_logged", residual: cloneResidual(residual),
+        edges: edges.slice(),
+        msg: `${invalid.length} pair(s) unresolved after ${MAX_ATTEMPTS} attempts. WARN logged.`,
+      });
+    }
+    steps.push({
+      action: "done", residual: cloneResidual(residual), edges: edges.slice(),
+      msg: `done. ${edges.length} edge(s) placed; ${residualSum(residual)} stub(s) lost to unresolved invalids.`,
+    });
+    return steps;
+  }
+
+  // ── Algorithm: hybrid ──
+  // Tag rewire steps with phase 1, true_greedy steps with phase 2.
+  function runHybrid(seed) {
+    const rewireSteps = runRewire(seed);
+    // Drop the trailing "done" so we can chain into phase 2.
+    while (rewireSteps.length && rewireSteps[rewireSteps.length - 1].action === "done") {
+      rewireSteps.pop();
+    }
+    // Tag every step as phase 1.
+    rewireSteps.forEach(s => { s.phase = 1; });
+    // Find the residual at end of phase 1.
+    const last = rewireSteps[rewireSteps.length - 1];
+    const phase1Residual = last ? cloneResidual(last.residual) : cloneResidual(DEFICIT);
+    const phase1Edges = last ? last.edges.slice() : [];
+    // Phase 2: true_greedy starting from phase1 state.
+    const adj = cloneAdj(adjBase);
+    phase1Edges.forEach(([u, v]) => { adj[u].add(v); adj[v].add(u); });
+    const deg = {};
+    NODES.forEach(n => { deg[n] = (DEGREES[n] || 0) + (countDegFromEdges(phase1Edges, n)); });
+    const residual = cloneResidual(phase1Residual);
+    const edges = phase1Edges.slice();
+    const phase2Steps = [];
+    if (residualSum(residual) === 0) {
+      phase2Steps.push({
+        action: "phase2_skip", residual: cloneResidual(residual),
+        edges: edges.slice(), phase: 2,
+        msg: "phase 1 (rewire) drained the deficit completely. phase 2 (true_greedy) skipped.",
+      });
+    } else {
+      phase2Steps.push({
+        action: "phase2_start", residual: cloneResidual(residual),
+        edges: edges.slice(), phase: 2,
+        msg: `phase 1 (rewire) left ${residualSum(residual)} stub(s) unplaced. handing off to true_greedy.`,
+      });
+      while (true) {
+        const remaining = nodesWithResidual(residual);
+        if (remaining.length === 0) break;
+        remaining.sort((a, b) => (residual[b] - residual[a]) || (a - b));
+        const u = remaining[0];
+        while (residual[u] > 0) {
+          const valid = [];
+          for (const k in residual) {
+            const v = parseInt(k, 10);
+            if (v === u) continue;
+            if (residual[v] <= 0) continue;
+            if (adj[u].has(v)) continue;
+            valid.push(v);
+          }
+          if (valid.length === 0) {
+            phase2Steps.push({
+              action: "gridlock_logged", u, residual: cloneResidual(residual),
+              edges: edges.slice(), phase: 2,
+              msg: `phase 2: u=${u} starved; ${residual[u]} stub(s) unplaced. WARN logged.`,
+            });
+            residual[u] = 0;
+            break;
+          }
+          valid.sort((a, b) => (deg[b] - deg[a]) || (a - b));
+          const v = valid[0];
+          adj[u].add(v); adj[v].add(u);
+          edges.push([u, v]);
+          residual[u] -= 1; residual[v] -= 1;
+          deg[u] += 1; deg[v] += 1;
+          phase2Steps.push({
+            action: "add", u, v, residual: cloneResidual(residual),
+            edges: edges.slice(), phase: 2,
+            msg: `phase 2: pop u=${u}; argmax v=${v}; added (${u}, ${v}).`,
+          });
+        }
+      }
+    }
+    phase2Steps.push({
+      action: "done", residual: cloneResidual(residual), edges: edges.slice(), phase: 2,
+      msg: `hybrid done. ${edges.length} edge(s) placed; ${residualSum(residual)} stub(s) lost.`,
+    });
+    return rewireSteps.concat(phase2Steps);
+  }
+  function countDegFromEdges(edges, n) {
+    let c = 0;
+    for (const [u, v] of edges) {
+      if (u === n || v === n) c++;
+    }
     return c;
   }
 
-  function renderBars() {
-    const barSvg = d3.select("#match-bars");
+  // ── Bars renderer (per-section) ──
+  function renderBars(svgId, residual, matchEdges) {
+    const barSvg = d3.select("#" + svgId);
     barSvg.selectAll("*").remove();
     const W = 340, H = 420;
     const PAD = { top: 14, right: 42, bottom: 18, left: 48 };
     const iw = W - PAD.left - PAD.right;
-    const sortedNodes = NODES.slice()
-      .sort((a, b) => (targetDeg(b) - targetDeg(a)) || (a - b));
+    const sortedNodes = NODES.slice().sort((a, b) => (targetDeg(b) - targetDeg(a)) || (a - b));
     const ih = H - PAD.top - PAD.bottom;
     const rowH = ih / sortedNodes.length;
     const maxD = d3.max(sortedNodes, targetDeg);
     const g = barSvg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
-    const cBase = countByNode(baseEdges);
-    const cMatch = applied ? countByNode(currentMatchEdges) : {};
-
+    const cBase = {};
+    NODES.forEach(n => { cBase[n] = (DEGREES[n] || 0); });
+    const cMatch = {};
+    matchEdges.forEach(([u, v]) => { cMatch[u] = (cMatch[u] || 0) + 1; cMatch[v] = (cMatch[v] || 0) + 1; });
     sortedNodes.forEach((n, i) => {
       const y = i * rowH;
       const t = targetDeg(n);
       const aBase = cBase[n] || 0;
       const aMatch = cMatch[n] || 0;
+      const def = (residual[n] || 0);
       const ach = aBase + aMatch;
-      const deficit = Math.max(0, t - ach);
       const scale = iw / maxD;
       let x = 0;
       g.append("text").attr("x", -6).attr("y", y + rowH / 2 + 3)
@@ -417,9 +926,9 @@ window.MathJax = {
           .attr("fill", COL.edge_stage4).attr("opacity", 0.95);
         x += aMatch * scale;
       }
-      if (deficit > 0) {
+      if (def > 0) {
         g.append("rect").attr("x", x).attr("y", y + rowH * 0.18)
-          .attr("height", rowH * 0.64).attr("width", deficit * scale)
+          .attr("height", rowH * 0.64).attr("width", def * scale)
           .attr("fill", COL.signal).attr("opacity", 0.22)
           .attr("stroke", COL.signal).attr("stroke-dasharray", "3 2")
           .attr("stroke-width", 0.7);
@@ -432,43 +941,99 @@ window.MathJax = {
     });
   }
 
-  function render() {
-    viz.removeEdges(id => String(id).startsWith("m-s4-"));
-    const alg = algEl.value;
-    const reals = ALG_REALIZATIONS[alg] || ALG_REALIZATIONS.hybrid;
-    if (real >= reals.length) real = 0;
-    const matchEdges = reals[real].edges;
-    currentMatchEdges = [];
-    matchEdges.forEach(([u, v]) => {
-      if (isFresh(u, v)) currentMatchEdges.push([u, v]);
+  // ── Per-section setup helper ──
+  function setupAlgoSection(opts) {
+    const { prefix, algoFn, deterministic } = opts;
+    const cyId   = `g-${prefix}-cy`;
+    const barsId = `g-${prefix}-bars`;
+    const stageEl = document.getElementById(`g-${prefix}-stage`);
+    const curEl   = document.getElementById(`g-${prefix}-cur`);
+    const totEl   = document.getElementById(`g-${prefix}-total`);
+    const descEl  = document.getElementById(`g-${prefix}-desc`);
+    const realEl  = document.getElementById(`g-${prefix}-real`);
+    const prevBtn = document.getElementById(`g-${prefix}-prev`);
+    const nextBtn = document.getElementById(`g-${prefix}-next`);
+    const resetBtn = document.getElementById(`g-${prefix}-reset`);
+    const endBtn  = document.getElementById(`g-${prefix}-end`);
+    const rerollBtn = document.getElementById(`g-${prefix}-reroll`);
+
+    const viz = NETGEN.VIZ.init(cyId, {
+      showLabels: true,
+      edges: baseEdges,
+      nodeColor: (id) => {
+        const c = CLUSTER_OF[id];
+        return COL[c] || COL.paper_3;
+      },
     });
-    if (applied) {
-      viz.addEdges(currentMatchEdges.map(([u, v], i) => ({
-        u, v, color: COL.edge_stage4, w: 2.4, id: `m-s4-${i}`,
-      })));
-      labelEl.textContent = "after match_degree · deficits filed down";
-      const placed = currentMatchEdges.length;
-      const gridlocked = reals[real].gridlock || 0;
-      countEl.textContent = `placed: ${placed} · gridlocked: ${gridlocked}`;
-    } else {
-      labelEl.textContent = "before match_degree · residual deficits visible";
-      countEl.textContent = "placed: 0 · gridlocked: 0";
+    NETGEN.makeTooltip(viz, document.getElementById(`g-${prefix}`));
+
+    let seed = 1;
+    let steps = algoFn(seed);
+    let stepIdx = 0;
+
+    function render() {
+      const s = steps[stepIdx];
+      // Replace match edges with the snapshot for this step.
+      viz.removeEdges(id => String(id).startsWith(`m-${prefix}-`));
+      const isPhase2 = s.phase === 2;
+      const phase1Color = COL.edge_stage4;
+      const phase2Color = COL.edge_stage3;
+      // For hybrid: phase 1 edges in stage4 grey, phase 2 in stage3 orchid.
+      // Each step's `edges` array holds all placed pairs cumulative; we
+      // need to know which are phase 1 vs phase 2 for hybrid.
+      let phase1Count = 0;
+      if (prefix === "hybrid") {
+        for (const ss of steps) {
+          if (ss === s) break;
+          if (ss.phase === 1 && ss.action === "add") phase1Count = ss.edges.length;
+        }
+        if (s.phase === 1 && s.action === "add") phase1Count = s.edges.length;
+      }
+      s.edges.forEach(([u, v], i) => {
+        const isP2 = (prefix === "hybrid" && i >= phase1Count);
+        viz.addEdges([{
+          u, v,
+          color: isP2 ? phase2Color : phase1Color,
+          w: 2.4,
+          id: `m-${prefix}-${i}`,
+        }]);
+      });
+      // Highlight u and v of this step.
+      // (skipped for brevity; the new edge is the most recent grey/orchid line)
+      stageEl.textContent = `step ${stepIdx} · ${s.action}`;
+      curEl.textContent = String(stepIdx);
+      totEl.textContent = String(steps.length - 1);
+      descEl.innerHTML = `<span class="st">step ${stepIdx}</span> &middot; ${s.msg}`;
+      if (window.MathJax && window.MathJax.typesetPromise) {
+        window.MathJax.typesetPromise([descEl]).catch(() => {});
+      }
+      renderBars(barsId, s.residual, s.edges);
+      prevBtn.disabled = stepIdx <= 0;
+      nextBtn.disabled = stepIdx >= steps.length - 1;
     }
-    realEl.textContent = reals[real].label;
-    renderBars();
+
+    prevBtn.addEventListener("click", () => { if (stepIdx > 0) { stepIdx--; render(); } });
+    nextBtn.addEventListener("click", () => { if (stepIdx < steps.length - 1) { stepIdx++; render(); } });
+    resetBtn.addEventListener("click", () => { stepIdx = 0; render(); });
+    endBtn.addEventListener("click", () => { stepIdx = steps.length - 1; render(); });
+    if (rerollBtn) {
+      rerollBtn.addEventListener("click", () => {
+        seed += 1;
+        steps = algoFn(seed);
+        stepIdx = 0;
+        if (realEl) realEl.textContent = `seed ${seed}`;
+        render();
+      });
+    }
+    render();
   }
 
-  NETGEN.toggle({
-    input: document.getElementById("g-match-toggle"),
-    onChange: (on) => { applied = on; render(); },
-  });
-  algEl.addEventListener("change", () => { real = 0; render(); });
-  document.getElementById("g-match-reroll").addEventListener("click", () => {
-    const reals = ALG_REALIZATIONS[algEl.value] || ALG_REALIZATIONS.hybrid;
-    real = (real + 1) % reals.length;
-    render();
-  });
-  render();
+  // Wire all five sections.
+  setupAlgoSection({ prefix: "greedy",      algoFn: runGreedy });
+  setupAlgoSection({ prefix: "truegreedy",  algoFn: runTrueGreedy, deterministic: true });
+  setupAlgoSection({ prefix: "randgreedy",  algoFn: runRandomGreedy });
+  setupAlgoSection({ prefix: "rewire",      algoFn: runRewire });
+  setupAlgoSection({ prefix: "hybrid",      algoFn: runHybrid });
 })();
 </script>
 </body>
