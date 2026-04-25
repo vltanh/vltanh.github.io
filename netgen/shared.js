@@ -233,7 +233,12 @@ const VIZ = {
       host.innerHTML = "";
       svg = d3.select(host).append("svg")
         .attr("class", "viz-svg")
-        .attr("viewBox", "-320 -340 640 680")
+        .attr("viewBox", fitViewBoxAttr({
+          positions: opts.positions || POSITIONS,
+          includeIds: opts.includeOutliers === false
+            ? NODES.filter(n => CLUSTER_OF[n] !== "OUT")
+            : NODES,
+        }))
         .attr("preserveAspectRatio", "xMidYMid meet");
     }
     const includeOutliers = opts.includeOutliers !== false;
@@ -299,12 +304,38 @@ const VIZ = {
     let onNodeEnter = null, onNodeLeave = null;
     let onEdgeEnter = null, onEdgeLeave = null;
 
+    // Cluster repulsion: nodes from different clusters push each other
+    // away when their centroids drift close. Pinned nodes (fx/fy set)
+    // ignore the velocity update so this is a no-op for static layouts;
+    // free-running sims (matcher input panel, future generative pages)
+    // get cluster separation for free.
+    function clusterRepel(alpha) {
+      const REACH = 80;
+      const STR  = 0.45;
+      for (let i = 0; i < nodesData.length; i++) {
+        const a = nodesData[i];
+        for (let j = i + 1; j < nodesData.length; j++) {
+          const b = nodesData[j];
+          if (a.cluster && a.cluster === b.cluster) continue;
+          const dx = b.x - a.x, dy = b.y - a.y;
+          const d2 = dx * dx + dy * dy;
+          if (d2 === 0 || d2 > REACH * REACH) continue;
+          const dist = Math.sqrt(d2);
+          const f = (REACH - dist) * STR * alpha / dist;
+          a.vx -= dx * f;
+          a.vy -= dy * f;
+          b.vx += dx * f;
+          b.vy += dy * f;
+        }
+      }
+    }
     const sim = d3.forceSimulation(nodesData)
       .force("link",    d3.forceLink([]).id(d => d.id).distance(55).strength(0.12))
       .force("charge",  d3.forceManyBody().strength(-45))
       .force("collide", d3.forceCollide(16))
       .force("x",       d3.forceX(d => d.homeX).strength(0.22))
       .force("y",       d3.forceY(d => d.homeY).strength(0.22))
+      .force("clusterRepel", clusterRepel)
       .alpha(0.35).alphaDecay(0.04);
 
     function classStr(base, extra) { return extra ? (base + " " + extra).trim() : base; }
