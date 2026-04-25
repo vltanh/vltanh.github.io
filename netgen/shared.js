@@ -725,6 +725,44 @@ if (typeof document !== "undefined") {
   }
 }
 
+// ── Auto-fit viewBox helper ───────────────────────────────────
+// Compute a square viewBox that wraps the supplied positions with a
+// margin large enough for block-rect dashes + node labels. Pages drop
+// hardcoded viewBox literals and call this so a fixture move (POSITIONS
+// change in shared.js) does not require touching each page's viewBox.
+//
+// opts:
+//   positions: id → {x, y}. Default: NETGEN.POSITIONS.
+//   includeIds: array of ids to wrap. Default: NETGEN.NODES.
+//   pad: extra margin around the bbox (default 80; covers makeBlockRects'
+//        padX/padY of 34/38 plus label/halo space).
+function fitViewBoxAttr(opts) {
+  opts = opts || {};
+  const positions = opts.positions || POSITIONS;
+  const ids = opts.includeIds || NODES;
+  const pad = opts.pad != null ? opts.pad : 80;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  ids.forEach(id => {
+    const p = positions[id];
+    if (!p) return;
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  });
+  if (!isFinite(minX)) return "-320 -320 640 640";
+  let x = minX - pad, y = minY - pad;
+  let w = (maxX - minX) + 2 * pad;
+  let h = (maxY - minY) + 2 * pad;
+  // Square out: pages set CSS aspect-ratio: 1/1 so the rendered SVG
+  // has matching x and y scales; padding the shorter axis to match
+  // keeps the content centred.
+  const side = Math.max(w, h);
+  x -= (side - w) / 2;
+  y -= (side - h) / 2;
+  return `${x} ${y} ${side} ${side}`;
+}
+
 // ── Export ────────────────────────────────────────────────────
 global.NETGEN = {
   POSITIONS, NODES, EDGES, CLUSTER_OF, DEGREES, DEGREES_EXCL, MINCUTS,
@@ -734,6 +772,7 @@ global.NETGEN = {
   COLORS, CY, VIZ,
   makeTooltip, scrubSlider, stepController, toggle,
   linksRow, kinSection,
+  fitViewBoxAttr,
 };
 
 })(window);
