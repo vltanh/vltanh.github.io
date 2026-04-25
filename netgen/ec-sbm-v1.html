@@ -208,13 +208,13 @@
   <div class="stage-num">profiling · the minimum edge cut</div>
   <h2>One new scalar per cluster: \(k(C)\).</h2>
   <p>For each cluster \(C\), the profile computes the minimum edge cut of \(C\)'s induced subgraph in the input. An edge cut for \(C\) is a set of edges whose removal disconnects \(C\); \(k(C)\) is the smallest such set's size. Measured via <a href="https://pypi.org/project/pymincut/" target="_blank" rel="noopener"><code>pymincut</code></a>'s Nagamochi-Ono-Ibaraki algorithm with a bucket-queue heap (<code>"noi"</code> / <code>"bqueue"</code>). Singleton clusters get \(k = 0\) by definition. Writes one integer per cluster to <code>mincut.csv</code>.</p>
-  <p>Each cluster's mincut on this synthetic, highlighted in red-dashed on the graph below. All three cuts here isolate a single low-degree vertex; a less uniform input would surface a non-trivial internal cut (two subsets separated by a thin bridge).</p>
+  <p>Each cluster's mincut on this synthetic, highlighted in red-dashed on the graph below. C1's cut is a non-trivial internal cut: two subsets of 4 nodes joined by a thin bridge of 2 edges. C2 and C3 isolate a single low-degree vertex.</p>
   <table class="profile-table">
     <thead>
       <tr><th>cluster</th><th>nodes</th><th>min deg in C</th><th>\(k(C)\)</th><th>one minimum cut</th></tr>
     </thead>
     <tbody>
-      <tr><th>C1</th><td class="val">8</td><td class="val">3</td><td class="val">3</td><td class="desc">{(3, 7), (6, 7), (7, 8)}.</td></tr>
+      <tr><th>C1</th><td class="val">8</td><td class="val">3</td><td class="val">2</td><td class="desc">{(1, 5), (4, 8)}, splitting {1,2,3,4} from {5,6,7,8}.</td></tr>
       <tr><th>C2</th><td class="val">6</td><td class="val">2</td><td class="val">2</td><td class="desc">{(9, 13), (12, 13)}.</td></tr>
       <tr><th>C3</th><td class="val">4</td><td class="val">1</td><td class="val">1</td><td class="desc">{(16, 18)}.</td></tr>
     </tbody>
@@ -276,7 +276,7 @@
     g.add_edge_list(core_edges)<br>
     gt.remove_parallel_edges(g); gt.remove_self_loops(g)
   </div>
-  <p>Step through the two phases and press <code>random</code> for a different SBM realization. The residual on this synthetic has 1 intra-C2 budget + 8 inter (4 C1-C2 + 2 C1-C3 + 2 C2-C3). Since all 6 possible intra-C2 pairs on \(\{9, 10, 11, 12\}\) are already core edges, <em>every</em> realization's single intra-C2 sample duplicates a core edge.</p>
+  <p>Step through the two phases and press <code>random</code> for a different SBM realization. The residual on this synthetic has 1 intra-C2 + 1 intra-C3 budget + 8 inter (4 C1-C2 + 2 C1-C3 + 2 C2-C3). Whether each intra sample lands on a fresh pair or duplicates a constructive edge depends on which slot the SBM picks; the dedup pass collapses any duplicates.</p>
   <div class="graph" id="g-overlay">
     <div class="graph-chrome">
       <span id="g-overlay-stage">step 0 &middot; constructive only</span>
@@ -558,35 +558,35 @@ window.MathJax = {
   // at PYTHONHASHSEED=0; see memory ec_sbm_viz_bugs.md. If you touch
   // shared.js's INTRA/MINCUTS, re-run verify_kec_core.py and update.
   //
-  //   C1 core (K_4 on {1,2,3,4}): 6 edges
-  //   C1 attach: 5→{1,2,3}, 6→{1,4,5}, 8→{1,2,3}, 7→{1,4,5}  (12 edges)
+  //   C1 core (K_3 on {1,4,2}): 3 edges
+  //   C1 attach: 3→{1,4}, 5→{1,2}, 6→{1,4}, 7→{3,5}, 8→{1,4}  (10 edges)
   //   C2 core (K_3 on {9,11,10}): 3 edges
-  //   C2 attach: 12→{9,11}, 13→{9,12}, 14→{10,11}  (6 edges)
+  //   C2 attach: 12→{9,11}, 13→{9,11}, 14→{10,12}  (6 edges)
   //   C3 core (K_2 on {15,16}): 1 edge
-  //   C3 attach: 17→{15}, 18→{15}  (2 edges)
-  //   Total: 30 edges.
+  //   C3 attach: 17→{15}, 18→{16}  (2 edges)
+  //   Total: 25 edges.
   const CORE_PLUS_ATTACH = [
-    [1,2],[1,3],[1,4],[2,3],[2,4],[3,4],
-    [1,5],[2,5],[3,5],
-    [1,6],[4,6],[5,6],
-    [1,8],[2,8],[3,8],
-    [1,7],[4,7],[5,7],
+    [1,2],[1,4],[2,4],
+    [1,3],[3,4],
+    [1,5],[2,5],
+    [1,6],[4,6],
+    [3,7],[5,7],
+    [1,8],[4,8],
     [9,10],[9,11],[10,11],
     [9,12],[11,12],
-    [9,13],[12,13],
-    [10,14],[11,14],
+    [9,13],[11,13],
+    [10,14],[12,14],
     [15,16],
     [15,17],
-    [15,18],
+    [16,18],
   ];
   const CORE_SET = new Set(CORE_PLUS_ATTACH.map(([u, v]) => edgeKey(u, v)));
 
   // ── Residual SBM overlay realizations ──
-  // After constructive: residual probs[C2,C2]=2 (1 intra edge), inter
-  // budgets 4/2/2 (C1C2/C1C3/C2C3). Intra-C2 stubs live only on nodes
-  // {9,10,11,12}, so every possible intra-C2 pair is already in CORE_SET
-  // → every realization's intra-C2 sample is a collision. Three hand-
-  // crafted realizations cycle on the random button.
+  // After constructive: residual probs[C2,C2]=2 (1 intra-C2 edge),
+  // probs[C3,C3]=2 (1 intra-C3 edge), inter budgets 4/2/2 (C1C2 /
+  // C1C3 / C2C3). Three hand-crafted realizations cycle on the random
+  // button; some intra residuals duplicate constructive edges.
   const REALIZATIONS = [
     {
       label: "realization 1 of 3",
@@ -595,7 +595,8 @@ window.MathJax = {
         [1, 15], [4, 17],                     // C1-C3
         [9, 15], [11, 16],                    // C2-C3
       ],
-      intraC2: [10, 11],  // duplicates core edge
+      intraC2: [13, 14],   // fresh pair
+      intraC3: [16, 17],   // fresh pair
     },
     {
       label: "realization 2 of 3",
@@ -604,7 +605,8 @@ window.MathJax = {
         [2, 16], [4, 15],
         [11, 15], [10, 16],
       ],
-      intraC2: [9, 12],  // duplicates attach edge
+      intraC2: [9, 12],    // duplicates attach edge
+      intraC3: [16, 18],   // duplicates attach edge
     },
     {
       label: "realization 3 of 3",
@@ -613,7 +615,8 @@ window.MathJax = {
         [1, 16], [3, 17],
         [9, 17], [12, 15],
       ],
-      intraC2: [11, 12],  // duplicates core edge
+      intraC2: [10, 11],   // duplicates core edge
+      intraC3: [15, 16],   // duplicates core edge
     },
   ];
 
@@ -625,14 +628,23 @@ window.MathJax = {
         id: `ov-inter-${i}`,
       });
     });
-    // Intra-C2 residual sample. Core already has this pair, so rendering
-    // this one copy next to the core's copy creates the two parallel
-    // strands the VIZ fan-out auto-draws. Red-dashed = the dup remove_
-    // parallel_edges will drop.
-    const [a, b] = real.intraC2;
-    out.push({
-      u: a, v: b, color: COL.edge_drop, w: 2.4,
-      id: "ov-intra-dup", classes: "dashed thick",
+    // Intra-C2 + intra-C3 residual samples. If the sampled pair already
+    // sits in CORE_PLUS_ATTACH, the second strand the VIZ fan-out draws
+    // is what remove_parallel_edges will drop (red-dashed).
+    const intras = [
+      { pair: real.intraC2, id: "ov-intra-c2" },
+      { pair: real.intraC3, id: "ov-intra-c3" },
+    ];
+    intras.forEach(({ pair, id }) => {
+      if (!pair) return;
+      const [a, b] = pair;
+      const isDup = CORE_SET.has(edgeKey(a, b));
+      out.push({
+        u: a, v: b,
+        color: isDup ? COL.edge_drop : COL.edge_stage3,
+        w: isDup ? 2.4 : 1.8,
+        id, classes: isDup ? "dashed thick" : "",
+      });
     });
     return out;
   }
@@ -888,15 +900,16 @@ window.MathJax = {
     const TOTAL_ARRIVALS = ARRIVAL_SEQ.length;
 
     const ATTACH_VARIANTS = {
-      5:  [[1, 2, 3], [1, 2, 4], [1, 3, 4]],
-      6:  [[1, 4, 5], [1, 3, 5], [2, 4, 5]],
-      7:  [[1, 4, 5], [1, 2, 3], [1, 3, 5]],
-      8:  [[1, 2, 3], [1, 4, 5], [2, 3, 4]],
-      12: [[9, 11],   [9, 10],   [10, 11]],
-      13: [[9, 12],   [11, 12],  [9, 10]],
-      14: [[10, 11],  [9, 12],   [12, 13]],
-      17: [[15],      [16],      [16]],
-      18: [[15],      [16],      [17]],
+      3:  [[1, 4],    [1, 2],    [2, 4]],
+      5:  [[1, 2],    [1, 4],    [2, 3]],
+      6:  [[1, 4],    [3, 4],    [1, 5]],
+      7:  [[3, 5],    [5, 6],    [1, 5]],
+      8:  [[1, 4],    [4, 7],    [1, 7]],
+      12: [[9, 11],   [10, 11],  [9, 10]],
+      13: [[9, 11],   [9, 12],   [10, 11]],
+      14: [[10, 12],  [10, 11],  [12, 13]],
+      17: [[15],      [16],      [15]],
+      18: [[16],      [15],      [17]],
     };
     const INTRO_ARRIVAL = {};
     ARRIVAL_SEQ.forEach((a, i) => { INTRO_ARRIVAL[a.node] = i + 1; });
