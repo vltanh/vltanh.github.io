@@ -102,6 +102,20 @@
   <p>Two things the model does <em>not</em> do, despite a casual reading. First, it does <em>not</em> forbid outlier-outlier edges: two outliers' \(z\)-stubs can pair in the background graph. Second, the identity of input outliers does <em>not</em> survive; our wrapper's profile drops their OO edges at input time only to make the target \(\xi\) reachable, not to tell the sampler which specific nodes to label as outliers.</p>
 </section>
 
+<!-- ─────────── Profiling · the shared fixture ─────────── -->
+<section class="stage">
+  <div class="stage-num">profiling · outliers as singletons</div>
+  <h2>Shared input graph: 18 clustered + 2 singletons (with the OO edge dashed).</h2>
+  <p>The 20-node synthetic this page builds on: C1 (8), C2 (6), C3 (4), plus outliers 19 + 20 each in their own 1-node cluster. ABCD+o's profile flips <code>drop_outlier_outlier_edges</code> on, so the (19, 20) edge below is dashed-red as a visual cue: it disappears before stage 2 sees the input. The sampler then picks its own \(s_0\) outliers in stage 2; this view shows the input partition only.</p>
+  <div class="graph" id="g-shared-input">
+    <div class="graph-chrome">
+      <span>input G &middot; singleton mode &middot; 5 clusters &middot; OO dashed</span>
+      <span class="right">shared fixture</span>
+    </div>
+    <div class="graph-canvas" id="g-shared-input-cy"></div>
+  </div>
+</section>
+
 <!-- ─────────── Profiling · degree sequence ─────────── -->
 <section class="stage">
   <div class="stage-num">profiling · degree sequence</div>
@@ -412,6 +426,28 @@ window.MathJax = {
     const c = CLUSTER_OF[e.u] || CLUSTER_OF[e.v];
     return COL.edge_intra[c] || COL.edge_inter;
   }
+
+  // Shared input fixture: input graph + singleton-mode 5-cluster colour.
+  // OO edge (19, 20) drawn dashed-red since drop_oo strips it pre-stage-2.
+  (function () {
+    const edges = EDGES.map(e => {
+      const isOO = INPUT_OUT_SET.has(e.u) && INPUT_OUT_SET.has(e.v);
+      return {
+        u: e.u, v: e.v,
+        color: pickInputColor(e), w: 1.4,
+        classes: isOO ? "dashed thick" : "",
+      };
+    });
+    NETGEN.VIZ.init("g-shared-input-cy", {
+      showLabels: true,
+      edges,
+      nodeColor: (id) => {
+        if (id === 19) return COL.OUT;
+        if (id === 20) return COL.OUT;
+        return COL[CLUSTER_OF[id]] || COL.paper_3;
+      },
+    });
+  })();
 
   (function () {
     const degs = NODES.map(n => DEG_KEPT[n]).sort((a, b) => b - a);
