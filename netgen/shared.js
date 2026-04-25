@@ -766,13 +766,15 @@ if (typeof document !== "undefined") {
 // opts:
 //   positions: id → {x, y}. Default: NETGEN.POSITIONS.
 //   includeIds: array of ids to wrap. Default: NETGEN.NODES.
-//   pad: extra margin around the bbox (default 80; covers makeBlockRects'
-//        padX/padY of 34/38 plus label/halo space).
+//   pad: extra margin around the bbox (default 42; covers makeBlockRects'
+//        padX/padY of 34/38 plus a small label/halo allowance). Tighter
+//        framing keeps the graph readable on mobile, where a generous
+//        pad shrinks every node well below thumb-target size.
 function fitViewBoxAttr(opts) {
   opts = opts || {};
   const positions = opts.positions || POSITIONS;
   const ids = opts.includeIds || NODES;
-  const pad = opts.pad != null ? opts.pad : 80;
+  const pad = opts.pad != null ? opts.pad : 42;
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   ids.forEach(id => {
     const p = positions[id];
