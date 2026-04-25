@@ -513,16 +513,28 @@ window.MathJax = {
     return COL.edge_intra[c] || COL.edge_inter;
   }
 
-  // Shared input fixture: input graph + singleton-mode 5-cluster colour.
+  // Shared input fixture: input graph + singleton-mode 5-cluster colour
+  // + cluster enclosure boxes via makeBlockRects. Includes outliers as
+  // singleton clusters at this baseline (the next stage drops them).
   (function () {
+    const host = document.getElementById("g-shared-input-cy");
+    if (!host) return;
+    host.innerHTML = "";
+    const svg = d3.select(host).append("svg")
+      .attr("class", "viz-svg")
+      .attr("viewBox", "-320 -340 640 680")
+      .attr("preserveAspectRatio", "xMidYMid meet");
+    const syncRects = makeBlockRects(svg, { labelFn: (n) => n });
     const edges = EDGES.map(e => ({
       u: e.u, v: e.v, color: pickInputColor(e), w: 1.4,
     }));
-    NETGEN.VIZ.init("g-shared-input-cy", {
-      showLabels: true,
-      edges,
+    const viz = NETGEN.VIZ.init("g-shared-input-cy", {
+      svg, showLabels: true, edges,
       nodeColor: (id) => COL[CLUSTER_OF[id]] || COL.OUT,
     });
+    NETGEN.makeTooltip(viz, document.getElementById("g-shared-input"));
+    syncRects(viz);
+    viz.sim.on("tick.blockRects", () => syncRects(viz));
   })();
 
   function edgeKey(u, v) { return Math.min(u, v) + "-" + Math.max(u, v); }
