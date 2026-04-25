@@ -359,44 +359,13 @@
   </div>
 </section>
 
-<!-- ─────────── Generation · match_degree, with choices ─────────── -->
+<!-- ─────────── Generation · match_degree (hybrid default) ─────────── -->
 <section class="stage">
-  <div class="stage-num">generation · match degree, with choices</div>
-  <h2>Five matchers. Hybrid logs gridlock; it does not silently drop.</h2>
-  <p>After the residual SBM + rewire, some nodes may still be short of their target. v2's <code>src/match_degree.py</code> ships five algorithms, selectable via <code>--algorithm</code>:</p>
-  <table class="matcher-table">
-    <thead>
-      <tr><th>algorithm</th><th>how it picks pairs</th><th>failure mode</th></tr>
-    </thead>
-    <tbody>
-      <tr>
-        <th>greedy</th>
-        <td class="desc">v1's heap-based. Pop \(u\) with max residual, connect to <code>min(residual, non-neighbours)</code> partners via <code>set.pop()</code>.</td>
-        <td class="desc">Silent gridlock.</td>
-      </tr>
-      <tr>
-        <th>true_greedy</th>
-        <td class="desc">Max-heap with dynamic re-push. Pop \(u\), pick \(v\) via argmax over current degrees among valid targets, push updated residuals back.</td>
-        <td class="desc">Logs gridlock.</td>
-      </tr>
-      <tr>
-        <th>random_greedy</th>
-        <td class="desc">Weighted-random \(u\) (by residual), weighted-random \(v\) from valid targets.</td>
-        <td class="desc">Logs gridlock; useful for comparing bias against deterministic greedy.</td>
-      </tr>
-      <tr>
-        <th>rewire</th>
-        <td class="desc">Configuration-model pairing then 2-opt repair. Build a flat stub list (each node repeated <code>residual</code> times), shuffle, pair adjacent. Invalid pairs queue for the same <code>run_rewire_attempts</code> used in stage 3.</td>
-        <td class="desc">Logs gridlock.</td>
-      </tr>
-      <tr class="pref">
-        <th>hybrid (default)</th>
-        <td class="desc">Run <code>rewire</code> first, then <code>true_greedy</code> on whatever <code>rewire</code> could not place. Rewire handles the bulk unbiased; greedy handles the stuck tail deterministically.</td>
-        <td class="desc">Logs gridlock; drops near zero on realistic inputs.</td>
-      </tr>
-    </tbody>
-  </table>
-  <p>Toggle <code>apply match_degree</code> to see the per-node deficit pile shrink. Switch the <code>algorithm</code> dropdown to pick a matcher; hit <code>random</code> for a different realization within that algorithm.</p>
+  <div class="stage-num">generation · match the residual degree</div>
+  <h2>Hybrid by default. Logs gridlock; does not silently drop.</h2>
+  <p>After the residual SBM + rewire, some nodes may still be short of their target. v2 hands off to <code>src/match_degree.py --algorithm hybrid</code>: a <code>rewire</code> pass over the residual stub list followed by a deterministic <code>true_greedy</code> on whatever the rewire could not place. Rewire handles the bulk unbiased; greedy handles the stuck tail. Anything still unplaced after both passes is logged as a <code>WARN</code> with the exact stub count, never silently dropped the way <a href="./ec-sbm-v1.html">v1's plain greedy</a> does.</p>
+  <p>The viz below runs <code>hybrid</code> on v2's specific stage-3 residual (the per-node deficit left after rewire). For the broader catalogue (<code>greedy</code>, <code>true_greedy</code>, <code>random_greedy</code>, <code>rewire</code>) and the <code>--remap</code> mode used by gens that emit fresh node IDs, see the <a href="./matcher.html">match_degree page</a>.</p>
+  <p>Toggle <code>apply match_degree</code> to see the per-node deficit pile shrink. Hit <code>random</code> for a different realization.</p>
   <div class="graph g-with-side" id="g-match">
     <div class="graph-chrome">
       <span id="g-match-label">before match_degree &middot; residual deficits visible</span>
@@ -417,17 +386,7 @@
         <span class="toggle-track"></span>
         <span>apply match_degree</span>
       </label>
-      <label style="font-family:'Special Elite',monospace;font-size:.78rem;color:var(--paper-2);">
-        algorithm
-        <select id="g-match-alg" style="margin-left:.4rem">
-          <option value="hybrid" selected>hybrid</option>
-          <option value="true_greedy">true_greedy</option>
-          <option value="rewire">rewire</option>
-          <option value="random_greedy">random_greedy</option>
-          <option value="greedy">greedy</option>
-        </select>
-      </label>
-      <button class="btn" id="g-match-reroll" title="resample">random</button>
+      <button class="btn" id="g-match-reroll" title="try a different matcher realization">random</button>
       <span class="step-label" id="g-match-real">realization 1 of 3</span>
     </div>
     <div class="provenance-legend">
@@ -1224,7 +1183,6 @@ window.MathJax = {
     const labelEl = document.getElementById("g-match-label");
     const countEl = document.getElementById("g-match-count");
     const realEl = document.getElementById("g-match-real");
-    const algEl = document.getElementById("g-match-alg");
 
     let applied = false;
     let real = 0;
@@ -1305,8 +1263,7 @@ window.MathJax = {
 
     function render() {
       viz.removeEdges(id => String(id).startsWith("m-s4-"));
-      const alg = algEl.value;
-      const reals = ALG_REALIZATIONS[alg] || ALG_REALIZATIONS.hybrid;
+      const reals = ALG_REALIZATIONS.hybrid;
       if (real >= reals.length) real = 0;
       const matchEdges = reals[real].edges;
       currentMatchEdges = [];
@@ -1335,9 +1292,8 @@ window.MathJax = {
       input: document.getElementById("g-match-toggle"),
       onChange: (on) => { applied = on; render(); },
     });
-    algEl.addEventListener("change", () => { real = 0; render(); });
     document.getElementById("g-match-reroll").addEventListener("click", () => {
-      const reals = ALG_REALIZATIONS[algEl.value] || ALG_REALIZATIONS.hybrid;
+      const reals = ALG_REALIZATIONS.hybrid;
       real = (real + 1) % reals.length;
       render();
     });

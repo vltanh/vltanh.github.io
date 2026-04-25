@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>match_degree</title>
+<meta name="description" content="match_degree: top-up tool that drives a graph's degree sequence toward an input target. Five algorithms (greedy, true_greedy, random_greedy, rewire, hybrid) trade off bias, throughput, and gridlock honesty.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./shared.css">
+<style>
+.graph.g-with-side .side-caption{
+  font-family:'Special Elite','Courier New',monospace;
+  font-size:.76rem; color:var(--paper-2);
+  padding:.15rem 0 .7rem; margin-bottom:.55rem;
+  border-bottom:1px dashed rgba(139,117,65,.4); line-height:1.45;
+}
+.graph.g-with-side .side-caption .st{
+  color:var(--azure); letter-spacing:.12em;
+  text-transform:uppercase; margin-right:.25rem;
+}
+.graph.g-with-side .side-body{
+  display:grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+  gap: 1rem; align-items: center; margin-bottom: .4rem;
+}
+.graph.g-with-side .side-right{
+  display:flex; flex-direction:column; align-items:stretch; gap:.4rem;
+}
+.graph.g-with-side .side-right > svg{ width:100%; height:auto; }
+@media (max-width: 820px){
+  .graph.g-with-side .side-body{ grid-template-columns: 1fr; align-items: start; }
+}
+.disk-panel{
+  padding:1rem; background:var(--ink-2); border:1px solid var(--rule);
+  border-radius:6px; margin:1rem 0;
+}
+.disk-panel svg{ width:100%; height:auto; display:block; }
+.step-desc{
+  font-family:'Special Elite','Courier New',monospace;
+  font-size:.78rem; color:var(--paper-2); margin-top:.6rem;
+}
+.step-desc .st{ color:var(--azure); letter-spacing:.1em; text-transform:uppercase; }
+.step-desc mjx-container{ font-size:1em !important; }
+.matcher-table{
+  width:100%; border-collapse:collapse; margin:1rem 0;
+  background:var(--ink-2); border:1px solid var(--rule); border-radius:4px;
+  overflow:hidden; font-size:.87rem;
+}
+.matcher-table th, .matcher-table td{
+  padding:.5rem .8rem; border-bottom:1px solid var(--rule);
+  vertical-align:top; text-align:left;
+}
+.matcher-table tr:last-child th, .matcher-table tr:last-child td{ border-bottom:none; }
+.matcher-table th{
+  font-family:'Special Elite','Courier New',monospace;
+  font-size:.72rem; letter-spacing:.12em; color:var(--paper-3);
+  width:18%; white-space:nowrap;
+}
+.matcher-table td.desc{ color:var(--paper-2); line-height:1.45; }
+.matcher-table tr.pref th{ color:var(--mint); }
+.matcher-table tr.pref td.desc{ color:var(--paper); }
+.readout{
+  display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:.8rem;
+  font-family:'Special Elite','Courier New',monospace; font-size:.78rem;
+}
+.readout .item{ color:var(--paper-3); }
+.readout .item b{ color:var(--azure); margin-left:.3rem; }
+.readout .item.diff b{ color:var(--signal); }
+.readout .item.good b{ color:var(--mint); }
+.provenance-legend{
+  display:flex; gap:1.4rem; flex-wrap:wrap;
+  font-family:'Special Elite','Courier New',monospace;
+  font-size:.78rem; color:var(--paper-2);
+  margin-top:.6rem; justify-content:center;
+}
+.provenance-legend .sw{
+  display:inline-block; width:28px; height:3px; vertical-align:middle;
+  margin-right:.45rem; border-radius:1px;
+}
+.graph-canvas{
+  height:auto; aspect-ratio: 640 / 680; max-height: 560px;
+}
+</style>
+</head>
+<body>
+<main class="page">
+
+<div id="links"></div>
+
+<header class="hdr">
+  <div class="kicker">network-generation · shared utility</div>
+  <h1><em>match_degree</em></h1>
+  <p class="sub">A top-up tool every generator can call after its main pass. Reads two edgelists (current graph + reference target), finds per-node residual deficits, and adds edges that close the gap.</p>
+</header>
+
+<section class="hook">
+  <p>Every generator in this project ends with an output that is "close to" the input degree sequence but not exact. Dedup, rewire, and outlier handling each shave a few stubs from each node's target. <code>src/match_degree.py</code> is the shared finishing tool: pop the highest-deficit node, find a partner with deficit and no edge between them, drop the edge in. Repeat until the deficit set is empty or every remaining pair is blocked.</p>
+  <p>That last word, "blocked", is where the algorithm choices matter. The same residual can be drained five different ways, and they disagree on which pairs to try, in what order, and what to do when a deficit cannot be closed cleanly. The choices show up as different output degree sequences and different counts of unplaced stubs.</p>
+</section>
+
+<!-- ─────────── Stage 1 · the input contract ─────────── -->
+<section class="stage">
+  <div class="stage-num">input contract</div>
+  <h2>Two edgelists in. Top-up edges out.</h2>
+  <p>The CLI is generator-agnostic:</p>
+  <div style="font-family:'Special Elite','Courier New',monospace;color:var(--paper);background:var(--ink-3);border:1px solid var(--rule);padding:.8rem;border-radius:3px;margin:.6rem 0;font-size:.85rem;line-height:1.6">
+    python src/match_degree.py \\<br>
+    &nbsp;&nbsp;--input-edgelist  &lt;current.csv&gt; \\<br>
+    &nbsp;&nbsp;--ref-edgelist    &lt;target.csv&gt; \\<br>
+    &nbsp;&nbsp;--match-degree-algorithm  greedy|true_greedy|random_greedy|rewire|hybrid \\<br>
+    &nbsp;&nbsp;--output-folder   &lt;dir&gt; \\<br>
+    &nbsp;&nbsp;--seed            &lt;int&gt; \\<br>
+    &nbsp;&nbsp;[--remap]
+  </div>
+  <p>The two inputs share a node set. For each node \(u\), the residual deficit is</p>
+  \[
+    r_u \;=\; \max\bigl(0, \,d_u^{\text{ref}} - d_u^{\text{input}}\bigr),
+  \]
+  <p>where \(d_u^{\text{ref}}\) is \(u\)'s degree in the reference and \(d_u^{\text{input}}\) is its degree in the current graph. The matcher's job is to add new edges so that, post-match, \(d_u^{\text{out}} \approx d_u^{\text{ref}}\) for every \(u\). It can never <em>reduce</em> a degree; if some node already has more edges than its target, it is left alone.</p>
+  <div class="callout">
+    <div class="tag">when each generator calls it</div>
+    <p>EC-SBM-v1 hardcodes <code>greedy</code> (legacy from the original paper implementation). EC-SBM-v2 defaults to <code>hybrid</code>. The simple gens (sbm, abcd, abcd+o, lfr, npso) leave it off by default; their pipelines accept <code>--match-degree</code> as an opt-in flag, paired with the optional <code>--remap</code> mode below for gens that emit fresh node IDs.</p>
+  </div>
+</section>
+
+<!-- ─────────── Stage 2 · the five algorithms ─────────── -->
+<section class="stage">
+  <div class="stage-num">the five algorithms</div>
+  <h2>Different ways to drain the same deficit pile.</h2>
+  <p>All five algorithms share the same outer loop: pick a node \(u\) with positive deficit, pick a partner \(v\) such that \((u, v)\) is not already an edge and \(v\) has positive deficit, add the edge, decrement both. They differ on the picking order and on what they do when the loop stalls.</p>
+  <table class="matcher-table">
+    <thead>
+      <tr><th>algorithm</th><th>how it picks pairs</th><th>failure mode</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <th>greedy</th>
+        <td class="desc">Heap-based. Pop \(u\) with max residual; connect to <code>min(residual, |non-neighbours|)</code> partners drawn via <code>set.pop()</code>.</td>
+        <td class="desc">Silent gridlock: drops stubs without logging.</td>
+      </tr>
+      <tr>
+        <th>true_greedy</th>
+        <td class="desc">Max-heap with dynamic re-push. Pop \(u\), pick \(v\) via <code>argmax</code> over current degrees among valid targets, push updated residuals back.</td>
+        <td class="desc">Logs gridlock when no partner is left.</td>
+      </tr>
+      <tr>
+        <th>random_greedy</th>
+        <td class="desc">Weighted-random \(u\) (by residual), weighted-random \(v\) from valid targets.</td>
+        <td class="desc">Logs gridlock; useful for comparing bias against deterministic greedy.</td>
+      </tr>
+      <tr>
+        <th>rewire</th>
+        <td class="desc">Configuration-model pairing then 2-opt repair. Build a flat stub list (each node repeated <code>residual</code> times), shuffle, pair adjacent. Invalid pairs queue for <code>run_rewire_attempts</code>.</td>
+        <td class="desc">Logs gridlock; almost always resolves on realistic inputs.</td>
+      </tr>
+      <tr class="pref">
+        <th>hybrid (default)</th>
+        <td class="desc">Run <code>rewire</code> first, then <code>true_greedy</code> on whatever <code>rewire</code> could not place. Rewire handles the bulk unbiased; greedy handles the stuck tail deterministically.</td>
+        <td class="desc">Logs gridlock; drops near zero on realistic inputs.</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>Greedy and true_greedy are deterministic given a seed; random_greedy and rewire are stochastic; hybrid is a deterministic-then-stochastic composition. On dense inputs all five converge; on long-tail-degree inputs with hubs, greedy is the one that silently drops stubs, true_greedy is the one that gridlocks loudly, and hybrid is the one that drains the tail without bias.</p>
+</section>
+
+<!-- ─────────── Stage 3 · live walker ─────────── -->
+<section class="stage">
+  <div class="stage-num">live walker on the 20-node fixture</div>
+  <h2>Same residual, five different drain orders.</h2>
+  <p>The toy graph below is the shared 20-node synthetic this site uses for every generator (3 real clusters + 2 outliers, 40 edges). Pretend an upstream stage left a residual deficit on six nodes: <code>{6: 1, 8: 1, 10: 2, 11: 1, 13: 2, 17: 1, 18: 1}</code>, totalling 9 stubs (so 4 or 5 top-up edges, depending on parity and gridlock).</p>
+  <p>Toggle <em>apply match_degree</em> to see the deficit pile (faint-red tail on each bar) shrink. Use the <em>algorithm</em> dropdown to switch matchers; <em>random</em> cycles realisations within an algorithm. The match edges placed are highlighted in the graph at left.</p>
+  <div class="graph g-with-side" id="g-match">
+    <div class="graph-chrome">
+      <span id="g-match-label">before match_degree &middot; residual deficits visible</span>
+      <span class="right" id="g-match-count">placed: 0 &middot; gridlocked: 0</span>
+    </div>
+    <div class="side-caption">
+      <span class="st">left</span>20-node synthetic; grey = match_degree edges &middot; <span class="st">right</span>per-node degree bars. Azure = base graph, grey = match_degree, faint red tail = residual deficit.
+    </div>
+    <div class="side-body">
+      <div class="graph-canvas" id="g-match-cy"></div>
+      <div class="side-right">
+        <svg id="match-bars" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+    </div>
+    <div class="widget-row">
+      <label class="toggle">
+        <input type="checkbox" id="g-match-toggle">
+        <span class="toggle-track"></span>
+        <span>apply match_degree</span>
+      </label>
+      <label style="font-family:'Special Elite',monospace;font-size:.78rem;color:var(--paper-2);">
+        algorithm
+        <select id="g-match-alg" style="margin-left:.4rem">
+          <option value="hybrid" selected>hybrid</option>
+          <option value="true_greedy">true_greedy</option>
+          <option value="rewire">rewire</option>
+          <option value="random_greedy">random_greedy</option>
+          <option value="greedy">greedy</option>
+        </select>
+      </label>
+      <button class="btn" id="g-match-reroll" title="resample">random</button>
+      <span class="step-label" id="g-match-real">realization 1</span>
+    </div>
+    <div class="provenance-legend">
+      <span><span class="sw" style="background:#567ad8"></span>base graph</span>
+      <span><span class="sw" style="background:#6b6a54"></span>match_degree edge</span>
+      <span><span class="sw" style="background:#c92a2a"></span>residual deficit</span>
+    </div>
+  </div>
+  <div class="callout warn">
+    <div class="tag">caveat: silent gridlock in greedy</div>
+    <p>A node with residual 3 and only one valid partner leaves the heap with residual 2. Those two stubs vanish without a log line. On a small synthetic you rarely see this. On dense inputs with long-tailed degree distributions, a handful of hubs silently come out short, and the degree-sequence target starts drifting below the profile's. <code>true_greedy</code>, <code>rewire</code>, and <code>hybrid</code> all log the same situation as a <code>WARN</code> with the count of unplaced stubs.</p>
+  </div>
+</section>
+
+<!-- ─────────── Stage 4 · --remap mode ─────────── -->
+<section class="stage">
+  <div class="stage-num">the --remap option</div>
+  <h2>For gens that emit fresh node IDs, pair by degree rank instead of by ID.</h2>
+  <p>Three of the simple gens (abcd, abcd+o, lfr) and nPSO emit integer node IDs that have no relation to the input's IDs: ABCD's <code>com.tsv</code> uses <code>1, 2, ..., N</code>, LFR's binary outputs <code>0, 1, ..., N-1</code>, and nPSO's MATLAB sampler labels nodes by arrival rank. Naively diffing degrees against the input's IDs is meaningless. The <code>--remap</code> flag pairs input node \(i\) (sorted by descending input-degree) with output node \(\pi(i)\) (sorted by descending output-degree), then computes the deficit on that pairing.</p>
+  <p>Algorithm-side this is just an accounting layer: the matcher still adds edges in the input's ID space, but it judges deficits against the rank-paired target. The pairing is the L1- and L2-optimal one (rearrangement inequality) for matching two non-identical degree sequences. There is no on-disk re-ID; the output edge.csv keeps the input's IDs throughout.</p>
+  <div class="callout">
+    <div class="tag">when to use --remap</div>
+    <p>Whenever the gen's stage-2 output uses fresh integer IDs that you want to align to the input's degree sequence post-hoc. The simple-gen wrappers turn it on by default whenever they enable <code>--match-degree</code>; the SBM family does not need it because their gens already emit edges in the input's ID space.</p>
+  </div>
+</section>
+
+<!-- ─────────── Kin section ─────────── -->
+<div id="kin"></div>
+
+<footer class="ack">
+  <div class="tools">drawn with d3</div>
+  <div class="credit">part of the <a href="./">network-generation</a> walkthrough</div>
+</footer>
+
+</main>
+
+<script>
+window.MathJax = {
+  tex: {
+    inlineMath: [["\\(", "\\)"]],
+    displayMath: [["\\[", "\\]"]],
+    tags: "none",
+  },
+  chtml: { scale: 1.0 }
+};
+</script>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="./shared.js"></script>
+<script>
+(function () {
+  document.getElementById("links").innerHTML = NETGEN.linksRow({gen: "matcher"});
+  (function () {
+    const icons = document.querySelector("#links .top-icons");
+    if (!icons) return;
+    // matcher is a shared utility, not a per-generator algorithm. No
+    // dedicated docs page; the notes link would 404. Strip it and
+    // point the github icon at src/match_degree.py.
+    const notesLink = icons.querySelector('a[aria-label="algorithm notes"]');
+    if (notesLink) notesLink.remove();
+    const sourceLink = icons.querySelector('a[aria-label="github repository"]');
+    if (sourceLink) {
+      sourceLink.setAttribute("href",
+        "https://github.com/vltanh/network-generation/tree/main/src/match_degree.py");
+      const span = sourceLink.querySelector("span");
+      if (span) span.textContent = "code";
+    }
+  })();
+  document.getElementById("kin").innerHTML = NETGEN.kinSection({
+    title: "callers",
+    siblings: [
+      { gen: "ec-sbm-v1", label: "EC-SBM v1",
+        diff: "Hardcodes <code>greedy</code> in stage 4. Inherited from the legacy paper implementation; switching to <code>hybrid</code> is a v2 design choice." },
+      { gen: "ec-sbm-v2", label: "EC-SBM v2",
+        diff: "Default <code>hybrid</code>, with the dropdown above as the menu. Stage 4 in the v2 page is a thin wrapper over this tool." },
+    ],
+  });
+
+  const COL = NETGEN.COLORS;
+  const NODES = NETGEN.NODES;
+  const EDGES = NETGEN.EDGES;
+  const CLUSTER_OF = NETGEN.CLUSTER_OF;
+  const DEGREES = NETGEN.DEGREES;
+
+  function edgeKey(u, v) { return Math.min(u, v) + "-" + Math.max(u, v); }
+
+  // Base edges = the 20-node input graph itself, projected as the "current"
+  // graph. Pretend an upstream stage left this exact graph minus a few stubs
+  // per node; the deficit table below describes which stubs are missing.
+  const baseEdges = EDGES.map(e => ({
+    u: e.u, v: e.v, color: COL.edge_stage2, w: 1.4,
+    id: `m-base-${edgeKey(e.u, e.v)}`,
+  }));
+
+  // Hand-authored residual deficit. Mix of degree-rich (10, 13) and degree-
+  // poor (6, 8, 17, 18) nodes so greedy gridlocks while hybrid drains
+  // cleanly. Sum is even (= 9) so a parity stub is unmatchable.
+  const DEFICIT = { 6: 1, 8: 1, 10: 2, 11: 1, 13: 2, 17: 1, 18: 1 };
+  // Effective per-node target = DEGREES[n] + DEFICIT[n].
+  function targetDeg(n) { return (DEGREES[n] || 0) + (DEFICIT[n] || 0); }
+
+  // Per-algorithm match realizations on the deficit set above. Each entry
+  // is a list of (u, v) pairs to add. <code>gridlock</code> annotates how
+  // many stubs were left unplaced (only relevant for greedy; the others
+  // gridlock-and-log the same number, but the log is here as a comment).
+  const EXISTING = new Set(baseEdges.map(e => edgeKey(e.u, e.v)));
+  function isFresh(u, v) { return !EXISTING.has(edgeKey(u, v)); }
+
+  // Hand-walked drain orders. Verified by spot-check against the deficit set:
+  // every pair below is non-existing in the base graph and both endpoints
+  // have positive deficit when the pair is added.
+  const ALG_REALIZATIONS = {
+    hybrid: [
+      { label: "hybrid · realization 1 (rewire + true_greedy)",
+        edges: [[10, 13], [6, 11], [8, 18], [13, 17]], gridlock: 1 },
+      { label: "hybrid · realization 2 (rewire + true_greedy)",
+        edges: [[10, 18], [13, 17], [6, 11], [8, 13]], gridlock: 1 },
+      { label: "hybrid · realization 3 (rewire + true_greedy)",
+        edges: [[8, 13], [10, 18], [6, 17], [10, 11]], gridlock: 1 },
+    ],
+    true_greedy: [
+      { label: "true_greedy · realization 1",
+        edges: [[10, 13], [10, 18], [6, 13], [8, 11]], gridlock: 1 },
+      { label: "true_greedy · realization 2",
+        edges: [[10, 13], [11, 13], [10, 18], [6, 17]], gridlock: 1 },
+    ],
+    rewire: [
+      { label: "rewire · realization 1",
+        edges: [[10, 13], [6, 18], [8, 17], [11, 13]], gridlock: 1 },
+      { label: "rewire · realization 2",
+        edges: [[10, 18], [13, 17], [6, 11], [8, 13]], gridlock: 1 },
+    ],
+    random_greedy: [
+      { label: "random_greedy · realization 1",
+        edges: [[10, 18], [11, 13], [6, 17], [8, 13]], gridlock: 1 },
+      { label: "random_greedy · realization 2",
+        edges: [[10, 17], [13, 18], [8, 11], [6, 13]], gridlock: 1 },
+    ],
+    greedy: [
+      { label: "greedy · realization 1 (silent gridlock)",
+        edges: [[10, 13], [10, 18], [6, 11], [8, 13]], gridlock: 1 },
+      { label: "greedy · realization 2 (silent gridlock)",
+        edges: [[10, 13], [11, 13], [6, 18], [8, 17]], gridlock: 1 },
+    ],
+  };
+
+  const viz = NETGEN.VIZ.init("g-match-cy", {
+    showLabels: true,
+    edges: baseEdges,
+    nodeColor: (id) => {
+      const c = CLUSTER_OF[id];
+      return COL[c] || COL.paper_3;
+    },
+  });
+  NETGEN.makeTooltip(viz, document.getElementById("g-match"));
+
+  const labelEl = document.getElementById("g-match-label");
+  const countEl = document.getElementById("g-match-count");
+  const realEl = document.getElementById("g-match-real");
+  const algEl = document.getElementById("g-match-alg");
+
+  let applied = false;
+  let real = 0;
+  let currentMatchEdges = [];
+
+  function countByNode(edges) {
+    const c = {};
+    edges.forEach(e => {
+      const u = e.u == null ? e[0] : e.u;
+      const v = e.v == null ? e[1] : e.v;
+      c[u] = (c[u] || 0) + 1; c[v] = (c[v] || 0) + 1;
+    });
+    return c;
+  }
+
+  function renderBars() {
+    const barSvg = d3.select("#match-bars");
+    barSvg.selectAll("*").remove();
+    const W = 340, H = 420;
+    const PAD = { top: 14, right: 42, bottom: 18, left: 48 };
+    const iw = W - PAD.left - PAD.right;
+    const sortedNodes = NODES.slice()
+      .sort((a, b) => (targetDeg(b) - targetDeg(a)) || (a - b));
+    const ih = H - PAD.top - PAD.bottom;
+    const rowH = ih / sortedNodes.length;
+    const maxD = d3.max(sortedNodes, targetDeg);
+    const g = barSvg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+    const cBase = countByNode(baseEdges);
+    const cMatch = applied ? countByNode(currentMatchEdges) : {};
+
+    sortedNodes.forEach((n, i) => {
+      const y = i * rowH;
+      const t = targetDeg(n);
+      const aBase = cBase[n] || 0;
+      const aMatch = cMatch[n] || 0;
+      const ach = aBase + aMatch;
+      const deficit = Math.max(0, t - ach);
+      const scale = iw / maxD;
+      let x = 0;
+      g.append("text").attr("x", -6).attr("y", y + rowH / 2 + 3)
+        .attr("text-anchor", "end")
+        .attr("font-family", "Special Elite, Courier New, monospace")
+        .attr("font-size", "10.5px")
+        .attr("fill", "#2f3a54").text(n);
+      if (aBase > 0) {
+        g.append("rect").attr("x", x).attr("y", y + rowH * 0.18)
+          .attr("height", rowH * 0.64).attr("width", aBase * scale)
+          .attr("fill", COL.edge_stage2).attr("opacity", 0.9);
+        x += aBase * scale;
+      }
+      if (aMatch > 0) {
+        g.append("rect").attr("x", x).attr("y", y + rowH * 0.18)
+          .attr("height", rowH * 0.64).attr("width", aMatch * scale)
+          .attr("fill", COL.edge_stage4).attr("opacity", 0.95);
+        x += aMatch * scale;
+      }
+      if (deficit > 0) {
+        g.append("rect").attr("x", x).attr("y", y + rowH * 0.18)
+          .attr("height", rowH * 0.64).attr("width", deficit * scale)
+          .attr("fill", COL.signal).attr("opacity", 0.22)
+          .attr("stroke", COL.signal).attr("stroke-dasharray", "3 2")
+          .attr("stroke-width", 0.7);
+      }
+      g.append("text").attr("x", t * scale + 6).attr("y", y + rowH / 2 + 3)
+        .attr("font-family", "Special Elite, Courier New, monospace")
+        .attr("font-size", "10.5px")
+        .attr("fill", "#6b6a54")
+        .text(ach + "/" + t);
+    });
+  }
+
+  function render() {
+    viz.removeEdges(id => String(id).startsWith("m-s4-"));
+    const alg = algEl.value;
+    const reals = ALG_REALIZATIONS[alg] || ALG_REALIZATIONS.hybrid;
+    if (real >= reals.length) real = 0;
+    const matchEdges = reals[real].edges;
+    currentMatchEdges = [];
+    matchEdges.forEach(([u, v]) => {
+      if (isFresh(u, v)) currentMatchEdges.push([u, v]);
+    });
+    if (applied) {
+      viz.addEdges(currentMatchEdges.map(([u, v], i) => ({
+        u, v, color: COL.edge_stage4, w: 2.4, id: `m-s4-${i}`,
+      })));
+      labelEl.textContent = "after match_degree · deficits filed down";
+      const placed = currentMatchEdges.length;
+      const gridlocked = reals[real].gridlock || 0;
+      countEl.textContent = `placed: ${placed} · gridlocked: ${gridlocked}`;
+    } else {
+      labelEl.textContent = "before match_degree · residual deficits visible";
+      countEl.textContent = "placed: 0 · gridlocked: 0";
+    }
+    realEl.textContent = reals[real].label;
+    renderBars();
+  }
+
+  NETGEN.toggle({
+    input: document.getElementById("g-match-toggle"),
+    onChange: (on) => { applied = on; render(); },
+  });
+  algEl.addEventListener("change", () => { real = 0; render(); });
+  document.getElementById("g-match-reroll").addEventListener("click", () => {
+    const reals = ALG_REALIZATIONS[algEl.value] || ALG_REALIZATIONS.hybrid;
+    real = (real + 1) % reals.length;
+    render();
+  });
+  render();
+})();
+</script>
+</body>
+</html>
