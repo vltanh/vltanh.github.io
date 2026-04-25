@@ -20,30 +20,37 @@
 // Positions: outliers at origin, three clusters orbit around.
 
 const POSITIONS = {
-  // C1 cluster (top, 8 nodes, spread ~120 radius)
-  1:  {x:    0, y: -190},
-  2:  {x:  -55, y: -200},
-  3:  {x:   50, y: -170},
-  4:  {x:  -20, y: -240},
-  5:  {x:  -90, y: -215},
-  6:  {x:   80, y: -220},
-  7:  {x:   40, y: -285},
-  8:  {x:  -65, y: -295},
-  // C2 cluster (bottom-right, 6 nodes, spread ~100)
-  9:  {x:  205, y:  120},
-  10: {x:  255, y:  150},
-  11: {x:  170, y:  155},
-  12: {x:  245, y:   85},
-  13: {x:  290, y:  180},
-  14: {x:  165, y:   95},
-  // C3 cluster (bottom-left, 4 nodes, spread ~80)
-  15: {x: -205, y:  120},
-  16: {x: -220, y:  155},
-  17: {x: -165, y:  165},
-  18: {x: -185, y:   85},
-  // Outliers near origin
-  19: {x:  -30, y:  -10},
-  20: {x:   30, y:   10},
+  // C1 (top): planar embeddings on both halves. K_4 drawn as triangle
+  // {1,3,4} with 2 inside, so the bridge endpoints 1 (top-right) and
+  // 4 (bottom-right) sit on the K_4 boundary and the bridges (1,5),
+  // (4,8) leave K_4 cleanly. Diamond is the 4-cycle 5-6-8-7 plus the
+  // (6,7) diagonal; 5 is top, 8 is bottom, 6 and 7 are the side
+  // vertices the diagonal connects.
+  1:  {x: -130, y: -190},
+  2:  {x: -175, y: -250},
+  3:  {x: -235, y: -190},
+  4:  {x: -130, y: -300},
+  5:  {x:    0, y: -180},
+  6:  {x:   60, y: -220},
+  7:  {x:  -60, y: -200},
+  8:  {x:    0, y: -270},
+  // C2 (bottom-right, 6 nodes): K_4 on {9,10,11,12} as a square,
+  // 13 hangs off (9,12), 14 off (10,11) on opposite diagonals.
+  9:  {x:  180, y:   85},
+  10: {x:  215, y:   45},
+  11: {x:  180, y:  150},
+  12: {x:  310, y:   90},
+  13: {x:  290, y:  160},
+  14: {x:  220, y:  185},
+  // C3 (bottom-left, 4 nodes): triangle {15,16,17}, leaf 18 off 16.
+  15: {x: -220, y:   85},
+  17: {x: -280, y:  155},
+  16: {x: -200, y:  170},
+  18: {x: -110, y:  185},
+  // Outliers in the middle, pulled off the C2 axis so they don't
+  // read as a continuation of the 9-12-13 line.
+  19: {x:  -80, y:  -50},
+  20: {x:   50, y:  -80},
 };
 
 const C1 = [1,2,3,4,5,6,7,8];
@@ -61,30 +68,29 @@ const NODES = Object.keys(POSITIONS).map(Number);
 
 // Edges grouped by provenance in the input:
 const INTRA = {
-  // C1 is dense: K_5 on {1..5} plus a small tail {6,7,8} attached.
-  // Hubs 1 and 5 will dominate the degree tail so dedup and match_degree
-  // bite visibly on SBM-family visualizations.
+  // C1 is two halves of 4 joined by 2 bridges: K_4 on {1,2,3,4} and a
+  // diamond (K_4 minus (5,8)) on {5,6,7,8}, bridged by (1,5) and (4,8).
+  // Edge connectivity = 2 strictly (the bridge cut), and min internal
+  // degree = 3, so the best cut set is NOT all edges of a single node.
+  // This is the only cluster where the min cut is a "between halves"
+  // bridge cut rather than an "isolate a leaf" cut.
   C1: [
-    [1,2],[1,3],[1,4],[1,5],[1,6],
-    [2,3],[2,4],[2,5],[2,6],
-    [3,4],[3,5],[3,7],
-    [4,5],[4,8],
-    [5,8],
-    [6,7],[6,8],
-    [7,8],
+    [1,2],[1,3],[1,4],[2,3],[2,4],[3,4],   // K_4 on {1,2,3,4}
+    [5,6],[5,7],[6,7],[6,8],[7,8],          // diamond on {5,6,7,8}
+    [1,5],[4,8],                             // 2 bridges
   ],
-  // C2 is K_4 on {9..12} plus a trailing pair {13, 14}. Node 13 hangs
-  // off the K_4 by edges (9,13) and (12,13); node 14 by (10,14) and
-  // (11,14). The induced subgraph has min cut = 2, achieved by
-  // isolating either node 13 or node 14.
+  // C2 is K_4 on {9..12} plus tails 13 and 14. 13 hangs off the K_4
+  // by edges (9,13) and (12,13); 14 hangs off by (10,14) and (11,14).
+  // Min cut = 2, achieved by isolating either 13 or 14 (single-node).
   C2: [
     [9,10],[9,11],[9,12],[9,13],
     [10,11],[10,12],[10,14],
     [11,12],[11,14],
     [12,13],
   ],
-  // C3 is deliberately sparse so its mincut is k=1.
-  C3: [[15,16],[15,17],[16,18]],
+  // C3 has a triangle on {15,16,17} plus node 18 dangling off node 16.
+  // Min cut = 1 (isolate 18 via (16,18)).
+  C3: [[15,16],[15,17],[16,17],[16,18]],
 };
 const INTER = [
   [1,9], [2,10], [3,11], [5,12],   // C1-C2
@@ -92,10 +98,12 @@ const INTER = [
   [1,15], [4,17],                    // C1-C3
 ];
 const OUT_EDGES = [[19,1],[19,9],[20,5],[20,16],[19,20]];
-// Total: 18 + 11 + 3 + 8 + 5 = 45 edges. Degrees: node 1 = 8 (biggest hub),
-// nodes 5, 9 = 7; nodes 2, 3, 4, 11 = 6. Long tail of low-degree nodes.
-// Dense C1 gives the SBM pages visible dedup loss, and match_degree has
-// several residual stubs to fill.
+// Total: 13 + 10 + 4 + 8 + 5 = 40 edges. Hubs after the rebalance:
+// node 1 has full degree 7 (intra 4 + inter 2 + outlier 1), node 9 = 6,
+// nodes 4 and 11 = 5. C1's bridge-cut topology drives the EC-SBM and
+// SBM stories: K_3 core on the top-3 leaves residual stubs for attach
+// and rewire, and attach can overshoot a hub's input degree if the
+// heuristic concentrates partners on the K_3 nodes.
 
 // Flat input edge list with kind tags.
 const EDGES = [
@@ -121,22 +129,24 @@ EDGES.forEach(({u,v}) => {
   DEGREES_EXCL[u]++; DEGREES_EXCL[v]++;
 });
 
-const MINCUTS = { C1: 3, C2: 2, C3: 1 };
+const MINCUTS = { C1: 2, C2: 2, C3: 1 };
 
-// A concrete minimum edge cut set per cluster. Each one achieves the
-// cluster's MINCUTS[c] by isolating the lowest-degree node inside the
-// cluster. Useful for "best edge cut set" visualizations.
-//   - C1 (k=3): isolate node 7 (intra-deg 3) via {(3,7),(6,7),(7,8)}
+// A concrete minimum edge cut set per cluster. C1's cut splits the
+// cluster into two non-trivial halves (no single node is isolated);
+// C2 and C3 isolate the lowest-degree node inside the cluster.
+//   - C1 (k=2): bridge cut {(1,5),(4,8)} splits {1,2,3,4} | {5,6,7,8}
 //   - C2 (k=2): isolate node 13 (intra-deg 2) via {(9,13),(12,13)}
 //   - C3 (k=1): isolate node 18 (intra-deg 1) via {(16,18)}
 // Each edge set is listed with lo-id first.
 const MIN_CUT_EDGES = {
-  C1: [[3,7],[6,7],[7,8]],
+  C1: [[1,5],[4,8]],
   C2: [[9,13],[12,13]],
   C3: [[16,18]],
 };
 // Node that gets isolated by the corresponding MIN_CUT_EDGES set.
-const MIN_CUT_ISOLATE = { C1: 7, C2: 13, C3: 18 };
+// C1 is null because its min cut splits two non-trivial halves rather
+// than isolating a single node; consumers must handle null.
+const MIN_CUT_ISOLATE = { C1: null, C2: 13, C3: 18 };
 
 // Top-(k+1) nodes per cluster by degree desc, id asc tiebreak. Takes
 // the degree map as an argument so EC-SBM pages (post-exclusion) and
@@ -447,7 +457,7 @@ const VIZ = {
         if (pred == null)                 keep = [];
         else if (typeof pred === "string") keep = links.filter(l => l.id !== pred);
         else if (Array.isArray(pred))      keep = links.filter(l => !pred.includes(l.id));
-        else if (typeof pred === "function") keep = links.filter(l => !pred(l));
+        else if (typeof pred === "function") keep = links.filter(l => !pred(l.id));
         else keep = links;
         links.length = 0; keep.forEach(l => links.push(l));
         draw();
