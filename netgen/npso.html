@@ -202,7 +202,7 @@
       </div>
       <span class="step-label" id="heat-info" style="margin-left:auto">&middot;</span>
     </div>
-    <div class="step-desc" style="margin-top:.6rem"><span class="st">click</span> any node to set the source \(i\); the polar grid shades by \(p(i, j)\) for every location. Azure = high probability, cream = low. Dashed red = the \(p = 1/2\) contour, the same hyperbolic ball as in step 1. Drag the \(T\) slider to soften or sharpen the gradient.</div>
+    <div class="step-desc" style="margin-top:.6rem"><span class="st">click</span> any node to set the source \(i\); the polar grid shades by \(p(i, j)\) for every location. Azure = high probability, cream = low. Dashed red = the \(p = 1/2\) contour, the same hyperbolic ball as in step 1. <span class="st">click a different node</span> to read off \(p(i, j)\) for that target; the value appears in the top-right of the disk. Drag the \(T\) slider to soften or sharpen the gradient.</div>
   </div>
   <p>At \(T \to 0\) the rule becomes "deterministic geometry": only pairs strictly inside the cutoff connect, every close triple closes into a triangle, clustering coefficient is high. At \(T \to 1\) the rule becomes "noise": almost every pair flips a near-fair coin regardless of distance, and clustering collapses. The empirical clustering coefficient \(cc(T)\) of one nPSO sample is a Monte Carlo average over these coin flips, so different draws at the same \(T\) give different values; the curve is noisy. That noise matters later when we try to search for a \(T\) that hits an input target.</p>
   <p>The three \(p(i, j)\) values above are the weights the next section uses to pick which \(m\) predecessors node \(i\) actually connects to.</p>
@@ -1463,6 +1463,26 @@ window.MathJax = {
       return `rgb(${r}, ${g}, ${b})`;
     }
 
+    // Top-right p(i, j) readout for the second-clicked target node.
+    const pReadout = svg.append("g").attr("class", "fd-heat-pread")
+      .attr("pointer-events", "none");
+    const pRBg = pReadout.append("rect")
+      .attr("x", 80).attr("y", -260)
+      .attr("width", 180).attr("height", 50).attr("rx", 4)
+      .attr("fill", "rgba(243,236,215,0.92)")
+      .attr("stroke", "#b9a263").attr("stroke-width", 1);
+    const pRLine1 = pReadout.append("text")
+      .attr("x", 90).attr("y", -240)
+      .attr("font-family", "Special Elite, Courier New, monospace")
+      .attr("font-size", 11).attr("fill", "#2f3a54");
+    const pRLine2 = pReadout.append("text")
+      .attr("x", 90).attr("y", -222)
+      .attr("font-family", "Special Elite, Courier New, monospace")
+      .attr("font-size", 11).attr("fill", "#2f3a54");
+    pReadout.attr("display", "none");
+
+    let secondId = null;
+
     function redraw() {
       const currentId = SELECTED_ID;
       const T = currentT();
@@ -1497,10 +1517,44 @@ window.MathJax = {
       }
       const Rstr = (R == null || !isFinite(R)) ? "—"
                   : (R <= 0 ? "≤ 0" : R.toFixed(2));
-      infoEl.textContent = `node ${t_u} · R = ${Rstr}`;
+      infoEl.textContent = `source ${t_u} · R = ${Rstr}`
+        + (secondId != null ? ` · click again to clear target` : ` · click another node for p(i, j)`);
+
+      // Second-click readout: p(i, j) for the target node.
+      if (secondId != null && isFinite(R) && R > 0) {
+        const a2 = Math.min(currentId, secondId), b2 = Math.max(currentId, secondId);
+        const h_ij = SHARED.DISTS[`${a2}-${b2}`];
+        const p_ij = h_ij != null
+          ? 1 / (1 + Math.exp((h_ij - R) / (2 * T)))
+          : null;
+        const t_j = rankOf[secondId] + 1;
+        pRLine1.text(`target ${t_j} · h = ${h_ij != null ? h_ij.toFixed(2) : "—"}`);
+        pRLine2.text(`p(${t_u}, ${t_j}) = ${p_ij != null ? p_ij.toFixed(3) : "—"}`);
+        // Highlight the target node by adding a ring marker.
+        contourLayer.append("circle")
+          .attr("cx", SHARED.POS_POLAR[secondId].x)
+          .attr("cy", SHARED.POS_POLAR[secondId].y)
+          .attr("r", 14).attr("fill", "none")
+          .attr("stroke", COL.cobalt).attr("stroke-width", 2)
+          .attr("opacity", 0.9);
+        pReadout.attr("display", null);
+      } else {
+        pReadout.attr("display", "none");
+      }
     }
-    viz.onNodeTap((d) => setSelected(parseInt(d.id, 10)));
-    onSelectionChange(() => redraw());
+    viz.onNodeTap((d) => {
+      const id = parseInt(d.id, 10);
+      if (secondId == null && id !== SELECTED_ID) {
+        // First click on a different node = pick target.
+        secondId = id;
+        redraw();
+      } else {
+        // No target yet, or third click: treat as new source.
+        secondId = null;
+        setSelected(id);
+      }
+    });
+    onSelectionChange(() => { secondId = null; redraw(); });
     slider.addEventListener("input", () => {
       sliderOut.value = currentT().toFixed(2);
       redraw();
