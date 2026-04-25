@@ -4,7 +4,7 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>SBM</title>
-<meta name="description" content="The degree-corrected stochastic block model, walked through stage by stage on a small synthetic graph. Interactive: click edges to see the block matrix fill in, toggle dedup on and off.">
+<meta name="description" content="The degree-corrected stochastic block model, walked through stage by stage on a small synthetic graph. Interactive: click edges to see the edge count matrix fill in, toggle dedup on and off.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
@@ -160,8 +160,8 @@
 <section class="stage">
   <div class="stage-num">profiling · block assignment</div>
   <h2>Three vectors, one matrix: that is the input contract.</h2>
-  <p>Profile reads the reference network and its clustering and writes five CSVs. Two are label dictionaries (<code>node_id.csv</code>, <code>cluster_id.csv</code>). The other three carry the quantities the sampler will try to match: <code>assignment.csv</code> (block per node, this section), <code>degree.csv</code> (degree per node, next), and <code>edge_counts.csv</code> (the block matrix, the section after). Anything not in those three vectors, like mean degree, triangle count, or pairwise distances, is not in the contract.</p>
-  <p>Write \(b\) for the block assignment (\(b_u \in \{1, \ldots, B\}\) for node \(u\)), \(k\) for the degree sequence (\(k_u\) = degree of \(u\)), and \(e\) for the block-pair count matrix (\(e_{rs}\) defined in the block-matrix section below). The three sections that follow visualise \(b\), then \(k\), then \(e\), in that order.</p>
+  <p>Profile reads the reference network and its clustering and writes five CSVs. Two are label dictionaries (<code>node_id.csv</code>, <code>cluster_id.csv</code>). The other three carry the quantities the sampler will try to match: <code>assignment.csv</code> (block per node, this section), <code>degree.csv</code> (degree per node, next), and <code>edge_counts.csv</code> (the edge count matrix, the section after). Anything not in those three vectors, like mean degree, triangle count, or pairwise distances, is not in the contract.</p>
+  <p>Write \(b\) for the block assignment (\(b_u \in \{1, \ldots, B\}\) for node \(u\)), \(k\) for the degree sequence (\(k_u\) = degree of \(u\)), and \(e\) for the block-pair count matrix (\(e_{rs}\) defined in the edge-count-matrix section below). The three sections that follow visualise \(b\), then \(k\), then \(e\), in that order.</p>
   <p>Outlier handling happens here too. Under the default <code>outlier_mode=combined</code>, every unclustered node and every size-1 cluster is folded into one pseudo-block labelled <code>__outliers__</code>, so the sampler never has to treat them as a special case. The flag <code>drop_outlier_outlier_edges</code> is off by default, so outlier-outlier edges survive into the pseudo-block's diagonal.</p>
 
   <div class="graph" id="g-assign">
@@ -177,7 +177,7 @@
 <section class="stage">
   <div class="stage-num">profiling · degree sequence</div>
   <h2>How many edges each node has.</h2>
-  <p>The second vector in the contract is <code>degree.csv</code>: \(k_i\) per node. Below, the bars on the right are the degree sequence, one row per node sorted by degree desc and coloured by block. Hover a node to find its bar, or a bar to find its node. The block matrix (the third and last input) is in the next section.</p>
+  <p>The second vector in the contract is <code>degree.csv</code>: \(k_i\) per node. Below, the bars on the right are the degree sequence, one row per node sorted by degree desc and coloured by block. Hover a node to find its bar, or a bar to find its node. The edge count matrix (the third and last input) is in the next section.</p>
   <div class="graph g-with-side" id="g-deg">
     <div class="graph-chrome">
       <span>input G + degree bars &middot; hover to link</span>
@@ -195,9 +195,9 @@
   </div>
 </section>
 
-<!-- ─────────── Profiling · block matrix ─────────── -->
+<!-- ─────────── Profiling · edge count matrix ─────────── -->
 <section class="stage">
-  <div class="stage-num">profiling · the block matrix</div>
+  <div class="stage-num">profiling · the edge count matrix</div>
   <h2>Count edges per block-pair. That is the only structure the sampler sees.</h2>
   <p>Read \(e_{rs}\) as a <em>stub</em> (half-edge) count: how many half-edges from block \(r\) land in block \(s\). For \(r \neq s\) that is also the number of edges between the two blocks and the matrix is symmetric \(e_{rs} = e_{sr}\). For \(r = s\), each intra-block edge has both of its half-edges inside \(r\), so it contributes twice:</p>
   \[
@@ -211,7 +211,7 @@
       <span class="right" id="g2-cell">cell: (none)</span>
     </div>
     <div class="side-caption">
-      <span class="st">left</span>input graph &middot; <span class="st">right</span>block matrix \(e\), diagonal cells doubled. Hover an edge to find its cell, or a cell to light up every edge that contributes to its count.</div>
+      <span class="st">left</span>input graph &middot; <span class="st">right</span>edge count matrix \(e\), diagonal cells doubled. Hover an edge to find its cell, or a cell to light up every edge that contributes to its count.</div>
     <div class="side-body">
       <div class="graph-canvas" id="g2-cy"></div>
       <div class="side-right">
@@ -229,7 +229,7 @@
 <section class="stage">
   <div class="stage-num">generation · sample the multigraph</div>
   <h2>Stub-matching per block-pair, micro-canonical.</h2>
-  <p>Each node \(u\) has a target degree \(k_u\) that splits across the blocks it connects to: call the split \(k_u^{(s)}\), the number of half-edges from \(u\) landing in block \(s\). The sums match the block matrix: \(\sum_{u \,:\, b_u = r} k_u^{(s)} = e_{rs}\) for \(r \neq s\), and \(\sum_{u \,:\, b_u = r} k_u^{(r)} = e_{rr} = 2 \cdot \text{intra-edges}(r)\).</p>
+  <p>Each node \(u\) has a target degree \(k_u\) that splits across the blocks it connects to: call the split \(k_u^{(s)}\), the number of half-edges from \(u\) landing in block \(s\). The sums match the edge count matrix: \(\sum_{u \,:\, b_u = r} k_u^{(s)} = e_{rs}\) for \(r \neq s\), and \(\sum_{u \,:\, b_u = r} k_u^{(r)} = e_{rr} = 2 \cdot \text{intra-edges}(r)\).</p>
   <p>For each block-pair \((r, s)\), build two stub lists (or one for \(r = s\)): each node \(u\) appears \(k_u^{(s)}\) times. Shuffle, pair up consecutively. Every pair becomes an edge; nothing is rejected.</p>
   <div class="callout">
     <div class="tag">graph-tool accepts non-equality input</div>
@@ -241,13 +241,17 @@
   </div>
   <div class="graph" id="g3">
     <div class="graph-chrome">
-      <span>after gt.generate_sbm &middot; multigraph</span>
+      <span>stub-matching, step by step &middot; multigraph</span>
       <span class="right" id="g3-stats">&middot;</span>
     </div>
     <div class="graph-canvas" id="g3-cy"></div>
     <div class="widget-row" style="padding:.9rem 0 0;border-top:1px dashed rgba(139,117,65,.45)">
+      <button class="btn" id="g3-step" type="button">step</button>
+      <button class="btn" id="g3-random" type="button">random</button>
+      <button class="btn" id="g3-play" type="button">play</button>
+      <button class="btn" id="g3-skip" type="button">skip to end</button>
       <button class="btn" id="reroll-btn" type="button">random seed</button>
-      <span class="step-label">reshuffle stubs; dedup stage follows</span>
+      <span class="step-label" id="g3-step-label">propose two stubs; click step to pair them</span>
     </div>
   </div>
 </section>
@@ -301,7 +305,7 @@
       <tr><th>clusters</th><td class="val">87</td><td class="val">87</td><td class="desc">Passes through the input clustering, minus size-1 clusters (the input has none).</td></tr>
     </tbody>
   </table>
-  <p>The block matrix on <code>dnc</code> has 696 non-zero cells over 88 blocks. The largest cell is the diagonal of the 50-node cluster C<sub>2</sub>: 2,450 half-edges (1,225 intra-edges) in the profile. That is where dedup hits <strong>hardest</strong>: 894 half-edges collide, so 447 of those 1,225 intra-edges vanish. The outlier pseudo-block (355 nodes, 278 intra-edges pre-dedup) is the second-worst, losing 108.</p>
+  <p>The edge count matrix on <code>dnc</code> has 696 non-zero cells over 88 blocks. The largest cell is the diagonal of the 50-node cluster C<sub>2</sub>: 2,450 half-edges (1,225 intra-edges) in the profile. That is where dedup hits <strong>hardest</strong>: 894 half-edges collide, so 447 of those 1,225 intra-edges vanish. The outlier pseudo-block (355 nodes, 278 intra-edges pre-dedup) is the second-worst, losing 108.</p>
   <p>Left: \(e_{rs}\) as extracted by profile. Right: the same matrix recomputed on the output graph. Bottom: per-cell dedup loss \((\text{input} - \text{output})\), log-scaled so small cells still register. Blocks are sorted by size desc; the <code>__outliers__</code> pseudo-block (355 nodes) sits top-left. Hover any cell for its triple.</p>
   <div class="disk-panel" style="padding:1.1rem 1rem">
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem 1.1rem; align-items:end">
@@ -417,6 +421,7 @@ window.MathJax = {
   const EDGES = NETGEN.EDGES;
   const CLUSTER_OF = NETGEN.CLUSTER_OF;
   const NODES = NETGEN.NODES;
+  const POSITIONS = NETGEN.POSITIONS;
   const C1 = NETGEN.C1, C2 = NETGEN.C2, C3 = NETGEN.C3, OUT_N = NETGEN.OUT;
 
   function pickInputColor(e) {
@@ -477,7 +482,7 @@ window.MathJax = {
     host.innerHTML = "";
     const svg = d3.select(host).append("svg")
       .attr("class", "viz-svg")
-      .attr("viewBox", NETGEN.fitViewBoxAttr())
+      .attr("viewBox", NETGEN.fitViewBoxAttr({ pad: 40 }))
       .attr("preserveAspectRatio", "xMidYMid meet");
     const syncBlockRects = makeBlockRects(svg);
     const edges = EDGES.map(e => ({
@@ -558,7 +563,7 @@ window.MathJax = {
     host.innerHTML = "";
     const svg = d3.select(host).append("svg")
       .attr("class", "viz-svg")
-      .attr("viewBox", NETGEN.fitViewBoxAttr())
+      .attr("viewBox", NETGEN.fitViewBoxAttr({ pad: 40 }))
       .attr("preserveAspectRatio", "xMidYMid meet");
     const syncBlockRects = makeBlockRects(svg);
     // Block-assignment stage is about the partition, not the edges.
@@ -578,7 +583,7 @@ window.MathJax = {
     const edges = EDGES.map(e => ({
       u: e.u, v: e.v, color: pickInputColor(e), w: 1.2,
     }));
-    const viz = NETGEN.VIZ.init("g-deg-cy", { showLabels: true, edges });
+    const viz = NETGEN.VIZ.init("g-deg-cy", { showLabels: true, edges, pad: 40 });
 
     const svg = d3.select("#deg-seq");
     svg.selectAll("*").remove();
@@ -664,7 +669,7 @@ window.MathJax = {
     });
   })();
 
-  // ── Profiling · block matrix + two-way edge↔cell interaction ──
+  // ── Profiling · edge count matrix + two-way edge↔cell interaction ──
   (function () {
     const gm = document.getElementById("g2-mat");
     gm.innerHTML = "";
@@ -690,7 +695,7 @@ window.MathJax = {
       color: pickInputColor(e), w: 1.4,
       id: "e2-" + e.u + "-" + e.v,
     }));
-    const viz = NETGEN.VIZ.init("g2-cy", { showLabels: true, edges });
+    const viz = NETGEN.VIZ.init("g2-cy", { showLabels: true, edges, pad: 40 });
     const readout = document.getElementById("g2-cell");
 
     function clearAllHighlights() {
@@ -838,41 +843,336 @@ window.MathJax = {
     sampleListeners.forEach(fn => fn(SAMPLE));
   }
 
-  // ── Generation · live multigraph with dashed parallels + self-loops ──
+  // ── Generation · stub-pairing, step by step ──
+  // Per-node spokes (one per stub, coloured by target block) drawn around
+  // each node's perimeter. A "proposal" highlights two candidate stubs;
+  // step commits the pair as an edge. Mid-walk the random button reshuffles
+  // the proposal; at the end it resamples the whole sequence with a fresh
+  // seed.
   (function () {
-    const viz = NETGEN.VIZ.init("g3-cy", {
-      showLabels: true,
-      edges: [],
-    });
-    const statsEl = document.getElementById("g3-stats");
+    const host = document.getElementById("g3-cy");
+    if (!host) return;
+    host.innerHTML = "";
+    const svg = d3.select(host).append("svg")
+      .attr("class", "viz-svg")
+      .attr("viewBox", NETGEN.fitViewBoxAttr({ pad: 40 }))
+      .attr("preserveAspectRatio", "xMidYMid meet");
 
-    function render(sample) {
-      const edges = sample.all.map((e, i) => {
-        if (e.loop || e.multi) {
-          return {
-            u: e.u, v: e.v,
-            color: COL.edge_drop, w: 2,
-            id: "s3-" + i, classes: "dashed thick",
-          };
+    // Layer order: edges < spokes < proposal < nodes.
+    const gEdges    = svg.append("g").attr("class", "viz-edges");
+    const gSpokes   = svg.append("g").attr("class", "viz-spokes");
+    const gProposal = svg.append("g").attr("class", "viz-proposal");
+    const gNodes    = svg.append("g").attr("class", "viz-nodes");
+
+    const NODE_R = 13;
+    const SPOKE_GAP = 3;
+    const SPOKE_LEN = 14;
+
+    const nodeG = gNodes.selectAll("g.viz-node-group").data(NODES).enter()
+      .append("g").attr("class", "viz-node-group")
+      .attr("transform", n => "translate(" + POSITIONS[n].x + "," + POSITIONS[n].y + ")");
+    nodeG.append("circle").attr("class", "viz-node")
+      .attr("r", NODE_R)
+      .attr("fill", n => COL[CLUSTER_OF[n]] || COL.OUT)
+      .attr("stroke", "#1b2033").attr("stroke-width", 1.5);
+    nodeG.append("text").attr("class", "viz-label")
+      .attr("text-anchor", "middle").attr("dominant-baseline", "central")
+      .attr("pointer-events", "none")
+      .text(n => n);
+
+    // Spoke geometry: TARGET_DEG[n] spokes evenly spaced, grouped by target.
+    const spokeGeom = {};
+    NODES.forEach(n => {
+      const total = TARGET_DEG[n] || 0;
+      const list = [];
+      if (total > 0) {
+        const step = (Math.PI * 2) / total;
+        let i = 0;
+        for (let s = 0; s < NUM_BLOCKS; s++) {
+          const k = STUBS[n][s] || 0;
+          for (let j = 0; j < k; j++) {
+            list.push({ idx: i, angle: -Math.PI / 2 + i * step, target: s });
+            i++;
+          }
         }
-        return {
-          u: e.u, v: e.v,
-          color: e.intra ? (COL.edge_intra[blockOf(e.u)] || COL.edge_stage2) : COL.edge_inter,
-          w: 1.4,
-          id: "s3-" + i,
-        };
-      });
-      viz.setEdges(edges);
-      statsEl.textContent =
-        sample.stats.preEdges + " half-pairs · "
-        + sample.stats.nLoops + " self-loops · "
-        + sample.stats.nParallels + " parallels";
-    }
-    render(SAMPLE);
-    onSampleReroll(render);
+      }
+      spokeGeom[n] = list;
+    });
 
-    const btn = document.getElementById("reroll-btn");
-    if (btn) btn.addEventListener("click", triggerReroll);
+    function spokeEnds(n, angle) {
+      const p = POSITIONS[n];
+      return {
+        x1: p.x + Math.cos(angle) * (NODE_R + SPOKE_GAP),
+        y1: p.y + Math.sin(angle) * (NODE_R + SPOKE_GAP),
+        x2: p.x + Math.cos(angle) * (NODE_R + SPOKE_GAP + SPOKE_LEN),
+        y2: p.y + Math.sin(angle) * (NODE_R + SPOKE_GAP + SPOKE_LEN),
+      };
+    }
+    const spokeColor = (s) => BLOCK_COLOR[BLOCK_NAMES[s]] || COL.edge_inter;
+
+    // Block-pair queue, processed (r,s) with r <= s.
+    const blockPairs = [];
+    for (let r = 0; r < NUM_BLOCKS; r++)
+      for (let s = r; s < NUM_BLOCKS; s++) blockPairs.push([r, s]);
+
+    let currentSeed = 1;
+    let rng, stubs, bpIdx, consumed, committed, seenPairs, totalPairs, proposal;
+
+    function buildStubLists() {
+      const intra = {}, interR = {}, interS = {};
+      for (let r = 0; r < NUM_BLOCKS; r++) {
+        intra[r] = [];
+        BLOCK_NODES[BLOCK_NAMES[r]].forEach(n => {
+          spokeGeom[n].forEach(g => {
+            if (g.target === r) intra[r].push({ node: n, geomIdx: g.idx });
+          });
+        });
+        for (let s = r + 1; s < NUM_BLOCKS; s++) {
+          const key = r + "|" + s;
+          interR[key] = [];
+          interS[key] = [];
+          BLOCK_NODES[BLOCK_NAMES[r]].forEach(n => {
+            spokeGeom[n].forEach(g => {
+              if (g.target === s) interR[key].push({ node: n, geomIdx: g.idx });
+            });
+          });
+          BLOCK_NODES[BLOCK_NAMES[s]].forEach(n => {
+            spokeGeom[n].forEach(g => {
+              if (g.target === r) interS[key].push({ node: n, geomIdx: g.idx });
+            });
+          });
+        }
+      }
+      return { intra, interR, interS };
+    }
+
+    function freshState(seed) {
+      rng = d3.randomLcg(seed);
+      stubs = buildStubLists();
+      bpIdx = 0;
+      consumed = new Set();
+      committed = [];
+      seenPairs = new Map();
+      proposal = null;
+      let pairs = 0;
+      blockPairs.forEach(([r, s]) => {
+        if (r === s) pairs += Math.floor(stubs.intra[r].length / 2);
+        else pairs += Math.min(
+          stubs.interR[r + "|" + s].length,
+          stubs.interS[r + "|" + s].length);
+      });
+      totalPairs = pairs;
+    }
+
+    function currentBP() {
+      while (bpIdx < blockPairs.length) {
+        const [r, s] = blockPairs[bpIdx];
+        if (r === s) {
+          if (stubs.intra[r].length >= 2) return { bp: [r, s], kind: "intra" };
+        } else {
+          const k = r + "|" + s;
+          if (stubs.interR[k].length >= 1 && stubs.interS[k].length >= 1)
+            return { bp: [r, s], kind: "inter", key: k };
+        }
+        bpIdx++;
+      }
+      return null;
+    }
+
+    function rollProposal() {
+      const cur = currentBP();
+      if (!cur) { proposal = null; return; }
+      if (cur.kind === "intra") {
+        const pool = stubs.intra[cur.bp[0]];
+        const i = Math.floor(rng() * pool.length);
+        let j = Math.floor(rng() * (pool.length - 1));
+        if (j >= i) j++;
+        proposal = { bp: cur.bp, kind: "intra", a: pool[i], b: pool[j], aIdx: i, bIdx: j, intra: true };
+      } else {
+        const pR = stubs.interR[cur.key], pS = stubs.interS[cur.key];
+        const i = Math.floor(rng() * pR.length);
+        const j = Math.floor(rng() * pS.length);
+        proposal = { bp: cur.bp, kind: "inter", key: cur.key, a: pR[i], b: pS[j], aIdx: i, bIdx: j, intra: false };
+      }
+    }
+
+    function commitProposal() {
+      if (!proposal) return false;
+      const { a, b } = proposal;
+      consumed.add(a.node + "|" + a.geomIdx);
+      consumed.add(b.node + "|" + b.geomIdx);
+      if (proposal.kind === "intra") {
+        const pool = stubs.intra[proposal.bp[0]];
+        [proposal.aIdx, proposal.bIdx].sort((x, y) => y - x).forEach(i => pool.splice(i, 1));
+      } else {
+        stubs.interR[proposal.key].splice(proposal.aIdx, 1);
+        stubs.interS[proposal.key].splice(proposal.bIdx, 1);
+      }
+      const u = a.node, v = b.node;
+      const loop = u === v;
+      const lo = Math.min(u, v), hi = Math.max(u, v);
+      const k = lo + "|" + hi;
+      const prev = seenPairs.get(k) || 0;
+      const multi = !loop && prev >= 1;
+      seenPairs.set(k, prev + 1);
+      committed.push({ u, v, intra: proposal.intra, loop, multi, bp: proposal.bp });
+      proposal = null;
+      return true;
+    }
+
+    function step() {
+      if (!proposal) rollProposal();
+      if (!proposal) return false;
+      commitProposal();
+      rollProposal();
+      return true;
+    }
+
+    function skipToEnd() {
+      while (true) {
+        if (!proposal) rollProposal();
+        if (!proposal) break;
+        commitProposal();
+      }
+    }
+
+    function reseedAll() {
+      currentSeed += 1;
+      freshState(currentSeed);
+      rollProposal();
+    }
+
+    function render() {
+      const spokeData = [];
+      NODES.forEach(n => {
+        spokeGeom[n].forEach(g => {
+          if (consumed.has(n + "|" + g.idx)) return;
+          spokeData.push({
+            id: "sp-" + n + "-" + g.idx,
+            target: g.target, ...spokeEnds(n, g.angle),
+          });
+        });
+      });
+      const sp = gSpokes.selectAll("line.viz-spoke").data(spokeData, d => d.id);
+      sp.exit().remove();
+      const spEnter = sp.enter().append("line")
+        .attr("class", "viz-spoke")
+        .attr("stroke-width", 2.6).attr("stroke-linecap", "round")
+        .attr("opacity", 0.85);
+      spEnter.merge(sp)
+        .attr("x1", d => d.x1).attr("y1", d => d.y1)
+        .attr("x2", d => d.x2).attr("y2", d => d.y2)
+        .attr("stroke", d => spokeColor(d.target));
+
+      const propData = proposal ? [
+        { side: "a", node: proposal.a.node, idx: proposal.a.geomIdx },
+        { side: "b", node: proposal.b.node, idx: proposal.b.geomIdx },
+      ].map(d => {
+        const g = spokeGeom[d.node].find(x => x.idx === d.idx);
+        return { ...d, ...spokeEnds(d.node, g.angle), target: g.target };
+      }) : [];
+      const pp = gProposal.selectAll("g.proposal-spoke").data(propData, d => d.side);
+      pp.exit().remove();
+      const ppEnter = pp.enter().append("g").attr("class", "proposal-spoke");
+      ppEnter.append("line").attr("class", "proposal-glow")
+        .attr("stroke-width", 8).attr("stroke-linecap", "round").attr("opacity", 0.4);
+      ppEnter.append("line").attr("class", "proposal-line")
+        .attr("stroke-width", 3.4).attr("stroke-linecap", "round");
+      const ppAll = ppEnter.merge(pp);
+      ppAll.select(".proposal-glow")
+        .attr("x1", d => d.x1).attr("y1", d => d.y1)
+        .attr("x2", d => d.x2).attr("y2", d => d.y2)
+        .attr("stroke", "#f6e15a");
+      ppAll.select(".proposal-line")
+        .attr("x1", d => d.x1).attr("y1", d => d.y1)
+        .attr("x2", d => d.x2).attr("y2", d => d.y2)
+        .attr("stroke", d => spokeColor(d.target));
+
+      const edgeData = committed.map((e, i) => ({ id: "ce-" + i, ...e }));
+      const ee = gEdges.selectAll("path.viz-edge").data(edgeData, d => d.id);
+      ee.exit().remove();
+      const eeEnter = ee.enter().append("path").attr("fill", "none");
+      eeEnter.merge(ee)
+        .attr("class", d => "viz-edge" + ((d.loop || d.multi) ? " dashed thick" : ""))
+        .attr("d", d => {
+          const pu = POSITIONS[d.u], pv = POSITIONS[d.v];
+          if (d.loop) {
+            const r = 18;
+            return "M" + pu.x + "," + pu.y
+              + " C" + (pu.x - r) + "," + (pu.y - r * 2.2)
+              + " " + (pu.x + r) + "," + (pu.y - r * 2.2)
+              + " " + (pu.x + 0.01) + "," + (pu.y - 0.01);
+          }
+          return "M" + pu.x + "," + pu.y + " L" + pv.x + "," + pv.y;
+        })
+        .attr("stroke", d => (d.loop || d.multi)
+          ? COL.edge_drop
+          : (d.intra ? (COL.edge_intra[blockOf(d.u)] || COL.edge_stage2) : COL.edge_inter))
+        .attr("stroke-width", d => (d.loop || d.multi) ? 2 : 1.4);
+
+      const statsEl = document.getElementById("g3-stats");
+      const stepLabel = document.getElementById("g3-step-label");
+      const nLoops = committed.filter(e => e.loop).length;
+      const nMulti = committed.filter(e => e.multi).length;
+      const done = committed.length;
+      if (statsEl) {
+        statsEl.textContent = done + "/" + totalPairs + " edges · "
+          + nLoops + " self-loops · " + nMulti + " parallels";
+      }
+      if (stepLabel) {
+        if (proposal) {
+          const [r, s] = proposal.bp;
+          stepLabel.textContent = "block-pair (" + BLOCK_NAMES[r] + ", " + BLOCK_NAMES[s]
+            + ") · proposed: " + proposal.a.node + " ↔ " + proposal.b.node
+            + " · click step to pair, random to reshuffle";
+        } else {
+          stepLabel.textContent = "all stubs paired · click random to resample with a fresh seed";
+        }
+      }
+    }
+
+    freshState(currentSeed);
+    rollProposal();
+    render();
+
+    let playing = false, playTimer = null;
+    function setPlaying(on) {
+      playing = on;
+      const playBtn = document.getElementById("g3-play");
+      if (playBtn) playBtn.textContent = on ? "pause" : "play";
+      if (on) {
+        playTimer = setInterval(() => {
+          if (!step()) { setPlaying(false); }
+          render();
+        }, 280);
+      } else if (playTimer) {
+        clearInterval(playTimer); playTimer = null;
+      }
+    }
+
+    document.getElementById("g3-step").addEventListener("click", () => {
+      step(); render();
+    });
+    document.getElementById("g3-random").addEventListener("click", () => {
+      if (proposal) {
+        rollProposal();
+      } else {
+        reseedAll();
+      }
+      render();
+    });
+    document.getElementById("g3-play").addEventListener("click", () => setPlaying(!playing));
+    document.getElementById("g3-skip").addEventListener("click", () => {
+      setPlaying(false);
+      skipToEnd();
+      render();
+    });
+    document.getElementById("reroll-btn").addEventListener("click", () => {
+      setPlaying(false);
+      triggerReroll();        // reshuffles SAMPLE for g4 + dedup viz
+      reseedAll();
+      render();
+    });
   })();
 
   // ── Generation · dedup toggle + target-vs-achieved degree bars ──
@@ -880,6 +1180,7 @@ window.MathJax = {
     const viz = NETGEN.VIZ.init("g4-cy", {
       showLabels: true,
       edges: [],
+      pad: 40,
     });
     const label     = document.getElementById("g4-label");
     const edgeCount = document.getElementById("g4-edges");

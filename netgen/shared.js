@@ -238,6 +238,7 @@ const VIZ = {
           includeIds: opts.includeOutliers === false
             ? NODES.filter(n => CLUSTER_OF[n] !== "OUT")
             : NODES,
+          pad: opts.pad,
         }))
         .attr("preserveAspectRatio", "xMidYMid meet");
     }
