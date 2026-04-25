@@ -25,7 +25,7 @@ This project wraps seven such generators under a single two-stage pipeline: one 
 
 <div class="row justify-content-center">
   <div class="col-sm-12 mt-3 mt-md-0">
-    {% include figure.liquid path="assets/img/netgen/feature.png" title="20-node synthetic example" class="img-fluid rounded z-depth-1" caption="The 20-node example used in every per-generator walkthrough: 18 clustered nodes across C1 (8), C2 (6), and C3 (4), plus 2 outliers. 45 edges total: 32 intra-cluster, 8 inter-cluster, 4 clustered-outlier, 1 outlier-outlier." %}
+    {% include figure.liquid path="assets/img/netgen/feature.png" title="20-node synthetic example" class="img-fluid rounded z-depth-1" caption="The 20-node example used in every per-generator walkthrough: 18 clustered nodes across C1 (8), C2 (6), and C3 (4), plus 2 outliers. 40 edges total: 27 intra-cluster, 8 inter-cluster, 4 clustered-outlier, 1 outlier-outlier." %}
   </div>
 </div>
 
