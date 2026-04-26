@@ -268,7 +268,7 @@ body {
 }
 .gen-card {
   flex: 0 0 auto;
-  width: calc((100% - 2 * 1.3rem) / 3);
+  width: calc((100% - 1.3rem) / 2);
   min-width: 260px;
   display: flex; flex-direction: column;
   padding: 1.1rem 1.25rem 1.15rem;
@@ -289,7 +289,6 @@ body {
 .gen-card::before { z-index: 2; }
 .gen-card .refs { position: relative; z-index: 3; }
 
-@media (max-width: 880px) { .gen-card { width: calc((100% - 1.3rem) / 2); } }
 @media (max-width: 600px) { .gen-card { width: 100%; } }
 
 .gen-card:nth-of-type(odd)  { transform: rotate(-.7deg); }
@@ -394,7 +393,7 @@ body {
 <header class="hdr">
   <div class="kicker">project · network-generation</div>
   <h1>Synthetic Network <em>Generators</em></h1>
-  <p class="sub">A gallery of generators walked stage by stage on the same small input. The use case is benchmarking community-detection algorithms: each generator turns an empirical network and a ground-truth clustering into a fresh synthetic where the clustering is still the ground truth, so a detector can be scored against a clean target.</p>
+  <p class="sub">A gallery of generators walked stage by stage on the same small input. A community detector cannot be stress-tested without synthetics whose ground truth is known: each generator here takes a reference network and its community structure, and produces fresh draws keyed to that ground truth.</p>
 </header>
 
 <nav class="icon-links" aria-label="project links">
@@ -413,15 +412,15 @@ body {
 </nav>
 
 <section class="hook">
-  <p>Given an empirically observed network \(G\) (undirected, unweighted, and simple graph) together with a community structure \(\mathcal{C}\) on its nodes (either ground-truth or produced by a community-detection algorithm), we want to sample a family of networks that are <em>statistically similar</em> to \(G\) and \(\mathcal{C}\) without being identical. What "statistically similar" means differs from one generator to the next: each freezes a different summary of \(G\) and \(\mathcal{C}\), and randomises the rest.</p>
-  <p>The motivating use case is benchmarking community-detection algorithms. We want a synthetic that <em>keeps</em> \(\mathcal{C}\) as the only ground truth and randomises everything that is not communities, so that a detector run on the synthetic can be scored against \(\mathcal{C}\) without the score being polluted by structure the detector got for free. That is also why the choice of generator and outlier-mode matters: a generator that quietly bakes extra structure into the synthetic (for instance an SBM in <code>singleton</code> outlier mode that replicates the outlier subgraph verbatim) makes the score say things about that structure rather than about the detector's quality.</p>
-  <p>Each page below walks one generator from input to output on the same 20-node example, keeps one interactive widget per stage, and ends with a plain note on what is preserved and what drifts.</p>
-  <p>Two labels recur across the pages. A node is either inside a non-trivial community or standing alone, and the generators treat these two cases differently:</p>
+  <p>Given a network \(G\) (undirected, unweighted, simple) with a community structure \(\mathcal{C}\) on its nodes, we want to sample a family of networks that are <em>statistically similar</em> to \(G\) and \(\mathcal{C}\) without being identical. \(\mathcal{C}\) can be ground-truth or produced by a detection algorithm; the generator does not care which. What "statistically similar" means differs from one generator to the next: each freezes a different summary of \(G\) and \(\mathcal{C}\) and randomises the rest.</p>
+  <p>Scoring a community-detection algorithm requires networks whose answer can be checked. An empirical network gives only one labelling, which may itself be wrong, and a single network is a sample of one. Synthetics fix that: each generator emits a network and its ground-truth clustering together, across as many seeds, sizes, and noise levels as the test demands.</p>
+  <p>Each page below walks one generator from input to output on the same 20-node example, keeps one interactive widget per stage, and closes with a plain note on what holds and what drifts.</p>
+  <p>Two labels recur across the pages: a node is either inside a non-trivial community or standing alone, and generators treat the two cases differently.</p>
   <div class="defs">
     <div><span class="term cl">clustered</span>: node that belongs to a community of size &ge; 2.</div>
     <div><span class="term out">outlier</span>: node that is unclustered, or the sole member of a singleton community.</div>
   </div>
-  <p>Every generator runs the same three-stage pipeline: <strong>profile</strong> the input to extract the parameters the generator needs, <strong>generate</strong> a fresh graph from those parameters, then <strong>post-process</strong> the output. Post-processing covers up to three steps: an optional <em>match-degree</em> rewire to align the generated degree sequence to the input (refer to <a href="./matcher.html">match_degree</a> for more details), a <em>simplify</em> pass that collapses parallel edges and drops self-loops, and a <em>singleton drop</em> that removes size-1 clusters and deems the lone inhabitant an outlier.</p>
+  <p>Every generator runs the same three-stage pipeline: <strong>profile</strong> the input to extract the parameters the generator needs, <strong>generate</strong> a fresh graph from those parameters, then <strong>post-process</strong> the output. Post-processing covers up to three steps. An optional <em>match-degree</em> rewire aligns the generated degree sequence to the input (see <a href="./matcher.html">degree matchers</a>). A <em>simplify</em> pass collapses parallel edges and drops self-loops. A <em>singleton drop</em> removes size-1 clusters and relabels the lone inhabitant as an outlier.</p>
 </section>
 
 <figure class="shared-graph">
@@ -479,7 +478,7 @@ body {
 
 <section class="family">
   <h2 class="family-title">Block-model generators</h2>
-  <p class="family-lede">Central objects: the cluster assignment \(\mathcal{C}\), the block-to-block edge-count matrix, and (as the variants here all use the degree-corrected SBM) the per-node degree sequence. Variants add further structural constraints (per-cluster edge connectivity) on top.</p>
+  <p class="family-lede">Central objects: the cluster assignment \(\mathcal{C}\), the block-to-block edge-count matrix, and the per-node degree sequence (every variant here uses the degree-corrected SBM). Variants add further structural constraints (per-cluster edge connectivity) on top.</p>
   <div class="gen-grid">
     <article class="gen-card under-construction">
       <a class="card-click" href="./sbm.html" aria-label="SBM generator"></a>
@@ -494,7 +493,7 @@ body {
           <a class="ref" href="https://git.skewed.de/count0/graph-tool" target="_blank" rel="noopener">code</a>
         </span>
       </div>
-      <div class="blurb">The degree-corrected variant of the classic SBM. Keeps the cluster assignment \(\mathcal{C}\), the block-to-block edge counts, and the per-node degree sequence; the rest is random. The baseline the other block-model variants build on.</div>
+      <div class="blurb">The degree-corrected variant of the classic SBM. Keeps the cluster assignment, the block-to-block edge counts, and the per-node degree sequence; the rest is random. The baseline the other block-model variants build on.</div>
     </article>
     <article class="gen-card under-construction">
       <a class="card-click" href="./ec-sbm-v1.html" aria-label="EC-SBMv1 generator"></a>
@@ -509,7 +508,7 @@ body {
           <a class="ref" href="https://github.com/illinois-or-research-analytics/ec-sbm" target="_blank" rel="noopener">code</a>
         </span>
       </div>
-      <div class="blurb">SBM with an edge-connectivity guarantee: each output cluster is at least as edge-connected as its input counterpart, delivered by stitching a hand-built \(k\)-edge-connected core into each cluster before sampling. Outliers are treated as singleton clusters, which effectively replicates the edges between them; a naive greedy matcher fills any residual degree deficit.</div>
+      <div class="blurb">SBM with an edge-connectivity guarantee: a hand-built \(k\)-edge-connected core is stitched into each cluster before sampling, so each output cluster ends up at least as edge-connected as its input counterpart. Outliers are treated as singleton clusters, which replicates the edges between them; a naive greedy matcher fills any residual degree deficit.</div>
     </article>
     <article class="gen-card under-construction">
       <a class="card-click" href="./ec-sbm-v2.html" aria-label="EC-SBMv2 generator"></a>
@@ -524,7 +523,7 @@ body {
           <a class="ref" href="https://github.com/illinois-or-research-analytics/ec-sbm" target="_blank" rel="noopener">code</a>
         </span>
       </div>
-      <div class="blurb">Same edge-connectivity guarantee as v1, with two changes. Treating outliers as singleton clusters, as v1 does, can accidentally regenerate community-like structure among them; v2 folds all outliers into a single block instead. Residual accounting is cleaner too: one SBM call, a block-preserving rewire, and a hybrid degree-matching pass.</div>
+      <div class="blurb">Same edge-connectivity guarantee as v1, with two changes. Treating outliers as singleton clusters can accidentally regenerate community-like structure among them; v2 folds all outliers into a single block instead. Residual accounting is simpler too: one SBM call, a block-preserving rewire, and a hybrid degree-matching pass.</div>
     </article>
   </div>
 </section>
@@ -546,7 +545,7 @@ body {
           <a class="ref" href="https://github.com/andrealancichinetti/LFRbenchmarks" target="_blank" rel="noopener">code</a>
         </span>
       </div>
-      <div class="blurb">Fits power laws to the degree distribution and the cluster sizes, resamples both from scratch, and discards the original. Mixing is the mean of a per-node fraction \(\mu\); the long-standing community-detection benchmark.</div>
+      <div class="blurb">Fits power laws to the degree distribution and the cluster sizes, resamples both from scratch, and discards the original. Mixing is the mean of a per-node fraction \(\mu\). The long-standing community-detection benchmark.</div>
     </article>
     <article class="gen-card under-construction">
       <a class="card-click" href="./abcd.html" aria-label="ABCD generator"></a>
@@ -576,7 +575,7 @@ body {
           <a class="ref" href="https://github.com/bkamins/ABCDGraphGenerator.jl" target="_blank" rel="noopener">code</a>
         </span>
       </div>
-      <div class="blurb">ABCD with an explicit outlier block. Outliers connect only outward and never to each other.</div>
+      <div class="blurb">ABCD with an explicit outlier block. The sampler picks the outlier set at random; outlier&ndash;outlier edges are not expected.</div>
     </article>
   </div>
 </section>
@@ -791,5 +790,6 @@ window.MathJax = {
 
 })();
 </script>
+
 </body>
 </html>
