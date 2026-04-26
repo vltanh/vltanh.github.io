@@ -9,10 +9,23 @@
 //   - degree-sequence parity correction (sum even)
 //   - cluster-size sampler with the max_degree+1 seed branch
 //
-// Stages NOT yet covered (defer to follow-up):
-//   - rewire passes (`internal_kin`, `erase_link`, `arrange`) for
-//     drift-correcting per-node mu_i toward the global target after
-//     the per-cluster + global config-model edges are placed
+// Stages now covered (full canonical pipeline):
+//   - solve_dmin / integer_average / powerlaw cumulative / parity
+//   - cluster-size sampler + max_internal_degree+1 seed branch
+//   - sampleInternalDegrees (Bernoulli + excess/defect ratchets)
+//   - assignNodesToClusters (build_bipartite_network +
+//     internal_degree_and_membership remap)
+//   - computeInternalDegreePerNode (split internal degree across
+//     memberships, lines 665-684)
+//   - buildSubgraph (per-cluster phases 1+2+3: deterministic multimap
+//     seed + 10 randomization passes + multi-edge rewire,
+//     lines 719-948)
+//   - buildSubgraphsLinkList (parity bump per cluster + per-node
+//     link_list construction, lines 954-1097)
+//   - connectAllTheParts (global external config model + mate rewire,
+//     lines 1144-1413)
+//   - eraseLinks (excess/defect drift correction, lines 1443-1537)
+//   - runFullPipeline (faithful benchmark driver)
 //
 // Randomness: caller passes a JS rng (() -> [0,1)). Page uses
 // d3.randomLcg + per-stage seed; byte-equality with LFR's ran4() is
@@ -328,6 +341,661 @@
     return { edges: kept, dropped, stats };
   }
 
+  // Faithful port of benchm.cpp:665-684 (compute_internal_degree_per_node).
+  // Splits internal degree d across m memberships: floor(d/m) for all,
+  // with the first (d % m) entries getting +1.
+  function computeInternalDegreePerNode(d, m) {
+    if (m <= 0) return [];
+    const di = Math.floor(d / m);
+    const out = new Array(m).fill(di);
+    const rem = d % m;
+    for (let i = 0; i < rem; i++) out[i] += 1;
+    return out;
+  }
+
+  // Helper: do nodes i and j share at least one community?
+  // Mirrors benchm.cpp's they_are_mate(i, j, member_list). member_list[i]
+  // is a sorted ascending array of cluster indices node i belongs to.
+  function theyAreMate(i, j, memberList) {
+    const a = memberList[i], b = memberList[j];
+    if (!a || !b) return false;
+    let p = 0, q = 0;
+    while (p < a.length && q < b.length) {
+      if (a[p] === b[q]) return true;
+      if (a[p] < b[q]) p += 1; else q += 1;
+    }
+    return false;
+  }
+
+  // Faithful port of benchm.cpp's build_subgraph (lines 719-948).
+  // nodes:    array of global node ids (size n)
+  // degrees:  per-position internal degree (size n; sum even)
+  // rng:      () -> [0, 1)
+  // E:        deque<set<int>> — pre-existing global adjacency keyed by
+  //           the same node ids as `nodes` (mutated in place; new
+  //           internal links added via E[u].add(v) + E[v].add(u))
+  // Returns { ok: bool, multipleResolved: int, multipleDropped: int }.
+  // Phase 1 (lines 762-806): deterministic multimap-based seed by
+  // degree desc; tie-break by multimap insertion order. Phase 2
+  // (lines 818-853): 10 randomization passes via 4-way swap. Phase 3
+  // (lines 858-939): rewire any multi-edges that emerge when merging
+  // into E; drop after 2*|E[i]| stagnation.
+  function buildSubgraph(args) {
+    const { nodes, degrees, rng, E } = args;
+    const n = nodes.length;
+    if (degrees.length < 3 || n < 3) {
+      // canonical errors out: "communities should have only 2 nodes"
+      return { ok: false, multipleResolved: 0, multipleDropped: 0 };
+    }
+    // en[i] = local adjacency of cluster-internal index i (0..n-1)
+    const en = [];
+    for (let i = 0; i < n; i++) en.push(new Set());
+
+    // ---- Phase 1: deterministic multimap seed ----
+    // Canonical std::multimap<int,int> sorted by key asc. We model with
+    // an array of [degree, idx] entries in sorted order; equal-key
+    // entries preserve insertion order. Insertions during the loop
+    // re-insert at the right slot; deletions remove specific entries.
+    let dn = [];
+    for (let i = 0; i < degrees.length; i++) dn.push([degrees[i], i]);
+    dn.sort((a, b) => (a[0] - b[0]));  // asc; equal keys stable
+    while (dn.length > 0) {
+      // itlast = last entry (highest degree)
+      const last = dn[dn.length - 1];
+      let itit = dn.length - 1;          // start at itlast, then --
+      const erasenda = [];
+      let inserted = 0;
+      for (let i = 0; i < last[0]; i++) {
+        if (itit !== 0) {
+          itit -= 1;
+          en[last[1]].add(dn[itit][1]);
+          en[dn[itit][1]].add(last[1]);
+          inserted += 1;
+          erasenda.push(itit);
+        } else {
+          break;
+        }
+      }
+      // Erase erasenda (sorted by itit asc; we built them descending so
+      // sort to remove highest first to preserve indices).
+      erasenda.sort((a, b) => b - a);
+      const reinsert = [];
+      erasenda.forEach(idx => {
+        const ent = dn[idx];
+        if (ent[0] > 1) reinsert.push([ent[0] - 1, ent[1]]);
+        dn.splice(idx, 1);
+      });
+      // Re-insert with stable sort (preserves canonical multimap order).
+      reinsert.forEach(ent => {
+        let lo = 0, hi = dn.length;
+        while (lo < hi) {
+          const mid = (lo + hi) >> 1;
+          if (dn[mid][0] <= ent[0]) lo = mid + 1; else hi = mid;
+        }
+        dn.splice(lo, 0, ent);
+      });
+      // Erase itlast (now at the very end; after splice'ing erasenda
+      // it still sits at end since we removed strictly lower indices).
+      // Re-find: it was at original last position. After splices, it
+      // should still be at dn.length - 1 if it wasn't included in
+      // erasenda. We never push itlast index into erasenda.
+      // Find the [last[0], last[1]] entry and remove it.
+      for (let i = dn.length - 1; i >= 0; i--) {
+        if (dn[i][0] === last[0] && dn[i][1] === last[1]) {
+          dn.splice(i, 1);
+          break;
+        }
+      }
+    }
+
+    // ---- Phase 2: 10 randomization passes ----
+    const degreeList = [];
+    for (let kk = 0; kk < degrees.length; kk++)
+      for (let k2 = 0; k2 < degrees[kk]; k2++) degreeList.push(kk);
+
+    for (let run = 0; run < 10; run++) {
+      for (let nodeA = 0; nodeA < degrees.length; nodeA++) {
+        const enA = en[nodeA];
+        const enASize = enA.size;
+        for (let krm = 0; krm < enASize; krm++) {
+          let randomMate = degreeList[Math.floor(rng() * degreeList.length)];
+          while (randomMate === nodeA) {
+            randomMate = degreeList[Math.floor(rng() * degreeList.length)];
+          }
+          if (en[nodeA].has(randomMate)) continue;
+          // The Set.add returns true if newly added. Canonical semantics:
+          // "if (en[node_a].insert(random_mate).second)" — only proceed
+          // if it WAS inserted (i.e. wasn't there). We checked above so
+          // proceed.
+          en[nodeA].add(randomMate);
+          // out_nodes = en[nodeA] minus {randomMate}
+          const outNodes = [];
+          en[nodeA].forEach(v => { if (v !== randomMate) outNodes.push(v); });
+          const oldNode = outNodes[Math.floor(rng() * outNodes.length)];
+          en[nodeA].delete(oldNode);
+          en[randomMate].add(nodeA);
+          en[oldNode].delete(nodeA);
+          // not_common: nodes in en[randomMate] not in en[oldNode] AND
+          // not equal to oldNode
+          const notCommon = [];
+          en[randomMate].forEach(v => {
+            if (v !== oldNode && !en[oldNode].has(v)) notCommon.push(v);
+          });
+          // canonical doesn't gate this on size but does irand on the
+          // result; if empty, this is a runtime error in canonical.
+          // Defensive: skip the swap if notCommon empty.
+          if (notCommon.length === 0) {
+            // Roll back: re-add oldNode to nodeA, remove randomMate
+            en[nodeA].add(oldNode);
+            en[randomMate].delete(nodeA);
+            en[oldNode].add(nodeA);
+            en[nodeA].delete(randomMate);
+            continue;
+          }
+          const nodeH = notCommon[Math.floor(rng() * notCommon.length)];
+          en[randomMate].delete(nodeH);
+          en[nodeH].delete(randomMate);
+          en[nodeH].add(oldNode);
+          en[oldNode].add(nodeH);
+        }
+      }
+    }
+
+    // ---- Phase 3: insert into global E + multi-edge rewire ----
+    const multipleEdges = [];
+    for (let i = 0; i < n; i++) {
+      const ui = nodes[i];
+      en[i].forEach(j => {
+        if (i < j) {
+          const uj = nodes[j];
+          if (E[ui].has(uj)) {
+            multipleEdges.push([ui, uj]);
+          } else {
+            E[ui].add(uj);
+            E[uj].add(ui);
+          }
+        }
+      });
+    }
+
+    // Multi-edge rewire (lines 878-939).
+    let multipleResolved = 0;
+    let multipleDropped = 0;
+    multipleEdges.forEach(([a, b]) => {
+      let stopperMl = 0;
+      const stopperLimit = 2 * E.length;
+      while (true) {
+        stopperMl += 1;
+        let randomMateGlobal = nodes[degreeList[Math.floor(rng() * degreeList.length)]];
+        while (randomMateGlobal === a || randomMateGlobal === b) {
+          randomMateGlobal = nodes[degreeList[Math.floor(rng() * degreeList.length)]];
+        }
+        if (!E[a].has(randomMateGlobal)) {
+          // not_common: nodes in E[randomMateGlobal] not equal to b,
+          // not in E[b], AND in nodes (binary_search on sorted nodes).
+          const sortedNodes = nodes.slice().sort((x, y) => x - y);
+          const notCommon = [];
+          E[randomMateGlobal].forEach(v => {
+            if (v === b || E[b].has(v)) return;
+            // binary search v in sortedNodes
+            let lo = 0, hi = sortedNodes.length;
+            while (lo < hi) {
+              const mid = (lo + hi) >> 1;
+              if (sortedNodes[mid] < v) lo = mid + 1; else hi = mid;
+            }
+            if (lo < sortedNodes.length && sortedNodes[lo] === v) {
+              notCommon.push(v);
+            }
+          });
+          if (notCommon.length > 0) {
+            const nodeHGlobal = notCommon[Math.floor(rng() * notCommon.length)];
+            E[randomMateGlobal].add(a);
+            E[randomMateGlobal].delete(nodeHGlobal);
+            E[nodeHGlobal].delete(randomMateGlobal);
+            E[nodeHGlobal].add(b);
+            E[b].add(nodeHGlobal);
+            E[a].add(randomMateGlobal);
+            multipleResolved += 1;
+            break;
+          }
+        }
+        if (stopperMl === stopperLimit) {
+          multipleDropped += 1;
+          break;
+        }
+      }
+    });
+
+    return { ok: true, multipleResolved, multipleDropped };
+  }
+
+  // Faithful port of benchm.cpp's build_subgraphs (lines 954-1140):
+  // builds member_list (per-node sorted cluster ids), link_list (per-node
+  // [intra_each_cluster..., external]) with parity-bump per cluster, then
+  // calls buildSubgraph on every cluster and merges into global E.
+  // Returns { E, memberList, linkList, perCluster: [{multipleResolved, multipleDropped}, ...] }.
+  // E is initialised here; caller passes empty.
+  function buildSubgraphs(args) {
+    const {
+      memberMatrix, internalDegreeSeq, degreeSeq, rng, excess, defect,
+    } = args;
+    const numNodes = degreeSeq.length;
+    const E = [];
+    for (let i = 0; i < numNodes; i++) E.push(new Set());
+
+    // member_list[i] = sorted cluster ids that contain node i.
+    const memberList = [];
+    for (let i = 0; i < numNodes; i++) memberList.push([]);
+    for (let k = 0; k < memberMatrix.length; k++) {
+      for (let j = 0; j < memberMatrix[k].length; j++) {
+        memberList[memberMatrix[k][j]].push(k);
+      }
+    }
+    memberList.forEach(m => m.sort((a, b) => a - b));
+
+    // link_list[i] = per-cluster internal degree (one entry per cluster
+    // node i belongs to, in member_list[i] order) followed by external
+    // degree as the last entry.
+    const linkList = [];
+    for (let i = 0; i < numNodes; i++) {
+      const liin = [];
+      for (let j = 0; j < memberList[i].length; j++) {
+        const split = computeInternalDegreePerNode(
+          internalDegreeSeq[i], memberList[i].length,
+        );
+        for (let s = 0; s < split.length; s++) liin.push(split[s]);
+      }
+      // canonical pushes split[m] entries per j (so for non-overlap
+      // m=1, exactly 1 entry per node). Same shape.
+      // External degree as last entry:
+      liin.push(degreeSeq[i] - internalDegreeSeq[i]);
+      linkList.push(liin);
+    }
+
+    // Per-cluster parity bump (lines 1015-1097): if internal stub count
+    // sum is odd, shift one stub from external to internal (or reverse
+    // under defect) at a random member of the cluster. Canonical chooses
+    // direction by excess flag → up; defect → down; else coin flip.
+    for (let k = 0; k < memberMatrix.length; k++) {
+      let internalCluster = 0;
+      for (let j = 0; j < memberMatrix[k].length; j++) {
+        const nodeId = memberMatrix[k][j];
+        // right_index = position of cluster k in memberList[nodeId]
+        const rightIndex = memberList[nodeId].indexOf(k);
+        internalCluster += linkList[nodeId][rightIndex];
+      }
+      if (internalCluster % 2 !== 0) {
+        let defaultFlag = false;
+        if (excess) defaultFlag = true;
+        else if (defect) defaultFlag = false;
+        else if (rng() > 0.5) defaultFlag = true;
+        if (defaultFlag) {
+          // bump up: find a member whose intra+1 still <= cluster_size-1
+          // AND whose external > 0
+          for (let j = 0; j < memberMatrix[k].length; j++) {
+            const randomMate = memberMatrix[k][
+              Math.floor(rng() * memberMatrix[k].length)
+            ];
+            const rightIndex = memberList[randomMate].indexOf(k);
+            const intraVal = linkList[randomMate][rightIndex];
+            const extVal = linkList[randomMate][linkList[randomMate].length - 1];
+            if (intraVal < memberMatrix[k].length - 1 && extVal > 0) {
+              linkList[randomMate][rightIndex] += 1;
+              linkList[randomMate][linkList[randomMate].length - 1] -= 1;
+              break;
+            }
+          }
+        } else {
+          for (let j = 0; j < memberMatrix[k].length; j++) {
+            const randomMate = memberMatrix[k][
+              Math.floor(rng() * memberMatrix[k].length)
+            ];
+            const rightIndex = memberList[randomMate].indexOf(k);
+            if (linkList[randomMate][rightIndex] > 0) {
+              linkList[randomMate][rightIndex] -= 1;
+              linkList[randomMate][linkList[randomMate].length - 1] += 1;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    // Per-cluster build via buildSubgraph.
+    const perCluster = [];
+    for (let k = 0; k < memberMatrix.length; k++) {
+      const internalDegreeI = [];
+      for (let j = 0; j < memberMatrix[k].length; j++) {
+        const nodeId = memberMatrix[k][j];
+        const rightIndex = memberList[nodeId].indexOf(k);
+        internalDegreeI.push(linkList[nodeId][rightIndex]);
+      }
+      const sub = buildSubgraph({
+        nodes: memberMatrix[k].slice(),
+        degrees: internalDegreeI,
+        rng, E,
+      });
+      perCluster.push(sub);
+    }
+
+    return { E, memberList, linkList, perCluster };
+  }
+
+  // Faithful port of benchm.cpp:1144-1413 connect_all_the_parts.
+  // Treats external degrees (link_list[i].last()) as a separate
+  // configuration model graph (deterministic seed + 10 swaps), then
+  // mate-rewires to break any same-cluster external edges.
+  // Mutates E in place (adds external links).
+  // Returns { mateRemaining: int, swappedAway: int }.
+  function connectAllTheParts(args) {
+    const { E, memberList, linkList, rng, mateTrooper = 10 } = args;
+    const numNodes = linkList.length;
+    const degrees = linkList.map(l => l[l.length - 1]);
+
+    const en = [];
+    for (let i = 0; i < numNodes; i++) en.push(new Set());
+
+    // Phase 1: deterministic multimap seed (same as buildSubgraph
+    // phase 1 but on the global node set with external degrees).
+    let dn = [];
+    for (let i = 0; i < numNodes; i++) dn.push([degrees[i], i]);
+    dn.sort((a, b) => a[0] - b[0]);
+    while (dn.length > 0) {
+      const last = dn[dn.length - 1];
+      let itit = dn.length - 1;
+      const erasenda = [];
+      for (let i = 0; i < last[0]; i++) {
+        if (itit !== 0) {
+          itit -= 1;
+          en[last[1]].add(dn[itit][1]);
+          en[dn[itit][1]].add(last[1]);
+          erasenda.push(itit);
+        } else {
+          break;
+        }
+      }
+      erasenda.sort((a, b) => b - a);
+      const reinsert = [];
+      erasenda.forEach(idx => {
+        const ent = dn[idx];
+        if (ent[0] > 1) reinsert.push([ent[0] - 1, ent[1]]);
+        dn.splice(idx, 1);
+      });
+      reinsert.forEach(ent => {
+        let lo = 0, hi = dn.length;
+        while (lo < hi) {
+          const mid = (lo + hi) >> 1;
+          if (dn[mid][0] <= ent[0]) lo = mid + 1; else hi = mid;
+        }
+        dn.splice(lo, 0, ent);
+      });
+      for (let i = dn.length - 1; i >= 0; i--) {
+        if (dn[i][0] === last[0] && dn[i][1] === last[1]) {
+          dn.splice(i, 1);
+          break;
+        }
+      }
+    }
+
+    // Phase 2: 10 randomization passes (lines 1228-1271).
+    const degreeList = [];
+    for (let kk = 0; kk < degrees.length; kk++)
+      for (let k2 = 0; k2 < degrees[kk]; k2++) degreeList.push(kk);
+
+    for (let run = 0; run < 10; run++) {
+      for (let nodeA = 0; nodeA < numNodes; nodeA++) {
+        const enASize = en[nodeA].size;
+        for (let krm = 0; krm < enASize; krm++) {
+          let randomMate = degreeList[Math.floor(rng() * degreeList.length)];
+          while (randomMate === nodeA) {
+            randomMate = degreeList[Math.floor(rng() * degreeList.length)];
+          }
+          if (en[nodeA].has(randomMate)) continue;
+          en[nodeA].add(randomMate);
+          const outNodes = [];
+          en[nodeA].forEach(v => { if (v !== randomMate) outNodes.push(v); });
+          const oldNode = outNodes[Math.floor(rng() * outNodes.length)];
+          en[nodeA].delete(oldNode);
+          en[randomMate].add(nodeA);
+          en[oldNode].delete(nodeA);
+          const notCommon = [];
+          en[randomMate].forEach(v => {
+            if (v !== oldNode && !en[oldNode].has(v)) notCommon.push(v);
+          });
+          if (notCommon.length === 0) {
+            en[nodeA].add(oldNode);
+            en[randomMate].delete(nodeA);
+            en[oldNode].add(nodeA);
+            en[nodeA].delete(randomMate);
+            continue;
+          }
+          const nodeH = notCommon[Math.floor(rng() * notCommon.length)];
+          en[randomMate].delete(nodeH);
+          en[nodeH].delete(randomMate);
+          en[nodeH].add(oldNode);
+          en[oldNode].add(nodeH);
+        }
+      }
+    }
+
+    // Phase 3: mate-rewire loop (lines 1278-1390). Until var_mate is 0
+    // or stagnated for `mateTrooper` rounds.
+    function countMate() {
+      let v = 0;
+      for (let i = 0; i < numNodes; i++) {
+        en[i].forEach(j => {
+          if (theyAreMate(i, j, memberList)) v += 1;
+        });
+      }
+      return v;
+    }
+    let varMate = countMate();
+    let stopperMate = 0;
+    while (varMate > 0) {
+      const bestVarMate = varMate;
+      // Find a mate-pair (a, b) with they_are_mate(a, b).
+      let resolved = false;
+      outer:
+      for (let a = 0; a < numNodes && !resolved; a++) {
+        const enA = Array.from(en[a]);
+        for (let bi = 0; bi < enA.length; bi++) {
+          const b = enA[bi];
+          if (!theyAreMate(a, b, memberList)) continue;
+          let stopperM = 0;
+          while (true) {
+            stopperM += 1;
+            let randomMate = degreeList[Math.floor(rng() * degreeList.length)];
+            while (randomMate === a || randomMate === b) {
+              randomMate = degreeList[Math.floor(rng() * degreeList.length)];
+            }
+            if (!theyAreMate(a, randomMate, memberList) && !en[a].has(randomMate)) {
+              const notCommon = [];
+              en[randomMate].forEach(v => {
+                if (v !== b && !en[b].has(v)) notCommon.push(v);
+              });
+              if (notCommon.length > 0) {
+                const nodeH = notCommon[Math.floor(rng() * notCommon.length)];
+                en[randomMate].delete(nodeH);
+                en[randomMate].add(a);
+                en[nodeH].delete(randomMate);
+                en[nodeH].add(b);
+                en[b].delete(a);
+                en[b].add(nodeH);
+                en[a].add(randomMate);
+                en[a].delete(b);
+                if (!theyAreMate(b, nodeH, memberList)) varMate -= 2;
+                if (theyAreMate(randomMate, nodeH, memberList)) varMate -= 2;
+                resolved = true;
+                break;
+              }
+            }
+            if (stopperM === en[a].size) break;
+          }
+          break outer;
+        }
+      }
+      if (varMate === bestVarMate) {
+        stopperMate += 1;
+        if (stopperMate === mateTrooper) break;
+      } else {
+        stopperMate = 0;
+      }
+    }
+
+    // Merge en into E.
+    for (let i = 0; i < numNodes; i++) {
+      en[i].forEach(j => {
+        if (i < j) {
+          E[i].add(j);
+          E[j].add(i);
+        }
+      });
+    }
+    return { mateRemaining: varMate };
+  }
+
+  // Faithful port of benchm.cpp:1443-1537 erase_links.
+  // Drift-correct per-node mu_i toward (1 - mixing_parameter) by
+  // dropping (excess) or adding (defect) edges. No-op when neither
+  // flag is set.
+  function eraseLinks(args) {
+    const { E, memberList, excess, defect, mu, rng } = args;
+    const numNodes = memberList.length;
+    let erasAddTimes = 0;
+
+    function internalKin(i) {
+      let v = 0;
+      E[i].forEach(j => { if (theyAreMate(i, j, memberList)) v += 1; });
+      return v;
+    }
+
+    if (excess) {
+      for (let i = 0; i < numNodes; i++) {
+        while (E[i].size > 1 && internalKin(i) / E[i].size < 1 - mu) {
+          erasAddTimes += 1;
+          const deqar = [];
+          E[i].forEach(v => {
+            if (!theyAreMate(i, v, memberList)) deqar.push(v);
+          });
+          if (deqar.length === E[i].size) return { ok: false, erasAddTimes };
+          const randomMate = deqar[Math.floor(rng() * deqar.length)];
+          E[i].delete(randomMate);
+          E[randomMate].delete(i);
+        }
+      }
+    }
+    if (defect) {
+      for (let i = 0; i < numNodes; i++) {
+        while (E[i].size < E.length && internalKin(i) / E[i].size > 1 - mu) {
+          erasAddTimes += 1;
+          const stopperHere = numNodes;
+          let stopper = 0;
+          let randomMate = Math.floor(rng() * numNodes);
+          while (
+            (theyAreMate(i, randomMate, memberList) || E[i].has(randomMate))
+            && stopper < stopperHere
+          ) {
+            randomMate = Math.floor(rng() * numNodes);
+            stopper += 1;
+          }
+          if (stopper === stopperHere) return { ok: false, erasAddTimes };
+          E[i].add(randomMate);
+          E[randomMate].add(i);
+        }
+      }
+    }
+    return { ok: true, erasAddTimes };
+  }
+
+  // Faithful port of benchm.cpp:170-202 (change_community_size).
+  // Merges the smallest two communities and replaces a slot at index 0;
+  // returns -1 when |seq| <= 2 (un-recoverable). Mutates seq in place.
+  function changeCommunitySize(seq) {
+    if (seq.length <= 2) return -1;
+    let min1 = 0;
+    for (let i = 0; i < seq.length; i++) if (seq[i] <= seq[min1]) min1 = i;
+    let min2 = min1 === 0 ? 1 : 0;
+    for (let i = 0; i < seq.length; i++) {
+      if (seq[i] <= seq[min2] && seq[i] > seq[min1]) min2 = i;
+    }
+    seq[min1] += seq[min2];
+    const c = seq[0];
+    seq[0] = seq[min2];
+    seq[min2] = c;
+    seq.shift();
+    return 0;
+  }
+
+  // Top-level driver mirroring benchm.cpp's `benchmark` pipeline:
+  //   resample degrees → resample sizes → split internal → assign nodes
+  //   → build subgraphs → connect parts → erase links.
+  // Faithful to canonical: when assignNodesToClusters cannot satisfy
+  // degree feasibility within 3*N retries, run change_community_size
+  // and retry (canonical line 614 recursion). Bounded retries here.
+  // Returns the full final adjacency, memberList, linkList, and stage
+  // diagnostics so the page can render any intermediate stage.
+  function runFullPipeline(args) {
+    const {
+      N, k_avg, max_k, t1, c_min, c_max, t2, mu, rng,
+      excess = false, defect = false,
+      maxResizeAttempts = 8,
+    } = args;
+    const dseq = sampleDegreeSequence({ N, k_avg, max_k, t1, rng });
+    const maxIntDeg = Math.max(0, Math.floor((1 - mu) * dseq.degrees[dseq.degrees.length - 1]));
+    const cs = sampleClusterSizes({
+      N, max_internal_degree: maxIntDeg, c_min, c_max, t2, rng,
+      fixed_range: false, overlap_extra: 0,
+    });
+    const split = sampleInternalDegrees({
+      degrees: dseq.degrees, mu, rng, excess, defect,
+    });
+    let sizes = cs.sizes.slice();
+    let assignRes = null;
+    let resized = 0;
+    while (resized <= maxResizeAttempts) {
+      assignRes = assignNodesToClusters({
+        degrees: dseq.degrees,
+        internalDegrees: split.internal,
+        sizes,
+        rng,
+      });
+      if (assignRes.ok) break;
+      if (changeCommunitySize(sizes) === -1) break;
+      resized += 1;
+    }
+    if (!assignRes.ok) return { ok: false, stage: "assign", resized };
+    const subRes = buildSubgraphs({
+      memberMatrix: assignRes.memberMatrix,
+      internalDegreeSeq: split.internal,
+      degreeSeq: dseq.degrees,
+      rng, excess, defect,
+    });
+    const connRes = connectAllTheParts({
+      E: subRes.E, memberList: subRes.memberList, linkList: subRes.linkList,
+      rng,
+    });
+    const eraseRes = eraseLinks({
+      E: subRes.E, memberList: subRes.memberList,
+      excess, defect, mu, rng,
+    });
+    return {
+      ok: true,
+      degrees: dseq.degrees,
+      sizes,
+      internal: split.internal,
+      external: split.external,
+      assignment: assignRes.assignment,
+      memberMatrix: assignRes.memberMatrix,
+      memberList: subRes.memberList,
+      linkList: subRes.linkList,
+      E: subRes.E,
+      perCluster: subRes.perCluster,
+      mateRemaining: connRes.mateRemaining,
+      erasAddTimes: eraseRes.erasAddTimes,
+      resized,
+    };
+  }
+
   // Faithful port of benchm.cpp's cluster-assignment pipeline:
   //   - build_bipartite_network (lines 208-378): greedy bipartite seed
   //     by capacity-desc + 10 random-swap passes
@@ -551,5 +1219,13 @@
     cleanupMultigraph,
     buildConfigModelGraph,
     assignNodesToClusters,
+    computeInternalDegreePerNode,
+    theyAreMate,
+    buildSubgraph,
+    buildSubgraphs,
+    connectAllTheParts,
+    eraseLinks,
+    changeCommunitySize,
+    runFullPipeline,
   };
 })();

@@ -761,73 +761,38 @@ window.MathJax = {
       .attr("stroke", COL.mint).attr("stroke-width", 2)
       .attr("stroke-dasharray", "4 4");
 
-    // Live per-node μ_i = ext_deg / total_deg, derived from a real
-    // config-model + cleanup pipeline (LFRKernel.buildConfigModelGraph).
-    // Faithful to benchm.cpp's structure:
-    //   1. sampleInternalDegrees (per-node split with parity ratchet),
-    //   2. configModelPairStubs (uniform random stub pairing per cluster
-    //      AND on the global external-stub pool),
-    //   3. cleanupMultigraph (2-opt rewire of self-loops + parallels).
-    // Cluster assignment now also calls LFRKernel.assignNodesToClusters
-    // (faithful port of build_bipartite_network +
-    // internal_degree_and_membership), so the μ histogram reflects the
-    // canonical pipeline end-to-end (assignment → split → config model).
+    // Live per-node μ_i = ext_deg / total_deg, derived from
+    // LFRKernel.runFullPipeline. The kernel is a faithful port of
+    // benchm.cpp's `benchmark` driver end-to-end:
+    //   1. sampleDegreeSequence + sampleClusterSizes
+    //   2. sampleInternalDegrees (per-node split with excess/defect)
+    //   3. assignNodesToClusters (bipartite seed + 10 swaps + remap;
+    //      auto-resize via change_community_size if infeasible)
+    //   4. buildSubgraphs (per-cluster phase-1 multimap seed +
+    //      phase-2 randomization + phase-3 multi-edge rewire +
+    //      parity bump per cluster)
+    //   5. connectAllTheParts (global external config model with
+    //      multimap seed + 10 swaps + mate-rewire loop)
+    //   6. eraseLinks (drift correction under -sup / -inf flags)
     function sampleMus(mu, edgeSeed) {
       const rng = seededRng(edgeSeed * 53 + 9);
-      const degs = resampleDegrees(RESAMPLE_SEED);
-      const split = LFRKernel.sampleInternalDegrees({
-        degrees: degs, mu, rng,
+      const r = LFRKernel.runFullPipeline({
+        N: N_, k_avg: K_MEAN, max_k: K_MAX, t1: T1,
+        c_min: C_MIN, c_max: C_MAX, t2: T2,
+        mu, rng,
       });
-
-      const sizes = resampleClusterSizes(RESAMPLE_SEED);
-      const assignRng = seededRng(edgeSeed * 41 + 5);
-      const assignResult = LFRKernel.assignNodesToClusters({
-        degrees: degs,
-        internalDegrees: split.internal,
-        sizes,
-        rng: assignRng,
-      });
-      const assignment = assignResult.assignment;
-
-      // Per-cluster config model on internal stubs.
-      const intDegByCluster = sizes.map(() => []);
-      const intDegOwner = sizes.map(() => []);
-      for (let i = 0; i < N_; i++) {
-        const cid = assignment[i];
-        intDegByCluster[cid].push(split.internal[i]);
-        intDegOwner[cid].push(i);
+      if (!r.ok) {
+        return new Array(N_).fill(mu);  // viz fallback if pipeline gives up
       }
-      const intCount = new Array(N_).fill(0);
-      intDegByCluster.forEach((degs, cid) => {
-        if (degs.length === 0) return;
-        const owners = intDegOwner[cid];
-        const sub = LFRKernel.buildConfigModelGraph({
-          degrees: degs, rng, maxRetries: 10,
-        });
-        sub.edges.forEach(([a, b]) => {
-          intCount[owners[a]] += 1;
-          intCount[owners[b]] += 1;
-        });
-      });
-
-      // Global config model on external stubs.
-      const extSub = LFRKernel.buildConfigModelGraph({
-        degrees: split.external, rng, maxRetries: 10,
-      });
-      const extCount = new Array(N_).fill(0);
-      extSub.edges.forEach(([a, b]) => {
-        // Same-cluster fallback after global rewire still counted as ext
-        // here (canonical does an additional arrange pass to pull these
-        // back; viz approximation).
-        extCount[a] += 1;
-        extCount[b] += 1;
-      });
-
       const mus = [];
       for (let i = 0; i < N_; i++) {
-        const total = intCount[i] + extCount[i];
+        const total = r.E[i].size;
         if (total === 0) { mus.push(0); continue; }
-        mus.push(extCount[i] / total);
+        let intK = 0;
+        r.E[i].forEach(j => {
+          if (LFRKernel.theyAreMate(i, j, r.memberList)) intK += 1;
+        });
+        mus.push((total - intK) / total);
       }
       return mus;
     }
