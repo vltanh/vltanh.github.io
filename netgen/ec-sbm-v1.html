@@ -449,6 +449,7 @@ window.MathJax = {
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 <script src="./shared.js"></script>
 <script src="./js/profile_kernel.js"></script>
+<script src="./js/ec_sbm_kernel.js"></script>
 <script>
 (function () {
   document.getElementById("links").innerHTML = NETGEN.linksRow({gen: "ec-sbm-v1"});
@@ -597,33 +598,65 @@ window.MathJax = {
     };
   }
 
-  // ── Verified constructive edge list ──
-  // Derived by running gen_kec_core.generate_cluster on this synthetic
-  // at PYTHONHASHSEED=0; see memory ec_sbm_viz_bugs.md. If you touch
-  // shared.js's INTRA/MINCUTS, re-run verify_kec_core.py and update.
+  // ── Constructive edge list, live via ECSBMKernel.generateInternalEdges
+  // (faithful port of externals/ec-sbm/src/gen_kec_core.py). The page
+  // ran a hardcoded snapshot of this output prior to the kernel port;
+  // calling the kernel keeps the trace canonical and lets reroll
+  // re-randomise the np.random.choice fallback.
   //
-  //   C1 core (K_3 on {1,4,2}): 3 edges
-  //   C1 attach: 3→{1,4}, 5→{1,2}, 6→{1,4}, 7→{3,5}, 8→{1,4}  (10 edges)
-  //   C2 core (K_3 on {9,11,10}): 3 edges
-  //   C2 attach: 12→{9,11}, 13→{9,11}, 14→{10,12}  (6 edges)
-  //   C3 core (K_2 on {15,16}): 1 edge
-  //   C3 attach: 17→{15}, 18→{16}  (2 edges)
-  //   Total: 25 edges.
-  const CORE_PLUS_ATTACH = [
-    [1,2],[1,4],[2,4],
-    [1,3],[3,4],
-    [1,5],[2,5],
-    [1,6],[4,6],
-    [3,7],[5,7],
-    [1,8],[4,8],
-    [9,10],[9,11],[10,11],
-    [9,12],[11,12],
-    [9,13],[11,13],
-    [10,14],[12,14],
-    [15,16],
-    [15,17],
-    [16,18],
-  ];
+  // Seeded LCG (d3.randomLcg) so the default load is reproducible; the
+  // RESIDUAL state below mutates with the kernel call, so subsequent
+  // SBM-overlay computations consume the canonical residual budget.
+  const KEC_RNG_SEED = 0x57f1c4ec;
+  const PROF_KEC = ProfileKernel.runProfile({
+    gen: "ec-sbm",
+    edgelist: EDGES.map(e => [String(e.u), String(e.v)]),
+    clustering: NODES
+      .filter(n => CLUSTER_OF[n] !== "OUT")
+      .map(n => [String(n), CLUSTER_OF[n]]),
+    outlier_mode: "excluded",
+    drop_oo: false,
+  });
+  const KEC_NODE_IDS = PROF_KEC.files["node_id.csv"].trim().split("\n");
+  const KEC_CLUSTER_LABELS = PROF_KEC.files["cluster_id.csv"].trim().split("\n");
+  const KEC_DEG = PROF_KEC.files["degree.csv"].trim().split("\n").map(Number);
+  const KEC_ASSIGN = PROF_KEC.files["assignment.csv"].trim().split("\n").map(Number);
+  const KEC_NUM_CLUSTERS = KEC_CLUSTER_LABELS.length;
+  const KEC_NODE2CLUSTER = new Map();
+  const KEC_CLUSTERING = new Map();
+  KEC_ASSIGN.forEach((c, iid) => {
+    if (c === -1) return;
+    KEC_NODE2CLUSTER.set(iid, c);
+    if (!KEC_CLUSTERING.has(c)) KEC_CLUSTERING.set(c, []);
+    KEC_CLUSTERING.get(c).push(iid);
+  });
+  // Mincut per cluster_iid via the canonical name (BLOCK_NAMES values).
+  const KEC_MCS = KEC_CLUSTER_LABELS.map(name => MINCUTS[name] || 0);
+  // Sparse edge_counts.csv → dense num_clusters x num_clusters matrix.
+  const KEC_PROBS = Array.from({length: KEC_NUM_CLUSTERS},
+    () => new Array(KEC_NUM_CLUSTERS).fill(0));
+  PROF_KEC.files["edge_counts.csv"].trim().split("\n").forEach(row => {
+    if (!row) return;
+    const [r, c, w] = row.split(",").map(Number);
+    KEC_PROBS[r][c] = w;
+  });
+  // Mutates KEC_DEG and KEC_PROBS in place (canonical semantics): post-call
+  // they hold the residual budget for downstream stages (SBM overlay).
+  const KEC_RESULT = ECSBMKernel.generateInternalEdges({
+    clustering: KEC_CLUSTERING,
+    mcs: KEC_MCS,
+    deg: KEC_DEG,
+    probs: KEC_PROBS,
+    node2cluster: KEC_NODE2CLUSTER,
+    rng: d3.randomLcg(KEC_RNG_SEED),
+  });
+  const CORE_PLUS_ATTACH = Array.from(KEC_RESULT.edges.values()).map(
+    ([a, b]) => {
+      const u = parseInt(KEC_NODE_IDS[a], 10);
+      const v = parseInt(KEC_NODE_IDS[b], 10);
+      return u <= v ? [u, v] : [v, u];
+    },
+  );
   const CORE_SET = new Set(CORE_PLUS_ATTACH.map(([u, v]) => edgeKey(u, v)));
 
   // ── Residual SBM overlay realizations ──
