@@ -102,7 +102,7 @@
 </header>
 
 <section class="hook">
-  <p>Plain <a href="./abcd.html">ABCD</a> has no outlier concept. Our wrapper's <code>outlier_mode=singleton</code> hack wraps each unclustered input node in its own 1-node pseudo-cluster, and the sampler shoehorns them by admissibility fallback. ABCD+o is the paper-level fix: add a single integer parameter \(s_0\) and the Julia pseudo-code treats those \(s_0\) nodes as noise without pretending they form a community.</p>
+  <p>Plain <a href="./abcd.html">ABCD</a> has no outlier concept. Our wrapper's <code>outlier_mode=singleton</code> wraps each unclustered input node in its own 1-node pseudo-cluster, and the sampler accepts them through admissibility fallback. ABCD+o is the paper-level fix: a single integer parameter \(s_0\) so the Julia pseudo-code treats those \(s_0\) nodes as noise without pretending they form a community.</p>
   <p>The sampler's outlier block sits at cluster_id = 1. Its members are drawn uniformly at random from every node satisfying an upper-degree bound the paper derives; once drawn, their weight split is pinned (\(\hat y_u = 0\), \(\hat z_u = w_u\)). All their stubs fund the background graph \(G_0\); none fund any cluster graph.</p>
   <p>Across seeds the set of chosen outliers rotates, so two runs with the same inputs typically produce different outlier picks. The 233 input nodes that our profile marked as outliers need not show up at cluster_id = 1 in the output.</p>
   <p>Two things the model does <em>not</em> do, despite a casual reading. First, it does <em>not</em> forbid outlier-outlier edges: two outliers' \(z\)-stubs can pair in the background graph. Second, the identity of input outliers does <em>not</em> survive; our wrapper's profile drops their OO edges at input time only to make the target \(\xi\) reachable, not to tell the sampler which specific nodes to label as outliers.</p>
@@ -206,7 +206,7 @@
     \bar L \;=\; \sum_{u \in V} \min(1, \xi w_u).
   \]
   <p>where \(\bar L\) is a lower bound on the expected count of nodes with at least one background-graph stub. The eligibility threshold keeps hubs out of the mega-cluster only when their degree would exceed the residual cluster graph's graphic bound. On most inputs the threshold is large enough that every node is eligible. On our synthetic, the threshold is about 16 and every node with \(w_u \le 8\) passes. From the eligible set, the sampler draws \(s_0\) uniformly at random without replacement; those become cluster_id = 1.</p>
-  <p>Press <em>re-roll outliers</em> below to sample fresh members. Watch how the mega-cluster label lands on different input nodes each time.</p>
+  <p>Press <em>re-roll outliers</em> below to sample fresh members; the mega-cluster label lands on different input nodes each time.</p>
   <div class="disk-panel">
     <div class="widget-row" style="padding:0;border:none;margin:0 0 .8rem">
       <button class="btn primary" id="outlier-reroll" type="button">re-roll outliers</button>
@@ -276,7 +276,7 @@
 <section class="stage">
   <div class="stage-num">generation · degree preservation</div>
   <h2>Output degrees match input almost exactly, even with the outlier pin.</h2>
-  <p>Overlay bars per node: azure = input \(w_u\) (post-drop_oo), mint = output degree this realisation, crimson = chosen-as-outlier marker. Nodes picked as outliers still participate in the background graph, so their output degree should remain close to \(w_u\); the dashed-red frames only mark the model-level outlier label. Re-roll the outliers or the stubs above to see how the distribution of deltas shifts.</p>
+  <p>Overlay bars per node: azure = input \(w_u\) (post-drop_oo), mint = output degree this realisation, crimson = chosen-as-outlier marker. Nodes picked as outliers still participate in the background graph, so their output degree should remain close to \(w_u\); the dashed-red frames only mark the model-level outlier label. Re-roll the outliers or the stubs above to redraw the delta distribution.</p>
   <div class="disk-panel">
     <svg id="deg-cmp" viewBox="0 0 640 320" preserveAspectRatio="xMidYMid meet"></svg>
     <div class="step-desc">
@@ -343,7 +343,7 @@
   </div>
   <div class="callout warn">
     <div class="tag">caveat 2: drop_oo can delete nodes</div>
-    <p>233 of 906 nodes vanish from <code>edge.csv</code> on <code>dnc</code>: all their edges were OO in the input, drop_oo zeroes their degrees, and the sampler has no stubs for them. If your downstream pipeline expects one row per input node in the edge list, ABCD+o silently breaks that invariant on outlier-heavy inputs.</p>
+    <p>233 of 906 nodes vanish from <code>edge.csv</code> on <code>dnc</code>: all their edges were OO in the input, drop_oo zeroes their degrees, and the sampler has no stubs for them. Any downstream pipeline that expects one row per input node in the edge list will silently break on outlier-heavy inputs under ABCD+o.</p>
   </div>
   <div class="callout warn">
     <div class="tag">caveat 3: the "community" warning is a heuristic</div>
@@ -400,7 +400,7 @@ window.MathJax = {
     title: "similarity",
     siblings: [
       { gen: "abcd", label: "ABCD",
-        diff: "Same sampler internals but no \\(s_0\\); unclustered input nodes are mapped to 1-node pseudo-clusters by the wrapper and shoehorned at assignment time." },
+        diff: "Same sampler internals but no \\(s_0\\); unclustered input nodes are mapped to 1-node pseudo-clusters by the wrapper and accepted through admissibility fallback at assignment time." },
       { gen: "lfr", label: "LFR",
         diff: "Similar configuration-model backbone. LFR fits and resamples a power law for the degree sequence and a second for the cluster sizes; no outlier mechanism." },
     ],

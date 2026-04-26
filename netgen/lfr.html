@@ -81,7 +81,7 @@
   <p>LFR's design choice is the opposite of <a href="./abcd.html">ABCD</a>'s. ABCD takes your degree sequence and cluster sizes verbatim; LFR refuses to. It assumes the <em>shapes</em> are power laws and distils your input to two scalar exponents plus a handful of range parameters.</p>
   <p>Stage 2 resamples new degrees from a truncated power law with the fitted exponent and range, and new cluster sizes from a second power law under LFR's size-floor constraints. The output graph shares statistics with the input but not identity: node 5 in the output is not node 5 in the input; cluster 3 is not cluster 3.</p>
   <p>Mixing is controlled by a scalar \(\mu\) per node: LFR tries to arrange each node's neighbours so \(\mu_i = d^{\text{out}}_i / d_i \approx \mu\). A several-hundred-rewire loop reshuffles edge endpoints (never nodes) until each node's internal/external split is within a small tolerance of \(\mu\). The paper's Fig. 3 shows the resulting \(\mu_i\) distribution as bell-shaped around \(\mu\), not a delta.</p>
-  <p>Use LFR when the goal is "graphs with controlled degree + size distributions, sweepable across \(\mu\)". Use ABCD when you need "a synthetic twin of this specific input". The two models share a configuration-model-plus-rewire backbone but differ on what counts as input.</p>
+  <p>LFR fits a goal of "graphs with controlled degree + size distributions, sweepable across \(\mu\)". ABCD fits when the input itself is the target. The two models share a configuration-model-plus-rewire backbone but differ on what counts as input.</p>
 </section>
 
 <!-- ─────────── Profiling · the shared fixture ─────────── -->
@@ -115,7 +115,7 @@
   <div class="stage-num">profiling · cluster sizes</div>
   <h2>A second power law, with a size floor.</h2>
   <p>Profile writes <code>cluster_sizes.csv</code> the same way ABCD does. Stage 2 derives \(c_{\min}, c_{\max}\), and the exponent \(t_2\) fitted with <code>xmin = max(min(cluster_sizes), 3)</code>. The floor of 3 is a hard LFR requirement: the C++ binary refuses to build clusters smaller than 3. If the input has size-1 or size-2 clusters (such as the wrapper's singleton outliers), the floor absorbs them; the fitted exponent is estimated only from sizes \(\ge 3\).</p>
-  <p>On the synthetic: <code>cluster_sizes = [8, 6, 4, 1, 1]</code> → \(c_{\min} = 3\) (floor kicks in), \(c_{\max} = 8\), \(t_2 \approx 2.23\). On <code>dnc</code>: 442 entries ending in 355 singletons → \(c_{\min} = 3\), \(c_{\max} = 52\), \(t_2 \approx 2.01\).</p>
+  <p>On the synthetic: <code>cluster_sizes = [8, 6, 4, 1, 1]</code> → \(c_{\min} = 3\) (floor applies), \(c_{\max} = 8\), \(t_2 \approx 2.23\). On <code>dnc</code>: 442 entries ending in 355 singletons → \(c_{\min} = 3\), \(c_{\max} = 52\), \(t_2 \approx 2.01\).</p>
   <div class="disk-panel">
     <svg id="cs-fit" viewBox="0 0 640 300" preserveAspectRatio="xMidYMid meet"></svg>
     <div class="step-desc"><span class="st">reading the chart</span> &middot; dots are the input cluster-size histogram (log-log). Singletons (size 1) on the synthetic and on <code>dnc</code> appear in red; they are below the fit's \(x_{\min}\) floor and do not influence \(t_2\). The fit line starts at \(c_{\min}\).</div>
@@ -242,7 +242,7 @@
   </div>
   <div class="callout warn">
     <div class="tag">caveat 2: cluster count shifts</div>
-    <p>On <code>dnc</code>, input has 87 real clusters (plus 355 singletons the wrapper counts separately); LFR output has 10 clusters. This is not a bug: LFR samples \(c^{-t_2}\) truncated to \([c_{\min}, c_{\max}]\) with sum fixed to \(N\). With \(t_2\) near 2 and \(c_{\max} = 52\), the sampler draws a handful of large clusters that sum to 906 quickly, leaving no room for the many small clusters the input had. If you need a specific cluster count, don't use LFR.</p>
+    <p>On <code>dnc</code>, input has 87 real clusters (plus 355 singletons the wrapper counts separately); LFR output has 10 clusters. This is not a bug: LFR samples \(c^{-t_2}\) truncated to \([c_{\min}, c_{\max}]\) with sum fixed to \(N\). With \(t_2\) near 2 and \(c_{\max} = 52\), the sampler draws a handful of large clusters that sum to 906 quickly, leaving no room for the many small clusters the input had. LFR is the wrong tool when a specific cluster count is required.</p>
   </div>
   <div class="callout warn">
     <div class="tag">caveat 3: outliers disappear</div>
