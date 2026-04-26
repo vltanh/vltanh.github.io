@@ -1677,6 +1677,12 @@ window.MathJax = {
     let edgeNonce = 0;
     let step = FINAL_STEP;          // start at the settled terminal state
     let arrivals = [];
+    // Per-arrival pick snapshot. Set when a step is committed (NEXT past
+    // it). Read at render time when k < step (mid-walk past arrivals stay
+    // frozen at the T they were committed under). Cleared when step
+    // moves backward across an arrival, on RESET, and on entering
+    // FINAL_STEP (where T-scrub is allowed to randomize everything).
+    const committed = {};
 
     function R_of_T_at(t, T) {
       return NPSOKernel.R_of_T_at(t, T, M_PROF, GAMMA);
@@ -1733,7 +1739,17 @@ window.MathJax = {
 
     function recomputeAll() {
       const T = parseFloat(slider.value);
-      arrivals = sorted.map((_, i) => computeArrival(i, T, localEmb));
+      // Mid-walk: arrivals strictly before the current step stay locked at
+      // their committed value (frozen at the T at which user moved past
+      // them). The current step + everything beyond re-evaluates at the
+      // current T. At FINAL_STEP, every arrival re-evaluates (T scrub
+      // randomizes the whole graph there).
+      arrivals = sorted.map((_, i) => {
+        if (step !== FINAL_STEP && i < step && committed[i] != null) {
+          return committed[i];
+        }
+        return computeArrival(i, T, localEmb);
+      });
     }
 
     function render() {
@@ -1847,19 +1863,45 @@ window.MathJax = {
       render();
     }
 
+    function clearCommitted() {
+      for (const k of Object.keys(committed)) delete committed[k];
+    }
+
     slider.addEventListener("input", () => { recomputeAll(); render(); });
     rerollBtn.addEventListener("click", rerollEdges);
     document.getElementById("impl3-prev").addEventListener("click", () => {
-      if (step > 0) { step -= 1; render(); }
+      if (step > 0) {
+        // Stepping back un-locks the arrival the user is moving onto, so
+        // sliding T at that step is live-randomizing again.
+        step -= 1;
+        delete committed[step];
+        recomputeAll();
+        render();
+      }
     });
     document.getElementById("impl3-next").addEventListener("click", () => {
-      if (step < FINAL_STEP) { step += 1; render(); }
+      if (step < FINAL_STEP) {
+        // Commit the just-shown arrival under current T before advancing.
+        // Entering FINAL_STEP wipes commitments because T-scrub at the
+        // settled state randomizes the whole graph.
+        if (step <= LAST_ARRIVAL) committed[step] = arrivals[step];
+        step += 1;
+        if (step === FINAL_STEP) clearCommitted();
+        recomputeAll();
+        render();
+      }
     });
     document.getElementById("impl3-reset").addEventListener("click", () => {
-      step = 0; render();
+      step = 0;
+      clearCommitted();
+      recomputeAll();
+      render();
     });
     document.getElementById("impl3-end").addEventListener("click", () => {
-      step = FINAL_STEP; render();
+      step = FINAL_STEP;
+      clearCommitted();
+      recomputeAll();
+      render();
     });
 
     recomputeAll();
@@ -1868,6 +1910,9 @@ window.MathJax = {
     onEmbeddingReroll((emb) => {
       edgeNonce = 0;
       localEmb = emb;
+      // Fresh embedding invalidates every committed pick; the commits
+      // were tied to the old DISTS / U_NODE.
+      clearCommitted();
       viz.nodesData.forEach(n => {
         const nid = parseInt(n.id, 10);
         const p = emb.POS_POLAR[nid];
