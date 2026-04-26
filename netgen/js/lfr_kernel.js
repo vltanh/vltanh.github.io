@@ -10,11 +10,9 @@
 //   - cluster-size sampler with the max_degree+1 seed branch
 //
 // Stages NOT yet covered (defer to follow-up):
-//   - internal/external degree split + global mu (per benchm.cpp:
-//     `internal_degree=(1-mu)*degree_seq[i] + Bernoulli(frac)`)
-//   - per-cluster + global config-model edge sampling
-//     (`build_subgraph`, `build_subgraphs`)
-//   - rewire passes (`internal_kin`, `erase_link`, `arrange`)
+//   - rewire passes (`internal_kin`, `erase_link`, `arrange`) for
+//     drift-correcting per-node mu_i toward the global target after
+//     the per-cluster + global config-model edges are placed
 //
 // Randomness: caller passes a JS rng (() -> [0,1)). Page uses
 // d3.randomLcg + per-stage seed; byte-equality with LFR's ran4() is
@@ -330,6 +328,215 @@
     return { edges: kept, dropped, stats };
   }
 
+  // Faithful port of benchm.cpp's cluster-assignment pipeline:
+  //   - build_bipartite_network (lines 208-378): greedy bipartite seed
+  //     by capacity-desc + 10 random-swap passes
+  //   - internal_degree_and_membership node-id remap (lines 579-651):
+  //     for each node from highest to lowest degree, pick a random
+  //     available bipartite slot whose capacity supports the node's
+  //     internal degree (retry up to 3*N times before signalling
+  //     change_community_size on caller).
+  //
+  // Specialised for the page's wrapper: max_mem_num=1, overlapping=0
+  // (member_numbers[i] = 1 for all i). This collapses the bipartite
+  // greedy seed to a per-community fill in num_seq-desc order, and
+  // each node ends up in exactly one community.
+  //
+  // Inputs:
+  //   degrees:         per-node total degree (page-id-keyed)
+  //   internalDegrees: per-node target internal degree
+  //   sizes:           per-cluster capacity num_seq[k]
+  //   rng:             () -> [0, 1)
+  //   maxAttempts:     remap retries per node before giving up
+  //                    (defaults to 3 * N, matching canonical)
+  //   randomizationPasses: how many of the 10 canonical swap passes
+  //                    to record snapshots for (default 10)
+  //
+  // Output:
+  //   {
+  //     assignment: [cluster_idx per node iid],
+  //     memberMatrix: [[node_iid, ...] per cluster],
+  //     phases: { seed, swap, remap }, each is a snapshot of `assignment`
+  //     after that phase (suitable for the page step walker).
+  //     ok: bool. False if remap couldn't satisfy degree feasibility
+  //          (caller can rebuild num_seq and retry).
+  //   }
+  //
+  // Faithful divergence: canonical's randomization-pass loop iterates
+  // a Python deque/set under PYTHONHASHSEED=0; the JS port uses
+  // insertion-order Set + indexed array. Same control flow + same
+  // number of rng() draws per pass, distinct realizations.
+  function assignNodesToClusters(args) {
+    const {
+      degrees,
+      internalDegrees,
+      sizes,
+      rng,
+      maxAttempts,
+      randomizationPasses = 10,
+    } = args;
+    const N = degrees.length;
+    const ncom = sizes.length;
+    if (N === 0 || ncom === 0) {
+      return {
+        assignment: [], memberMatrix: [], phases: {
+          seed: [], swap: [], remap: [],
+        }, ok: true,
+      };
+    }
+
+    // Phase 1: bipartite greedy seed.
+    // Canonical iterates degree_node_in from end (highest member_numbers
+    // value) backward; for member_numbers[i]=1 this reduces to walking
+    // node ids high-to-low and giving each node the highest-capacity
+    // remaining community. Tie-break: stable insertion order in the
+    // capacity multimap (canonical std::multimap is RB-tree, so equal
+    // keys preserve insertion order).
+    const enOut = sizes.map(() => []);    // per-cluster node list
+    const enIn = new Array(N).fill(-1);   // per-node cluster
+    const remainingCap = sizes.slice();
+    // priority list: pairs (cap, cluster_idx). Re-inserts after decrement.
+    function popHighestCap() {
+      let bestIdx = -1, bestCap = -1, bestK = -1;
+      for (let k = 0; k < remainingCap.length; k++) {
+        if (remainingCap[k] > bestCap || (remainingCap[k] === bestCap && k > bestK)) {
+          bestCap = remainingCap[k];
+          bestK = k;
+        }
+      }
+      if (bestCap <= 0) return -1;
+      remainingCap[bestK] -= 1;
+      return bestK;
+    }
+    for (let i = N - 1; i >= 0; i--) {
+      const k = popHighestCap();
+      if (k === -1) {
+        // canonical returns -1 (over-subscribed); page wrapper should
+        // not hit this since sum(sizes) == N (cluster-size sampler tops
+        // up smallest cluster by deficit).
+        return {
+          assignment: enIn.slice(), memberMatrix: enOut.map(c => c.slice()),
+          phases: { seed: enIn.slice(), swap: enIn.slice(), remap: enIn.slice() },
+          ok: false,
+        };
+      }
+      enIn[i] = k;
+      enOut[k].push(i);
+    }
+    const seedSnapshot = enIn.slice();
+
+    // Phase 2: 10 randomization passes (canonical lines 319-359).
+    // For each (run, cluster k, krm < |enOut[k]|): draw a random node
+    // from degree_list (which under member_numbers[i]=1 is just
+    // [0,1,...,N-1]); if that random_mate is NOT already in cluster k,
+    // execute a 4-way swap that preserves all degree constraints.
+    const degreeList = [];
+    for (let i = 0; i < N; i++) degreeList.push(i);  // member_numbers=1
+
+    for (let run = 0; run < randomizationPasses; run++) {
+      for (let k = 0; k < ncom; k++) {
+        const cap = enOut[k].length;
+        for (let krm = 0; krm < cap; krm++) {
+          const randomMate = degreeList[Math.floor(rng() * degreeList.length)];
+          // canonical: irand(L-1) in [0, L-1] inclusive; JS floor(rng()*L)
+          // gives [0, L-1] inclusive. Same range.
+          if (enIn[randomMate] === k) continue;
+          if (enOut[k].indexOf(randomMate) >= 0) continue;
+          // pick old_node from enOut[k]
+          const externalNodes = enOut[k];
+          const oldNode = externalNodes[Math.floor(rng() * externalNodes.length)];
+          // not_common = communities in en_in[random_mate] but not in
+          // en_in[old_node]. For member_numbers=1, en_in[i] holds one
+          // value, so not_common is at most {en_in[random_mate]}.
+          // canonical iterates en_in[random_mate]; the only element is
+          // a community c. If c !== en_in[old_node] (i.e. c !== k since
+          // old_node is in k), c qualifies; else not_common empty.
+          const cMate = enIn[randomMate];
+          if (cMate === k) continue;  // same community, skip
+          if (cMate === enIn[oldNode]) {
+            // not_common empty; canonical breaks out of this entire
+            // (run, node_a, krm) loop level. JS port mirrors with break.
+            break;
+          }
+          const nodeH = randomMate;
+          // 4-way swap (canonical lines 345-356).
+          // node_a = community k; we transplant random_mate INTO k and
+          // bounce old_node OUT of k INTO node_h's previous community.
+          const cOld = enIn[oldNode];   // = k (since oldNode in k)
+          const cMate2 = enIn[nodeH];   // = cMate
+          // remove old_node from k, put random_mate (=nodeH) in
+          const oi = enOut[k].indexOf(oldNode);
+          if (oi >= 0) enOut[k][oi] = nodeH;
+          // remove nodeH from cMate, put oldNode in
+          const hi = enOut[cMate2].indexOf(nodeH);
+          if (hi >= 0) enOut[cMate2][hi] = oldNode;
+          enIn[nodeH] = k;
+          enIn[oldNode] = cMate2;
+        }
+      }
+    }
+    const swapSnapshot = enIn.slice();
+
+    // Phase 3: degree-feasibility node remap (canonical lines 579-651).
+    // For each node in degrees-desc order, pick a random
+    // available bipartite slot whose `available[slot] >=
+    // internal_degree[node]`. `available[slot] = sum_k (size_k - 1)
+    // for k in en_in[slot]`; for member_numbers=1, available[slot] =
+    // size_{en_in[slot]} - 1.
+    const slotIndices = [];
+    for (let s = 0; s < N; s++) slotIndices.push(s);
+    const slotAvailable = slotIndices.map(s => sizes[enIn[s]] - 1);
+    const mapNodes = new Array(N).fill(0);
+    const cap = maxAttempts == null ? 3 * N : maxAttempts;
+
+    // Order nodes by degree desc, id asc on tie.
+    const nodeOrder = [];
+    for (let i = 0; i < N; i++) nodeOrder.push(i);
+    nodeOrder.sort((a, b) => (degrees[b] - degrees[a]) || (a - b));
+
+    let ok = true;
+    const availPool = slotIndices.slice();
+    for (let oi = 0; oi < nodeOrder.length; oi++) {
+      const i = nodeOrder[oi];
+      const intDeg = internalDegrees[i];
+      let tryThis = Math.floor(rng() * availPool.length);
+      let kr = 0;
+      while (intDeg > slotAvailable[availPool[tryThis]]) {
+        kr += 1;
+        tryThis = Math.floor(rng() * availPool.length);
+        if (kr === cap) {
+          ok = false;
+          break;
+        }
+      }
+      if (!ok) break;
+      mapNodes[availPool[tryThis]] = i;
+      availPool[tryThis] = availPool[availPool.length - 1];
+      availPool.pop();
+    }
+
+    // Apply remap: member_matrix[k][j] = mapNodes[member_matrix[k][j]].
+    const memberMatrix = enOut.map(c => c.map(s => mapNodes[s]));
+    // sort members within each cluster (canonical line 656)
+    memberMatrix.forEach(c => c.sort((a, b) => a - b));
+    // build per-node assignment
+    const assignment = new Array(N).fill(-1);
+    memberMatrix.forEach((members, k) => {
+      members.forEach(n => { assignment[n] = k; });
+    });
+
+    return {
+      assignment,
+      memberMatrix,
+      phases: {
+        seed: seedSnapshot,
+        swap: swapSnapshot,
+        remap: assignment.slice(),
+      },
+      ok,
+    };
+  }
+
   window.LFRKernel = {
     integral,
     averageDegree,
@@ -343,5 +550,6 @@
     configModelPairStubs,
     cleanupMultigraph,
     buildConfigModelGraph,
+    assignNodesToClusters,
   };
 })();

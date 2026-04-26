@@ -641,65 +641,40 @@ window.MathJax = {
   })();
 
   // ── Generation · assignment step-through ──
-  // Iterative algorithm: shuffle nodes, walk through; each homeless node
-  // proposes a random community. Admission: community size > dint = (1-mu) d.
-  // If community full, kick a current member (becomes homeless).
+  // Live via LFRKernel.assignNodesToClusters: faithful port of
+  // benchm.cpp's bipartite greedy seed (build_bipartite_network) +
+  // 10 randomization swap passes + degree-feasibility node remap
+  // (internal_degree_and_membership). The step walker shows the four
+  // canonical phases (initial empty → seed → swap → remap).
   (function () {
     const viz = NETGEN.VIZ.init("g-assign-cy", { showLabels: true, edges: [] });
 
     const CLUSTERS_COLORS = [COL.C1, COL.C2, COL.C3, COL.OUT, COL.azure_3 || COL.azure];
 
     function runAssignment(seed, mu) {
-      const rng = seededRng(seed * 41 + 5);
+      const splitRng = seededRng(seed * 41 + 5);
+      const assignRng = seededRng(seed * 41 + 23);
       const sizes = resampleClusterSizes(seed);
       const degs = resampleDegrees(seed);
-      // Line up: iid indices 0..N-1 with degree degs[i]. Each "node iid"
-      // displayed at POSITIONS of synthetic node (iid+1).
-      const clusters = sizes.map(() => []);
-      const homeless = d3.range(N_);
-      shuffled(homeless, rng).forEach(i => {});  // (no-op, just to exercise RNG)
-      const iters = [];  // record state per iter
-      // Iteration: while homeless non-empty, take one, propose random cluster.
-      let ticks = 0;
-      let current = shuffled(homeless, rng);
-      const assignment = new Array(N_).fill(-1);
-      const sizesLeft = sizes.slice();
-      const iterLimit = 3;
-      for (let t = 0; t < iterLimit; t++) {
-        const snapshot = assignment.slice();
-        iters.push(snapshot);
-        const nextHomeless = [];
-        current.forEach(iid => {
-          const d = degs[iid] || 1;
-          const dint = Math.round((1 - mu) * d);
-          // Random cluster
-          const cid = Math.floor(rng() * sizes.length);
-          if (sizes[cid] > dint) {
-            // admissible
-            if (sizesLeft[cid] > 0) {
-              assignment[iid] = cid;
-              sizesLeft[cid] -= 1;
-            } else if (clusters[cid].length > 0) {
-              // kick a current member
-              const kickIdx = Math.floor(rng() * clusters[cid].length);
-              const kicked = clusters[cid][kickIdx];
-              assignment[kicked] = -1;
-              nextHomeless.push(kicked);
-              clusters[cid][kickIdx] = iid;
-              assignment[iid] = cid;
-            }
-          } else {
-            nextHomeless.push(iid);
-          }
-          if (assignment[iid] === cid) {
-            if (!clusters[cid].includes(iid)) clusters[cid].push(iid);
-          }
-        });
-        current = nextHomeless;
-        if (current.length === 0) break;
-      }
-      iters.push(assignment.slice());
-      return { iters, sizes, degs, assignment };
+      const split = LFRKernel.sampleInternalDegrees({
+        degrees: degs, mu, rng: splitRng,
+      });
+      const result = LFRKernel.assignNodesToClusters({
+        degrees: degs,
+        internalDegrees: split.internal,
+        sizes,
+        rng: assignRng,
+      });
+      // step walker snapshots: initial-empty + 3 canonical phases.
+      const empty = new Array(N_).fill(-1);
+      const iters = [
+        empty,
+        result.phases.seed.slice(),
+        result.phases.swap.slice(),
+        result.phases.remap.slice(),
+        result.assignment.slice(),
+      ];
+      return { iters, sizes, degs, assignment: result.assignment, ok: result.ok };
     }
 
     let lastRun = runAssignment(ASSIGN_SEED, 0.4);
@@ -717,19 +692,19 @@ window.MathJax = {
       });
       viz.setEdges([]);
       const STEP_LABELS = [
-        "iter 0 · all nodes homeless (grey)",
-        "iter 1 · first pass of random assignments",
-        "iter 2 · kicks start; homeless pool cycles",
-        "iter 3 · convergence",
+        "step 0 · all nodes homeless (grey)",
+        "step 1 · bipartite greedy seed",
+        "step 2 · 10 randomization passes",
+        "step 3 · degree-feasibility remap",
         "final",
       ];
       document.getElementById("g-assign-stage").textContent = STEP_LABELS[Math.min(step, 4)];
       const STEP_DESCS = [
         "Start: every node grey, no assignment. The sizes come from the resample above, so clusters have capacity from the fresh cluster-size list, not the input.",
-        "Each homeless node picks a random community and is admitted if the community's size exceeds its internal degree \\(d^{\\text{int}} = (1-\\mu) d\\). Small-degree nodes are admitted often; high-degree nodes frequently rejected.",
-        "Homeless nodes now try again. The kick rule: if a chosen community is full, displace a random current member back to the homeless pool. The loop makes progress each pass as degree-filled communities shed small nodes for larger ones.",
-        "By the third pass most nodes land. Any remaining homeless rotation is short; the loop exits when the pool empties.",
-        "All nodes placed, cluster sizes exactly match the resample.",
+        "<code>build_bipartite_network</code> phase 1: walk node ids highest-to-lowest; each node attaches to the highest-capacity remaining community. Tie-break is insertion order in the canonical multimap.",
+        "<code>build_bipartite_network</code> phase 2: 10 randomization passes. Each pass iterates every (community, slot) pair; pick a random node, swap memberships if it preserves degree constraints, otherwise skip.",
+        "<code>internal_degree_and_membership</code> remap: for each node from highest to lowest degree, pick a random bipartite slot whose capacity \\(c_k - 1\\) covers the node's internal degree \\(d^{\\text{int}}_i\\). Up to \\(3N\\) retries per node before the cluster sizes are rebuilt.",
+        "All nodes placed; cluster sizes exactly match the resample; per-node \\(d^{\\text{int}}_i \\le c_k - 1\\).",
       ];
       const descEl = document.getElementById("g-assign-desc");
       descEl.innerHTML = '<span class="st">' + STEP_LABELS[Math.min(step, 4)] + "</span> &middot; " + STEP_DESCS[Math.min(step, 4)];
@@ -793,9 +768,10 @@ window.MathJax = {
     //   2. configModelPairStubs (uniform random stub pairing per cluster
     //      AND on the global external-stub pool),
     //   3. cleanupMultigraph (2-opt rewire of self-loops + parallels).
-    // Cluster assignment uses the page's runAssignment helper since
-    // that loop is not the focus here; the μ histogram lives on the
-    // resulting per-node ext / total ratio.
+    // Cluster assignment now also calls LFRKernel.assignNodesToClusters
+    // (faithful port of build_bipartite_network +
+    // internal_degree_and_membership), so the μ histogram reflects the
+    // canonical pipeline end-to-end (assignment → split → config model).
     function sampleMus(mu, edgeSeed) {
       const rng = seededRng(edgeSeed * 53 + 9);
       const degs = resampleDegrees(RESAMPLE_SEED);
@@ -803,39 +779,15 @@ window.MathJax = {
         degrees: degs, mu, rng,
       });
 
-      // Cluster assignment for the per-cluster config model. Uses the
-      // page's existing homeless-iter pass (canonical's full assignment
-      // loop is not yet ported; this approximation gives each node a
-      // valid cluster placement to drive the per-cluster sampler).
       const sizes = resampleClusterSizes(RESAMPLE_SEED);
-      const assignment = (function () {
-        const arng = seededRng(edgeSeed * 41 + 5);
-        const a = new Array(N_).fill(-1);
-        const sizesLeft = sizes.slice();
-        const homeless = d3.range(N_);
-        for (let t = 0; t < 6; t++) {
-          let stuck = true;
-          homeless.forEach(iid => {
-            if (a[iid] !== -1) return;
-            const cid = Math.floor(arng() * sizes.length);
-            if (sizesLeft[cid] > 0) {
-              a[iid] = cid; sizesLeft[cid] -= 1; stuck = false;
-            }
-          });
-          if (stuck) break;
-        }
-        // Deterministic backstop: anything still unassigned gets the
-        // last cluster with capacity (or cluster 0).
-        for (let i = 0; i < a.length; i++) {
-          if (a[i] === -1) {
-            const fb = sizesLeft.findIndex(s => s > 0);
-            const cid = fb >= 0 ? fb : 0;
-            a[i] = cid;
-            if (sizesLeft[cid] > 0) sizesLeft[cid] -= 1;
-          }
-        }
-        return a;
-      })();
+      const assignRng = seededRng(edgeSeed * 41 + 5);
+      const assignResult = LFRKernel.assignNodesToClusters({
+        degrees: degs,
+        internalDegrees: split.internal,
+        sizes,
+        rng: assignRng,
+      });
+      const assignment = assignResult.assignment;
 
       // Per-cluster config model on internal stubs.
       const intDegByCluster = sizes.map(() => []);
