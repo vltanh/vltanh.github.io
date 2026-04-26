@@ -218,16 +218,15 @@
 <!-- ─────────── algorithm · greedy ─────────── -->
 <section class="stage">
   <div class="stage-num">algorithm · greedy</div>
-  <h2>Heap pop, partner via <code>set.pop()</code>.</h2>
-  <p>v1's matcher. Pops the node with the most missing stubs and drains it via Python's <code>set.pop()</code>. The Python docs claim <code>set.pop()</code> returns "an arbitrary element", but for sets of small integers the implementation is deterministic in practice: <code>hash(n) == n</code>, the underlying hash table iterates in slot order, and small ints hash to their own slot.</p>
-  <p>So greedy drains candidates roughly in <em>id-ascending</em> order, not randomly. The naming hides the determinism; the algorithm is more "id-sorted greedy" than "random greedy". Once \(u\)'s deficit is zero or partners run out, move on; unplaced stubs disappear without a log line.</p>
+  <h2>Heap pop, partner via id-ascending sort.</h2>
+  <p>v1's matcher. Pops the node with the most missing stubs and drains it against the candidate pool. Older versions of the code used Python's <code>set.pop()</code> and relied on <code>hash(n) == n</code> for small ints to drain in slot order; the production code now sorts the candidate set explicitly by id ascending so the algorithm is deterministic across <code>PYTHONHASHSEED</code> values and matches this page's JS port.</p>
+  <p>Once \(u\)'s deficit is zero or partners run out, move on; unplaced stubs disappear without a log line.</p>
   <div class="pseudo"><span class="kw">def</span> greedy(residual, adj):
     heap = max-heap of (residual[u], u) for u with residual[u] &gt; 0
     <span class="kw">while</span> heap not empty:
         u = heap.pop()
-        candidates = {v : v != u, v not in adj[u], residual[v] &gt; 0}
-        <span class="kw">while</span> residual[u] &gt; 0 <span class="kw">and</span> candidates:
-            v = candidates.pop()  <span class="cm"># int hash table → id-ascending in practice</span>
+        candidates = sorted({v : v != u, v not in adj[u], residual[v] &gt; 0})
+        <span class="kw">for</span> v <span class="kw">in</span> candidates[:residual[u]]:
             adj[u].add(v); adj[v].add(u)
             residual[u] -= 1; residual[v] -= 1
         <span class="cm"># residual[u] &gt; 0 here means u was starved. dropped silently.</span></div>
@@ -264,23 +263,22 @@
 <!-- ─────────── algorithm · true_greedy ─────────── -->
 <section class="stage">
   <div class="stage-num">algorithm · true_greedy</div>
-  <h2>Heap pop, partner via <code>argmax</code> over current degrees.</h2>
-  <p>Same outer pop as greedy, but the partner pick is deterministic: among valid targets (node not yet adjacent, has positive deficit), pick the one with the highest <em>current achieved degree</em>. Tie-break by id ascending. After each pair, push updated residuals back into the heap so subsequent pops see fresh values.</p>
-  <div class="pseudo"><span class="kw">def</span> true_greedy(residual, adj, deg):
+  <h2>Heap pop, partner via <code>argmax</code> over remaining residual deficit.</h2>
+  <p>Same outer pop as greedy, but the partner pick is deterministic: among valid targets (node not yet adjacent, has positive deficit), pick the one with the highest <em>remaining residual deficit</em>. Tie-break by id ascending. After each pair, push updated residuals back into the heap so subsequent pops see fresh values.</p>
+  <div class="pseudo"><span class="kw">def</span> true_greedy(residual, adj):
     heap = max-heap of (residual[u], u) for u with residual[u] &gt; 0
     <span class="kw">while</span> heap not empty:
         u = heap.pop()
         <span class="kw">while</span> residual[u] &gt; 0:
             valid = {v : v != u, v not in adj[u], residual[v] &gt; 0}
             <span class="kw">if not</span> valid: <span class="kw">break</span>
-            v = argmax(valid, key=lambda v: deg[v])  <span class="cm"># id-asc tiebreak</span>
+            v = argmax(valid, key=lambda v: (residual[v], -v))  <span class="cm"># id-asc tiebreak</span>
             adj[u].add(v); adj[v].add(u)
             residual[u] -= 1; residual[v] -= 1
-            deg[u] += 1; deg[v] += 1
             heap.push(residual[v], v)
         <span class="kw">if</span> residual[u] &gt; 0:
             log.warn(f"gridlock at u={u}, {residual[u]} stubs unplaced")</div>
-  <p>Picking by max current degree biases toward already-popular nodes, which is fine for top-up because they have the most candidate partners. The deterministic tiebreak and explicit gridlock log are the two changes from <code>greedy</code>.</p>
+  <p>Picking by max remaining deficit biases toward the neediest nodes, draining them while they still have a wide pool of candidates. The deterministic tiebreak and explicit gridlock log are the two changes from <code>greedy</code>.</p>
   <div class="graph g-with-side" id="g-truegreedy">
     <div class="graph-chrome">
       <span id="g-truegreedy-stage">step 0 &middot; initial deficit</span>
@@ -447,7 +445,7 @@
 <!-- ─────────── --remap mode ─────────── -->
 <section class="stage">
   <div class="stage-num">the --remap option</div>
-  <h2>For gens that emit fresh node IDs, pair by degree rank instead of by ID.</h2>
+  <h2>Pair by degree rank for gens that emit fresh node IDs.</h2>
   <p>Three of the simple gens (abcd, abcd+o, lfr) and nPSO emit integer node IDs that have no relation to the input's IDs: ABCD's <code>com.tsv</code> uses <code>1, 2, ..., N</code>, LFR's binary outputs <code>0, 1, ..., N-1</code>, and nPSO's MATLAB sampler labels nodes by arrival rank. Naively diffing degrees against the input's IDs is meaningless. The <code>--remap</code> flag pairs nodes by degree rank: the input node at rank \(i\) (descending input-degree) is paired with the output node at rank \(i\) (descending output-degree), and the deficit is computed on that pairing.</p>
   <p>Algorithm-side this is an accounting layer: the matcher still adds edges in the input's ID space, but it judges deficits against the rank-paired target. The pairing is the L1- and L2-optimal one (rearrangement inequality) for matching two non-identical degree sequences. There is no on-disk re-ID; the output edge.csv keeps the input's IDs throughout.</p>
   <div class="disk-panel" style="margin-top:1rem">
@@ -477,8 +475,8 @@
 <div id="kin"></div>
 
 <footer class="ack">
-  <div class="tools">drawn with d3</div>
-  <div class="credit">part of the <a href="./">network-generation</a> walkthrough</div>
+  <p class="tools">drawn with <a href="https://d3js.org" target="_blank" rel="noopener">d3</a></p>
+  <p class="credit">typed by vltanh, doodled with Claude</p>
 </footer>
 
 </main>

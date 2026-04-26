@@ -196,7 +196,7 @@
 <!-- ─────────── Profiling · block assignment ─────────── -->
 <section class="stage">
   <div class="stage-num">profiling · block assignment</div>
-  <h2>Per-node block label. Outliers excluded at profile, folded back as a combined block at stage 3.</h2>
+  <h2>Per-node block label. Outliers excluded now, folded back at stage 3.</h2>
   <p>Profile writes the same seven CSVs as v1: <code>node_id</code>, <code>cluster_id</code>, <code>assignment</code>, <code>degree</code>, <code>edge_counts</code>, <code>mincut</code>, and <code>com</code>. v2 also forces <code>outlier_mode=excluded</code>, so profile's tables cover only the clustered sub-network. The difference shows up later: at stage 3, v2 re-reads the empirical edgelist and folds every outlier into one combined pseudo-block, while v1 creates one singleton block per outlier.</p>
   <div class="graph" id="g-assign">
     <div class="graph-chrome">
@@ -236,7 +236,7 @@
 <!-- ─────────── Profiling · block matrix ─────────── -->
 <section class="stage">
   <div class="stage-num">profiling · the block matrix</div>
-  <h2>Edge count per block pair. 3x3 at profile time, grows to 4x4 at stage 3.</h2>
+  <h2>Edge count per block pair. 3x3 now, 4x4 at stage 3.</h2>
   <p>Same half-edge convention as v1 / SBM:</p>
   \[
     e_{rr} \;=\; 2 \cdot \bigl| \{\, \{u, v\} \in E \,:\, b_u = b_v = r \,\} \bigr|.
@@ -287,7 +287,7 @@
 <!-- ─────────── Generation · K_{k+1} core, same as v1 ─────────── -->
 <section class="stage">
   <div class="stage-num">generation · the \(K_{k+1}\) core</div>
-  <h2>Same \(K_{k+1}\) seed as v1, but nothing else samples at this stage.</h2>
+  <h2>Same \(K_{k+1}\) seed as v1. Nothing else samples here.</h2>
   <p>Stage 2 calls exactly the same <code>gen_kec_core.generate_cluster</code> as v1, with one change: v2 passes <code>--no-sbm-overlay</code>, so the constructive pass ends with the cores + attach-by-availability and nothing more. No <code>gt.generate_sbm</code> here, no overlay, no dedup. <code>probs</code> and <code>deg</code> carry exactly the budget the construction used.</p>
   <p>The walker below is the same per-arrival walk used on the <a href="./ec-sbm-v1.html#g-core">v1 page</a>: cluster-major sort, phase-1 arrivals auto-attach, phase-2 arrivals greedy-pick \(k\) partners by residual <code>int_deg</code> desc. Realization 1 is byte-verified against the shipped Python at <code>PYTHONHASHSEED=0</code>; <code>random</code> re-samples partner picks at the current arrival and onward, leaving earlier scaffolding frozen.</p>
   <div class="graph" id="g-core">
@@ -348,7 +348,7 @@
 <!-- ─────────── Generation · residual SBM + rewire ─────────── -->
 <section class="stage">
   <div class="stage-num">generation · residual SBM + block-preserving rewire</div>
-  <h2>One SBM call, swap endpoints on invalid edges to kill them without losing the block count.</h2>
+  <h2>One SBM call. Block-preserving swaps repair invalid edges without losing the block count.</h2>
   <p>With the residual <code>probs</code>, <code>out_degs</code>, and the combined-outlier block assignment ready, v2 calls <code>gt.generate_sbm(b, probs, out_degs, micro_ers=True, micro_degs=True)</code> once. The sampler can still emit self-loops (two of a node's stubs pair together) and parallel edges (the same pair drawn twice). v1 dedupped both and accepted the degree loss. v2 tries to fix each one via a block-preserving 2-opt swap.</p>
   <p>The swap: bucket every valid edge by its unordered block-pair \((A, B)\); for each invalid edge, pick a random valid edge in the same bucket and swap endpoints so each node stays in its home block. That preserves both the block-pair count and every node's block membership. Up to 10 retry passes with a stagnation detector. Edges still invalid after that are dropped with a <code>WARN</code>.</p>
   <p>Step through; hit <code>random</code> to resample stage 3.</p>
