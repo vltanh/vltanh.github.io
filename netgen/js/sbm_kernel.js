@@ -77,11 +77,21 @@
     for (let bpi = 0; bpi < blockPairs.length; bpi++) {
       const [r, s] = blockPairs[bpi];
       let left = budget[`${r}|${s}`];
+      // has_n check matching graph-tool's UrnSampler<_, false>::has_n
+      // (kernel_check.cpp:168-175): the pair claims `ers` stubs from each
+      // urn (ers = mrs off-diagonal, 2*mrs on-diagonal). Throw upfront so
+      // malformed inputs surface loudly instead of silently producing a
+      // truncated edge set.
+      if (left > 0) {
+        const ers = (r === s) ? 2 * left : left;
+        if (urns[r].length < ers) {
+          throw new Error(`SBM has_n: urn r=${r} size=${urns[r].length} < ers=${ers}`);
+        }
+        if (r !== s && urns[s].length < ers) {
+          throw new Error(`SBM has_n: urn s=${s} size=${urns[s].length} < ers=${ers}`);
+        }
+      }
       while (left > 0) {
-        const ok = (r === s)
-          ? urns[r].length >= 2
-          : (urns[r].length >= 1 && urns[s].length >= 1);
-        if (!ok) break;
         const [a, ia] = popRandomFromUrn(urns[r], rng);
         const [b, ib] = popRandomFromUrn(r === s ? urns[r] : urns[s], rng);
         const u = (a && a.node !== undefined) ? a.node : a;

@@ -131,11 +131,16 @@
     const j0 = hasOutliers ? 1 : 0; // 1-based j0 boundary in Julia
     let j = j0; // tracks furthest cluster pointer (1-based)
     let tmpWsum = 0;
+    const badWeights = [];
     for (let i = 0; i < n; i++) {
       if (stabu.has(i)) continue;
       const vw = w[i];
-      // Advance j until at least one slot.
+      // Advance j until at least one slot. Mirror canonical's bad_weights
+      // tracking (graph_sampler.jl:120-122): if the next cluster is too
+      // small for this vertex when we still have no slots, record the
+      // weight as ξ-biased.
       while (j + 1 <= s.length && tmpWsum === 0) {
+        if (mul * vw + 1 > s[j + 1 - 1]) badWeights.push(vw);
         j += 1;
         tmpWsum += slots[j - 1];
       }
@@ -158,6 +163,12 @@
       clusters[i] = loc;
       slots[loc - 1] -= 1;
       tmpWsum -= 1;
+    }
+    if (badWeights.length > 0 && typeof console !== "undefined" && console.warn) {
+      console.warn(
+        `ABCD populate_clusters: could not find a large enough cluster for vertices of weights `
+        + `${badWeights.join(",")}. Resulting ξ may be slightly biased.`
+      );
     }
     return clusters;
   }

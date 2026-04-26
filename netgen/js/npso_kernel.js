@@ -217,20 +217,30 @@
   // For i == 0 (first arrival), no picks. For i in [1..m] (the seed
   // K_{m+1}), connects to all earlier arrivals. For i > m, picks m
   // predecessors via impl-3 weighted-without-replace.
+  //
+  // Distances are recomputed at arrival time t = i+1 using
+  // popularity-faded radii r_j(t) = 2β·log(j) + 2(1-β)·log(t) for
+  // every j ≤ t — line-for-line with nPSO_model.m's update at the
+  // top of each iteration. emb.DISTS is final-state (t=N) and is
+  // only used for visualisation outside this function.
   function computeArrival(i, T, emb, m, gamma) {
     const newNodeId = i + 1; // 1-based
     if (i === 0) {
       return { newNode: newNodeId, placed: [], picks: [], autoAll: true };
     }
-    const R_i = R_of_T_at(i + 1, T, m, gamma);
+    const t = newNodeId;
+    const beta = 1 / (gamma - 1);
+    const log_t = Math.log(t);
+    const r_new = 2 * log_t;
+    const R_i = R_of_T_at(t, T, m, gamma);
     const inv2T = 1 / (2 * T);
+    const thetaNew = emb.POLAR[t - 1].theta;
     const candidates = [];
     const weights = [];
     for (let j = 0; j < i; j++) {
       const otherId = j + 1;
-      const a = Math.min(otherId, newNodeId);
-      const b = Math.max(otherId, newNodeId);
-      const d = emb.DISTS[`${a}-${b}`];
+      const r_other = 2 * beta * Math.log(otherId) + 2 * (1 - beta) * log_t;
+      const d = hyperbolicDist(r_new, r_other, thetaNew - emb.POLAR[otherId - 1].theta);
       const p = 1 / (1 + Math.exp((d - R_i) * inv2T));
       candidates.push(otherId);
       weights.push(p);

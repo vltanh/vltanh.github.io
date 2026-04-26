@@ -118,9 +118,12 @@
     let i = 0;
     while (i <= k) {
       const u = ordered[i];
-      // canonical iterates `for v in processed_nodes`; insertion-order Set
-      // mirrors PYTHONHASHSEED=0 iteration for the inputs we care about.
-      for (const v of processedSet) {
+      // Match canonical's `for v in sorted(processed_nodes)` (gen_kec_core.py
+      // post-determinism fix): the per-edge ensure_edge_capacity sequence
+      // depends on int_deg / probs state, so iteration order leaks into the
+      // residual + inflate trace. Sorting iid-asc matches canonical exactly.
+      const phase1Sorted = Array.from(processedSet).sort((a, b) => a - b);
+      for (const v of phase1Sorted) {
         ensureEdgeCapacity(u, v);
         applyEdge(u, v);
         trace.push({ stage: "phase1", cid: args.cid, u, v });
@@ -177,7 +180,11 @@
     const allEdges = new Map();
     const allTrace = [];
     const perCluster = new Map();
-    for (const [cid, clusterNodes] of clustering.entries()) {
+    // Iterate cluster_iid asc so the per-cluster mutation order matches
+    // canonical (post-determinism fix in externals/ec-sbm/src/gen_kec_core.py).
+    const sortedCids = Array.from(clustering.keys()).sort((a, b) => a - b);
+    for (const cid of sortedCids) {
+      const clusterNodes = clustering.get(cid);
       const sub = generateCluster({
         clusterNodes, k: mcs[cid], deg, probs, node2cluster, rng, cid,
       });

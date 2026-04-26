@@ -308,7 +308,7 @@
 <section class="stage">
   <div class="stage-num">algorithm · random_greedy</div>
   <h2>Weighted-random pop, weighted-random partner.</h2>
-  <p>Both picks are randomised. \(u\) is drawn proportional to its current residual; \(v\) is drawn uniformly from the valid set. Useful when comparing matcher bias against the deterministic algorithms: the same input run with several seeds reveals how much of the output depends on which deterministic ordering greedy and true_greedy lock in.</p>
+  <p>Both picks are residual-weighted. \(u\) is drawn proportional to its current residual; \(v\) is drawn proportional to the residuals of valid targets (not uniform). Useful when comparing matcher bias against the deterministic algorithms: the same input run with several seeds reveals how much of the output depends on which deterministic ordering greedy and true_greedy lock in.</p>
   <div class="pseudo"><span class="kw">def</span> random_greedy(residual, adj, rng):
     <span class="kw">while</span> any(residual[u] &gt; 0):
         u = rng.choice(nodes, weights=residual)  <span class="cm"># residual-weighted</span>
@@ -317,7 +317,7 @@
             log.warn(f"gridlock at u={u}, {residual[u]} stubs unplaced")
             residual[u] = 0  <span class="cm"># abandon this node</span>
             <span class="kw">continue</span>
-        v = rng.choice(valid)  <span class="cm"># uniform among valid targets</span>
+        v = rng.choice(valid, weights=[residual[n] for n in valid])  <span class="cm"># residual-weighted</span>
         adj[u].add(v); adj[v].add(u)
         residual[u] -= 1; residual[v] -= 1</div>
   <p>Each <em>random</em> click reseeds and reruns the algorithm; stepping through reveals how the picks differ across seeds. Step counts vary because gridlock-and-abandon makes the algorithm length depend on which u gets starved.</p>
@@ -366,7 +366,7 @@
     <span class="cm"># 2-opt repair phase</span>
     <span class="kw">for</span> attempt <span class="kw">in</span> range(MAX_RETRIES):
         <span class="kw">if not</span> invalid: <span class="kw">break</span>
-        u, v = invalid.pop()
+        u, v = invalid.popleft()  <span class="cm"># FIFO over the queue</span>
         x, y = rng.choice(pairs)  <span class="cm"># try swapping with valid edge (x, y)</span>
         <span class="kw">if</span> can_swap(u, v, x, y, adj):
             adj[u].add(y); adj[y].add(u)

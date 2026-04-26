@@ -518,7 +518,9 @@
       });
     }
 
-    // Multi-edge rewire (lines 878-939).
+    // Multi-edge rewire (lines 878-939). sortedNodes hoisted out of the
+    // retry loop — was being recomputed per attempt (perf bug L4).
+    const sortedNodes = nodes.slice().sort((x, y) => x - y);
     let multipleResolved = 0;
     let multipleDropped = 0;
     multipleEdges.forEach(([a, b]) => {
@@ -533,7 +535,6 @@
         if (!E[a].has(randomMateGlobal)) {
           // not_common: nodes in E[randomMateGlobal] not equal to b,
           // not in E[b], AND in nodes (binary_search on sorted nodes).
-          const sortedNodes = nodes.slice().sort((x, y) => x - y);
           const notCommon = [];
           E[randomMateGlobal].forEach(v => {
             if (v === b || E[b].has(v)) return;
@@ -598,16 +599,14 @@
     // degree as the last entry.
     const linkList = [];
     for (let i = 0; i < numNodes; i++) {
-      const liin = [];
-      for (let j = 0; j < memberList[i].length; j++) {
-        const split = computeInternalDegreePerNode(
-          internalDegreeSeq[i], memberList[i].length,
-        );
-        for (let s = 0; s < split.length; s++) liin.push(split[s]);
-      }
-      // canonical pushes split[m] entries per j (so for non-overlap
-      // m=1, exactly 1 entry per node). Same shape.
-      // External degree as last entry:
+      // Canonical (benchm.cpp:984-997) clears `liin` inside
+      // compute_internal_degree_per_node every j iteration, so the outer
+      // j-loop is effectively a no-op: only the last iter's split survives.
+      // Final shape: m internal entries + 1 external. Compute once.
+      const split = computeInternalDegreePerNode(
+        internalDegreeSeq[i], memberList[i].length,
+      );
+      const liin = split.slice();
       liin.push(degreeSeq[i] - internalDegreeSeq[i]);
       linkList.push(liin);
     }
@@ -793,10 +792,11 @@
     let stopperMate = 0;
     while (varMate > 0) {
       const bestVarMate = varMate;
-      // Find a mate-pair (a, b) with they_are_mate(a, b).
-      let resolved = false;
-      outer:
-      for (let a = 0; a < numNodes && !resolved; a++) {
+      // Canonical sweeps every `a`; for each `a` with a mate-neighbor, run
+      // one rewire attempt (success or stopper) and `break` the neighbor
+      // loop — but `for(a)` continues. Stagnation is declared only after a
+      // full pass over all `a`s leaves var_mate unchanged.
+      for (let a = 0; a < numNodes; a++) {
         const enA = Array.from(en[a]);
         for (let bi = 0; bi < enA.length; bi++) {
           const b = enA[bi];
@@ -825,13 +825,12 @@
                 en[a].delete(b);
                 if (!theyAreMate(b, nodeH, memberList)) varMate -= 2;
                 if (theyAreMate(randomMate, nodeH, memberList)) varMate -= 2;
-                resolved = true;
                 break;
               }
             }
             if (stopperM === en[a].size) break;
           }
-          break outer;
+          break;
         }
       }
       if (varMate === bestVarMate) {
@@ -941,13 +940,13 @@
       maxResizeAttempts = 8,
     } = args;
     const dseq = sampleDegreeSequence({ N, k_avg, max_k, t1, rng });
-    const maxIntDeg = Math.max(0, Math.floor((1 - mu) * dseq.degrees[dseq.degrees.length - 1]));
+    const split = sampleInternalDegrees({
+      degrees: dseq.degrees, mu, rng, excess, defect,
+    });
+    const maxIntDeg = split.internal.length ? Math.max(0, ...split.internal) : 0;
     const cs = sampleClusterSizes({
       N, max_internal_degree: maxIntDeg, c_min, c_max, t2, rng,
       fixed_range: false, overlap_extra: 0,
-    });
-    const split = sampleInternalDegrees({
-      degrees: dseq.degrees, mu, rng, excess, defect,
     });
     let sizes = cs.sizes.slice();
     let assignRes = null;
@@ -1157,10 +1156,13 @@
     const mapNodes = new Array(N).fill(0);
     const cap = maxAttempts == null ? 3 * N : maxAttempts;
 
-    // Order nodes by degree desc, id asc on tie.
+    // Order nodes by degree desc, id desc on tie. Canonical (benchm.cpp:602)
+    // iterates `i=N-1..0` over an asc-sorted degree_seq, so within a tied
+    // run of length L starting at position p the visit order is
+    // (p+L-1, p+L-2, ..., p) — i.e. high-id first.
     const nodeOrder = [];
     for (let i = 0; i < N; i++) nodeOrder.push(i);
-    nodeOrder.sort((a, b) => (degrees[b] - degrees[a]) || (a - b));
+    nodeOrder.sort((a, b) => (degrees[b] - degrees[a]) || (b - a));
 
     let ok = true;
     const availPool = slotIndices.slice();
