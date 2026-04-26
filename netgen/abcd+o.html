@@ -367,6 +367,7 @@ window.MathJax = {
 </script>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 <script src="./shared.js"></script>
+<script src="./js/profile_kernel.js"></script>
 <script>
 (function () {
   document.getElementById("links").innerHTML = NETGEN.linksRow({gen: "abcd+o"});
@@ -416,13 +417,22 @@ window.MathJax = {
   NODES.forEach(n => { DEG_KEPT[n] = 0; });
   KEPT_EDGES.forEach(({u, v}) => { DEG_KEPT[u]++; DEG_KEPT[v]++; });
 
-  let INTER_KEPT = 0;
-  KEPT_EDGES.forEach(e => {
-    const cu = CLUSTER_OF[e.u], cv = CLUSTER_OF[e.v];
-    if (cu === "OUT" || cv === "OUT" || cu !== cv) INTER_KEPT++;
+  // Profile-side scalars via ProfileKernel.runProfile. abcd+o defaults
+  // (src/abcd+o/profile.py): outlier_mode=singleton, drop_oo=true. Kernel emits
+  // degree.csv (post-drop_oo), cluster_sizes.csv (real clusters only), n_outliers.txt,
+  // and mixing_parameter.txt. Stage-2 wrapper prepends n_outliers to cluster sizes.
+  const PROF_KERNEL_OUT = ProfileKernel.runProfile({
+    gen: "abcd+o",
+    edgelist: EDGES.map(e => [String(e.u), String(e.v)]),
+    clustering: NODES.filter(n => CLUSTER_OF[n] !== "OUT")
+                     .map(n => [String(n), CLUSTER_OF[n]]),
+    outlier_mode: "singleton",
+    drop_oo: true,
   });
-  const SYNTHETIC_XI = INTER_KEPT / KEPT_EDGES.length;
-  const N_OUTLIERS = OUT_N.length;
+  const PROF_DEGREES = PROF_KERNEL_OUT.files["degree.csv"].trim().split("\n").map(Number);
+  const PROF_REAL_SIZES = PROF_KERNEL_OUT.files["cluster_sizes.csv"].trim().split("\n").map(Number);
+  const N_OUTLIERS = parseInt(PROF_KERNEL_OUT.files["n_outliers.txt"], 10);
+  const SYNTHETIC_XI = parseFloat(PROF_KERNEL_OUT.files["mixing_parameter.txt"]);
 
   function pickInputColor(e) {
     if (INPUT_OUT_SET.has(e.u) && INPUT_OUT_SET.has(e.v)) return COL.edge_drop;
@@ -455,12 +465,11 @@ window.MathJax = {
   })();
 
   (function () {
-    const degs = NODES.map(n => DEG_KEPT[n]).sort((a, b) => b - a);
-    document.getElementById("prof-N").textContent = degs.length;
+    document.getElementById("prof-N").textContent = PROF_DEGREES.length;
     document.getElementById("prof-deg").textContent =
-      degs.length + " entries · max " + degs[0] + " · drop_oo cut " + OO_EDGES.length + " edge";
-    const realSizes = [C1.length, C2.length, C3.length].sort((a, b) => b - a);
-    const afterPrepend = [N_OUTLIERS, ...realSizes];
+      PROF_DEGREES.length + " entries · max " + PROF_DEGREES[0] +
+      " · drop_oo cut " + OO_EDGES.length + " edge";
+    const afterPrepend = [N_OUTLIERS, ...PROF_REAL_SIZES];
     document.getElementById("prof-cs").textContent = "[" + afterPrepend.join(", ") + "]";
     document.getElementById("prof-nout").textContent = N_OUTLIERS;
     document.getElementById("prof-xi").textContent = SYNTHETIC_XI.toFixed(3);

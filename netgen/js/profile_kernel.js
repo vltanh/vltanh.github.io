@@ -369,6 +369,24 @@
         };
       },
     },
+    // ec-sbm shares sbm's deterministic profile shape; mincut.csv + com.csv are
+    // emitted by externals/ec-sbm/src/profile.py via PyGraph + extra ledger
+    // bookkeeping and live outside profile_common, so the kernel does not emit
+    // them. Pages keep mincut as NETGEN.MINCUTS.
+    "ec-sbm": {
+      outputs: (state, neighbors) => {
+        const { nodeDegSorted } = computeNodeDegree(state, neighbors);
+        const { commSizeSorted, clusterId2iid } = computeCommSize(state);
+        const edgeCounts = computeEdgeCount(state, neighbors, clusterId2iid);
+        return {
+          "node_id.csv": exportNodeId(nodeDegSorted),
+          "cluster_id.csv": exportClusterId(commSizeSorted),
+          "assignment.csv": exportAssignment(nodeDegSorted, state.node2com, clusterId2iid),
+          "degree.csv": exportDegree(nodeDegSorted),
+          "edge_counts.csv": exportEdgeCount(edgeCounts),
+        };
+      },
+    },
   };
 
   function runProfile(payload) {

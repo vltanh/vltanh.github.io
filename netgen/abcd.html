@@ -346,6 +346,7 @@ window.MathJax = {
 </script>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 <script src="./shared.js"></script>
+<script src="./js/profile_kernel.js"></script>
 <script>
 (function () {
   document.getElementById("links").innerHTML = NETGEN.linksRow({gen: "abcd"});
@@ -410,13 +411,22 @@ window.MathJax = {
     return COL.edge_intra[c] || COL.edge_inter;
   }
 
-  const TOTAL_EDGES = EDGES.length;
-  let INTER_EDGES = 0;
-  EDGES.forEach(e => {
-    const cu = CLUSTER_OF[e.u], cv = CLUSTER_OF[e.v];
-    if (cu === "OUT" || cv === "OUT" || cu !== cv) INTER_EDGES++;
+  // Profile-side scalars from ProfileKernel.runProfile (mirrors src/abcd/profile.py
+  // defaults: outlier_mode=singleton, drop_oo=false). The kernel's outputs are the
+  // only profile-side numbers the page surfaces, so we route them through here so a
+  // future change in profile_common.py auto-flows.
+  const PROF_KERNEL_OUT = ProfileKernel.runProfile({
+    gen: "abcd",
+    edgelist: EDGES.map(e => [String(e.u), String(e.v)]),
+    clustering: NODES.filter(n => CLUSTER_OF[n] !== "OUT")
+                     .map(n => [String(n), CLUSTER_OF[n]]),
+    outlier_mode: "singleton",
+    drop_oo: false,
   });
-  const SYNTHETIC_XI = INTER_EDGES / TOTAL_EDGES;
+  const PROF_DEGREES = PROF_KERNEL_OUT.files["degree.csv"].trim().split("\n").map(Number);
+  const PROF_CLUSTER_SIZES = PROF_KERNEL_OUT.files["cluster_sizes.csv"].trim().split("\n").map(Number);
+  const SYNTHETIC_XI = parseFloat(PROF_KERNEL_OUT.files["mixing_parameter.txt"]);
+  const TOTAL_EDGES = EDGES.length;
 
   // Shared input fixture: input graph + singleton-mode 5-cluster colour.
   (function () {
@@ -431,12 +441,10 @@ window.MathJax = {
   })();
 
   (function () {
-    const degs = NODES.map(n => DEGREES[n]).sort((a, b) => b - a);
-    document.getElementById("prof-N").textContent = degs.length;
+    document.getElementById("prof-N").textContent = PROF_DEGREES.length;
     document.getElementById("prof-deg").textContent =
-      degs.length + " entries · max " + degs[0];
-    const sizes = [C1.length, C2.length, C3.length, 1, 1].sort((a, b) => b - a);
-    document.getElementById("prof-cs").textContent = "[" + sizes.join(", ") + "]";
+      PROF_DEGREES.length + " entries · max " + PROF_DEGREES[0];
+    document.getElementById("prof-cs").textContent = "[" + PROF_CLUSTER_SIZES.join(", ") + "]";
     document.getElementById("prof-xi").textContent = SYNTHETIC_XI.toFixed(3);
     document.getElementById("xi-prof").textContent = SYNTHETIC_XI.toFixed(3);
   })();

@@ -267,6 +267,7 @@ window.MathJax = {
 </script>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 <script src="./shared.js"></script>
+<script src="./js/profile_kernel.js"></script>
 <script>
 (function () {
   document.getElementById("links").innerHTML = NETGEN.linksRow({gen: "lfr"});
@@ -329,27 +330,31 @@ window.MathJax = {
     });
   })();
 
-  // Profile-derived scalars for the synthetic.
-  const N_ = NODES.length;
-  const K_MEAN = NODES.reduce((a, n) => a + DEGREES[n], 0) / N_;
-  const K_MAX = Math.max(...NODES.map(n => DEGREES[n]));
-  const INPUT_CS = [C1.length, C2.length, C3.length, 1, 1];  // singleton mode
-  const C_MIN = Math.max(Math.min(...INPUT_CS), 3);
-  const C_MAX = Math.max(...INPUT_CS);
+  // Profile-side scalars via ProfileKernel.runProfile. lfr defaults
+  // (src/lfr/profile.py): outlier_mode=singleton, drop_oo=false. Kernel emits
+  // degree.csv, cluster_sizes.csv (singletons retained), and mixing_parameter.txt
+  // (mean reduction: per-node out/total averaged, numpy pairwise sum).
+  const PROF_KERNEL_OUT = ProfileKernel.runProfile({
+    gen: "lfr",
+    edgelist: EDGES.map(e => [String(e.u), String(e.v)]),
+    clustering: NODES.filter(n => CLUSTER_OF[n] !== "OUT")
+                     .map(n => [String(n), CLUSTER_OF[n]]),
+    outlier_mode: "singleton",
+    drop_oo: false,
+  });
+  const PROF_DEGREES = PROF_KERNEL_OUT.files["degree.csv"].trim().split("\n").map(Number);
+  const PROF_CLUSTER_SIZES = PROF_KERNEL_OUT.files["cluster_sizes.csv"].trim().split("\n").map(Number);
+  const N_ = PROF_DEGREES.length;
+  const K_MEAN = PROF_DEGREES.reduce((a, b) => a + b, 0) / N_;
+  const K_MAX = PROF_DEGREES[0];  // kernel sorts deg desc.
+  const C_MIN = Math.max(Math.min(...PROF_CLUSTER_SIZES), 3);
+  const C_MAX = Math.max(...PROF_CLUSTER_SIZES);
   // Fitted exponents (read from src/lfr/profile.py output on the synthetic).
+  // powerlaw.Fit lives in Python only; the page hardcodes the canonical fits
+  // rather than reimplementing the package.
   const T1 = 2.11;
   const T2 = 2.23;
-  // Per-node mu_i = out_i / total. Under singleton outlier mode every outlier
-  // edge is inter, every intra-cluster edge is intra.
-  let OUT_DEG_I = {};
-  NODES.forEach(n => { OUT_DEG_I[n] = 0; });
-  EDGES.forEach(e => {
-    const cu = CLUSTER_OF[e.u], cv = CLUSTER_OF[e.v];
-    const inter = (cu === "OUT" || cv === "OUT" || cu !== cv);
-    if (inter) { OUT_DEG_I[e.u]++; OUT_DEG_I[e.v]++; }
-  });
-  const MUS = NODES.map(n => DEGREES[n] > 0 ? OUT_DEG_I[n] / DEGREES[n] : 0);
-  const MU_MEAN = MUS.reduce((a, b) => a + b, 0) / MUS.length;
+  const MU_MEAN = parseFloat(PROF_KERNEL_OUT.files["mixing_parameter.txt"]);
 
   // ── Populate profile-table readouts ──
   document.getElementById("prof-N").textContent = N_;
@@ -503,7 +508,7 @@ window.MathJax = {
     const ih = H - PAD.top - PAD.bottom;
     const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
 
-    const hist = d3.rollup(INPUT_CS, v => v.length, d => d);
+    const hist = d3.rollup(PROF_CLUSTER_SIZES, v => v.length, d => d);
     const data = Array.from(hist.entries()).map(([k, c]) => ({ k, c })).sort((a,b) => a.k - b.k);
 
     const xMax = d3.max(data, d => d.k) || 10;
@@ -605,7 +610,7 @@ window.MathJax = {
 
   // ── Cluster-sizes resample ──
   (function () {
-    const INPUT_SORTED = INPUT_CS.slice().sort((a,b) => b - a);
+    const INPUT_SORTED = PROF_CLUSTER_SIZES.slice().sort((a,b) => b - a);
     const W = 640, H = 170;
     const PAD = { top: 16, right: 20, bottom: 30, left: 40 };
     const iw = W - PAD.left - PAD.right;

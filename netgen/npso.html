@@ -324,6 +324,7 @@ window.MathJax = {
 </script>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 <script src="./shared.js"></script>
+<script src="./js/profile_kernel.js"></script>
 <script src="./js/npso_kernel.js"></script>
 <script>
 (function () {
@@ -416,21 +417,33 @@ window.MathJax = {
   // ── Profile step ────────────────────────────────────────────
   // Mirror gen.py: N, m = round(mean_deg/2), γ = max(Hill-MLE, 2), C,
   // target global clustering coefficient, mixing_proportions.
-  const N_NODES = nodesAll.length;
-  const degValues = nodesAll.map(n => DEGREES[n]);
-  const meanDeg = degValues.reduce((a, b) => a + b, 0) / N_NODES;
+  // Profile-side scalars via ProfileKernel.runProfile (npso defaults:
+  // outlier_mode=singleton, drop_oo=false). Kernel emits degree.csv and
+  // cluster_sizes.csv; per-gen scalars (m, γ, target_cc) are derived in
+  // src/npso/profile.py — kept inline here since powerlaw.Fit + networkit's
+  // exactGlobal are not in profile_common.
+  const PROF_KERNEL_OUT = ProfileKernel.runProfile({
+    gen: "npso",
+    edgelist: NETGEN.EDGES.map(e => [String(e.u), String(e.v)]),
+    clustering: nodesAll.filter(n => CLUSTER_OF[n] !== "OUT")
+                        .map(n => [String(n), CLUSTER_OF[n]]),
+    outlier_mode: "singleton",
+    drop_oo: false,
+  });
+  const PROF_DEGREES = PROF_KERNEL_OUT.files["degree.csv"].trim().split("\n").map(Number);
+  const PROF_CLUSTER_SIZES = PROF_KERNEL_OUT.files["cluster_sizes.csv"].trim().split("\n").map(Number);
+  const N_NODES = PROF_DEGREES.length;
+  const meanDeg = PROF_DEGREES.reduce((a, b) => a + b, 0) / N_NODES;
   const M_PROF = Math.max(1, Math.round(meanDeg / 2));
   // Real code: gamma = max(powerlaw.Fit(degrees, discrete=True).power_law.alpha, 2.0).
   // On this fixed synthetic that evaluates to 2.73 (Python powerlaw package with
   // KS-chosen x_min = 3). Hill-MLE with x_min = 1 would give 1.71 and floor to 2;
   // different number, different behaviour. Hardcode powerlaw.Fit's result so the
   // radial law, β, and R(T) here match what the generator actually uses.
-  const logSum = degValues.reduce((s, d) => s + Math.log(Math.max(d, 1)), 0);
-  const GAMMA_HILL = logSum > 0 ? Math.max(1 + N_NODES / logSum, 2.0) : 2.0;
   const GAMMA = 2.73;
   const BETA  = 1 / (GAMMA - 1);
-  const C     = CLUSTER_DEFS.length;
-  const MIXING_PROPORTIONS = CLUSTER_DEFS.map(cd => cd.nodes.length / N_NODES);
+  const C     = PROF_CLUSTER_SIZES.length;
+  const MIXING_PROPORTIONS = PROF_CLUSTER_SIZES.map(sz => sz / N_NODES);
   const CLUSTER_COLOR_BY_ID = {};
   CLUSTER_DEFS.forEach(cd => { CLUSTER_COLOR_BY_ID[cd.id] = cd.color; });
 
@@ -551,7 +564,7 @@ window.MathJax = {
     const ih = H - PAD.top - PAD.bottom;
     const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
 
-    const hist = d3.rollup(degValues, v => v.length, d => d);
+    const hist = d3.rollup(PROF_DEGREES, v => v.length, d => d);
     const data = Array.from(hist.entries())
       .map(([d, n]) => ({ d, n }))
       .sort((a, b) => a.d - b.d);
