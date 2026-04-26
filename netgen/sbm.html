@@ -240,10 +240,6 @@
   <p>Each node \(u\) has a target degree \(k_u\). Build one urn per block: for block \(r\), drop each node \(u\) with \(b_u = r\) into the urn \(k_u\) times. The urn is a bag of half-edges and that is all it is; it does <em>not</em> remember which target block any particular half-edge was supposed to land in. The spokes drawn around each node visualise its share of the urn.</p>
   <p>For each block-pair \((r, s)\) with \(r \le s\), iterate in row-major order on the edge count matrix. The pair claims \(e_{rs}\) edges. For \(r = s\) pull two half-edges out of urn \(r\) per edge; for \(r \neq s\) pull one out of urn \(r\) and one out of urn \(s\) per edge. Sampling is uniform without replacement. Every draw becomes an edge; nothing is rejected.</p>
   <div class="callout">
-    <div class="tag">profile records more than the sampler uses</div>
-    <p>Profile knows the finer split \(k_u^{(s)}\), the count of \(u\)'s edges that fell in block \(s\) on the input (\(\sum_u k_u^{(s)} = e_{rs}\) for \(r \neq s\), \(= e_{rr}\) for \(r = s\)). graph-tool drops the split: only \(k_u\) and \(e_{rs}\) survive into the sampler. So in any one sample, \(u\)'s per-block degree fluctuates around \(k_u^{(s)}\) under the constraint that the column totals stay at \(e_{rs}\). On a hub with a strong block-preference in the input that preference is preserved in expectation only.</p>
-  </div>
-  <div class="callout">
     <div class="tag">graph-tool accepts non-equality input</div>
     <p>We feed <code>gt.generate_sbm</code> a \((k, e)\) pair that satisfies the identities above, but the function actually accepts looser input: the consistency condition is only the inequality \(\sum_{u \,:\, b_u = r} k_u \;\ge\; \sum_{s} e_{rs}\) (LHS = stubs available in block \(r\), RHS = edges incident to \(r\)). When the two sides match exactly, the sampler distributes the stubs the natural way. When they do not, some nodes come out with a degree <em>below</em> the requested \(k\): graph-tool prioritises hitting \(e_{rs}\) over hitting \(k_u\). A minimal example: \(b = (1, 1)\), \(k = (3, 3)\), \(e = (4)\), i.e. two nodes both asking for degree 3, with four half-edges on the diagonal. The condition \(3 + 3 \ge 4\) holds, but only as a strict inequality, and the sampler reliably returns one node with degree 1 rather than 3. The identities we use on this page (equality, not inequality) are why the toy runs above behave cleanly.</p>
   </div>
@@ -476,22 +472,11 @@ window.MathJax = {
     EDGE_COUNTS[r][c] = w;
   });
 
-  // Profile-only diagnostic: per-node, per-target-block stub count
-  // k_i^{(s)}. graph-tool does NOT use this split (its urn is block-pooled,
-  // target-untyped); kept around for prose / hover-debug only.
-  const STUBS = {};
-  NODES.forEach(n => {
-    STUBS[n] = new Array(NUM_BLOCKS).fill(0);
-  });
-  EDGES.forEach(e => {
-    const r = blockIdx(e.u), s = blockIdx(e.v);
-    STUBS[e.u][s] += 1;
-    STUBS[e.v][r] += 1;
-  });
-
-  // Total degree per node = size of node's stub population in its block urn.
+  // Per-node target degree k_u, the second vector in the input contract
+  // (degree.csv). Block-pooled urn semantics; no per-target-block split.
   const TARGET_DEG = {};
-  NODES.forEach(n => { TARGET_DEG[n] = STUBS[n].reduce((a, b) => a + b, 0); });
+  NODES.forEach(n => { TARGET_DEG[n] = 0; });
+  EDGES.forEach(e => { TARGET_DEG[e.u]++; TARGET_DEG[e.v]++; });
   const EDGES_TOTAL = EDGES.length;
   const MEAN_DEG    = EDGES_TOTAL * 2 / NODES.length;
   const OUT_COUNT   = OUT_N.length;
