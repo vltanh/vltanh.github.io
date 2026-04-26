@@ -136,7 +136,7 @@
 <header class="hdr">
   <div class="kicker">network-generation · ec-sbm-v1</div>
   <h1><em>EC-SBM</em> v1</h1>
-  <p class="sub">SBM with a per-cluster edge-connectivity floor. Adds one scalar to SBM's contract, the minimum edge cut \(k(C)\) of each cluster, and hand-builds a \(K_{k+1}\) clique inside \(C\) so the output cluster survives any \(k-1\) edge removals.</p>
+  <p class="sub">SBM with a per-cluster edge-connectivity floor. Adds one scalar to SBM's contract: the minimum edge cut \(k(C)\) of each cluster. Hand-builds a \(K_{k+1}\) clique inside \(C\) so the output cluster survives any \(k-1\) edge removals.</p>
 </header>
 
 <section class="hook">
@@ -227,7 +227,7 @@
   <div class="stage-num">profiling · the minimum edge cut</div>
   <h2>One new scalar per cluster: \(k(C)\).</h2>
   <p>For each cluster \(C\), the profile computes the minimum edge cut of \(C\)'s induced subgraph in the input. An edge cut for \(C\) is a set of edges whose removal disconnects \(C\); \(k(C)\) is the smallest such set's size. Measured via <a href="https://pypi.org/project/pymincut/" target="_blank" rel="noopener"><code>pymincut</code></a>'s Nagamochi-Ono-Ibaraki algorithm with a bucket-queue heap (<code>"noi"</code> / <code>"bqueue"</code>). Singleton clusters get \(k = 0\) by definition. Writes one integer per cluster to <code>mincut.csv</code>.</p>
-  <p>Each cluster's mincut on this synthetic, highlighted in red-dashed on the graph below. C1's cut is a non-trivial internal cut: two subsets of 4 nodes joined by a thin bridge of 2 edges. C2 and C3 isolate a single low-degree vertex.</p>
+  <p>Each cluster's mincut on this synthetic, highlighted in red-dashed on the graph below. C1 has a non-trivial internal cut: two subsets of 4 nodes joined by a thin bridge of 2 edges. C2 and C3 isolate a single low-degree vertex.</p>
   <table class="profile-table">
     <thead>
       <tr><th>cluster</th><th>nodes</th><th>min deg in C</th><th>\(k(C)\)</th><th>one minimum cut</th></tr>
@@ -255,7 +255,7 @@
 <section class="stage">
   <div class="stage-num">generation · the \(K_{k+1}\) core</div>
   <h2>Complete subgraph on the top \(k+1\) nodes, then attach the rest with \(k\) edges each.</h2>
-  <p>Per cluster \(C\), sort nodes by target degree desc (id-asc tiebreak). Take the top \(k+1\) and wire them into a complete subgraph \(K_{k+1}\): that is \(\binom{k+1}{2}\) edges, each node has degree exactly \(k\). A complete graph on \(k+1\) vertices is \(k\)-edge-connected, so any cluster that contains this \(K_{k+1}\) as a subgraph is \(k\)-edge-connected regardless of what the SBM layer does next.</p>
+  <p>Per cluster \(C\), sort nodes by target degree desc (id-asc tiebreak). Take the top \(k+1\) and wire them into a complete subgraph \(K_{k+1}\): that is \(\binom{k+1}{2}\) edges, with each node at degree exactly \(k\). A complete graph on \(k+1\) vertices is \(k\)-edge-connected, so any cluster that contains this \(K_{k+1}\) as a subgraph is \(k\)-edge-connected regardless of what the SBM layer does next.</p>
   <p>Phase 2 walks the remaining cluster nodes in descending target-degree order. Each new node \(u\) attaches to exactly \(k\) already-processed partners, preferring the ones with the highest <em>residual</em> (remaining) target degree. The paper's equivalent rule is "make \(u\) adjacent to \(\min\{k, |N_0|\}\) partners with probability proportional to availability"; during the first \(k+1\) iterations \(|N_0| < k\), so the new vertex joins everything in \(N_0\), and the result of those iterations is the \((k+1)\)-clique.</p>
   <p>When a partner's residual or the block-pair budget would block a required edge, <code>ensure_edge_capacity</code> inflates both by 1 so the edge can still go in:</p>
   \[
@@ -326,7 +326,7 @@
 <section class="stage">
   <div class="stage-num">generation · the outlier rescue</div>
   <h2>Outliers get their own SBM pass.</h2>
-  <p>The constructive + overlay phase never saw outliers because the profile excluded them. This phase re-reads the original (pre-exclusion) edgelist, flags every node that is in the edgelist but not in the clustering, and treats each outlier as a size-1 block of its own. It then samples an SBM on the outlier-incident edges only (<code>--scope outlier-incident</code>); clustered-side pairs are not re-sampled.</p>
+  <p>The constructive + overlay phase never saw outliers because the profile excluded them. This phase re-reads the original (pre-exclusion) edgelist, flags every node that is in the edgelist but not in the clustering, and treats each outlier as a size-1 block of its own. It then samples an SBM on the outlier-incident edges only (<code>--scope outlier-incident</code>); the SBM does not touch clustered-side pairs.</p>
   <p>The <code>combine_edgelists.py</code> merge is first-seen-wins with the constructive + overlay output as input 1. Two pure bands, undirected-deduped, written to a fresh <code>edge.csv</code> plus <code>sources.json</code> mapping each band to an inclusive 1-based row range.</p>
   <div class="graph" id="g-outlier">
     <div class="graph-chrome">
