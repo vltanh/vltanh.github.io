@@ -495,6 +495,7 @@ window.MathJax = {
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script src="./shared.js"></script>
+<script src="./js/match_degree_kernel.js"></script>
 <script>
 (function () {
   document.getElementById("links").innerHTML = NETGEN.linksRow({gen: "matcher"});
@@ -579,7 +580,7 @@ window.MathJax = {
   NODES.forEach(n => { adjBase[n] = new Set(); });
   EDGES.forEach(e => { adjBase[e.u].add(e.v); adjBase[e.v].add(e.u); });
 
-  // ── Helpers: LCG PRNG, shallow clone of residual / adj ──
+  // ── Helpers: LCG PRNG, residual snapshot helper ──
   function makeLCG(seed) {
     let s = (seed >>> 0) || 1;
     return () => {
@@ -588,423 +589,69 @@ window.MathJax = {
     };
   }
   function cloneResidual(r) { const c = {}; for (const k in r) c[k] = r[k]; return c; }
-  function cloneAdj(adj) {
-    const c = {};
-    for (const k in adj) c[k] = new Set(adj[k]);
-    return c;
-  }
-  function residualSum(r) {
-    let s = 0;
-    for (const k in r) s += r[k];
-    return s;
-  }
-  function nodesWithResidual(r) {
-    const out = [];
-    for (const k in r) if (r[k] > 0) out.push(parseInt(k, 10));
-    return out;
-  }
 
-  // ── Helpers shared by every algorithm ──
-  // Each step records: residual, unplaced, edges, exitOrder, msg, action,
-  // (optional) phase. exitOrder grows in the order nodes leave the queue,
-  // either by clean drain (residual→0) or abandonment (residual→0 +
-  // unplaced>0). Bars renderer puts active rows on top in queue order
-  // and drained/abandoned rows below in exit order, so the layout is
-  // stable instead of reshuffling every time a node hits zero.
-  function initState(initialState) {
-    const residual = cloneResidual(initialState ? initialState.residual : DEFICIT);
-    const unplaced = initialState ? { ...initialState.unplaced }
-                                  : (() => { const u = {}; NODES.forEach(n => { u[n] = 0; }); return u; })();
-    const adj = cloneAdj(adjBase);
-    const edges = initialState ? initialState.edges.slice() : [];
-    edges.forEach(([u, v]) => { adj[u].add(v); adj[v].add(u); });
-    const exitOrder = initialState ? (initialState.exitOrder || []).slice() : [];
-    return { residual, unplaced, adj, edges, exitOrder };
-  }
-  function maybeInitStep(steps, residual, unplaced, edges, exitOrder, initialState) {
-    if (initialState) return;
-    steps.push({
-      action: "init",
-      residual: cloneResidual(residual),
-      unplaced: { ...unplaced },
-      edges: edges.slice(),
-      exitOrder: exitOrder.slice(),
-      msg: `initial deficit: ${nodesWithResidual(residual).map(n => `${n}:${residual[n]}`).join(", ")}.`,
-    });
+  // ── Step shape (every algorithm emits the same record) ──
+  // { action, residual, unplaced, edges, exitOrder, msg, ...optional u/v/x/y/phase }.
+  // exitOrder grows in the order nodes leave the queue (clean drain or
+  // abandonment); the bars renderer puts active rows on top in queue
+  // order and drained/abandoned rows below in exit order so the layout
+  // is stable. Init + state plumbing live inside MatchDegreeKernel.
+
+  // Shared payload constructor used by the kernel-backed algos. DEFICIT
+  // and adjBase are page-mutable (input-reroll swaps them), so build per
+  // call rather than capturing once.
+  function makeKernelPayload() {
+    return { iids: NODES, deficit: DEFICIT, baseAdj: adjBase };
   }
 
   // ── Algorithm: greedy ──
-  // CPython's set.pop() iterates the underlying hash table in slot order;
-  // for sets of small ints, hash(n) == n and the slot layout puts elements
-  // back in id-ascending order. Faithful simulation: pick the smallest id
-  // from the candidate set every time. Deterministic, no seed.
+  // Canonical static-heap drain-burst per src/match_degree.py (no re-push;
+  // sorted non-neighbors[:avail_k] in one go; silent gridlock when the
+  // burst is short of residual). Implementation in MatchDegreeKernel.
   function runGreedy(seed, initialState) {
-    const { residual, unplaced, adj, edges, exitOrder } = initState(initialState);
-    const abandoned = new Set();
-    for (const k in unplaced) if (unplaced[k] > 0) abandoned.add(parseInt(k, 10));
-    const steps = [];
-    maybeInitStep(steps, residual, unplaced, edges, exitOrder, initialState);
-    while (true) {
-      const remaining = nodesWithResidual(residual).filter(n => !abandoned.has(n));
-      if (remaining.length === 0) break;
-      remaining.sort((a, b) => (residual[b] - residual[a]) || (a - b));
-      const u = remaining[0];
-      while (residual[u] > 0) {
-        const candidates = [];
-        for (const k in residual) {
-          const v = parseInt(k, 10);
-          if (v === u) continue;
-          if (residual[v] <= 0) continue;
-          if (adj[u].has(v)) continue;
-          candidates.push(v);
-        }
-        if (candidates.length === 0) {
-          const lost = residual[u];
-          unplaced[u] = lost;
-          abandoned.add(u);
-          residual[u] = 0;
-          if (!exitOrder.includes(u)) exitOrder.push(u);
-          steps.push({
-            action: "gridlock_silent", u, residual: cloneResidual(residual),
-            unplaced: { ...unplaced },
-            edges: edges.slice(),
-            exitOrder: exitOrder.slice(),
-            msg: `u=${u} starved: ${lost} stub(s) unplaced. greedy drops them silently.`,
-          });
-          break;
-        }
-        candidates.sort((a, b) => a - b);
-        const v = candidates[0];
-        adj[u].add(v); adj[v].add(u);
-        edges.push([u, v]);
-        residual[u] -= 1; residual[v] -= 1;
-        if (residual[u] === 0 && !exitOrder.includes(u)) exitOrder.push(u);
-        if (residual[v] === 0 && !exitOrder.includes(v) && (DEFICIT[v] || 0) > 0) exitOrder.push(v);
-        steps.push({
-          action: "add", u, v, residual: cloneResidual(residual),
-          unplaced: { ...unplaced },
-          edges: edges.slice(),
-          exitOrder: exitOrder.slice(),
-          msg: `pop u=${u}. set.pop() of {${candidates.join(", ")}} returns smallest id v=${v}; added (${u}, ${v}).`,
-        });
-      }
-    }
-    steps.push({
-      action: "done",
-      residual: cloneResidual(residual),
-      unplaced: { ...unplaced },
-      edges: edges.slice(),
-      exitOrder: exitOrder.slice(),
-      msg: `done. ${edges.length} edge(s) placed; ${residualSum(unplaced)} stub(s) abandoned (silent in greedy).`,
-    });
-    return steps;
+    return MatchDegreeKernel.runGreedy(makeKernelPayload(), { initialState });
   }
 
   // ── Algorithm: true_greedy ──
+  // Canonical dynamic-heap with re-push per src/match_degree.py; v chosen
+  // via argmax(current_degrees[x], -x). One edge per pop.
   function runTrueGreedy(seed, initialState) {
-    const { residual, unplaced, adj, edges, exitOrder } = initState(initialState);
-    const abandoned = new Set();
-    for (const k in unplaced) if (unplaced[k] > 0) abandoned.add(parseInt(k, 10));
-    const deg = {};
-    NODES.forEach(n => { deg[n] = (DEGREES[n] || 0); });
-    edges.forEach(([u, v]) => { deg[u]++; deg[v]++; });
-    const steps = [];
-    maybeInitStep(steps, residual, unplaced, edges, exitOrder, initialState);
-    while (true) {
-      const remaining = nodesWithResidual(residual).filter(n => !abandoned.has(n));
-      if (remaining.length === 0) break;
-      remaining.sort((a, b) => (residual[b] - residual[a]) || (a - b));
-      const u = remaining[0];
-      while (residual[u] > 0) {
-        const valid = [];
-        for (const k in residual) {
-          const v = parseInt(k, 10);
-          if (v === u) continue;
-          if (residual[v] <= 0) continue;
-          if (adj[u].has(v)) continue;
-          valid.push(v);
-        }
-        if (valid.length === 0) {
-          const lost = residual[u];
-          unplaced[u] = lost;
-          abandoned.add(u);
-          residual[u] = 0;
-          if (!exitOrder.includes(u)) exitOrder.push(u);
-          steps.push({
-            action: "gridlock_logged", u, residual: cloneResidual(residual),
-            unplaced: { ...unplaced },
-            edges: edges.slice(),
-            exitOrder: exitOrder.slice(),
-            msg: `u=${u} starved: ${lost} stub(s) unplaced. WARN logged.`,
-          });
-          break;
-        }
-        valid.sort((a, b) => (deg[b] - deg[a]) || (a - b));
-        const v = valid[0];
-        adj[u].add(v); adj[v].add(u);
-        edges.push([u, v]);
-        residual[u] -= 1; residual[v] -= 1;
-        deg[u] += 1; deg[v] += 1;
-        if (residual[u] === 0 && !exitOrder.includes(u)) exitOrder.push(u);
-        if (residual[v] === 0 && !exitOrder.includes(v) && (DEFICIT[v] || 0) > 0) exitOrder.push(v);
-        steps.push({
-          action: "add", u, v, residual: cloneResidual(residual),
-          unplaced: { ...unplaced },
-          edges: edges.slice(),
-          exitOrder: exitOrder.slice(),
-          msg: `pop u=${u}; argmax over deg picks v=${v} (deg ${deg[v] - 1}→${deg[v]}); added (${u}, ${v}).`,
-        });
-      }
-    }
-    steps.push({
-      action: "done",
-      residual: cloneResidual(residual), unplaced: { ...unplaced },
-      edges: edges.slice(),
-      exitOrder: exitOrder.slice(),
-      msg: `done. ${edges.length} edge(s) placed; ${residualSum(unplaced)} stub(s) logged as gridlocked.`,
-    });
-    return steps;
+    return MatchDegreeKernel.runTrueGreedy(makeKernelPayload(), { initialState });
   }
 
   // ── Algorithm: random_greedy ──
+  // Canonical weighted-random u + weighted-random v on valid set. Page
+  // version used a single uniform v draw (a divergence); kernel uses
+  // residual weights for both picks per src/match_degree.py.
   function runRandomGreedy(seed, initialState) {
-    const rng = makeLCG(seed);
-    const { residual, unplaced, adj, edges, exitOrder } = initState(initialState);
-    const abandoned = new Set();
-    for (const k in unplaced) if (unplaced[k] > 0) abandoned.add(parseInt(k, 10));
-    const steps = [];
-    maybeInitStep(steps, residual, unplaced, edges, exitOrder, initialState);
-    function weightedPick(items, weights) {
-      let total = 0;
-      for (const w of weights) total += w;
-      if (total <= 0) return null;
-      let r = rng() * total;
-      for (let i = 0; i < items.length; i++) {
-        r -= weights[i];
-        if (r <= 0) return items[i];
-      }
-      return items[items.length - 1];
-    }
-    let safety = 200;
-    while (safety-- > 0) {
-      const remaining = nodesWithResidual(residual).filter(n => !abandoned.has(n));
-      if (remaining.length === 0) break;
-      const weights = remaining.map(n => residual[n]);
-      const u = weightedPick(remaining, weights);
-      const valid = [];
-      for (const k in residual) {
-        const v = parseInt(k, 10);
-        if (v === u) continue;
-        if (residual[v] <= 0) continue;
-        if (adj[u].has(v)) continue;
-        valid.push(v);
-      }
-      if (valid.length === 0) {
-        const lost = residual[u];
-        unplaced[u] = lost;
-        abandoned.add(u);
-        residual[u] = 0;
-        if (!exitOrder.includes(u)) exitOrder.push(u);
-        steps.push({
-          action: "gridlock_logged", u, residual: cloneResidual(residual),
-          unplaced: { ...unplaced },
-          edges: edges.slice(),
-          exitOrder: exitOrder.slice(),
-          msg: `u=${u} starved: ${lost} stub(s) abandoned. WARN logged.`,
-        });
-        continue;
-      }
-      const v = valid[Math.floor(rng() * valid.length)];
-      adj[u].add(v); adj[v].add(u);
-      edges.push([u, v]);
-      residual[u] -= 1; residual[v] -= 1;
-      if (residual[u] === 0 && !exitOrder.includes(u)) exitOrder.push(u);
-      if (residual[v] === 0 && !exitOrder.includes(v) && (DEFICIT[v] || 0) > 0) exitOrder.push(v);
-      steps.push({
-        action: "add", u, v, residual: cloneResidual(residual),
-        unplaced: { ...unplaced },
-        edges: edges.slice(),
-        exitOrder: exitOrder.slice(),
-        msg: `weighted-random u=${u} (residual ${residual[u] + 1}); uniform v=${v} from ${valid.length} valid; added (${u}, ${v}).`,
-      });
-    }
-    steps.push({
-      action: "done",
-      residual: cloneResidual(residual), unplaced: { ...unplaced },
-      edges: edges.slice(),
-      exitOrder: exitOrder.slice(),
-      msg: `done. ${edges.length} edge(s) placed; ${residualSum(unplaced)} stub(s) logged as gridlocked.`,
+    return MatchDegreeKernel.runRandomGreedy(makeKernelPayload(), {
+      rng: makeLCG(seed), initialState,
     });
-    return steps;
   }
 
   // ── Algorithm: rewire ──
-  // Phase 1: build stub list, shuffle, pair adjacent. Phase 2: 2-opt repair.
-  // Steps emitted per phase to make the walker explicit.
-  // ── Algorithm: rewire ──
+  // Canonical config-model pairing + 2-opt repair with coin-flipped
+  // recombination per src/match_degree.py. Page version's swap kept a
+  // fixed (u-y, x-v) recombination — a divergence. Kernel implements the
+  // proper coin flip between (e1[0], e2[0])+(e1[1], e2[1]) and
+  // (e1[0], e2[1])+(e1[1], e2[0]).
   // keepResidual=true (used by hybrid): leave residual > 0 for unmatched
   // stubs at end so phase 2 can drain them.
   // keepResidual=false (standalone): final cleanup moves leftover residual
   // into unplaced and emits a "gridlock_logged" exit per node.
   function runRewire(seed, initialState, keepResidual) {
-    const rng = makeLCG(seed);
-    const { residual, unplaced, adj, edges, exitOrder } = initState(initialState);
-    const steps = [];
-    maybeInitStep(steps, residual, unplaced, edges, exitOrder, initialState);
-    function recordExit(n) { if (!exitOrder.includes(n)) exitOrder.push(n); }
-    const stubs = [];
-    for (const k in residual) {
-      const u = parseInt(k, 10);
-      for (let i = 0; i < residual[u]; i++) stubs.push(u);
-    }
-    for (let i = stubs.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1));
-      [stubs[i], stubs[j]] = [stubs[j], stubs[i]];
-    }
-    steps.push({
-      action: "shuffle", residual: cloneResidual(residual), unplaced: { ...unplaced },
-      edges: edges.slice(), exitOrder: exitOrder.slice(),
-      msg: `phase 1: built ${stubs.length} stubs and shuffled. order: [${stubs.join(", ")}].`,
+    return MatchDegreeKernel.runRewire(makeKernelPayload(), {
+      rng: makeLCG(seed), initialState, keepResidual,
     });
-    const invalid = [];
-    for (let i = 0; i + 1 < stubs.length; i += 2) {
-      const u = stubs[i], v = stubs[i + 1];
-      if (u === v || adj[u].has(v)) {
-        invalid.push([u, v]);
-        steps.push({
-          action: "pair_invalid", u, v, residual: cloneResidual(residual),
-          unplaced: { ...unplaced },
-          edges: edges.slice(), exitOrder: exitOrder.slice(),
-          msg: `phase 1 pair (${u}, ${v}): ${u === v ? "self-loop" : "already adjacent"}; queued for repair.`,
-        });
-      } else {
-        adj[u].add(v); adj[v].add(u);
-        edges.push([u, v]);
-        residual[u] -= 1; residual[v] -= 1;
-        if (residual[u] === 0 && (DEFICIT[u] || 0) > 0) recordExit(u);
-        if (residual[v] === 0 && (DEFICIT[v] || 0) > 0) recordExit(v);
-        steps.push({
-          action: "add", u, v, residual: cloneResidual(residual),
-          unplaced: { ...unplaced },
-          edges: edges.slice(), exitOrder: exitOrder.slice(),
-          msg: `phase 1 pair (${u}, ${v}): valid; added.`,
-        });
-      }
-    }
-    let attempts = 0;
-    const MAX_ATTEMPTS = 12;
-    while (invalid.length > 0 && attempts < MAX_ATTEMPTS) {
-      attempts++;
-      const [u, v] = invalid.pop();
-      if (edges.length === 0) {
-        steps.push({
-          action: "repair_skip", u, v, residual: cloneResidual(residual),
-          unplaced: { ...unplaced },
-          edges: edges.slice(), exitOrder: exitOrder.slice(),
-          msg: `attempt ${attempts}: invalid (${u}, ${v}); no placed pair to swap against, requeue.`,
-        });
-        invalid.unshift([u, v]);
-        if (attempts >= MAX_ATTEMPTS) break;
-        continue;
-      }
-      const idx = Math.floor(rng() * edges.length);
-      const [x, y] = edges[idx];
-      const ok1 = u !== y && !adj[u].has(y);
-      const ok2 = x !== v && !adj[x].has(v);
-      if (ok1 && ok2) {
-        adj[x].delete(y); adj[y].delete(x);
-        adj[u].add(y); adj[y].add(u);
-        adj[x].add(v); adj[v].add(x);
-        edges.splice(idx, 1);
-        edges.push([u, y]); edges.push([x, v]);
-        residual[u] -= 1; residual[v] -= 1;
-        if (residual[u] === 0 && (DEFICIT[u] || 0) > 0) recordExit(u);
-        if (residual[v] === 0 && (DEFICIT[v] || 0) > 0) recordExit(v);
-        steps.push({
-          action: "repair_swap", u, v, x, y, residual: cloneResidual(residual),
-          unplaced: { ...unplaced },
-          edges: edges.slice(), exitOrder: exitOrder.slice(),
-          msg: `attempt ${attempts}: 2-opt swap. invalid (${u}, ${v}) + valid (${x}, ${y}) → (${u}, ${y}) + (${x}, ${v}).`,
-        });
-      } else {
-        steps.push({
-          action: "repair_fail", u, v, x, y, residual: cloneResidual(residual),
-          unplaced: { ...unplaced },
-          edges: edges.slice(), exitOrder: exitOrder.slice(),
-          msg: `attempt ${attempts}: tried (${x}, ${y}); swap blocked by ${ok1 ? "" : "(u, y) collision "}${ok2 ? "" : "(x, v) collision"}; requeue.`,
-        });
-        invalid.unshift([u, v]);
-      }
-    }
-    if (invalid.length > 0 && !keepResidual) {
-      // Standalone: convert leftover residual into unplaced so the bars
-      // show abandoned rows at end, and add the abandoned nodes to
-      // exitOrder.
-      const lostMap = {};
-      for (const k in residual) {
-        const u = parseInt(k, 10);
-        if (residual[u] > 0) {
-          lostMap[u] = residual[u];
-          unplaced[u] = (unplaced[u] || 0) + residual[u];
-          residual[u] = 0;
-          recordExit(u);
-        }
-      }
-      steps.push({
-        action: "gridlock_logged", residual: cloneResidual(residual),
-        unplaced: { ...unplaced },
-        edges: edges.slice(), exitOrder: exitOrder.slice(),
-        msg: `${invalid.length} pair(s) unresolved after ${MAX_ATTEMPTS} attempts. WARN: ${Object.entries(lostMap).map(([k,v]) => `${k}:${v}`).join(", ")}.`,
-      });
-    }
-    steps.push({
-      action: "done", residual: cloneResidual(residual),
-      unplaced: { ...unplaced },
-      edges: edges.slice(), exitOrder: exitOrder.slice(),
-      msg: `done. ${edges.length} edge(s) placed; ${residualSum(residual) + residualSum(unplaced)} stub(s) ${keepResidual ? "left for phase 2" : "abandoned"}.`,
-    });
-    return steps;
   }
 
   // ── Algorithm: hybrid ──
   // Phase 1: rewire with keepResidual=true (no abandon). Phase 2:
-  // true_greedy from rewire's leftover state. Final abandon happens
-  // inside true_greedy's gridlock branch.
+  // true_greedy from rewire's leftover state. Implemented in the kernel.
   function runHybrid(seed, initialState) {
-    const phase1 = runRewire(seed, initialState, true);
-    // Drop trailing "done"; tag remaining steps as phase 1.
-    while (phase1.length && phase1[phase1.length - 1].action === "done") phase1.pop();
-    phase1.forEach(s => { s.phase = 1; });
-    const last = phase1[phase1.length - 1];
-    const phase1State = last
-      ? { residual: last.residual, unplaced: last.unplaced, edges: last.edges, exitOrder: last.exitOrder }
-      : { residual: DEFICIT, unplaced: {}, edges: [], exitOrder: [] };
-    let phase2;
-    if (residualSum(phase1State.residual) === 0) {
-      phase2 = [{
-        action: "phase2_skip",
-        residual: cloneResidual(phase1State.residual),
-        unplaced: { ...phase1State.unplaced },
-        edges: phase1State.edges.slice(),
-        exitOrder: phase1State.exitOrder.slice(),
-        phase: 2,
-        msg: "phase 1 (rewire) drained the deficit completely. phase 2 (true_greedy) skipped.",
-      }];
-    } else {
-      const handoff = {
-        action: "phase2_start",
-        residual: cloneResidual(phase1State.residual),
-        unplaced: { ...phase1State.unplaced },
-        edges: phase1State.edges.slice(),
-        exitOrder: phase1State.exitOrder.slice(),
-        phase: 2,
-        msg: `phase 1 (rewire) left ${residualSum(phase1State.residual)} stub(s) unplaced. handing off to true_greedy.`,
-      };
-      const tg = runTrueGreedy(0, phase1State);
-      tg.forEach(s => { s.phase = 2; });
-      phase2 = [handoff].concat(tg);
-    }
-    return phase1.concat(phase2);
+    return MatchDegreeKernel.runHybrid(makeKernelPayload(), {
+      rng: makeLCG(seed), initialState,
+    });
   }
 
   // ── Deficit-only bars renderer ──
