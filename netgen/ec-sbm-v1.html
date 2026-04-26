@@ -449,6 +449,8 @@ window.MathJax = {
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 <script src="./shared.js"></script>
 <script src="./js/profile_kernel.js"></script>
+<script src="./js/sbm_kernel.js"></script>
+<script src="./js/match_degree_kernel.js"></script>
 <script src="./js/ec_sbm_kernel.js"></script>
 <script>
 (function () {
@@ -659,43 +661,43 @@ window.MathJax = {
   );
   const CORE_SET = new Set(CORE_PLUS_ATTACH.map(([u, v]) => edgeKey(u, v)));
 
-  // ── Residual SBM overlay realizations ──
-  // After constructive: residual probs[C2,C2]=2 (1 intra-C2 edge),
-  // probs[C3,C3]=2 (1 intra-C3 edge), inter budgets 4/2/2 (C1C2 /
-  // C1C3 / C2C3). Three hand-crafted realizations cycle on the random
-  // button; some intra residuals duplicate constructive edges.
-  const REALIZATIONS = [
-    {
-      label: "realization 1 of 3",
-      inter: [
-        [1, 9], [2, 10], [3, 11], [5, 12],  // C1-C2
-        [1, 15], [4, 17],                     // C1-C3
-        [9, 15], [11, 16],                    // C2-C3
-      ],
-      intraC2: [13, 14],   // fresh pair
-      intraC3: [16, 17],   // fresh pair
-    },
-    {
-      label: "realization 2 of 3",
-      inter: [
-        [1, 11], [2, 9], [3, 12], [5, 10],
-        [2, 16], [4, 15],
-        [11, 15], [10, 16],
-      ],
-      intraC2: [9, 12],    // duplicates attach edge
-      intraC3: [16, 18],   // duplicates attach edge
-    },
-    {
-      label: "realization 3 of 3",
-      inter: [
-        [1, 12], [2, 11], [3, 9], [5, 10],
-        [1, 16], [3, 17],
-        [9, 17], [12, 15],
-      ],
-      intraC2: [10, 11],   // duplicates core edge
-      intraC3: [15, 16],   // duplicates core edge
-    },
-  ];
+  // ── Residual SBM overlay via SBMKernel ──
+  // canonical: gen_clustered.synthesize_sbm_network calls
+  // gt.generate_sbm(b, residual_probs, out_degs=residual_deg). The
+  // residual budget mutated by ECSBMKernel.generateInternalEdges above
+  // is the input to this call (canonical mutation semantics).
+  // Snapshot the post-KEC residual so reroll re-samples from the same
+  // base instead of compounding budget mutations.
+  const KEC_RESIDUAL_DEG = KEC_DEG.slice();
+  const KEC_RESIDUAL_PROBS = KEC_PROBS.map(row => row.slice());
+  const KEC_BLOCKS = new Array(KEC_NODE_IDS.length).fill(-1);
+  KEC_NODE2CLUSTER.forEach((c, iid) => { KEC_BLOCKS[iid] = c; });
+
+  function sampleSBMOverlay(seed) {
+    const rng = d3.randomLcg(seed);
+    const sub = SBMKernel.sampleMicroSBM({
+      blocks: KEC_BLOCKS,
+      degrees: KEC_RESIDUAL_DEG,
+      eRs: KEC_RESIDUAL_PROBS.map(row => row.slice()),
+      numBlocks: KEC_NUM_CLUSTERS,
+      rng,
+    });
+    // Convert iid edges to page-id edges; classify intra/inter for the
+    // viz layout.
+    const inter = [];
+    const intra = [];
+    sub.edges.forEach(([a, b]) => {
+      const u = parseInt(KEC_NODE_IDS[a], 10);
+      const v = parseInt(KEC_NODE_IDS[b], 10);
+      const ru = KEC_BLOCKS[a], rv = KEC_BLOCKS[b];
+      if (ru === rv) intra.push([u <= v ? u : v, u <= v ? v : u, ru]);
+      else inter.push([u <= v ? u : v, u <= v ? v : u]);
+    });
+    return { inter, intra };
+  }
+
+  let OVERLAY_SEED = 1;
+  let CURRENT_OVERLAY = sampleSBMOverlay(OVERLAY_SEED);
 
   function overlayEdges(real) {
     const out = [];
@@ -705,22 +707,16 @@ window.MathJax = {
         id: `ov-inter-${i}`,
       });
     });
-    // Intra-C2 + intra-C3 residual samples. If the sampled pair already
-    // sits in CORE_PLUS_ATTACH, the second strand the VIZ fan-out draws
-    // is what remove_parallel_edges will drop (red-dashed).
-    const intras = [
-      { pair: real.intraC2, id: "ov-intra-c2" },
-      { pair: real.intraC3, id: "ov-intra-c3" },
-    ];
-    intras.forEach(({ pair, id }) => {
-      if (!pair) return;
-      const [a, b] = pair;
+    // Intra-block residual samples; flag duplicates against CORE_SET
+    // (these are what remove_parallel_edges will drop, viz-red-dashed).
+    real.intra.forEach(([a, b, blockIdx], i) => {
       const isDup = CORE_SET.has(edgeKey(a, b));
       out.push({
         u: a, v: b,
         color: isDup ? COL.edge_drop : COL.edge_stage3,
         w: isDup ? 2.4 : 1.8,
-        id, classes: isDup ? "dashed thick" : "",
+        id: `ov-intra-${blockIdx}-${i}`,
+        classes: isDup ? "dashed thick" : "",
       });
     });
     return out;
@@ -1163,7 +1159,6 @@ window.MathJax = {
     });
     NETGEN.makeTooltip(viz, document.getElementById("g-overlay"));
 
-    let real = 0;
     const stageEl = document.getElementById("g-overlay-stage");
     const labelEl = document.getElementById("g-overlay-label");
     const descEl = document.getElementById("g-overlay-desc");
@@ -1172,19 +1167,18 @@ window.MathJax = {
     let controller = null;
 
     function render(step) {
-      // Step 0: constructive only. Step 1: + overlay (pre-dedup, collision
-      // visible). Step 2: dedup applied (collision removed).
-      const ov = overlayEdges(REALIZATIONS[real]);
+      // Step 0: constructive only. Step 1: + overlay (pre-dedup, collisions
+      // visible). Step 2: dedup applied (collisions removed).
+      const ov = overlayEdges(CURRENT_OVERLAY);
+      const dups = ov.filter(e => e.classes && e.classes.indexOf("dashed") >= 0);
       viz.clearEdges();
       viz.addEdges(constructive);
       if (step >= 1) {
-        const keep = step >= 2
-          ? ov.filter(e => e.id !== "ov-intra-dup")
-          : ov;
+        const keep = step >= 2 ? ov.filter(e => dups.indexOf(e) < 0) : ov;
         viz.addEdges(keep);
       }
       const pre = constructive.length + (step >= 1 ? ov.length : 0);
-      const dropped = step >= 2 ? 1 : 0;
+      const dropped = step >= 2 ? dups.length : 0;
       const kept = pre - dropped;
       stageEl.textContent = [
         "step 0 · constructive only",
@@ -1192,11 +1186,11 @@ window.MathJax = {
         "step 2 · dedup applied",
       ][step];
       countEl && countEl.setAttribute("data-_", "");
-      labelEl.textContent = REALIZATIONS[real].label;
+      labelEl.textContent = `realization · seed ${OVERLAY_SEED}`;
       const desc = [
-        "The 30 constructive edges from the core + attach phase. Residual <code>probs</code>: C1,C1=0; C2,C2=2 (1 edge budget); C3,C3=0; inter C1-C2=4, C1-C3=2, C2-C3=2.",
-        "The SBM sample lands on top. Orchid = residual sample, red-dashed = the intra-C2 duplicate the sampler put next to an existing core edge. Pre-dedup total " + pre + " edges (counting the duplicate twice).",
-        "<code>remove_parallel_edges</code> collapses the duplicate; <code>remove_self_loops</code> has nothing to do on this sample. Kept " + kept + ", dropped " + dropped + ". The victim block's intra count lands under the profile's target.",
+        "Constructive edges from the core + attach phase. Residual <code>probs</code> and <code>out_degs</code> after the kernel mutated them are the input to <code>gt.generate_sbm</code>.",
+        "The SBM sample lands on top. Orchid = residual sample, red-dashed = duplicates the sampler put next to an existing core edge. Pre-dedup total " + pre + " edges (counting duplicates twice).",
+        "<code>remove_parallel_edges</code> collapses duplicates; <code>remove_self_loops</code> drops loops. Kept " + kept + ", dropped " + dropped + ". Victim blocks' intra counts land under profile's target.",
       ][step];
       descEl.innerHTML = `<span class="st">${[
         "core only","overlay pre-dedup","after dedup"][step]}</span> &middot; ${desc}`;
@@ -1216,76 +1210,102 @@ window.MathJax = {
     });
 
     document.getElementById("g-overlay-reroll").addEventListener("click", () => {
-      real = (real + 1) % REALIZATIONS.length;
+      OVERLAY_SEED += 1;
+      CURRENT_OVERLAY = sampleSBMOverlay(OVERLAY_SEED);
       render(controller.idx);
     });
   })();
 
-  // ── Generation · outlier rescue ──
-  (function () {
-    const stage2 = CORE_PLUS_ATTACH.map(([u, v]) => ({
-      u, v, color: COL.edge_stage2, w: 1.6, id: `o2-c-${edgeKey(u, v)}`,
-    }));
-    // Use realization 1's inter edges (no collisions on inter) as the
-    // settled clustered band.
-    const stage2inter = REALIZATIONS[0].inter.map(([u, v], i) => ({
-      u, v, color: COL.edge_stage2, w: 1.4, id: `o2-i-${i}`,
-    }));
-    const stage3 = OUT_EDGES.map(([u, v], i) => ({
-      u, v, color: COL.edge_stage3, w: 2, id: `o3-${i}`,
-    }));
+  // ── Generation · outlier rescue (canonical v1: scope=outlier-incident,
+  // outlier-mode=singleton, edge-correction=none). Profile is rebuilt on
+  // outlier-incident edges with each outlier as its own singleton block;
+  // SBMKernel samples a fresh edgelist matching that profile. Sample
+  // resamples on reroll; clustered band is the settled stage-2 output. ──
+  const OUT_INC_EDGES = EDGES
+    .filter(e => CLUSTER_OF[e.u] === "OUT" || CLUSTER_OF[e.v] === "OUT")
+    .map(e => [String(e.u), String(e.v)]);
+  const OUT_INC_CLUSTERING = NODES
+    .filter(n => CLUSTER_OF[n] !== "OUT")
+    .map(n => [String(n), CLUSTER_OF[n]]);
+  const PROF_OUT = ProfileKernel.runProfile({
+    gen: "sbm",
+    edgelist: OUT_INC_EDGES,
+    clustering: OUT_INC_CLUSTERING,
+    outlier_mode: "singleton",
+    drop_oo: false,
+  });
+  const OUT_NODE_IDS = PROF_OUT.files["node_id.csv"].trim().split("\n");
+  const OUT_CLUSTER_LABELS = PROF_OUT.files["cluster_id.csv"].trim().split("\n");
+  const OUT_DEG = PROF_OUT.files["degree.csv"].trim().split("\n").map(Number);
+  const OUT_ASSIGN = PROF_OUT.files["assignment.csv"].trim().split("\n").map(Number);
+  const OUT_NUM_BLOCKS = OUT_CLUSTER_LABELS.length;
+  const OUT_PROBS = Array.from({length: OUT_NUM_BLOCKS},
+    () => new Array(OUT_NUM_BLOCKS).fill(0));
+  PROF_OUT.files["edge_counts.csv"].trim().split("\n").forEach(row => {
+    if (!row) return;
+    const [r, c, w] = row.split(",").map(Number);
+    OUT_PROBS[r][c] = w;
+  });
 
+  function sampleOutlierRescue(seed) {
+    const rng = d3.randomLcg(seed);
+    const sub = SBMKernel.sampleMicroSBM({
+      blocks: OUT_ASSIGN,
+      degrees: OUT_DEG.slice(),
+      eRs: OUT_PROBS.map(row => row.slice()),
+      numBlocks: OUT_NUM_BLOCKS,
+      rng,
+    });
+    const out = [];
+    sub.edges.forEach(([a, b]) => {
+      const u = parseInt(OUT_NODE_IDS[a], 10);
+      const v = parseInt(OUT_NODE_IDS[b], 10);
+      out.push(u <= v ? [u, v] : [v, u]);
+    });
+    return out;
+  }
+
+  let OUTLIER_SEED = 1;
+  let CURRENT_OUTLIER = sampleOutlierRescue(OUTLIER_SEED);
+
+  (function () {
     const viz = NETGEN.VIZ.init("g-outlier-cy", {
-      showLabels: true, edges: [...stage2, ...stage2inter, ...stage3],
+      showLabels: true, edges: [],
     });
     NETGEN.makeTooltip(viz, document.getElementById("g-outlier"));
+
+    function rebuild() {
+      const stage2 = CORE_PLUS_ATTACH.map(([u, v]) => ({
+        u, v, color: COL.edge_stage2, w: 1.6, id: `o2-c-${edgeKey(u, v)}`,
+      }));
+      const stage2inter = CURRENT_OVERLAY.inter.map(([u, v], i) => ({
+        u, v, color: COL.edge_stage2, w: 1.4, id: `o2-i-${i}`,
+      }));
+      const stage3 = CURRENT_OUTLIER.map(([u, v], i) => ({
+        u, v, color: COL.edge_stage3, w: 2, id: `o3-${i}`,
+      }));
+      viz.clearEdges();
+      viz.addEdges([...stage2, ...stage2inter, ...stage3]);
+    }
+
+    rebuild();
+    const rerollBtn = document.getElementById("g-outlier-reroll");
+    if (rerollBtn) rerollBtn.addEventListener("click", () => {
+      OUTLIER_SEED += 1;
+      CURRENT_OUTLIER = sampleOutlierRescue(OUTLIER_SEED);
+      rebuild();
+    });
   })();
 
   // ── Generation · match_degree (graph + stacked bars + reroll) ──
+  // Canonical v1: src/match_degree.py with --algorithm greedy. Targets
+  // are NETGEN.DEGREES (the empirical input degrees that profile recorded
+  // in degree.csv); pre-match band is core + attach + overlay (dedup-kept)
+  // + outlier rescue; matcher fills the residual deficit by adding edges
+  // between deficit nodes that are not yet adjacent.
   (function () {
-    // Fixed "before" state: core + attach + overlay dedup kept + outlier
-    // rescue. Realization 1's inter is used so every node's azure count
-    // is reproducible.
-    const baseEdges = [];
-    CORE_PLUS_ATTACH.forEach(([u, v]) => baseEdges.push({
-      u, v, color: COL.edge_stage2, w: 1.5, id: `m-c-${edgeKey(u, v)}`,
-    }));
-    REALIZATIONS[0].inter.forEach(([u, v], i) => baseEdges.push({
-      u, v, color: COL.edge_stage2, w: 1.3, id: `m-i-${i}`,
-    }));
-    OUT_EDGES.forEach(([u, v], i) => baseEdges.push({
-      u, v, color: COL.edge_stage3, w: 1.6, id: `m-o-${i}`,
-    }));
-    // After the overlay collision on intra-C2 (realization 1: (10,11))
-    // the clustered band still contains (10,11) once (kept side of the
-    // dedup). The collision's victim block loses 2 half-edges from C2,C2
-    // intra. Those stubs show up as a residual deficit on nodes 10 and 11.
-
-    // Match-degree realizations: three valid partner lists (nodes 10, 11
-    // and a few others have a 1-stub residual, matcher fills them).
-    // Verified by walking match_degree.greedy by hand: heap order depends
-    // on set.pop() ordering under PYTHONHASHSEED=0. We present three
-    // plausible realizations cycling on the reroll button.
-    // Node deficits after stage 2 + 3 (verified above): 6, 8, 10, 11,
-    // 12, 16 each need +1. Three plausible pairings the heap-greedy may
-    // land on depending on set.pop() order (arbitrary under CPython).
-    const MATCH_REALIZATIONS = [
-      {
-        label: "realization 1 of 3",
-        edges: [[6, 10], [8, 11], [12, 16]],
-      },
-      {
-        label: "realization 2 of 3",
-        edges: [[6, 11], [8, 10], [12, 16]],
-      },
-      {
-        label: "realization 3 of 3",
-        edges: [[6, 12], [8, 16], [10, 11]],
-      },
-    ];
-
     const viz = NETGEN.VIZ.init("g-match-cy", {
-      showLabels: true, edges: baseEdges,
+      showLabels: true, edges: [],
     });
     NETGEN.makeTooltip(viz, document.getElementById("g-match"));
 
@@ -1294,13 +1314,51 @@ window.MathJax = {
     const realEl = document.getElementById("g-match-real");
 
     let applied = false;
-    let real = 0;
+    let baseEdges = [];
+    let baseEdgePairs = [];
+    let preCounts = {};
     let currentMatchEdges = [];
+    let matchSeed = 1;
+
+    function rebuildBase() {
+      baseEdges = [];
+      baseEdgePairs = [];
+      const dups = new Set();
+      // Stage 2: constructive cores.
+      CORE_PLUS_ATTACH.forEach(([u, v]) => {
+        const key = edgeKey(u, v);
+        if (dups.has(key)) return;
+        dups.add(key);
+        baseEdges.push({ u, v, color: COL.edge_stage2, w: 1.5, id: `m-c-${key}` });
+        baseEdgePairs.push([u, v]);
+      });
+      // Stage 2 (overlay, dedup-kept = no duplicates with core).
+      CURRENT_OVERLAY.inter.forEach(([u, v], i) => {
+        const key = edgeKey(u, v);
+        if (dups.has(key)) return;
+        dups.add(key);
+        baseEdges.push({ u, v, color: COL.edge_stage2, w: 1.3, id: `m-i-${i}` });
+        baseEdgePairs.push([u, v]);
+      });
+      CURRENT_OVERLAY.intra.forEach(([u, v, blockIdx], i) => {
+        const key = edgeKey(u, v);
+        if (dups.has(key)) return;
+        dups.add(key);
+        baseEdges.push({ u, v, color: COL.edge_stage2, w: 1.3, id: `m-ii-${blockIdx}-${i}` });
+        baseEdgePairs.push([u, v]);
+      });
+      // Stage 3: outlier rescue (live SBM sample).
+      CURRENT_OUTLIER.forEach(([u, v], i) => {
+        const key = edgeKey(u, v);
+        if (dups.has(key)) return;
+        dups.add(key);
+        baseEdges.push({ u, v, color: COL.edge_stage3, w: 1.6, id: `m-o-${i}` });
+        baseEdgePairs.push([u, v]);
+      });
+      preCounts = countByNode(baseEdges);
+    }
 
     function targetDeg(n) {
-      // v1's match_degree target: what the profile's degree.csv says (post-
-      // exclusion for clustered nodes, empirical for outliers that reappear
-      // in the outlier rescue).
       return DEGREES[n] || 0;
     }
 
@@ -1312,6 +1370,30 @@ window.MathJax = {
         c[u] = (c[u] || 0) + 1; c[v] = (c[v] || 0) + 1;
       });
       return c;
+    }
+
+    // Canonical match_degree.greedy via MatchDegreeKernel. baseAdj is
+    // the post-stage-3 adjacency keyed by page id (canonical works on
+    // iid space; for v1 the page identity == canonical iid since the
+    // matcher reads degree.csv ordering). Deficit = max(0, target - ach)
+    // per node. Greedy is deterministic; the rng arg is unused but
+    // required by the API surface for non-greedy algos.
+    function runMatchKernel() {
+      const adj = {};
+      NODES.forEach(n => { adj[n] = new Set(); });
+      baseEdgePairs.forEach(([u, v]) => {
+        adj[u].add(v); adj[v].add(u);
+      });
+      const deficit = {};
+      NODES.forEach(n => {
+        deficit[n] = Math.max(0, targetDeg(n) - (preCounts[n] || 0));
+      });
+      const steps = MatchDegreeKernel.runGreedy({
+        iids: NODES.slice(), deficit, baseAdj: adj,
+      }, {});
+      const finalStep = steps[steps.length - 1];
+      const baseSet = new Set(baseEdgePairs.map(([u, v]) => edgeKey(u, v)));
+      return finalStep.edges.filter(([u, v]) => !baseSet.has(edgeKey(u, v)));
     }
 
     function renderBars() {
@@ -1327,8 +1409,8 @@ window.MathJax = {
       const maxD = d3.max(nodes, targetDeg);
       const g = barSvg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
 
-      const c2 = countByNode(CORE_PLUS_ATTACH.concat(REALIZATIONS[0].inter));
-      const c3 = countByNode(OUT_EDGES);
+      const c2 = preCounts;
+      const c3 = {};  // outlier rescue already folded into preCounts
       const c4 = applied ? countByNode(currentMatchEdges) : {};
 
       nodes.forEach((n, i) => {
@@ -1382,28 +1464,32 @@ window.MathJax = {
     }
 
     function render() {
-      viz.removeEdges(id => String(id).startsWith("m-s4-"));
-      const matchEdges = MATCH_REALIZATIONS[real].edges;
-      // Filter: if the pair already exists in baseEdges, the matcher skips.
-      currentMatchEdges = [];
-      const existing = new Set(baseEdges.map(e => edgeKey(e.u, e.v)));
-      matchEdges.forEach(([u, v]) => {
-        if (!existing.has(edgeKey(u, v))) currentMatchEdges.push([u, v]);
+      // Rebuild base edges + pre-match counts from current overlay/outlier
+      // realizations. Then live-call MatchDegreeKernel.runGreedy.
+      rebuildBase();
+      viz.clearEdges();
+      viz.addEdges(baseEdges);
+      const allMatchEdges = runMatchKernel();
+      currentMatchEdges = allMatchEdges;
+      // Compute initial deficit total (placed + gridlocked) for the
+      // count readout.
+      let totalDeficit = 0;
+      NODES.forEach(n => {
+        totalDeficit += Math.max(0, targetDeg(n) - (preCounts[n] || 0));
       });
+      const placed = currentMatchEdges.length;
+      const gridlocked = Math.max(0, Math.floor((totalDeficit / 2) - placed));
       if (applied) {
         viz.addEdges(currentMatchEdges.map(([u, v], i) => ({
           u, v, color: COL.edge_stage4, w: 2.2, id: `m-s4-${i}`,
         })));
         labelEl.textContent = "after match_degree · deficits filed down";
-        const tried = MATCH_REALIZATIONS[real].edges.length;
-        const placed = currentMatchEdges.length;
-        const gridlocked = tried - placed;
         countEl.textContent = `placed: ${placed} · gridlocked: ${gridlocked}`;
       } else {
         labelEl.textContent = "before match_degree · residual deficits visible";
-        countEl.textContent = "placed: 0 · gridlocked: 0";
+        countEl.textContent = `placed: 0 · gridlocked: 0`;
       }
-      realEl.textContent = MATCH_REALIZATIONS[real].label;
+      realEl.textContent = `realization · seeds (overlay=${OVERLAY_SEED}, outlier=${OUTLIER_SEED})`;
       renderBars();
     }
 
@@ -1412,9 +1498,17 @@ window.MathJax = {
       onChange: (on) => { applied = on; render(); },
     });
     document.getElementById("g-match-reroll").addEventListener("click", () => {
-      real = (real + 1) % MATCH_REALIZATIONS.length;
+      // Match-degree greedy is deterministic; reroll bumps the upstream
+      // overlay + outlier seeds so the deficit shape changes, which is
+      // what produces a different match output.
+      OVERLAY_SEED += 1;
+      CURRENT_OVERLAY = sampleSBMOverlay(OVERLAY_SEED);
+      OUTLIER_SEED += 1;
+      CURRENT_OUTLIER = sampleOutlierRescue(OUTLIER_SEED);
       render();
     });
+
+    render();
   })();
 
   // ── Case study · dnc mincut histogram ──
