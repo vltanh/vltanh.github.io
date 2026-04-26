@@ -472,6 +472,8 @@ window.MathJax = {
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 <script src="./shared.js"></script>
 <script src="./js/profile_kernel.js"></script>
+<script src="./js/sbm_kernel.js"></script>
+<script src="./js/match_degree_kernel.js"></script>
 <script src="./js/ec_sbm_kernel.js"></script>
 <script>
 (function () {
@@ -1045,136 +1047,147 @@ window.MathJax = {
     });
   })();
 
-  // ── Generation · residual SBM + rewire step-through ──
-  // Synthetic residual on this graph: 2 intra-C2 halfedges (1 edge), 2
-  // intra-OUT halfedges (1 edge, after parity bump), plus 12 inter.
-  // Rewire scenario: residual SBM sampled (1, 9) twice; the second copy
-  // is a parallel that rewire swaps with (2, 10) → (1, 10), (2, 9).
+  // ── Generation · residual SBM + rewire step-through (live) ──
+  // Canonical v2: gen_outlier.run_outlier_generation with
+  // scope=all, outlier_mode=combined, edge-correction=rewire,
+  // exist_edgelist=stage-2 output. The pipeline:
+  //   1. _accumulate_all builds out_degs from input minus stage 2,
+  //      probs from input inter-block, diagonal rebalance.
+  //   2. SBMKernel.sampleMicroSBM on (b, probs, out_degs).
+  //   3. ECSBMKernel.rewireInvalidEdges 2-opt block-preserving on
+  //      self-loops + duplicates.
+  //   4. remove_parallel + remove_self.
+  //
+  // Re-runs ProfileKernel with combined outlier mode so outlier nodes
+  // share one block (cluster_iid = num_real_clusters). ALL_NODE_IDS is
+  // the universe of clustered + outlier iids in degree-desc-id-asc order.
+  let RES_SEED = 1;
+  let CURRENT_RES = null;
+  function buildResidualSample(seed) {
+    const PROF_ALL = ProfileKernel.runProfile({
+      gen: "ec-sbm",
+      edgelist: EDGES.map(e => [String(e.u), String(e.v)]),
+      clustering: NODES
+        .filter(n => CLUSTER_OF[n] !== "OUT")
+        .map(n => [String(n), CLUSTER_OF[n]]),
+      outlier_mode: "combined",
+      drop_oo: false,
+    });
+    const ALL_NODE_IDS = PROF_ALL.files["node_id.csv"].trim().split("\n");
+    const ALL_CLABELS = PROF_ALL.files["cluster_id.csv"].trim().split("\n");
+    const ALL_ASSIGN = PROF_ALL.files["assignment.csv"].trim().split("\n").map(Number);
+    const numIids = ALL_NODE_IDS.length;
+    const numBlocks = ALL_CLABELS.length;
+    const blocks = ALL_ASSIGN.slice();
+    const id2iid = new Map();
+    ALL_NODE_IDS.forEach((id, iid) => id2iid.set(parseInt(id, 10), iid));
+
+    // exist_edgelist = stage-2 output (CORE_PLUS_ATTACH on the v2 page;
+    // canonical v2 uses --no-sbm-overlay so stage 2 is just the cores).
+    const origIids = EDGES.map(e => [id2iid.get(e.u), id2iid.get(e.v)]);
+    const existIids = CORE_PLUS_ATTACH.map(([u, v]) => [id2iid.get(u), id2iid.get(v)]);
+    const { probs, outDegs } = ECSBMKernel.prepareV2SBMInputs({
+      numIids, blocks, numBlocks,
+      origEdges: origIids,
+      existEdges: existIids,
+    });
+    const rng = d3.randomLcg(seed);
+    const sub = SBMKernel.sampleMicroSBM({
+      blocks, degrees: outDegs.slice(), eRs: probs.map(r => r.slice()),
+      numBlocks, rng,
+    });
+    // raw multigraph (iid pairs).
+    const rawIidEdges = sub.edges.slice();
+    // run rewire on the multigraph.
+    const rewired = ECSBMKernel.rewireInvalidEdges({
+      edges: rawIidEdges, blocks, rng, maxRetries: 10,
+    });
+    function iidToPagePair([a, b]) {
+      const u = parseInt(ALL_NODE_IDS[a], 10);
+      const v = parseInt(ALL_NODE_IDS[b], 10);
+      return u <= v ? [u, v] : [v, u];
+    }
+    const seenRaw = new Set();
+    const rawClassified = [];
+    rawIidEdges.forEach(([a, b]) => {
+      const norm = a <= b ? `${a},${b}` : `${b},${a}`;
+      const pair = iidToPagePair([a, b]);
+      const isLoop = a === b;
+      const isDup = !isLoop && seenRaw.has(norm);
+      seenRaw.add(norm);
+      rawClassified.push({ pair, isLoop, isDup });
+    });
+    return {
+      raw: rawClassified,
+      keptPairs: rewired.kept.map(iidToPagePair),
+      droppedPairs: rewired.dropped.map(iidToPagePair),
+      seed,
+    };
+  }
+
+  CURRENT_RES = buildResidualSample(RES_SEED);
+
   (function () {
     const stage2 = CORE_PLUS_ATTACH.map(([u, v]) => ({
       u, v, color: COL.edge_stage2, w: 1.5, id: `s2-${edgeKey(u, v)}`,
     }));
-    const REWIRE_REALIZATIONS = [
-      {
-        label: "realization 1 of 3",
-        inter: [
-          [1, 9], [2, 10], [3, 11], [5, 12],   // C1-C2
-          [1, 15], [4, 17],                    // C1-C3
-          [9, 15], [11, 16],                   // C2-C3
-          [19, 2], [20, 7],                    // OUT-C1
-          [19, 11],                            // OUT-C2
-          [20, 15],                            // OUT-C3
-        ],
-        intraC2: [9, 12],  // SBM emits 1 intra-C2 edge (collides w/ core)
-        intraOUT: [19, 20],
-        badEdge: [1, 9],
-        partner: [2, 10],
-        swapTo: [[1, 10], [2, 9]],
-      },
-      {
-        label: "realization 2 of 3",
-        inter: [
-          [1, 10], [2, 9], [4, 11], [5, 12],
-          [2, 15], [4, 16],
-          [11, 17], [10, 18],
-          [19, 3], [20, 6],
-          [19, 13],
-          [19, 17],
-        ],
-        intraC2: [9, 11],
-        intraOUT: [19, 20],
-        badEdge: [1, 10],
-        partner: [2, 9],
-        swapTo: [[1, 9], [2, 10]],
-      },
-      {
-        label: "realization 3 of 3",
-        inter: [
-          [1, 11], [2, 12], [3, 10], [4, 9],
-          [3, 17], [5, 15],
-          [12, 16], [9, 18],
-          [19, 6], [20, 1],
-          [20, 9],
-          [19, 18],
-        ],
-        intraC2: [10, 12],
-        intraOUT: [19, 20],
-        badEdge: [1, 11],
-        partner: [3, 10],
-        swapTo: [[1, 10], [3, 11]],
-      },
-    ];
-    let rewReal = 0;
-
     const viz = NETGEN.VIZ.init("g-rewire-cy", {
       showLabels: true, edges: stage2,
     });
     NETGEN.makeTooltip(viz, document.getElementById("g-rewire"));
 
-    function residualEdges(real, step) {
+    function residualEdgesAt(step) {
       const out = [];
-      real.inter.forEach(([u, v], i) => out.push({
-        u, v, color: COL.edge_stage3, w: 1.6, id: `res-inter-${i}`,
-      }));
-      const [a, b] = real.intraC2;
-      out.push({ u: a, v: b, color: COL.edge_stage3, w: 1.6, id: "res-intra-c2" });
-      const [p, q] = real.intraOUT;
-      out.push({ u: p, v: q, color: COL.edge_stage3, w: 1.6, id: "res-intra-out" });
-      // The bad edge is one of the inter pairs that came out as a parallel
-      // (sampled twice). Render as a second copy in red-dashed.
-      if (step >= 0 && step <= 2) {
-        out.push({
-          u: real.badEdge[0], v: real.badEdge[1],
-          color: COL.edge_drop, w: 2.6,
-          id: "res-bad", classes: "dashed thick",
+      // Steps 0-2 show raw multigraph (with duplicates + loops as dashed-red).
+      // Step 3 shows post-rewire kept set.
+      if (step <= 2) {
+        CURRENT_RES.raw.forEach((rc, i) => {
+          const [u, v] = rc.pair;
+          if (rc.isLoop) return;  // self-loops omitted in viz; canonical drops them anyway
+          if (rc.isDup) {
+            out.push({
+              u, v, color: COL.edge_drop, w: 2.4,
+              id: `res-dup-${i}`, classes: "dashed thick",
+            });
+          } else {
+            out.push({
+              u, v, color: COL.edge_stage3, w: 1.6,
+              id: `res-raw-${i}`,
+            });
+          }
         });
-      }
-      if (step === 1 || step === 2) {
-        // Highlight partner in amber
-        const partnerId = `res-inter-${real.inter.findIndex(([u, v]) =>
-          (u === real.partner[0] && v === real.partner[1]) ||
-          (u === real.partner[1] && v === real.partner[0]))}`;
-        const found = out.find(o => o.id === partnerId);
-        if (found) { found.color = COL.amber; found.w = 2.6; }
-      }
-      if (step === 3) {
-        // Remove bad + partner; add the two swapped edges.
-        const partnerKey = edgeKey(real.partner[0], real.partner[1]);
-        const partnerIdx = out.findIndex(o =>
-          o.id.startsWith("res-inter-") && edgeKey(o.u, o.v) === partnerKey);
-        if (partnerIdx >= 0) out.splice(partnerIdx, 1);
-        real.swapTo.forEach(([u, v], i) => out.push({
-          u, v, color: COL.edge_stage3, w: 1.8,
-          id: `res-swap-${i}`,
+      } else {
+        CURRENT_RES.keptPairs.forEach(([u, v], i) => out.push({
+          u, v, color: COL.edge_stage3, w: 1.6, id: `res-kept-${i}`,
         }));
       }
       return out;
     }
 
     function render(step) {
-      const real = REWIRE_REALIZATIONS[rewReal];
       viz.clearEdges();
       viz.addEdges(stage2);
-      viz.addEdges(residualEdges(real, step));
-      const [pA, pB] = real.partner;
-      const [bA, bB] = real.badEdge;
-      const [[sA0, sB0], [sA1, sB1]] = real.swapTo;
+      viz.addEdges(residualEdgesAt(step));
+      const dups = CURRENT_RES.raw.filter(r => r.isDup).length;
+      const loops = CURRENT_RES.raw.filter(r => r.isLoop).length;
       const STEPS = [
         {
           label: "step 0 · residual SBM sampled",
-          desc: `After stage 3 draws on the residual (14 edges on this synthetic), one of them is a parallel: the SBM emitted (${bA}, ${bB}) twice. The red-dashed copy is the invalid parallel. The rewire loop needs a valid partner in the same bucket.`,
+          desc: `Live SBMKernel.sampleMicroSBM on the v2 residual: ` +
+                `${CURRENT_RES.raw.length} stub-pair draws, ${dups} duplicate(s), ${loops} self-loop(s). ` +
+                `Red-dashed = duplicates the rewire pass needs to resolve.`,
         },
         {
-          label: "step 1 · pick a partner",
-          desc: `A random valid edge in the same block bucket: (${pA}, ${pB}). The invariant to check: both edges must sit in the same bucket, so the swap preserves block counts.`,
+          label: "step 1 · group by block-pair",
+          desc: `The rewire kernel groups every valid edge by its (min_block, max_block) bucket; each duplicate is a candidate for swap with another valid edge in the same bucket.`,
         },
         {
-          label: "step 2 · swap endpoints block-wise",
-          desc: `Replace (${bA}, ${bB}) and (${pA}, ${pB}) with (${sA0}, ${sB0}) and (${sA1}, ${sB1}). Each node stays in its home block. The block-pair count is unchanged; one valid edge replaces one invalid edge; the duplicate is gone.`,
+          label: "step 2 · 2-opt swap, block-preserving",
+          desc: `For each duplicate, pick a random partner in the same bucket; swap endpoints so each node stays in its home block. Coin-flip when both endpoints are in the same block (intra case).`,
         },
         {
-          label: "step 3 · done, accept",
-          desc: "After up to 10 retry passes with a stagnation detector, every fixable invalid edge has been fixed. Unresolved edges are dropped with a <code>WARN</code>. On this synthetic the single invalid edge resolves in one pass.",
+          label: "step 3 · post-rewire result",
+          desc: `Up to 10 retry passes; ${CURRENT_RES.droppedPairs.length} unresolved edge(s) dropped. Final kept set: ${CURRENT_RES.keptPairs.length} edges.`,
         },
       ];
       const descEl = document.getElementById("g-rewire-desc");
@@ -1183,7 +1196,7 @@ window.MathJax = {
       const s = STEPS[step];
       descEl.innerHTML = `<span class="st">${s.label}</span> &middot; ${s.desc}`;
       stageEl.textContent = s.label;
-      realEl.textContent = REWIRE_REALIZATIONS[rewReal].label;
+      realEl.textContent = `realization · seed ${CURRENT_RES.seed}`;
       if (window.MathJax && window.MathJax.typesetPromise) {
         window.MathJax.typesetPromise([descEl]).catch(() => {});
       }
@@ -1198,71 +1211,19 @@ window.MathJax = {
       total: 4, onRender: render,
     });
     document.getElementById("g-rewire-reroll").addEventListener("click", () => {
-      rewReal = (rewReal + 1) % REWIRE_REALIZATIONS.length;
+      RES_SEED += 1;
+      CURRENT_RES = buildResidualSample(RES_SEED);
       render(controller.idx);
     });
   })();
 
-  // ── Generation · match_degree with stacked bars + algorithm dropdown ──
+  // ── Generation · match_degree, live via MatchDegreeKernel.runHybrid ──
+  // canonical v2 default: src/match_degree.py with --algorithm hybrid
+  // (rewire pass with keepResidual=true → true_greedy on whatever's left).
+  // Other algorithms exposed via the alg dropdown so the comparison is
+  // also live, not hand-curated.
   (function () {
-    // Base edges: stage 2 + stage 3 settled (residual SBM post-rewire +
-    // outlier band from realization 1).
-    const baseEdges = [];
-    CORE_PLUS_ATTACH.forEach(([u, v]) => baseEdges.push({
-      u, v, color: COL.edge_stage2, w: 1.5, id: `m-c-${edgeKey(u, v)}`,
-    }));
-    // Stage-3 inter + intra-OUT from realization 1 of rewire (post-swap).
-    const STAGE3_EDGES = [
-      [1, 9], [2, 10], [3, 11], [5, 12],
-      [1, 15], [4, 17],
-      [9, 15], [11, 16],
-      [19, 2], [20, 7],
-      [19, 11],
-      [20, 15],
-      [19, 20],
-    ];
-    STAGE3_EDGES.forEach(([u, v], i) => baseEdges.push({
-      u, v, color: COL.edge_stage3, w: 1.5, id: `m-r-${i}`,
-    }));
-
-    // Per-algorithm match realizations. Hand-walked on the residual
-    // deficit set; illustrative edges meant to surface each algorithm's
-    // pick style and gridlock signature, not byte-verified.
-    const ALG_REALIZATIONS = {
-      hybrid: [
-        { label: "rewire + true_greedy ·realization 1", edges: [[6, 13], [8, 11], [10, 18]] },
-        { label: "rewire + true_greedy ·realization 2", edges: [[6, 11], [8, 13], [10, 18]] },
-        { label: "rewire + true_greedy ·realization 3", edges: [[6, 18], [8, 13], [11, 17]] },
-      ],
-      true_greedy: [
-        { label: "true_greedy ·realization 1", edges: [[11, 10], [8, 13], [6, 16]] },
-        { label: "true_greedy ·realization 2", edges: [[8, 11], [13, 10], [6, 17]] },
-      ],
-      rewire: [
-        { label: "rewire ·realization 1", edges: [[6, 13], [11, 8]] },
-        { label: "rewire ·realization 2", edges: [[6, 11], [13, 8]] },
-      ],
-      random_greedy: [
-        { label: "random_greedy ·realization 1", edges: [[6, 18], [11, 8], [13, 17]] },
-        { label: "random_greedy ·realization 2", edges: [[8, 18], [6, 17], [11, 16]] },
-      ],
-      greedy: [
-        { label: "greedy ·realization 1 (silent gridlock)", edges: [[6, 13], [8, 11]], gridlock: 1 },
-        { label: "greedy ·realization 2 (silent gridlock)", edges: [[6, 11], [8, 13]], gridlock: 1 },
-      ],
-    };
-
-    const viz = NETGEN.VIZ.init("g-match-cy", {
-      showLabels: true, edges: baseEdges,
-    });
-    NETGEN.makeTooltip(viz, document.getElementById("g-match"));
-    const labelEl = document.getElementById("g-match-label");
-    const countEl = document.getElementById("g-match-count");
-    const realEl = document.getElementById("g-match-real");
-
-    let applied = false;
-    let real = 0;
-    let currentMatchEdges = [];
+    const ALGORITHMS = ["hybrid", "true_greedy", "rewire", "random_greedy", "greedy"];
 
     function targetDeg(n) { return DEGREES[n] || 0; }
     function countByNode(edges) {
@@ -1275,6 +1236,80 @@ window.MathJax = {
       return c;
     }
 
+    let baseEdges = [];
+    let baseEdgePairs = [];
+    let preCounts = {};
+    let stage3PageEdges = [];
+
+    function rebuildBase() {
+      baseEdges = [];
+      baseEdgePairs = [];
+      const dups = new Set();
+      // Stage 2: kec_core constructive only.
+      CORE_PLUS_ATTACH.forEach(([u, v]) => {
+        const key = edgeKey(u, v);
+        if (dups.has(key)) return;
+        dups.add(key);
+        baseEdges.push({ u, v, color: COL.edge_stage2, w: 1.5, id: `m-c-${key}` });
+        baseEdgePairs.push([u, v]);
+      });
+      // Stage 3: residual SBM post-rewire (live from CURRENT_RES.keptPairs).
+      stage3PageEdges = CURRENT_RES.keptPairs.slice();
+      stage3PageEdges.forEach(([u, v], i) => {
+        const key = edgeKey(u, v);
+        if (dups.has(key)) return;
+        dups.add(key);
+        baseEdges.push({ u, v, color: COL.edge_stage3, w: 1.5, id: `m-r-${i}` });
+        baseEdgePairs.push([u, v]);
+      });
+      preCounts = countByNode(baseEdges);
+    }
+
+    function runMatchKernel(algName, seed) {
+      const adj = {};
+      NODES.forEach(n => { adj[n] = new Set(); });
+      baseEdgePairs.forEach(([u, v]) => {
+        adj[u].add(v); adj[v].add(u);
+      });
+      const deficit = {};
+      NODES.forEach(n => {
+        deficit[n] = Math.max(0, targetDeg(n) - (preCounts[n] || 0));
+      });
+      const payload = { iids: NODES.slice(), deficit, baseAdj: adj };
+      const opts = { rng: d3.randomLcg(seed) };
+      let steps;
+      switch (algName) {
+        case "hybrid":         steps = MatchDegreeKernel.runHybrid(payload, opts); break;
+        case "true_greedy":    steps = MatchDegreeKernel.runTrueGreedy(payload, opts); break;
+        case "rewire":         steps = MatchDegreeKernel.runRewire(payload, opts); break;
+        case "random_greedy":  steps = MatchDegreeKernel.runRandomGreedy(payload, opts); break;
+        default:               steps = MatchDegreeKernel.runGreedy(payload, opts);
+      }
+      const finalStep = steps[steps.length - 1];
+      const baseSet = new Set(baseEdgePairs.map(([u, v]) => edgeKey(u, v)));
+      const placed = (finalStep.edges || []).filter(([u, v]) => !baseSet.has(edgeKey(u, v)));
+      let totalDeficit = 0;
+      NODES.forEach(n => { totalDeficit += deficit[n]; });
+      const expected = Math.floor(totalDeficit / 2);
+      const gridlocked = Math.max(0, expected - placed.length);
+      return { placed, gridlocked, expected };
+    }
+
+    rebuildBase();
+    const viz = NETGEN.VIZ.init("g-match-cy", {
+      showLabels: true, edges: baseEdges,
+    });
+    NETGEN.makeTooltip(viz, document.getElementById("g-match"));
+    const labelEl = document.getElementById("g-match-label");
+    const countEl = document.getElementById("g-match-count");
+    const realEl = document.getElementById("g-match-real");
+
+    let applied = false;
+    let currentAlg = "hybrid";
+    let matchSeed = 1;
+    let currentMatchEdges = [];
+    let currentGridlock = 0;
+
     function renderBars() {
       const barSvg = d3.select("#match-bars");
       barSvg.selectAll("*").remove();
@@ -1286,8 +1321,8 @@ window.MathJax = {
       const rowH = ih / nodes.length;
       const maxD = d3.max(nodes, targetDeg);
       const g = barSvg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
-      const c2 = countByNode(CORE_PLUS_ATTACH);
-      const c3 = countByNode(STAGE3_EDGES);
+      const c2 = preCounts;
+      const c3 = {};  // stage 2 + stage 3 already folded into preCounts
       const c4 = applied ? countByNode(currentMatchEdges) : {};
       nodes.forEach((n, i) => {
         const y = i * rowH;
@@ -1338,29 +1373,23 @@ window.MathJax = {
     }
 
     function render() {
-      viz.removeEdges(id => String(id).startsWith("m-s4-"));
-      const reals = ALG_REALIZATIONS.hybrid;
-      if (real >= reals.length) real = 0;
-      const matchEdges = reals[real].edges;
-      currentMatchEdges = [];
-      const existing = new Set(baseEdges.map(e => edgeKey(e.u, e.v)));
-      matchEdges.forEach(([u, v]) => {
-        if (!existing.has(edgeKey(u, v))) currentMatchEdges.push([u, v]);
-      });
+      rebuildBase();
+      viz.clearEdges();
+      viz.addEdges(baseEdges);
+      const result = runMatchKernel(currentAlg, matchSeed);
+      currentMatchEdges = result.placed;
+      currentGridlock = result.gridlocked;
       if (applied) {
         viz.addEdges(currentMatchEdges.map(([u, v], i) => ({
           u, v, color: COL.edge_stage4, w: 2.2, id: `m-s4-${i}`,
         })));
         labelEl.textContent = "after match_degree · deficits filed down";
-        const tried = matchEdges.length;
-        const placed = currentMatchEdges.length;
-        const gridlocked = reals[real].gridlock || 0;
-        countEl.textContent = `placed: ${placed} · gridlocked: ${gridlocked}`;
+        countEl.textContent = `placed: ${currentMatchEdges.length} · gridlocked: ${currentGridlock}`;
       } else {
         labelEl.textContent = "before match_degree · residual deficits visible";
         countEl.textContent = "placed: 0 · gridlocked: 0";
       }
-      realEl.textContent = reals[real].label;
+      realEl.textContent = `algorithm=${currentAlg} · seed ${matchSeed} (residual SBM seed=${CURRENT_RES.seed})`;
       renderBars();
     }
 
@@ -1368,11 +1397,27 @@ window.MathJax = {
       input: document.getElementById("g-match-toggle"),
       onChange: (on) => { applied = on; render(); },
     });
+    const algSelect = document.getElementById("g-match-alg");
+    if (algSelect) {
+      algSelect.addEventListener("change", () => {
+        const v = algSelect.value;
+        if (ALGORITHMS.indexOf(v) >= 0) {
+          currentAlg = v;
+          render();
+        }
+      });
+    }
     document.getElementById("g-match-reroll").addEventListener("click", () => {
-      const reals = ALG_REALIZATIONS.hybrid;
-      real = (real + 1) % reals.length;
+      // rng-using algos (random_greedy, rewire, hybrid) re-randomise on
+      // seed bump; greedy + true_greedy are deterministic so reroll only
+      // changes the upstream residual SBM seed for them.
+      matchSeed += 1;
+      RES_SEED += 1;
+      CURRENT_RES = buildResidualSample(RES_SEED);
       render();
     });
+
+    render();
   })();
 
   // ── Case study · dnc v1 vs v2 provenance comparison bar ──
