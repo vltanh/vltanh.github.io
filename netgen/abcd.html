@@ -103,7 +103,7 @@
 </header>
 
 <section class="hook">
-  <p>You have a network and its clusters. You want a synthetic twin that keeps both the degree sequence and the cluster sizes verbatim, drawing every edge fresh. ABCD's proposal: model the graph as a <em>union of independent random graphs</em>, one per cluster plus one global background, and let a single scalar \(\xi\) trade weight between the two.</p>
+  <p>You have a network and its clusters. You want a synthetic twin that keeps both the degree sequence and the cluster sizes verbatim while drawing every edge fresh. ABCD's proposal: model the graph as a <em>union of independent random graphs</em>, one per cluster plus one global background, and let a single scalar \(\xi\) trade weight between the two.</p>
   <p>Each node \(u\) has weight \(w_u\) (its target degree). ABCD splits this weight: \(y_u = (1 - \xi) w_u\) funds the cluster graph of \(u\)'s home cluster; \(z_u = \xi w_u\) funds the background graph on \(V\). A configuration model on each cluster graph produces cluster-internal edges; a configuration model on all \(z\)-stubs produces background edges that can pair any two nodes. The final graph is the union. At \(\xi = 0\) you get disjoint cluster graphs; at \(\xi = 1\) you get a pure random graph with no signal about cluster membership.</p>
   <p>The catch: \(\xi\) is the <em>only</em> structural dial. ABCD does not target triangle counts, clustering coefficients, or a per-pair block-count matrix. If the input has dense tight-triangle clusters, ABCD scatters those edges uniformly across each cluster's admissible pairs instead.</p>
 </section>
@@ -203,7 +203,7 @@
   <p>On inputs with no degree-0 nodes (like <code>dnc</code>, where every node has at least one edge), positive-degree vertices fail the admissibility for any singleton cluster (size \(s_j = 1\) requires \(x_u \le 0\), but \(\lceil (1-\xi\phi) w_u \rceil \ge 1\) for any \(w_u \ge 1\)). The sampler falls back: when every real cluster is full and a small-degree vertex is still unplaced, it takes the leftover singleton, issues a <code>bad_weights</code> warning, and moves on. Final \(\xi\) is biased by how many singletons had to absorb non-zero-degree vertices.</p>
   <div class="callout">
     <div class="tag">outliers in ABCD are a wrapper idea, not a model parameter</div>
-    <p>The paper has no notion of "outlier"; it just takes <code>cluster_sizes.csv</code> with \(\sum_j s_j = n\). Our wrapper's <code>outlier_mode=singleton</code> makes every unclustered input node a 1-node pseudo-cluster so the sum identity holds, and the post-processing step <code>drop_singleton_clusters</code> strips them from <code>com.csv</code> at the end. <a href="./abcd+o.html">ABCD+o</a> is the extended model that promotes outliers into a proper model-level parameter \(s_0\).</p>
+    <p>The paper has no notion of "outlier"; it takes <code>cluster_sizes.csv</code> with \(\sum_j s_j = n\) and asks no further questions. Our wrapper's <code>outlier_mode=singleton</code> makes every unclustered input node a 1-node pseudo-cluster so the sum identity holds, and the post-processing step <code>drop_singleton_clusters</code> strips them from <code>com.csv</code> at the end. <a href="./abcd+o.html">ABCD+o</a> is the extended model that promotes outliers into a proper model-level parameter \(s_0\).</p>
   </div>
 </section>
 
@@ -243,7 +243,7 @@
   <div class="stage-num">generation · cluster graphs and background graph</div>
   <h2>\(k\) independent cluster graphs, one global background, then union.</h2>
   <p>Each cluster graph \(G_j\) is a configuration model on its members' \(\hat y_u\) stubs. Each node \(u\) with \(c(u) = j\) contributes \(\hat y_u\) stubs; they shuffle within the cluster and pair adjacent. Self-loops and parallels move to a "recycle" list and rewire against a random edge of \(G_j\) until resolved. The paper claims, and our traces confirm, that the rewire loop almost always resolves every collision: on our 20-node synthetic across 10 seeds, 9 of 10 outputs have the <em>exact</em> input degree multiset; the remaining run loses a single edge to unresolvable residue.</p>
-  <p>The background graph \(G_0\) is a configuration model on <em>every</em> node's \(\hat z_u\) stubs, pooled globally. Any two nodes can pair, including two members of the same cluster. The same recycle-and-rewire loop runs here, with one extra check: an edge already present in a cluster graph gets recycled too, since the final graph is required to be simple.</p>
+  <p>The background graph \(G_0\) is a configuration model on <em>every</em> node's \(\hat z_u\) stubs, pooled globally. Any two nodes can pair, including two members of the same cluster. The same recycle-and-rewire loop runs here, with one extra check: an edge already present in a cluster graph gets recycled too, since the final graph must be simple.</p>
   <p>Step through the three phases below. Re-roll at the top re-shuffles the stubs and re-rounds \(U_u\).</p>
   <div class="graph" id="g-cm">
     <div class="graph-chrome">
