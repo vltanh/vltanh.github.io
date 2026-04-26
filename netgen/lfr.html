@@ -268,6 +268,7 @@ window.MathJax = {
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 <script src="./shared.js"></script>
 <script src="./js/profile_kernel.js"></script>
+<script src="./js/lfr_kernel.js"></script>
 <script>
 (function () {
   document.getElementById("links").innerHTML = NETGEN.linksRow({gen: "lfr"});
@@ -396,49 +397,31 @@ window.MathJax = {
     return a;
   }
 
-  // Inverse-CDF sample from truncated power law P(x) ∝ x^(-alpha) over [xmin, xmax],
-  // via integer rounding of the continuous sample.
-  function sampleTruncatedPowerLaw(alpha, xmin, xmax, rng) {
-    const u = rng();
-    const a = Math.pow(xmin, 1 - alpha);
-    const b = Math.pow(xmax, 1 - alpha);
-    const x = Math.pow(a + u * (b - a), 1 / (1 - alpha));
-    return Math.max(xmin, Math.min(xmax, Math.round(x)));
-  }
-
+  // Degree + cluster-size sampling delegate to LFRKernel, which is a
+  // line-for-line port of benchm.cpp's solve_dmin / integer_average /
+  // powerlaw cumulative + lower_bound stages (verified byte-equal vs
+  // canonical via tools/viz_check/lfr/kernel_check.mjs). Page-side
+  // wrappers sort desc to match the post-stage layout the viz expects.
   function resampleDegrees(seed) {
     const rng = seededRng(seed * 73 + 11);
-    const out = [];
-    // Keep rejection-sampling until mean is within 25% of target (enough for viz).
-    for (let t = 0; t < 50; t++) {
-      const draws = [];
-      for (let i = 0; i < N_; i++) draws.push(sampleTruncatedPowerLaw(T1, 1, K_MAX, rng));
-      const mean = draws.reduce((a,b) => a+b, 0) / draws.length;
-      if (Math.abs(mean - K_MEAN) / K_MEAN < 0.25) { out.length = 0; out.push(...draws); break; }
-      if (out.length === 0) { out.length = 0; out.push(...draws); }
-    }
-    out.sort((a,b) => b - a);
-    return out;
+    const { degrees } = LFRKernel.sampleDegreeSequence({
+      N: N_, k_avg: K_MEAN, max_k: K_MAX, t1: T1, rng,
+    });
+    return degrees.slice().sort((a, b) => b - a);
   }
 
   function resampleClusterSizes(seed) {
     const rng = seededRng(seed * 97 + 29);
-    // Sample sizes in [C_MIN, C_MAX] summing to approximately N_.
-    const sizes = [];
-    let remaining = N_;
-    while (remaining > 0) {
-      const s = sampleTruncatedPowerLaw(T2, C_MIN, Math.min(C_MAX, remaining), rng);
-      if (s > remaining) {
-        sizes.push(remaining);
-        remaining = 0;
-      } else {
-        sizes.push(s);
-        remaining -= s;
-      }
-      if (sizes.length > 50) break;  // safety
-    }
-    sizes.sort((a,b) => b - a);
-    return sizes;
+    // Canonical seed branch: when fixed_range=false and the largest
+    // internal degree forces a cluster of (max_int_deg + 1), the sampler
+    // pre-pushes that size. The page's wrapper hits the !fixed_range
+    // path; max_internal_degree falls out of (1 - mu) * max_k.
+    const max_internal_degree = Math.max(0, Math.floor((1 - MU_MEAN) * K_MAX));
+    const { sizes } = LFRKernel.sampleClusterSizes({
+      N: N_, max_internal_degree, c_min: C_MIN, c_max: C_MAX, t2: T2, rng,
+      fixed_range: false, overlap_extra: 0,
+    });
+    return sizes.slice().sort((a, b) => b - a);
   }
 
   // ── Profiling · degree-distribution fit ──
