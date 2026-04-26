@@ -174,6 +174,11 @@
     </div>
     <div class="graph-canvas" id="g-assign-cy"></div>
   </div>
+  <div class="callout warn">
+    <div class="tag">caveat: <code>outlier_mode=singleton</code> replicates the outlier subgraph</div>
+    <p>Switch <code>--outlier-mode</code> to <code>singleton</code> and every outlier becomes its own size-1 block, with its own row and column in \(e\). The urn for that block contains a single node repeated \(k_u\) times, so the sampler has no choice on the outlier side: outlier&ndash;outlier edges come back exactly (one stub from each singleton urn lands on the only resident), and outlier&ndash;cluster edges keep the outlier's per-cluster degree exact (only the specific cluster-side neighbour is rerolled).</p>
+    <p>The motivation for this project is benchmarking community detection algorithms, which is a contract: we hand the algorithm a synthetic graph plus a ground-truth clustering and ask whether the algorithm can recover it. Singleton mode breaks that contract whenever the outliers themselves carry community structure that the reference clustering missed. The synthetic preserves that structure verbatim while the ground truth claims those nodes are unclustered. An algorithm that finds the hidden communities looks wrong; one that misses them looks right. Use the default <code>combined</code> mode for benchmarking. Singleton mode is fine when the goal is replication, not benchmarking.</p>
+  </div>
 </section>
 
 <!-- ─────────── Profiling · degree sequence ─────────── -->
@@ -232,8 +237,12 @@
 <section class="stage">
   <div class="stage-num">generation · sample the multigraph</div>
   <h2>Stub-matching per block-pair, micro-canonical.</h2>
-  <p>Each node \(u\) has a target degree \(k_u\) that splits across the blocks it connects to: call the split \(k_u^{(s)}\), the number of half-edges from \(u\) landing in block \(s\). The sums match the edge count matrix: \(\sum_{u \,:\, b_u = r} k_u^{(s)} = e_{rs}\) for \(r \neq s\), and \(\sum_{u \,:\, b_u = r} k_u^{(r)} = e_{rr} = 2 \cdot \text{intra-edges}(r)\).</p>
-  <p>For each block-pair \((r, s)\), build two stub lists (or one for \(r = s\)): each node \(u\) appears \(k_u^{(s)}\) times. Shuffle, pair up consecutively. Every pair becomes an edge; nothing is rejected.</p>
+  <p>Each node \(u\) has a target degree \(k_u\). Build one urn per block: for block \(r\), drop each node \(u\) with \(b_u = r\) into the urn \(k_u\) times. The urn is a bag of half-edges and that is all it is; it does <em>not</em> remember which target block any particular half-edge was supposed to land in. The spokes drawn around each node visualise its share of the urn.</p>
+  <p>For each block-pair \((r, s)\) with \(r \le s\), iterate in row-major order on the edge count matrix. The pair claims \(e_{rs}\) edges. For \(r = s\) pull two half-edges out of urn \(r\) per edge; for \(r \neq s\) pull one out of urn \(r\) and one out of urn \(s\) per edge. Sampling is uniform without replacement. Every draw becomes an edge; nothing is rejected.</p>
+  <div class="callout">
+    <div class="tag">profile records more than the sampler uses</div>
+    <p>Profile knows the finer split \(k_u^{(s)}\), the count of \(u\)'s edges that fell in block \(s\) on the input (\(\sum_u k_u^{(s)} = e_{rs}\) for \(r \neq s\), \(= e_{rr}\) for \(r = s\)). graph-tool drops the split: only \(k_u\) and \(e_{rs}\) survive into the sampler. So in any one sample, \(u\)'s per-block degree fluctuates around \(k_u^{(s)}\) under the constraint that the column totals stay at \(e_{rs}\). On a hub with a strong block-preference in the input that preference is preserved in expectation only.</p>
+  </div>
   <div class="callout">
     <div class="tag">graph-tool accepts non-equality input</div>
     <p>We feed <code>gt.generate_sbm</code> a \((k, e)\) pair that satisfies the identities above, but the function actually accepts looser input: the consistency condition is only the inequality \(\sum_{u \,:\, b_u = r} k_u \;\ge\; \sum_{s} e_{rs}\) (LHS = stubs available in block \(r\), RHS = edges incident to \(r\)). When the two sides match exactly, the sampler distributes the stubs the natural way. When they do not, some nodes come out with a degree <em>below</em> the requested \(k\): graph-tool prioritises hitting \(e_{rs}\) over hitting \(k_u\). A minimal example: \(b = (1, 1)\), \(k = (3, 3)\), \(e = (4)\), i.e. two nodes both asking for degree 3, with four half-edges on the diagonal. The condition \(3 + 3 \ge 4\) holds, but only as a strict inequality, and the sampler reliably returns one node with degree 1 rather than 3. The identities we use on this page (equality, not inequality) are why the toy runs above behave cleanly.</p>
@@ -249,12 +258,13 @@
     </div>
     <div class="graph-canvas" id="g3-cy"></div>
     <div class="widget-row" style="padding:.9rem 0 0;border-top:1px dashed rgba(139,117,65,.45)">
-      <button class="btn" id="g3-step" type="button">step</button>
-      <button class="btn" id="g3-random" type="button">random</button>
-      <button class="btn" id="g3-play" type="button">play</button>
+      <button class="btn" id="g3-prev" type="button">&larr; back</button>
+      <button class="btn primary" id="g3-next" type="button">next &rarr;</button>
+      <button class="btn" id="g3-reset" type="button">reset</button>
       <button class="btn" id="g3-skip" type="button">skip to end</button>
+      <button class="btn" id="g3-random" type="button">random</button>
       <button class="btn" id="reroll-btn" type="button">random seed</button>
-      <span class="step-label" id="g3-step-label">propose two stubs; click step to pair them</span>
+      <span class="step-label" id="g3-step-label">step <b id="g3-cur">0</b> / <span id="g3-total">0</span></span>
     </div>
   </div>
 </section>
@@ -454,10 +464,9 @@ window.MathJax = {
     else { EDGE_COUNTS[r][s] += 1; EDGE_COUNTS[s][r] += 1; }
   });
 
-  // Per-node stubs per target block: k_i^{(s)} = count of edges from i into s.
-  // For intra (s = block(i)), k_i^{(s)} equals the intra-block degree; for
-  // inter it equals the directed count to block s. Sum_{i in r} k_i^{(s)} =
-  // e_{rs} for r != s, and = e_{rr} for r = s.
+  // Profile-only diagnostic: per-node, per-target-block stub count
+  // k_i^{(s)}. graph-tool does NOT use this split (its urn is block-pooled,
+  // target-untyped); kept around for prose / hover-debug only.
   const STUBS = {};
   NODES.forEach(n => {
     STUBS[n] = new Array(NUM_BLOCKS).fill(0);
@@ -468,6 +477,7 @@ window.MathJax = {
     STUBS[e.v][r] += 1;
   });
 
+  // Total degree per node = size of node's stub population in its block urn.
   const TARGET_DEG = {};
   NODES.forEach(n => { TARGET_DEG[n] = STUBS[n].reduce((a, b) => a + b, 0); });
   const EDGES_TOTAL = EDGES.length;
@@ -757,49 +767,54 @@ window.MathJax = {
   })();
 
   // ── Micro-SBM sampler (JS). ──
-  // Mirrors graph-tool's generate_sbm(micro_ers=true, micro_degs=true) via
-  // configuration-model stub-matching per block-pair. Output is a multigraph
-  // whose per-pair and per-node half-edge counts hit the profile exactly;
-  // dedup afterwards turns it into a simple graph and bleeds both counts
-  // down by the parallel + self-loop count.
+  // Mirrors graph-tool's generate_sbm(micro_ers=true, micro_degs=true).
+  // For each block r, build an urn containing each node u repeated k_u
+  // times. Stubs are block-pooled and target-untyped: the urn does not
+  // know which (r, s) cell each stub will end up in. For each pair (r, s)
+  // with r <= s in row-major order, draw e_{rs} stubs without replacement
+  // from urn r (and another e_{rs} from urn s when r != s); each draw
+  // becomes one edge. Output is a multigraph; dedup happens after.
   function seededRng(seed) {
     // d3.randomLcg gives deterministic U[0,1). Stable across browsers.
     return d3.randomLcg(seed);
   }
-  function shuffleInPlace(arr, rng) {
-    for (let i = arr.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1));
-      const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
-    }
+  function popRandom(urn, rng) {
+    // Mirrors graph-tool UrnSampler<Value, false>::sample: uniform index,
+    // swap with last, pop. O(1) per draw.
+    const i = Math.floor(rng() * urn.length);
+    const v = urn[i];
+    urn[i] = urn[urn.length - 1];
+    urn.pop();
+    return v;
+  }
+  function buildBlockUrns() {
+    return BLOCK_NAMES.map((name) => {
+      const urn = [];
+      BLOCK_NODES[name].forEach(u => {
+        for (let k = 0; k < TARGET_DEG[u]; k++) urn.push(u);
+      });
+      return urn;
+    });
   }
   function sampleMicroSBM(seed) {
     const rng = seededRng(seed);
+    const urns = buildBlockUrns();
     const raw = [];  // {u, v, intra, multi, loop}
     for (let r = 0; r < NUM_BLOCKS; r++) {
       for (let s = r; s < NUM_BLOCKS; s++) {
-        if (r === s) {
-          const stubs = [];
-          BLOCK_NODES[BLOCK_NAMES[r]].forEach(u => {
-            for (let k = 0; k < STUBS[u][r]; k++) stubs.push(u);
-          });
-          shuffleInPlace(stubs, rng);
-          for (let k = 0; k + 1 < stubs.length; k += 2) {
-            raw.push({ u: stubs[k], v: stubs[k+1], intra: true });
-          }
-        } else {
-          const stubsR = [], stubsS = [];
-          BLOCK_NODES[BLOCK_NAMES[r]].forEach(u => {
-            for (let k = 0; k < STUBS[u][s]; k++) stubsR.push(u);
-          });
-          BLOCK_NODES[BLOCK_NAMES[s]].forEach(u => {
-            for (let k = 0; k < STUBS[u][r]; k++) stubsS.push(u);
-          });
-          shuffleInPlace(stubsR, rng);
-          shuffleInPlace(stubsS, rng);
-          const n = Math.min(stubsR.length, stubsS.length);
-          for (let k = 0; k < n; k++) {
-            raw.push({ u: stubsR[k], v: stubsS[k], intra: false });
-          }
+        const ers = EDGE_COUNTS[r][s];
+        if (ers === 0) continue;
+        // Diagonal: e_{rr} = 2 * intra count, halve to get edges.
+        const mrs = (r === s) ? Math.floor(ers / 2) : ers;
+        // has_n consistency: mirrors UrnSampler::has_n. With the toy
+        // fixture e_r = sum_s e_{rs} so this never fails.
+        const stubsNeeded = (r === s) ? 2 * mrs : mrs;
+        if (urns[r].length < stubsNeeded) continue;
+        if (r !== s && urns[s].length < stubsNeeded) continue;
+        for (let k = 0; k < mrs; k++) {
+          const u = popRandom(urns[r], rng);
+          const v = popRandom(urns[r === s ? r : s], rng);
+          raw.push({ u, v, intra: r === s });
         }
       }
     }
@@ -883,20 +898,17 @@ window.MathJax = {
       .attr("pointer-events", "none")
       .text(n => n);
 
-    // Spoke geometry: TARGET_DEG[n] spokes evenly spaced, grouped by target.
+    // Spoke geometry: TARGET_DEG[n] spokes evenly spaced. Untyped (no
+    // target-block info) to mirror graph-tool's block-pooled urn; the
+    // visible colour is the source block (the node's own block).
     const spokeGeom = {};
     NODES.forEach(n => {
       const total = TARGET_DEG[n] || 0;
       const list = [];
       if (total > 0) {
         const step = (Math.PI * 2) / total;
-        let i = 0;
-        for (let s = 0; s < NUM_BLOCKS; s++) {
-          const k = STUBS[n][s] || 0;
-          for (let j = 0; j < k; j++) {
-            list.push({ idx: i, angle: -Math.PI / 2 + i * step, target: s });
-            i++;
-          }
+        for (let i = 0; i < total; i++) {
+          list.push({ idx: i, angle: -Math.PI / 2 + i * step });
         }
       }
       spokeGeom[n] = list;
@@ -911,7 +923,7 @@ window.MathJax = {
         y2: p.y + Math.sin(angle) * (NODE_R + SPOKE_GAP + SPOKE_LEN),
       };
     }
-    const spokeColor = (s) => BLOCK_COLOR[BLOCK_NAMES[s]] || COL.edge_inter;
+    const spokeColor = (n) => COL[CLUSTER_OF[n]] || COL.OUT;
 
     // Block-pair queue, processed (r,s) with r <= s.
     const blockPairs = [];
@@ -919,130 +931,142 @@ window.MathJax = {
       for (let s = r; s < NUM_BLOCKS; s++) blockPairs.push([r, s]);
 
     let currentSeed = 1;
-    let rng, stubs, bpIdx, consumed, committed, seenPairs, totalPairs, proposal;
+    let trace = [];          // pre-computed full trace at currentSeed
+    let totalPairs = 0;
+    let stepIdx = 0;         // 0 .. totalPairs (post-commit position)
+    let consumed = new Set();
+    let committed = [];
+    let proposal = null;     // upcoming step preview, for spoke highlight
 
-    function buildStubLists() {
-      const intra = {}, interR = {}, interS = {};
-      for (let r = 0; r < NUM_BLOCKS; r++) {
-        intra[r] = [];
-        BLOCK_NODES[BLOCK_NAMES[r]].forEach(n => {
-          spokeGeom[n].forEach(g => {
-            if (g.target === r) intra[r].push({ node: n, geomIdx: g.idx });
-          });
-        });
-        for (let s = r + 1; s < NUM_BLOCKS; s++) {
-          const key = r + "|" + s;
-          interR[key] = [];
-          interS[key] = [];
-          BLOCK_NODES[BLOCK_NAMES[r]].forEach(n => {
-            spokeGeom[n].forEach(g => {
-              if (g.target === s) interR[key].push({ node: n, geomIdx: g.idx });
-            });
-          });
-          BLOCK_NODES[BLOCK_NAMES[s]].forEach(n => {
-            spokeGeom[n].forEach(g => {
-              if (g.target === r) interS[key].push({ node: n, geomIdx: g.idx });
-            });
-          });
-        }
-      }
-      return { intra, interR, interS };
+    function buildPairBudget() {
+      const map = {};
+      blockPairs.forEach(([r, s]) => {
+        const e = EDGE_COUNTS[r][s];
+        map[r + "|" + s] = e === 0 ? 0 : (r === s ? Math.floor(e / 2) : e);
+      });
+      return map;
     }
 
-    function freshState(seed) {
-      rng = d3.randomLcg(seed);
-      stubs = buildStubLists();
-      bpIdx = 0;
+    function buildFreshUrns() {
+      return BLOCK_NAMES.map((name) => {
+        const urn = [];
+        BLOCK_NODES[name].forEach(n => {
+          spokeGeom[n].forEach(g => urn.push({ node: n, geomIdx: g.idx }));
+        });
+        return urn;
+      });
+    }
+
+    // Run the kernel forward from a given (urns, budget, seen) state with
+    // the supplied rng, returning the trace tail. Mutates the inputs.
+    function buildTraceFrom(urns, budget, seenPairs, rng) {
+      const out = [];
+      for (let bpi = 0; bpi < blockPairs.length; bpi++) {
+        const [r, s] = blockPairs[bpi];
+        let left = budget[r + "|" + s];
+        while (left > 0) {
+          const ok = (r === s)
+            ? urns[r].length >= 2
+            : (urns[r].length >= 1 && urns[s].length >= 1);
+          if (!ok) break;
+          let i, j, a, b;
+          if (r === s) {
+            i = Math.floor(rng() * urns[r].length);
+            j = Math.floor(rng() * (urns[r].length - 1));
+            if (j >= i) j++;
+            a = urns[r][i]; b = urns[r][j];
+            [i, j].sort((x, y) => y - x).forEach(k => urns[r].splice(k, 1));
+          } else {
+            i = Math.floor(rng() * urns[r].length);
+            j = Math.floor(rng() * urns[s].length);
+            a = urns[r][i]; b = urns[s][j];
+            urns[r].splice(i, 1);
+            urns[s].splice(j, 1);
+          }
+          const u = a.node, v = b.node;
+          const loop = u === v;
+          const lo = Math.min(u, v), hi = Math.max(u, v);
+          const key = lo + "|" + hi;
+          const prev = seenPairs.get(key) || 0;
+          const multi = !loop && prev >= 1;
+          seenPairs.set(key, prev + 1);
+          out.push({
+            bp: [r, s],
+            a, b, aIdx: i, bIdx: j,
+            u, v, intra: r === s, loop, multi,
+          });
+          left -= 1;
+        }
+      }
+      return out;
+    }
+
+    function freshTrace(seed) {
+      const urns = buildFreshUrns();
+      const budget = buildPairBudget();
+      const seen = new Map();
+      trace = buildTraceFrom(urns, budget, seen, d3.randomLcg(seed));
+      totalPairs = trace.length;
+    }
+
+    // Mid-walk re-roll: keep trace[0..k-1] (already-committed prefix), bump
+    // the seed, and regenerate trace[k..]. Mirrors matcher.html's reroll
+    // semantics: at the end this collapses to a full re-trace from step 0.
+    function reseedFrom(k) {
+      currentSeed += 1;
+      if (k <= 0 || k >= totalPairs) {
+        freshTrace(currentSeed);
+        stepIdx = 0;
+        return;
+      }
+      const urns = buildFreshUrns();
+      const budget = buildPairBudget();
+      const seen = new Map();
+      // Replay the first k entries to advance state. Indices stored in
+      // trace are relative to the urn at the time of commit, and the
+      // fresh urns above are byte-identical to the originals, so the
+      // splice indices remain valid.
+      for (let i = 0; i < k; i++) {
+        const t = trace[i];
+        const [r, s] = t.bp;
+        if (r === s) {
+          [t.aIdx, t.bIdx].sort((x, y) => y - x).forEach(j => urns[r].splice(j, 1));
+        } else {
+          urns[r].splice(t.aIdx, 1);
+          urns[s].splice(t.bIdx, 1);
+        }
+        budget[r + "|" + s] -= 1;
+        if (!t.loop) {
+          const lo = Math.min(t.u, t.v), hi = Math.max(t.u, t.v);
+          const key = lo + "|" + hi;
+          seen.set(key, (seen.get(key) || 0) + 1);
+        }
+      }
+      const tail = buildTraceFrom(urns, budget, seen, d3.randomLcg(currentSeed));
+      trace = trace.slice(0, k).concat(tail);
+      totalPairs = trace.length;
+      // stepIdx unchanged: visible commits stay; preview swaps to the
+      // first reshuffled entry.
+    }
+
+    // Materialise (consumed, committed, proposal) for the current stepIdx.
+    function applyStep() {
       consumed = new Set();
       committed = [];
-      seenPairs = new Map();
-      proposal = null;
-      let pairs = 0;
-      blockPairs.forEach(([r, s]) => {
-        if (r === s) pairs += Math.floor(stubs.intra[r].length / 2);
-        else pairs += Math.min(
-          stubs.interR[r + "|" + s].length,
-          stubs.interS[r + "|" + s].length);
-      });
-      totalPairs = pairs;
-    }
-
-    function currentBP() {
-      while (bpIdx < blockPairs.length) {
-        const [r, s] = blockPairs[bpIdx];
-        if (r === s) {
-          if (stubs.intra[r].length >= 2) return { bp: [r, s], kind: "intra" };
-        } else {
-          const k = r + "|" + s;
-          if (stubs.interR[k].length >= 1 && stubs.interS[k].length >= 1)
-            return { bp: [r, s], kind: "inter", key: k };
-        }
-        bpIdx++;
+      for (let i = 0; i < stepIdx; i++) {
+        const t = trace[i];
+        consumed.add(t.a.node + "|" + t.a.geomIdx);
+        consumed.add(t.b.node + "|" + t.b.geomIdx);
+        committed.push({
+          u: t.u, v: t.v, intra: t.intra, loop: t.loop, multi: t.multi, bp: t.bp,
+        });
       }
-      return null;
+      proposal = (stepIdx < trace.length) ? trace[stepIdx] : null;
     }
 
-    function rollProposal() {
-      const cur = currentBP();
-      if (!cur) { proposal = null; return; }
-      if (cur.kind === "intra") {
-        const pool = stubs.intra[cur.bp[0]];
-        const i = Math.floor(rng() * pool.length);
-        let j = Math.floor(rng() * (pool.length - 1));
-        if (j >= i) j++;
-        proposal = { bp: cur.bp, kind: "intra", a: pool[i], b: pool[j], aIdx: i, bIdx: j, intra: true };
-      } else {
-        const pR = stubs.interR[cur.key], pS = stubs.interS[cur.key];
-        const i = Math.floor(rng() * pR.length);
-        const j = Math.floor(rng() * pS.length);
-        proposal = { bp: cur.bp, kind: "inter", key: cur.key, a: pR[i], b: pS[j], aIdx: i, bIdx: j, intra: false };
-      }
-    }
-
-    function commitProposal() {
-      if (!proposal) return false;
-      const { a, b } = proposal;
-      consumed.add(a.node + "|" + a.geomIdx);
-      consumed.add(b.node + "|" + b.geomIdx);
-      if (proposal.kind === "intra") {
-        const pool = stubs.intra[proposal.bp[0]];
-        [proposal.aIdx, proposal.bIdx].sort((x, y) => y - x).forEach(i => pool.splice(i, 1));
-      } else {
-        stubs.interR[proposal.key].splice(proposal.aIdx, 1);
-        stubs.interS[proposal.key].splice(proposal.bIdx, 1);
-      }
-      const u = a.node, v = b.node;
-      const loop = u === v;
-      const lo = Math.min(u, v), hi = Math.max(u, v);
-      const k = lo + "|" + hi;
-      const prev = seenPairs.get(k) || 0;
-      const multi = !loop && prev >= 1;
-      seenPairs.set(k, prev + 1);
-      committed.push({ u, v, intra: proposal.intra, loop, multi, bp: proposal.bp });
-      proposal = null;
-      return true;
-    }
-
-    function step() {
-      if (!proposal) rollProposal();
-      if (!proposal) return false;
-      commitProposal();
-      rollProposal();
-      return true;
-    }
-
-    function skipToEnd() {
-      while (true) {
-        if (!proposal) rollProposal();
-        if (!proposal) break;
-        commitProposal();
-      }
-    }
-
-    function reseedAll() {
-      currentSeed += 1;
-      freshState(currentSeed);
-      rollProposal();
+    function gotoStep(k) {
+      stepIdx = Math.max(0, Math.min(totalPairs, k));
+      applyStep();
     }
 
     function render() {
@@ -1052,7 +1076,7 @@ window.MathJax = {
           if (consumed.has(n + "|" + g.idx)) return;
           spokeData.push({
             id: "sp-" + n + "-" + g.idx,
-            target: g.target, ...spokeEnds(n, g.angle),
+            node: n, ...spokeEnds(n, g.angle),
           });
         });
       });
@@ -1065,14 +1089,14 @@ window.MathJax = {
       spEnter.merge(sp)
         .attr("x1", d => d.x1).attr("y1", d => d.y1)
         .attr("x2", d => d.x2).attr("y2", d => d.y2)
-        .attr("stroke", d => spokeColor(d.target));
+        .attr("stroke", d => spokeColor(d.node));
 
       const propData = proposal ? [
         { side: "a", node: proposal.a.node, idx: proposal.a.geomIdx },
         { side: "b", node: proposal.b.node, idx: proposal.b.geomIdx },
       ].map(d => {
         const g = spokeGeom[d.node].find(x => x.idx === d.idx);
-        return { ...d, ...spokeEnds(d.node, g.angle), target: g.target };
+        return { ...d, ...spokeEnds(d.node, g.angle) };
       }) : [];
       const pp = gProposal.selectAll("g.proposal-spoke").data(propData, d => d.side);
       pp.exit().remove();
@@ -1089,7 +1113,7 @@ window.MathJax = {
       ppAll.select(".proposal-line")
         .attr("x1", d => d.x1).attr("y1", d => d.y1)
         .attr("x2", d => d.x2).attr("y2", d => d.y2)
-        .attr("stroke", d => spokeColor(d.target));
+        .attr("stroke", d => spokeColor(d.node));
 
       const edgeData = committed.map((e, i) => ({ id: "ce-" + i, ...e }));
       const ee = gEdges.selectAll("path.viz-edge").data(edgeData, d => d.id);
@@ -1114,67 +1138,72 @@ window.MathJax = {
         .attr("stroke-width", d => (d.loop || d.multi) ? 2 : 1.4);
 
       const statsEl = document.getElementById("g3-stats");
-      const stepLabel = document.getElementById("g3-step-label");
+      const curEl   = document.getElementById("g3-cur");
+      const totEl   = document.getElementById("g3-total");
       const nLoops = committed.filter(e => e.loop).length;
       const nMulti = committed.filter(e => e.multi).length;
       const done = committed.length;
       if (statsEl) {
-        statsEl.textContent = done + "/" + totalPairs + " edges · "
+        let chrome = done + "/" + totalPairs + " edges · "
           + nLoops + " self-loops · " + nMulti + " parallels";
-      }
-      if (stepLabel) {
         if (proposal) {
           const [r, s] = proposal.bp;
-          stepLabel.textContent = "block-pair (" + BLOCK_NAMES[r] + ", " + BLOCK_NAMES[s]
-            + ") · proposed: " + proposal.a.node + " ↔ " + proposal.b.node
-            + " · click step to pair, random to reshuffle";
-        } else {
-          stepLabel.textContent = "all stubs paired · click random to resample with a fresh seed";
+          chrome += " · next: pair (" + BLOCK_NAMES[r] + ", " + BLOCK_NAMES[s]
+            + ") " + proposal.a.node + " ↔ " + proposal.b.node;
         }
+        statsEl.textContent = chrome;
       }
+      if (curEl) curEl.textContent = String(stepIdx);
+      if (totEl) totEl.textContent = String(totalPairs);
     }
 
-    freshState(currentSeed);
-    rollProposal();
+    freshTrace(currentSeed);
+    applyStep();
     render();
 
-    let playing = false, playTimer = null;
-    function setPlaying(on) {
-      playing = on;
-      const playBtn = document.getElementById("g3-play");
-      if (playBtn) playBtn.textContent = on ? "pause" : "play";
-      if (on) {
-        playTimer = setInterval(() => {
-          if (!step()) { setPlaying(false); }
-          render();
-        }, 280);
-      } else if (playTimer) {
-        clearInterval(playTimer); playTimer = null;
+    function syncButtons() {
+      const prev = document.getElementById("g3-prev");
+      const next = document.getElementById("g3-next");
+      const reset = document.getElementById("g3-reset");
+      const skip = document.getElementById("g3-skip");
+      const rand = document.getElementById("g3-random");
+      if (prev) prev.disabled = (stepIdx <= 0);
+      if (reset) reset.disabled = (stepIdx <= 0);
+      if (next) next.disabled = (stepIdx >= totalPairs);
+      if (skip) skip.disabled = (stepIdx >= totalPairs);
+      if (rand) {
+        rand.title = (stepIdx === 0 || stepIdx === totalPairs)
+          ? "fresh seed: re-trace from step 0"
+          : "mid-walk reroll: keep first " + stepIdx + " edges, regenerate the rest";
       }
     }
 
-    document.getElementById("g3-step").addEventListener("click", () => {
-      step(); render();
+    function rerender() { render(); syncButtons(); }
+    rerender();
+
+    document.getElementById("g3-prev").addEventListener("click", () => {
+      gotoStep(stepIdx - 1); rerender();
+    });
+    document.getElementById("g3-next").addEventListener("click", () => {
+      gotoStep(stepIdx + 1); rerender();
+    });
+    document.getElementById("g3-reset").addEventListener("click", () => {
+      gotoStep(0); rerender();
+    });
+    document.getElementById("g3-skip").addEventListener("click", () => {
+      gotoStep(totalPairs); rerender();
     });
     document.getElementById("g3-random").addEventListener("click", () => {
-      if (proposal) {
-        rollProposal();
-      } else {
-        reseedAll();
-      }
-      render();
-    });
-    document.getElementById("g3-play").addEventListener("click", () => setPlaying(!playing));
-    document.getElementById("g3-skip").addEventListener("click", () => {
-      setPlaying(false);
-      skipToEnd();
-      render();
+      reseedFrom(stepIdx);
+      applyStep();
+      rerender();
     });
     document.getElementById("reroll-btn").addEventListener("click", () => {
-      setPlaying(false);
       triggerReroll();        // reshuffles SAMPLE for g4 + dedup viz
-      reseedAll();
-      render();
+      currentSeed += 1;
+      freshTrace(currentSeed);
+      gotoStep(0);
+      rerender();
     });
   })();
 
