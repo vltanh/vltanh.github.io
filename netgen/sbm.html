@@ -140,7 +140,7 @@
 </header>
 
 <section class="hook">
-  <p>You have a real network, and its block (think "community") structure. You want a synthetic twin that keeps that block structure and the per-node degrees, and is otherwise drawn fresh. The <em>stochastic block model</em> says: a few things about \(G\) matter enough to freeze, and the rest is accident.</p>
+  <p>You have a real network and its block (think "community") structure. You want a synthetic twin that keeps that block structure and the per-node degrees, and is otherwise drawn fresh. The <em>stochastic block model</em> says: a few things about \(G\) matter enough to freeze, and the rest is accident.</p>
   <p>Peixoto's micro-canonical degree-corrected SBM freezes three things: (1) each node's block label, (2) the edge count between every pair of blocks \(e_{rs}\), and (3) each node's degree \(k_i\). Any graph that meets those three constraints is equally likely under the model.</p>
   <p>The catch is dedup. Micro-SBM samples a multigraph where those constraints hit exactly, then a simplify step drops self-loops and parallel edges so the output is a simple graph. On dense blocks the simplify step kills a visible fraction of edges, and the three frozen quantities end up as upper bounds, not targets hit.</p>
 </section>
@@ -163,8 +163,8 @@
 <section class="stage">
   <div class="stage-num">profiling · block assignment</div>
   <h2>Three vectors, one matrix: that is the input contract.</h2>
-  <p>Profile reads the reference network and its clustering and writes five CSVs. Two are label dictionaries (<code>node_id.csv</code>, <code>cluster_id.csv</code>). The other three carry the quantities the sampler will try to match: <code>assignment.csv</code> (block per node, this section), <code>degree.csv</code> (degree per node, next), and <code>edge_counts.csv</code> (the edge count matrix, the section after). Anything not in those three vectors, like mean degree, triangle count, or pairwise distances, is not in the contract.</p>
-  <p>Write \(b\) for the block assignment (\(b_u \in \{1, \ldots, B\}\) for node \(u\)), \(k\) for the degree sequence (\(k_u\) = degree of \(u\)), and \(e\) for the block-pair count matrix (\(e_{rs}\) defined in the edge-count-matrix section below). The three sections that follow visualise \(b\), then \(k\), then \(e\), in that order.</p>
+  <p>Profile reads the reference network with its clustering and writes five CSVs. Two are label dictionaries (<code>node_id.csv</code>, <code>cluster_id.csv</code>). The other three carry the quantities the sampler will try to match: <code>assignment.csv</code> (block per node, this section), <code>degree.csv</code> (degree per node, next), and <code>edge_counts.csv</code> (the edge count matrix, the section after). Anything not in those three vectors, like mean degree, triangle count, or pairwise distances, is not in the contract.</p>
+  <p>Write \(b\) for the block assignment (\(b_u \in \{1, \ldots, B\}\) for node \(u\)), \(k\) for the degree sequence (\(k_u\) = degree of \(u\)), and \(e\) for the block-pair count matrix (\(e_{rs}\) defined in the edge-count-matrix section below). The three sections that follow visualise \(b\), then \(k\), then \(e\).</p>
   <p>Outlier handling happens here too. Under the default <code>outlier_mode=combined</code>, every unclustered node and every size-1 cluster is folded into one pseudo-block labelled <code>__outliers__</code>, so the sampler never has to treat them as a special case. The flag <code>drop_outlier_outlier_edges</code> is off by default, so outlier-outlier edges survive into the pseudo-block's diagonal.</p>
 
   <div class="graph" id="g-assign">
@@ -207,11 +207,11 @@
 <section class="stage">
   <div class="stage-num">profiling · the edge count matrix</div>
   <h2>Count edges per block-pair. That is the only structure the sampler sees.</h2>
-  <p>Read \(e_{rs}\) as a <em>stub</em> (half-edge) count: how many half-edges from block \(r\) land in block \(s\). For \(r \neq s\) that is also the number of edges between the two blocks and the matrix is symmetric \(e_{rs} = e_{sr}\). For \(r = s\), each intra-block edge has both of its half-edges inside \(r\), so it contributes twice:</p>
+  <p>Read \(e_{rs}\) as a <em>stub</em> (half-edge) count: how many half-edges from block \(r\) land in block \(s\). For \(r \neq s\) that is also the number of edges between the two blocks; the matrix is symmetric \(e_{rs} = e_{sr}\). For \(r = s\), each intra-block edge has both of its half-edges inside \(r\), so it contributes twice:</p>
   \[
     e_{rr} \;=\; 2 \cdot \bigl| \{\, \{u, v\} \in E \,:\, b_u = b_v = r \,\} \bigr|.
   \]
-  <p>This half-edge reading is what makes the diagonal doubling natural, and it matches graph-tool's undirected convention. It is not how most SBM write-ups introduce \(e_{rs}\) (they usually call it "edge count" and then note the factor of two as a bookkeeping detail), so expect a small re-orientation if you are coming from there.</p>
+  <p>This half-edge reading makes the diagonal doubling natural and matches graph-tool's undirected convention. It is not how most SBM write-ups introduce \(e_{rs}\) (they usually call it "edge count" and then note the factor of two as a bookkeeping detail), so expect a small re-orientation if you are coming from there.</p>
   <p>The matrix has one row and column per block, so on this synthetic it is a compact 4x4. Each edge contributes to exactly one cell (diagonal) or to the pair \((r, s), (s, r)\) (off-diagonal). Click any edge to highlight the cell it lands in, or click a cell to light up every edge that contributes to its count: the sampler will not remember which specific edges were there, only that the cell owes that many.</p>
   <div class="graph g-with-side" id="g2">
     <div class="graph-chrome">
@@ -241,7 +241,7 @@
   <p>For each block-pair \((r, s)\) with \(r \le s\), iterate in row-major order on the edge count matrix. The pair claims \(e_{rs}\) edges. For \(r = s\) pull two half-edges out of urn \(r\) per edge; for \(r \neq s\) pull one out of urn \(r\) and one out of urn \(s\) per edge. Sampling is uniform without replacement. Every draw becomes an edge; nothing is rejected.</p>
   <div class="callout">
     <div class="tag">graph-tool accepts non-equality input</div>
-    <p>We feed <code>gt.generate_sbm</code> a \((k, e)\) pair that satisfies the identities above, but the function actually accepts looser input: the consistency condition is only the inequality \(\sum_{u \,:\, b_u = r} k_u \;\ge\; \sum_{s} e_{rs}\) (LHS = stubs available in block \(r\), RHS = edges incident to \(r\)). When the two sides match exactly, the sampler distributes the stubs the natural way. When they do not, some nodes come out with a degree <em>below</em> the requested \(k\): graph-tool prioritises hitting \(e_{rs}\) over hitting \(k_u\). A minimal example: \(b = (1, 1)\), \(k = (3, 3)\), \(e = (4)\), i.e. two nodes both asking for degree 3, with four half-edges on the diagonal. The condition \(3 + 3 \ge 4\) holds, but only as a strict inequality, and the sampler reliably returns one node with degree 1 rather than 3. The identities we use on this page (equality, not inequality) are why the toy runs above behave cleanly.</p>
+    <p>We feed <code>gt.generate_sbm</code> a \((k, e)\) pair that satisfies the identities above, but the function accepts looser input: the consistency condition is only the inequality \(\sum_{u \,:\, b_u = r} k_u \;\ge\; \sum_{s} e_{rs}\) (LHS = stubs available in block \(r\), RHS = edges incident to \(r\)). When the two sides match exactly, the sampler distributes the stubs the natural way. When they do not, some nodes come out with a degree <em>below</em> the requested \(k\): graph-tool prioritises hitting \(e_{rs}\) over hitting \(k_u\). A minimal example: \(b = (1, 1)\), \(k = (3, 3)\), \(e = (4)\), i.e. two nodes both asking for degree 3, with four half-edges on the diagonal. The condition \(3 + 3 \ge 4\) holds, but only as a strict inequality, and the sampler reliably returns one node with degree 1 rather than 3. The identities we use on this page (equality, not inequality) are why the toy runs above behave cleanly.</p>
   </div>
   <div class="callout warn">
     <div class="tag">caveat: counts, not distinct pairs</div>
