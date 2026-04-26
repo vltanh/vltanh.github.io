@@ -324,6 +324,7 @@ window.MathJax = {
 </script>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 <script src="./shared.js"></script>
+<script src="./js/npso_kernel.js"></script>
 <script>
 (function () {
   document.getElementById("links").innerHTML = NETGEN.linksRow({gen: "npso"});
@@ -659,104 +660,63 @@ window.MathJax = {
   const LOG_N = Math.log(N_NODES);
   const R_HYP_MAX = 2 * BETA * LOG_N + 2 * (1 - BETA) * LOG_N;
 
-  // GMM component means μ_k = 2π·k/C, rotated so the biggest cluster
-  // sits at the top of the disk. Keyed by cluster id so computeEmbedding
-  // and drawGmmStrip can look them up directly.
+  // GMM component means in the canonical model frame: μ_k = 2π·k/C
+  // for k = 0..C-1 (matches externals/npso/nPSO_model.m). The viz
+  // rotates the disk by -π/2 so the largest cluster sits at the top;
+  // that rotation is applied at render time only. Comm assignment uses
+  // canonical-frame μ.
+  const VIZ_ROTATION = -Math.PI / 2;
   const MU = {};
   CLUSTER_DEFS.forEach((cd, k) => {
-    MU[cd.id] = -Math.PI / 2 + 2 * Math.PI * k / C;
+    MU[cd.id] = VIZ_ROTATION + 2 * Math.PI * k / C;
   });
   const SIGMA_NPSO = 2 * Math.PI / (6 * C);      // paper's σ
 
-  function wrapAngle(a) {
-    a = a % (2 * Math.PI);
-    if (a > Math.PI)  a -= 2 * Math.PI;
-    if (a < -Math.PI) a += 2 * Math.PI;
-    return a;
-  }
-
   // A full embedding bundle is a deterministic function of `seed`.
-  // Every node samples θ from the full mixture: pick a component k with
-  // probability ρ_k, draw θ ~ N(μ_k, σ²). Input cluster labels do not
-  // survive. Nodes are re-assigned to the nearest μ (argmin d_ang)
-  // after sampling, matching the real generator's community output.
+  // Algorithm = NPSOKernel.computeEmbedding (line-for-line port of
+  // externals/npso/nPSO_model.m's gmdistribution path). The kernel
+  // returns canonical-frame angles; the page rotates them by
+  // VIZ_ROTATION for display. Cluster IDs from the kernel are 1..C
+  // (1-based) and map to CLUSTER_DEFS[k-1].
   function computeEmbedding(seed) {
-    const rng = d3.randomLcg(seed);
-    const normalSrc = d3.randomNormal.source(rng);
-    const pickU = d3.randomUniform.source(rng)(0, 1);
-
-    const samplers = CLUSTER_DEFS.map(cd => normalSrc(MU[cd.id], SIGMA_NPSO));
-    const cum = [];
-    MIXING_PROPORTIONS.reduce((acc, p) => { const v = acc + p; cum.push(v); return v; }, 0);
-
-    function pickComponent() {
-      const u = pickU();
-      for (let k = 0; k < cum.length - 1; k++) if (u <= cum[k]) return k;
-      return cum.length - 1;
-    }
-    function argminCluster(theta) {
-      let bestK = 0, bestD = Infinity;
-      for (let k = 0; k < C; k++) {
-        const mu = MU[CLUSTER_DEFS[k].id];
-        let d = Math.abs(theta - mu);
-        if (d > Math.PI) d = 2 * Math.PI - d;
-        if (d < bestD) { bestD = d; bestK = k; }
-      }
-      return bestK;
-    }
+    const kernelEmb = NPSOKernel.computeEmbedding({
+      N: N_NODES,
+      m: M_PROF,
+      gamma: GAMMA,
+      C,
+      mixingProportions: MIXING_PROPORTIONS,
+      seed,
+    });
 
     const POLAR = {};
+    const POS_POLAR = {};
     const ASSIGNED = {};
     nodesAll.forEach(n => {
-      const k = pickComponent();
-      const theta = wrapAngle(samplers[k]());
-      const assignedK = argminCluster(theta);
-      const t_i   = rankOf[n] + 1;
-      const r_hyp = 2 * BETA * Math.log(t_i) + 2 * (1 - BETA) * LOG_N;
-      const r     = R_MIN + (R_MAX - R_MIN) * (r_hyp / R_HYP_MAX);
-      POLAR[n]    = { r, r_hyp, theta };
-      ASSIGNED[n] = CLUSTER_DEFS[assignedK].id;
-    });
-
-    const POS_POLAR = {};
-    nodesAll.forEach(n => {
+      const t_i = rankOf[n] + 1;
+      const k = kernelEmb.POLAR[t_i - 1];
+      const r = R_MIN + (R_MAX - R_MIN) * (k.r_hyp / R_HYP_MAX);
+      const drawTheta = k.theta + VIZ_ROTATION;
+      POLAR[n] = { r, r_hyp: k.r_hyp, theta: drawTheta };
       POS_POLAR[n] = {
-        x: POLAR[n].r * Math.cos(POLAR[n].theta),
-        y: POLAR[n].r * Math.sin(POLAR[n].theta),
+        x: r * Math.cos(drawTheta),
+        y: r * Math.sin(drawTheta),
       };
+      ASSIGNED[n] = CLUSTER_DEFS[kernelEmb.ASSIGNED[t_i - 1] - 1].id;
     });
 
-    // Real hyperbolic distance on the Poincaré disk.
-    // d = arccosh( cosh(r_u)·cosh(r_v) − sinh(r_u)·sinh(r_v)·cos(Θ) )
-    // with Θ = shortest angular distance between the two.
+    // DISTS keyed by node id (page convention) but recomputed from the
+    // kernel's already-built `${i}-${j}` (1-based arrival rank) map.
     const DISTS = {};
     for (let i = 0; i < nodesAll.length; i++) {
       for (let j = i + 1; j < nodesAll.length; j++) {
         const u = nodesAll[i], v = nodesAll[j];
-        const ru = POLAR[u].r_hyp, rv = POLAR[v].r_hyp;
-        let dth = Math.abs(POLAR[u].theta - POLAR[v].theta);
-        if (dth > Math.PI) dth = 2 * Math.PI - dth;
-        const val = Math.cosh(ru) * Math.cosh(rv) - Math.sinh(ru) * Math.sinh(rv) * Math.cos(dth);
-        DISTS[`${u}-${v}`] = val > 1 ? Math.acosh(val) : Math.abs(ru - rv);
+        const a = Math.min(rankOf[u] + 1, rankOf[v] + 1);
+        const b = Math.max(rankOf[u] + 1, rankOf[v] + 1);
+        DISTS[`${u}-${v}`] = kernelEmb.DISTS[`${a}-${b}`];
       }
     }
 
-    // Per-arrival uniforms for implementation 3 of the paper's edge
-    // sampler (Muscoloni & Cannistraci 2018, page 7). Node i arriving
-    // at time t_i picks m targets from the earlier arrivals without
-    // replacement, weighted by p(i, j). Pre-drawing m uniforms per
-    // node (instead of sampling fresh per T) keeps edges continuous
-    // under T scrub. Separate seed stream so the pair draws don't
-    // alias with the angular draws.
-    const rngEdge = d3.randomLcg(seed * 31 + 7);
-    const U_NODE = [];
-    for (let i = 0; i < nodesAll.length; i++) {
-      const us = [];
-      for (let c = 0; c < M_PROF; c++) us.push(rngEdge());
-      U_NODE.push(us);
-    }
-
-    return { POLAR, POS_POLAR, DISTS, U_NODE, ASSIGNED };
+    return { POLAR, POS_POLAR, DISTS, U_NODE: kernelEmb.U_NODE, ASSIGNED };
   }
 
   let SHARED = computeEmbedding(1);
@@ -769,30 +729,16 @@ window.MathJax = {
     rerollListeners.forEach(fn => fn(SHARED));
   }
 
-  // Current disk radius from the paper (eq. 2 evaluated at t = N).
-  // General form:
-  //   R(T) = 2 ln N − 2 ln[ 2T (1 − exp(−(1−β) ln N)) / (sin(πT) m (1−β)) ]
-  // With the β → 1 limit handled separately (L'Hopital on (1-β)):
-  //   R(T) = 2 ln N − 2 ln[ 2T · ln N / (sin(πT) m) ]
+  // R(T) and the impl-3 walker delegate to NPSOKernel — same formulas
+  // as the canonical run_npso.m / nPSO_model.m. R(T) here is evaluated
+  // at t = N (full-disk radius); R_of_T_at(t, T) gives the per-arrival
+  // radius used in the step-through. Page node ids are arrival ranks
+  // 1..N in the kernel's frame (same as MATLAB) so emb.DISTS keys
+  // `${u}-${v}` (page node ids) line up with kernel rank indices.
   function R_of_T(T) {
-    const s = Math.sin(Math.PI * T);
-    if (s <= 0) return Infinity;
-    if (Math.abs(BETA - 1) < 1e-9) {
-      return 2 * LOG_N - 2 * Math.log((2 * T * LOG_N) / (s * M_PROF));
-    }
-    const num = 2 * T * (1 - Math.exp(-(1 - BETA) * LOG_N));
-    const den = s * M_PROF * (1 - BETA);
-    return 2 * LOG_N - 2 * Math.log(num / den);
+    return NPSOKernel.R_of_T(T, M_PROF, N_NODES, GAMMA);
   }
 
-  // Implementation 3 from Muscoloni & Cannistraci 2018 (page 7): each
-  // new node arrives in degree-rank order and picks m targets from the
-  // existing nodes without replacement, with probability proportional
-  // to the Fermi-Dirac connection rule p(i, j). For arrivals with
-  // fewer than m predecessors, connect to all predecessors (matches
-  // the paper's m*(m+1)/2 + (N-m-1)*m edge count). Using pre-drawn
-  // per-node uniforms from the embedding so edges slide continuously
-  // under T scrub.
   function edgesAtT(T, emb) {
     const R = R_of_T(T);
     const inv2T = 1 / (2 * T);
@@ -1752,16 +1698,7 @@ window.MathJax = {
     let arrivals = [];
 
     function R_of_T_at(t, T) {
-      // R_t(T) evaluated at 1-indexed arrival t.
-      const s = Math.sin(Math.PI * T);
-      if (s <= 0 || t < 2) return Infinity;
-      const lnT = Math.log(t);
-      if (Math.abs(BETA - 1) < 1e-9) {
-        return 2 * lnT - 2 * Math.log((2 * T * lnT) / (s * M_PROF));
-      }
-      const num = 2 * T * (1 - Math.exp(-(1 - BETA) * lnT));
-      const den = s * M_PROF * (1 - BETA);
-      return 2 * lnT - 2 * Math.log(num / den);
+      return NPSOKernel.R_of_T_at(t, T, M_PROF, GAMMA);
     }
 
     // Per-arrival edge list + per-candidate p(i,j) for the caption.
