@@ -164,8 +164,11 @@
 
   // config_model port. Mirrors graph_sampler.jl::config_model with the
   // hasoutliers branch zeroing wInternalRaw on cluster-1 members.
+  // traceStages=true: returns a `stages` field with per-cluster + global +
+  // final snapshots for page step-walkers. Trace recording does NOT consume
+  // any rng draws so logic stays byte-equal with the untraced path.
   function configModel(args) {
-    const { clusters, w: wIn, s, hasOutliers, xi, rng } = args;
+    const { clusters, w: wIn, s, hasOutliers, xi, rng, traceStages } = args;
     const w = wIn.slice();
     const numClusters = s.length;
     const clusterWeight = new Array(numClusters).fill(0);
@@ -182,10 +185,19 @@
     }
     const edges = new Set();
     const wInternal = new Array(w.length).fill(0);
+    const stages = traceStages
+      ? { perCluster: [], global: null, final: null }
+      : null;
 
     for (let cidx0 = 0; cidx0 < numClusters; cidx0++) {
       const cluster = clusterList[cidx0];
-      if (cluster.length === 0) continue;
+      if (cluster.length === 0) {
+        if (stages) stages.perCluster.push({
+          cluster: cidx0 + 1, members: [], stubsShuffled: [],
+          prePairs: [], postEdges: [], residueForwarded: 0,
+        });
+        continue;
+      }
       // Find max-weight leader (0-based index into cluster).
       let maxIdx0 = 0, maxVal = -Infinity;
       for (let k = 0; k < cluster.length; k++) {
@@ -216,15 +228,26 @@
         for (let k = 0; k < wInternal[v - 1]; k++) stubs.push(v);
       }
       shuffleInPlace(stubs, rng);
+      const stubsShuffledSnap = stubs.slice();
+      // Snapshot wInternal[v] for cluster members BEFORE residue forwarding
+      // (mutations below decrement wInternal for any forwarded residue stub).
+      // Pages that surface the y/z weight split want the pre-forwarding value.
+      const wInternalPreForwardSnap = stages
+        ? cluster.map(v => wInternal[v - 1])
+        : null;
 
       const localEdges = new Set();
       let recycle = [];
+      const prePairsSnap = [];
       for (let i = 0; i + 1 < stubs.length; i += 2) {
         const a = stubs[i], b = stubs[i + 1];
         const e = epair(a, b);
         const k = ekey(a, b);
-        if (a === b || localEdges.has(k)) recycle.push(e);
+        const loop = a === b;
+        const multi = !loop && localEdges.has(k);
+        if (loop || multi) recycle.push(e);
         else localEdges.add(k);
+        if (stages) prePairsSnap.push([a, b, loop, multi]);
       }
       let lastRecycle = recycle.length;
       let recycleCounter = lastRecycle;
@@ -284,10 +307,21 @@
         if (!success) recycle.push(p1);
       }
       for (const k of localEdges) edges.add(k);
+      let residueForwarded = 0;
       for (const [a, b] of recycle) {
         wInternal[a - 1] -= 1;
         wInternal[b - 1] -= 1;
+        residueForwarded += 2;
       }
+      if (stages) stages.perCluster.push({
+        cluster: cidx0 + 1,
+        members: cluster.slice(),
+        wInternalPreForward: wInternalPreForwardSnap,
+        stubsShuffled: stubsShuffledSnap,
+        prePairs: prePairsSnap,
+        postEdges: Array.from(localEdges).map(k => k.split("-").map(Number)),
+        residueForwarded,
+      });
     }
 
     // Global stage.
@@ -296,6 +330,7 @@
       for (let k = wInternal[i] + 1; k <= w[i]; k++) stubs.push(i + 1);
     }
     shuffleInPlace(stubs, rng);
+    const globalStubsSnap = stages ? stubs.slice() : null;
     if (stubs.length % 2 === 1) {
       let maxi = 0;
       for (let i = 1; i < stubs.length; i++) {
@@ -307,12 +342,17 @@
     }
     const globalEdges = new Set();
     let recycle = [];
+    const globalPrePairsSnap = [];
     for (let i = 0; i + 1 < stubs.length; i += 2) {
       const a = stubs[i], b = stubs[i + 1];
       const e = epair(a, b);
       const k = ekey(a, b);
-      if (a === b || globalEdges.has(k) || edges.has(k)) recycle.push(e);
+      const loop = a === b;
+      const multi = !loop && globalEdges.has(k);
+      const crossDup = !loop && !multi && edges.has(k);
+      if (loop || multi || crossDup) recycle.push(e);
       else globalEdges.add(k);
+      if (stages) globalPrePairsSnap.push([a, b, loop, multi, crossDup]);
     }
     let lastRecycle = recycle.length;
     let recycleCounter = lastRecycle;
@@ -356,6 +396,14 @@
       }
     }
     for (const k of globalEdges) edges.add(k);
+    if (stages) {
+      stages.global = {
+        stubsShuffled: globalStubsSnap,
+        prePairs: globalPrePairsSnap,
+        postEdges: Array.from(globalEdges).map(k => k.split("-").map(Number)),
+        residueAfterRewire: recycle.length,
+      };
+    }
 
     // Final stage: any persistent residue rewires against the union edges.
     if (recycle.length > 0) {
@@ -392,10 +440,14 @@
 
     const edgeArr = Array.from(edges).map(k => k.split("-").map(Number))
       .sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
+    if (stages) {
+      stages.final = { residueAfter: recycle.length };
+    }
     return {
       edges: edgeArr,
       wInternal,
       residueAfter: recycle.length,
+      stages,
     };
   }
 
