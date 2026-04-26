@@ -786,19 +786,96 @@ window.MathJax = {
       .attr("stroke", COL.mint).attr("stroke-width", 2)
       .attr("stroke-dasharray", "4 4");
 
+    // Live per-node μ_i = ext_deg / total_deg, derived from a real
+    // config-model + cleanup pipeline (LFRKernel.buildConfigModelGraph).
+    // Faithful to benchm.cpp's structure:
+    //   1. sampleInternalDegrees (per-node split with parity ratchet),
+    //   2. configModelPairStubs (uniform random stub pairing per cluster
+    //      AND on the global external-stub pool),
+    //   3. cleanupMultigraph (2-opt rewire of self-loops + parallels).
+    // Cluster assignment uses the page's runAssignment helper since
+    // that loop is not the focus here; the μ histogram lives on the
+    // resulting per-node ext / total ratio.
     function sampleMus(mu, edgeSeed) {
       const rng = seededRng(edgeSeed * 53 + 9);
       const degs = resampleDegrees(RESAMPLE_SEED);
+      const split = LFRKernel.sampleInternalDegrees({
+        degrees: degs, mu, rng,
+      });
+
+      // Cluster assignment for the per-cluster config model. Uses the
+      // page's existing homeless-iter pass (canonical's full assignment
+      // loop is not yet ported; this approximation gives each node a
+      // valid cluster placement to drive the per-cluster sampler).
+      const sizes = resampleClusterSizes(RESAMPLE_SEED);
+      const assignment = (function () {
+        const arng = seededRng(edgeSeed * 41 + 5);
+        const a = new Array(N_).fill(-1);
+        const sizesLeft = sizes.slice();
+        const homeless = d3.range(N_);
+        for (let t = 0; t < 6; t++) {
+          let stuck = true;
+          homeless.forEach(iid => {
+            if (a[iid] !== -1) return;
+            const cid = Math.floor(arng() * sizes.length);
+            if (sizesLeft[cid] > 0) {
+              a[iid] = cid; sizesLeft[cid] -= 1; stuck = false;
+            }
+          });
+          if (stuck) break;
+        }
+        // Deterministic backstop: anything still unassigned gets the
+        // last cluster with capacity (or cluster 0).
+        for (let i = 0; i < a.length; i++) {
+          if (a[i] === -1) {
+            const fb = sizesLeft.findIndex(s => s > 0);
+            const cid = fb >= 0 ? fb : 0;
+            a[i] = cid;
+            if (sizesLeft[cid] > 0) sizesLeft[cid] -= 1;
+          }
+        }
+        return a;
+      })();
+
+      // Per-cluster config model on internal stubs.
+      const intDegByCluster = sizes.map(() => []);
+      const intDegOwner = sizes.map(() => []);
+      for (let i = 0; i < N_; i++) {
+        const cid = assignment[i];
+        intDegByCluster[cid].push(split.internal[i]);
+        intDegOwner[cid].push(i);
+      }
+      const intCount = new Array(N_).fill(0);
+      intDegByCluster.forEach((degs, cid) => {
+        if (degs.length === 0) return;
+        const owners = intDegOwner[cid];
+        const sub = LFRKernel.buildConfigModelGraph({
+          degrees: degs, rng, maxRetries: 10,
+        });
+        sub.edges.forEach(([a, b]) => {
+          intCount[owners[a]] += 1;
+          intCount[owners[b]] += 1;
+        });
+      });
+
+      // Global config model on external stubs.
+      const extSub = LFRKernel.buildConfigModelGraph({
+        degrees: split.external, rng, maxRetries: 10,
+      });
+      const extCount = new Array(N_).fill(0);
+      extSub.edges.forEach(([a, b]) => {
+        // Same-cluster fallback after global rewire still counted as ext
+        // here (canonical does an additional arrange pass to pull these
+        // back; viz approximation).
+        extCount[a] += 1;
+        extCount[b] += 1;
+      });
+
       const mus = [];
       for (let i = 0; i < N_; i++) {
-        const d = degs[i] || 1;
-        const dint = Math.round((1 - mu) * d);
-        const dext = d - dint;
-        // Add small Gaussian-ish jitter to emulate the rewire loop not
-        // landing exactly on target.
-        const jitter = (rng() - 0.5) * 0.3 / Math.max(1, Math.sqrt(d));
-        const mui = Math.max(0, Math.min(1, (dext / d) + jitter));
-        mus.push(mui);
+        const total = intCount[i] + extCount[i];
+        if (total === 0) { mus.push(0); continue; }
+        mus.push(extCount[i] / total);
       }
       return mus;
     }

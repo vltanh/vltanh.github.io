@@ -181,6 +181,155 @@
     return { sizes, cumulative };
   }
 
+  // Faithful port of benchm.cpp:405-441: per-node internal-degree split.
+  // For each degree d, internal = floor((1-mu)*d) + Bernoulli(frac), then
+  // ratchet up under `excess` or down under `defect` until d_int / d
+  // crosses the (1-mu) threshold. External = d - internal.
+  function sampleInternalDegrees(args) {
+    const { degrees, mu, rng, excess = false, defect = false } = args;
+    const internal = new Array(degrees.length);
+    const external = new Array(degrees.length);
+    for (let i = 0; i < degrees.length; i++) {
+      const d = degrees[i];
+      const interno = (1 - mu) * d;
+      let intInterno = Math.floor(interno);
+      if (rng() < (interno - intInterno)) intInterno += 1;
+      if (excess) {
+        while (intInterno / d < (1 - mu) && intInterno < d) intInterno += 1;
+      }
+      if (defect) {
+        while (intInterno / d > (1 - mu) && intInterno > 0) intInterno -= 1;
+      }
+      internal[i] = intInterno;
+      external[i] = d - intInterno;
+    }
+    return { internal, external };
+  }
+
+  // Configuration-model stub matcher. Given a list of stubs (each entry =
+  // a node iid; node iid u repeated d_u times), pair them uniformly at
+  // random; emit a multigraph edge per pair. Returns
+  //   { edges: [[u, v], ...], stats: { loops, parallels } }
+  // before dedup. Caller threads the result through cleanupMultigraph
+  // for the rewire step.
+  function configModelPairStubs(args) {
+    const { stubs, rng } = args;
+    const work = stubs.slice();
+    // Fisher-Yates shuffle, then walk pairs.
+    for (let i = work.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      const t = work[i]; work[i] = work[j]; work[j] = t;
+    }
+    if (work.length % 2 !== 0) work.pop();  // odd parity: drop last stub
+    const edges = [];
+    let loops = 0;
+    const seen = new Map();
+    for (let i = 0; i < work.length; i += 2) {
+      const u = work[i], v = work[i + 1];
+      edges.push([u, v]);
+      if (u === v) loops += 1;
+      const a = u <= v ? u : v;
+      const b = u <= v ? v : u;
+      const k = `${a},${b}`;
+      seen.set(k, (seen.get(k) || 0) + 1);
+    }
+    let parallels = 0;
+    seen.forEach(v => { if (v > 1) parallels += v - 1; });
+    return { edges, stats: { loops, parallels } };
+  }
+
+  // Generic 2-opt cleanup of self-loops + parallel edges (no block-pair
+  // restriction; that's what makes this LFR-specific). Mirrors the
+  // multi-edge rewire pass in benchm.cpp's build_subgraph (lines 858-939).
+  // edges: multigraph as [[u,v],...]. Returns kept simple edges + dropped.
+  function cleanupMultigraph(args) {
+    const { edges, rng, maxRetries = 10 } = args;
+    const validSet = new Set();
+    const valid = [];
+    const invalid = [];
+
+    edges.forEach(([u, v]) => {
+      const a = u < v ? u : v;
+      const b = u < v ? v : u;
+      const key = `${a},${b}`;
+      if (u === v || validSet.has(key)) {
+        invalid.push([u, v]);
+      } else {
+        validSet.add(key);
+        valid.push([a, b]);
+      }
+    });
+
+    function tryRewire(badEdge) {
+      const [u, v] = badEdge;
+      if (valid.length === 0) {
+        invalid.push([u, v]);
+        return;
+      }
+      const idx = Math.floor(rng() * valid.length);
+      const [x, y] = valid[idx];
+      let new_e1, new_e2;
+      if (rng() < 0.5) {
+        new_e1 = [Math.min(u, x), Math.max(u, x)];
+        new_e2 = [Math.min(v, y), Math.max(v, y)];
+      } else {
+        new_e1 = [Math.min(u, y), Math.max(u, y)];
+        new_e2 = [Math.min(v, x), Math.max(v, x)];
+      }
+      const k1 = `${new_e1[0]},${new_e1[1]}`;
+      const k2 = `${new_e2[0]},${new_e2[1]}`;
+      if (
+        new_e1[0] !== new_e1[1] && new_e2[0] !== new_e2[1] &&
+        !validSet.has(k1) && !validSet.has(k2) && k1 !== k2
+      ) {
+        const xyKey = `${x},${y}`;
+        validSet.delete(xyKey);
+        valid[idx] = valid[valid.length - 1];
+        valid.pop();
+        validSet.add(k1); validSet.add(k2);
+        valid.push(new_e1); valid.push(new_e2);
+      } else {
+        invalid.push([u, v]);
+      }
+    }
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      if (invalid.length === 0) break;
+      let lastRecycle = invalid.length;
+      let recycleCounter = lastRecycle;
+      while (invalid.length > 0) {
+        recycleCounter -= 1;
+        if (recycleCounter < 0) {
+          if (invalid.length < lastRecycle) {
+            lastRecycle = invalid.length;
+            recycleCounter = lastRecycle;
+          } else {
+            break;
+          }
+        }
+        tryRewire(invalid.shift());
+      }
+    }
+    return { kept: valid.slice(), dropped: invalid.slice() };
+  }
+
+  // Top-level config-model pipeline used by the page: from per-node
+  // degree sequence, build the stub list, pair-shuffle, cleanup. Returns
+  // simple edges + drop count. Matches the structural shape of LFR's
+  // build_subgraph minus the deterministic seed phase (which is a
+  // micro-optimisation; the randomized output is uniformly distributed
+  // over simple graphs given enough retries).
+  function buildConfigModelGraph(args) {
+    const { degrees, rng, maxRetries = 10 } = args;
+    const stubs = [];
+    for (let i = 0; i < degrees.length; i++) {
+      for (let k = 0; k < degrees[i]; k++) stubs.push(i);
+    }
+    const { edges, stats } = configModelPairStubs({ stubs, rng });
+    const { kept, dropped } = cleanupMultigraph({ edges, rng, maxRetries });
+    return { edges: kept, dropped, stats };
+  }
+
   window.LFRKernel = {
     integral,
     averageDegree,
@@ -190,5 +339,9 @@
     lowerBound,
     sampleDegreeSequence,
     sampleClusterSizes,
+    sampleInternalDegrees,
+    configModelPairStubs,
+    cleanupMultigraph,
+    buildConfigModelGraph,
   };
 })();
