@@ -678,6 +678,13 @@ window.MathJax = {
   // returns canonical-frame angles; the page rotates them by
   // VIZ_ROTATION for display. Cluster IDs from the kernel are 1..C
   // (1-based) and map to CLUSTER_DEFS[k-1].
+  // Page id ↔ rank mapping. The nPSO algorithm only knows arrival ranks
+  // (1..N); page ids exist solely so the input graph and the disk
+  // viz can identify the visible nodes. Convert page-id → rank with
+  // rankOf[id] + 1; convert rank → page-id with sorted[rank - 1].
+  function rankToId(rank) { return sorted[rank - 1]; }
+  function idToRank(id) { return rankOf[id] + 1; }
+
   function computeEmbedding(seed) {
     const kernelEmb = NPSOKernel.computeEmbedding({
       N: N_NODES,
@@ -688,35 +695,37 @@ window.MathJax = {
       seed,
     });
 
-    const POLAR = {};
-    const POS_POLAR = {};
-    const ASSIGNED = {};
-    nodesAll.forEach(n => {
-      const t_i = rankOf[n] + 1;
-      const k = kernelEmb.POLAR[t_i - 1];
+    // POLAR is rank-indexed (0..N-1) with theta in canonical-frame +
+    // VIZ_ROTATION applied at draw time. r_hyp is from the kernel,
+    // r is the visual-radius mapping the page uses for rendering.
+    const POLAR = new Array(N_NODES);
+    const ASSIGNED = new Array(N_NODES); // rank-indexed: cluster id (string)
+    for (let rank0 = 0; rank0 < N_NODES; rank0++) {
+      const k = kernelEmb.POLAR[rank0];
       const r = R_MIN + (R_MAX - R_MIN) * (k.r_hyp / R_HYP_MAX);
       const drawTheta = k.theta + VIZ_ROTATION;
-      POLAR[n] = { r, r_hyp: k.r_hyp, theta: drawTheta };
-      POS_POLAR[n] = {
-        x: r * Math.cos(drawTheta),
-        y: r * Math.sin(drawTheta),
-      };
-      ASSIGNED[n] = CLUSTER_DEFS[kernelEmb.ASSIGNED[t_i - 1] - 1].id;
-    });
-
-    // DISTS keyed by node id (page convention) but recomputed from the
-    // kernel's already-built `${i}-${j}` (1-based arrival rank) map.
-    const DISTS = {};
-    for (let i = 0; i < nodesAll.length; i++) {
-      for (let j = i + 1; j < nodesAll.length; j++) {
-        const u = nodesAll[i], v = nodesAll[j];
-        const a = Math.min(rankOf[u] + 1, rankOf[v] + 1);
-        const b = Math.max(rankOf[u] + 1, rankOf[v] + 1);
-        DISTS[`${u}-${v}`] = kernelEmb.DISTS[`${a}-${b}`];
-      }
+      POLAR[rank0] = { r, r_hyp: k.r_hyp, theta: drawTheta };
+      ASSIGNED[rank0] = CLUSTER_DEFS[kernelEmb.ASSIGNED[rank0] - 1].id;
     }
 
-    return { POLAR, POS_POLAR, DISTS, U_NODE: kernelEmb.U_NODE, ASSIGNED };
+    // POS_POLAR: page-id-keyed cartesian positions for NETGEN.VIZ
+    // (which uses page ids as node identifiers). Derived from POLAR.
+    const POS_POLAR = {};
+    nodesAll.forEach(n => {
+      const p = POLAR[idToRank(n) - 1];
+      POS_POLAR[n] = {
+        x: p.r * Math.cos(p.theta),
+        y: p.r * Math.sin(p.theta),
+      };
+    });
+
+    return {
+      POLAR,             // rank-indexed (0..N-1)
+      POS_POLAR,         // page-id-keyed (for VIZ render)
+      DISTS: kernelEmb.DISTS,  // rank-pair-keyed, e.g. `${a}-${b}` with a<b
+      U_NODE: kernelEmb.U_NODE, // rank-indexed (0..N-1)
+      ASSIGNED,          // rank-indexed
+    };
   }
 
   let SHARED = computeEmbedding(1);
@@ -739,46 +748,16 @@ window.MathJax = {
     return NPSOKernel.R_of_T(T, M_PROF, N_NODES, GAMMA);
   }
 
+  // Delegate to NPSOKernel; converts the kernel's rank-pair edges to
+  // page-id pairs so callers (globalCC, viz overlays) keep working.
   function edgesAtT(T, emb) {
-    const R = R_of_T(T);
-    const inv2T = 1 / (2 * T);
-    const m = M_PROF;
-    const byArrival = sorted;
-    const out = [];
-    for (let i = 0; i < byArrival.length; i++) {
-      const newNode = byArrival[i];
-      if (i === 0) continue;
-      const candidates = [];
-      const weights = [];
-      for (let j = 0; j < i; j++) {
-        const other = byArrival[j];
-        const a = Math.min(other, newNode), b = Math.max(other, newNode);
-        const d = emb.DISTS[`${a}-${b}`];
-        const p = 1 / (1 + Math.exp((d - R) * inv2T));
-        candidates.push(other);
-        weights.push(p);
-      }
-      if (candidates.length <= m) {
-        candidates.forEach(c => out.push([Math.min(newNode, c), Math.max(newNode, c)]));
-        continue;
-      }
-      const us = emb.U_NODE[i];
-      for (let c = 0; c < m; c++) {
-        let sum = 0;
-        for (const w of weights) sum += w;
-        if (sum <= 0) break;
-        const u = us[c] * sum;
-        let acc = 0, pick = 0;
-        for (let j = 0; j < weights.length; j++) {
-          acc += weights[j];
-          if (acc >= u) { pick = j; break; }
-        }
-        out.push([Math.min(newNode, candidates[pick]), Math.max(newNode, candidates[pick])]);
-        candidates.splice(pick, 1);
-        weights.splice(pick, 1);
-      }
-    }
-    return out;
+    const rankEdges = NPSOKernel.edgesImpl3({
+      T, emb, m: M_PROF, N: N_NODES, gamma: GAMMA,
+    });
+    return rankEdges.map(([a, b]) => {
+      const u = sorted[a - 1], v = sorted[b - 1];
+      return [Math.min(u, v), Math.max(u, v)];
+    });
   }
 
   function globalCC(edges) {
@@ -885,7 +864,7 @@ window.MathJax = {
       labelText: (d) => String(rankOf[parseInt(d.id, 10)] + 1),
       // Colour nodes by the argmin-assigned mixture component, not by
       // the input clustering; that's what the real generator outputs.
-      nodeColor: (id) => CLUSTER_COLOR_BY_ID[SHARED.ASSIGNED[parseInt(id, 10)]] || COL.paper_3,
+      nodeColor: (id) => CLUSTER_COLOR_BY_ID[SHARED.ASSIGNED[rankOf[parseInt(id, 10)]]] || COL.paper_3,
       edges,
     });
     NETGEN.makeTooltip(viz, svg.node().closest(".disk-panel"));
@@ -897,7 +876,7 @@ window.MathJax = {
         n.homeX = p.x; n.homeY = p.y;
         n.fx = p.x; n.fy = p.y;
         n.x = p.x;   n.y = p.y;
-        n.color = CLUSTER_COLOR_BY_ID[emb.ASSIGNED[nid]] || COL.paper_3;
+        n.color = CLUSTER_COLOR_BY_ID[emb.ASSIGNED[rankOf[nid]]] || COL.paper_3;
       });
       // Force a redraw to pick up the new n.color values. No-op class
       // toggle is the cheapest handle-exposed way to trigger draw().
@@ -1165,7 +1144,7 @@ window.MathJax = {
       pinned: true,
       showLabels: true,
       labelText: (d) => String(rankOf[parseInt(d.id, 10)] + 1),
-      nodeColor: (id) => CLUSTER_COLOR_BY_ID[SHARED.ASSIGNED[parseInt(id, 10)]] || COL.paper_3,
+      nodeColor: (id) => CLUSTER_COLOR_BY_ID[SHARED.ASSIGNED[rankOf[parseInt(id, 10)]]] || COL.paper_3,
       edges: [],
     });
     NETGEN.makeTooltip(viz, svg.node().closest(".disk-panel"));
@@ -1199,7 +1178,7 @@ window.MathJax = {
       // the ball; the empty disk is the right picture.
       if (!isFinite(R) || R <= 0) { clearOverlay(); setInfo(id, R); return; }
       setInfo(id, R);
-      const polar = SHARED.POLAR[id];
+      const polar = SHARED.POLAR[rankOf[id]];
       if (!polar) return;
       const pts = hyperbolicBall(polar.r_hyp, polar.theta, R);
       const dStr = ballPath(pts);
@@ -1235,7 +1214,7 @@ window.MathJax = {
         n.homeX = p.x; n.homeY = p.y;
         n.fx = p.x; n.fy = p.y;
         n.x = p.x;   n.y = p.y;
-        n.color = CLUSTER_COLOR_BY_ID[SHARED.ASSIGNED[nid]] || COL.paper_3;
+        n.color = CLUSTER_COLOR_BY_ID[SHARED.ASSIGNED[rankOf[nid]]] || COL.paper_3;
       });
       viz.sim.alpha(0.3).restart();
     });
@@ -1262,7 +1241,7 @@ window.MathJax = {
       pinned: true,
       showLabels: true,
       labelText: (d) => String(rankOf[parseInt(d.id, 10)] + 1),
-      nodeColor: (id) => CLUSTER_COLOR_BY_ID[SHARED.ASSIGNED[parseInt(id, 10)]] || COL.paper_3,
+      nodeColor: (id) => CLUSTER_COLOR_BY_ID[SHARED.ASSIGNED[rankOf[parseInt(id, 10)]]] || COL.paper_3,
       edges: [],
     });
     NETGEN.makeTooltip(viz, svg.node().closest(".disk-panel"));
@@ -1306,7 +1285,8 @@ window.MathJax = {
         return;
       }
       const t2 = rankOf[secondId] + 1;
-      const a = Math.min(firstId, secondId), b = Math.max(firstId, secondId);
+      const a = Math.min(rankOf[firstId] + 1, rankOf[secondId] + 1);
+      const b = Math.max(rankOf[firstId] + 1, rankOf[secondId] + 1);
       const h = SHARED.DISTS[`${a}-${b}`];
       rTarget.innerHTML = `&middot; target ${t2} &middot; h = ${h != null ? h.toFixed(2) : "—"}`;
       rHint.textContent = "click outside to clear";
@@ -1316,7 +1296,7 @@ window.MathJax = {
       const T = currentT();
       const R = FD_R_at(t, T);
       if (!isFinite(R) || R <= 0) return;
-      const polar = SHARED.POLAR[id];
+      const polar = SHARED.POLAR[rankOf[id]];
       if (!polar) return;
       const pts = FD_hyperbolicBall(polar.r_hyp, polar.theta, R);
       const dStr = FD_ballPath(pts);
@@ -1329,7 +1309,7 @@ window.MathJax = {
         .attr("pointer-events", "none");
     }
     function drawGeodesicFor(id1, id2) {
-      const p1 = SHARED.POLAR[id1], p2 = SHARED.POLAR[id2];
+      const p1 = SHARED.POLAR[rankOf[id1]], p2 = SHARED.POLAR[rankOf[id2]];
       if (!p1 || !p2) return;
       const pts = FD_geodesic(p1.r_hyp, p1.theta, p2.r_hyp, p2.theta);
       if (!pts.length) return;
@@ -1428,7 +1408,7 @@ window.MathJax = {
       pinned: true,
       showLabels: true,
       labelText: (d) => String(rankOf[parseInt(d.id, 10)] + 1),
-      nodeColor: (id) => CLUSTER_COLOR_BY_ID[SHARED.ASSIGNED[parseInt(id, 10)]] || COL.paper_3,
+      nodeColor: (id) => CLUSTER_COLOR_BY_ID[SHARED.ASSIGNED[rankOf[parseInt(id, 10)]]] || COL.paper_3,
       edges: [],
     });
     NETGEN.makeTooltip(viz, svg.node().closest(".disk-panel"));
@@ -1502,7 +1482,7 @@ window.MathJax = {
       }
       const t_u = rankOf[currentId] + 1;
       const R = FD_R_at(t_u, T);
-      const polar = SHARED.POLAR[currentId];
+      const polar = SHARED.POLAR[rankOf[currentId]];
       const a = Math.cosh(polar.r_hyp);
       const sU = Math.sinh(polar.r_hyp);
       const showHeat = heatOn();
@@ -1558,7 +1538,8 @@ window.MathJax = {
       // Readout below the disk: target/p once a target is picked,
       // otherwise the "click another node…" instruction.
       if (secondId != null && isFinite(R) && R > 0) {
-        const a2 = Math.min(currentId, secondId), b2 = Math.max(currentId, secondId);
+        const a2 = Math.min(rankOf[currentId] + 1, rankOf[secondId] + 1);
+        const b2 = Math.max(rankOf[currentId] + 1, rankOf[secondId] + 1);
         const h_ij = SHARED.DISTS[`${a2}-${b2}`];
         const p_ij = h_ij != null
           ? 1 / (1 + Math.exp((h_ij - R) / (2 * T)))
@@ -1567,7 +1548,7 @@ window.MathJax = {
         rTarget.innerHTML = `&middot; target ${t_j} &middot; h = ${h_ij != null ? h_ij.toFixed(2) : "—"} &middot; p = ${p_ij != null ? p_ij.toFixed(3) : "—"}`;
         rHint.textContent = "click outside to clear";
         // Geodesic path from source to target.
-        const p1 = SHARED.POLAR[currentId], p2 = SHARED.POLAR[secondId];
+        const p1 = SHARED.POLAR[rankOf[currentId]], p2 = SHARED.POLAR[rankOf[secondId]];
         if (p1 && p2) {
           const pts = FD_geodesic(p1.r_hyp, p1.theta, p2.r_hyp, p2.theta);
           if (pts.length) {
@@ -1647,7 +1628,7 @@ window.MathJax = {
         n.homeX = p.x; n.homeY = p.y;
         n.fx = p.x; n.fy = p.y;
         n.x = p.x;   n.y = p.y;
-        n.color = CLUSTER_COLOR_BY_ID[emb.ASSIGNED[nid]] || COL.paper_3;
+        n.color = CLUSTER_COLOR_BY_ID[emb.ASSIGNED[rankOf[nid]]] || COL.paper_3;
       });
       viz.sim.alpha(0.3).restart();
       redraw();
@@ -1670,7 +1651,7 @@ window.MathJax = {
       pinned: true,
       showLabels: true,
       labelText: (d) => String(rankOf[parseInt(d.id, 10)] + 1),
-      nodeColor: (id) => CLUSTER_COLOR_BY_ID[SHARED.ASSIGNED[parseInt(id, 10)]] || COL.paper_3,
+      nodeColor: (id) => CLUSTER_COLOR_BY_ID[SHARED.ASSIGNED[rankOf[parseInt(id, 10)]]] || COL.paper_3,
       edges: [],
     });
     NETGEN.makeTooltip(viz, svg.node().closest(".disk-panel"));
@@ -1702,26 +1683,29 @@ window.MathJax = {
     }
 
     // Per-arrival edge list + per-candidate p(i,j) for the caption.
+    // All node references in the returned shape are *ranks* (1..N) — the
+    // canonical nPSO identity. The renderer maps rank → page id at draw
+    // time when feeding NETGEN.VIZ (which uses page ids as node keys).
     function computeArrival(i, T, emb) {
-      const newNode = sorted[i];
-      if (i === 0) return { newNode, placed: [], picks: [] };
+      const newRank = i + 1;
+      if (i === 0) return { newRank, placed: [], picks: [], autoAll: true };
       const candidates = [], weights = [];
-      const R_i = R_of_T_at(i + 1, T);
+      const R_i = R_of_T_at(newRank, T);
       for (let j = 0; j < i; j++) {
-        const other = sorted[j];
-        const a = Math.min(other, newNode), b = Math.max(other, newNode);
+        const otherRank = j + 1;
+        const a = Math.min(otherRank, newRank), b = Math.max(otherRank, newRank);
         const d = emb.DISTS[`${a}-${b}`];
         const p = 1 / (1 + Math.exp((d - R_i) / (2 * T)));
-        candidates.push(other);
+        candidates.push(otherRank);
         weights.push(p);
       }
       const m = M_PROF;
       if (candidates.length <= m) {
-        const placed = candidates.map((c, k) => [Math.min(newNode, c), Math.max(newNode, c), weights[k]]);
+        const placed = candidates.map((c, k) => [Math.min(newRank, c), Math.max(newRank, c), weights[k]]);
         return {
-          newNode,
+          newRank,
           placed,
-          picks: candidates.map((c, k) => ({ node: c, p: weights[k] })),
+          picks: candidates.map((c, k) => ({ rank: c, p: weights[k] })),
           autoAll: true,
         };
       }
@@ -1737,14 +1721,14 @@ window.MathJax = {
           acc += wcopy[jj];
           if (acc >= u) { idx = jj; break; }
         }
-        picks.push({ node: ccopy[idx], p: wcopy[idx] });
+        picks.push({ rank: ccopy[idx], p: wcopy[idx] });
         ccopy.splice(idx, 1);
         wcopy.splice(idx, 1);
       }
       const placed = picks.map(x => [
-        Math.min(newNode, x.node), Math.max(newNode, x.node), x.p,
+        Math.min(newRank, x.rank), Math.max(newRank, x.rank), x.p,
       ]);
-      return { newNode, placed, picks, autoAll: false };
+      return { newRank, placed, picks, autoAll: false };
     }
 
     function recomputeAll() {
@@ -1780,9 +1764,11 @@ window.MathJax = {
       for (let i = 0; i <= walkUpTo; i++) {
         arrivedSet.add(sorted[i]);
         const isLast = (i === highlightArrival);
+        // arrivals[i].placed entries are [rank_a, rank_b, p]; convert to
+        // page ids for NETGEN.VIZ (whose node identifiers are page ids).
         arrivals[i].placed.forEach((e, k) => {
           edges.push({
-            u: e[0], v: e[1],
+            u: sorted[e[0] - 1], v: sorted[e[1] - 1],
             color: isLast ? COL.signal : COL.edge_stage2,
             w: isLast ? 2.4 : 1.1,
             id: `i3-${i}-${k}`,
@@ -1799,10 +1785,8 @@ window.MathJax = {
 
       // Caption describes the current arrival, or the settled graph at FINAL_STEP.
       // Node references in captions use the *rank* (1..N), the same label
-      // shown on the disk, so the two readings line up. (Page-id ≠ rank in
-      // general: the small20 fixture's rank-3 hub is page-id 11, etc.)
+      // shown on the disk, so the two readings line up.
       const m = M_PROF;
-      const rankOfNode = (n) => rankOf[n] + 1;
       let txt;
       if (step === FINAL_STEP) {
         txt = `<span class="st">all arrivals placed</span> &middot; graph is settled. <em>random</em> here resamples every arrival's picks at once for a fresh full draw.`;
@@ -1811,13 +1795,13 @@ window.MathJax = {
         const t = step + 1;
         const V = step;
         if (step === 0) {
-          txt = `<span class="st">arrival \\(t=1\\)</span> &middot; node ${rankOfNode(a.newNode)} placed (the biggest hub). No predecessors, so \\(S_1 = \\emptyset\\).`;
+          txt = `<span class="st">arrival \\(t=1\\)</span> &middot; node ${a.newRank} placed (the biggest hub). No predecessors, so \\(S_1 = \\emptyset\\).`;
         } else if (a.autoAll) {
-          const list = a.picks.map(x => rankOfNode(x.node)).join(", ");
-          txt = `<span class="st">arrival \\(t=${t}\\)</span> &middot; node ${rankOfNode(a.newNode)} placed. \\(|V_t|=${V} \\leq m=${m}\\), so connect to <em>all</em> ${V} predecessor${V === 1 ? "" : "s"}: \\(S_t = \\{${list}\\}\\).`;
+          const list = a.picks.map(x => x.rank).join(", ");
+          txt = `<span class="st">arrival \\(t=${t}\\)</span> &middot; node ${a.newRank} placed. \\(|V_t|=${V} \\leq m=${m}\\), so connect to <em>all</em> ${V} predecessor${V === 1 ? "" : "s"}: \\(S_t = \\{${list}\\}\\).`;
         } else {
-          const picks = a.picks.map(x => `${rankOfNode(x.node)}&nbsp;(\\(p=${x.p.toFixed(3)}\\))`).join(", ");
-          txt = `<span class="st">arrival \\(t=${t}\\)</span> &middot; node ${rankOfNode(a.newNode)} placed. \\(|V_t|=${V} &gt; m=${m}\\); weighted pull picks \\(S_t\\) = {${picks}}.`;
+          const picks = a.picks.map(x => `${x.rank}&nbsp;(\\(p=${x.p.toFixed(3)}\\))`).join(", ");
+          txt = `<span class="st">arrival \\(t=${t}\\)</span> &middot; node ${a.newRank} placed. \\(|V_t|=${V} &gt; m=${m}\\); weighted pull picks \\(S_t\\) = {${picks}}.`;
         }
       }
       descEl.innerHTML = txt;
@@ -1891,7 +1875,7 @@ window.MathJax = {
         n.homeX = p.x; n.homeY = p.y;
         n.fx = p.x; n.fy = p.y;
         n.x = p.x;   n.y = p.y;
-        n.color = CLUSTER_COLOR_BY_ID[emb.ASSIGNED[nid]] || COL.paper_3;
+        n.color = CLUSTER_COLOR_BY_ID[emb.ASSIGNED[rankOf[nid]]] || COL.paper_3;
       });
       viz.sim.alpha(0.3).restart();
       recomputeAll();
