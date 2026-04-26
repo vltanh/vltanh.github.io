@@ -368,6 +368,7 @@ window.MathJax = {
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 <script src="./shared.js"></script>
 <script src="./js/profile_kernel.js"></script>
+<script src="./js/abcd_kernel.js"></script>
 <script>
 (function () {
   document.getElementById("links").innerHTML = NETGEN.linksRow({gen: "abcd+o"});
@@ -513,17 +514,11 @@ window.MathJax = {
   }
 
   function seededRng(seed) { return d3.randomLcg(seed); }
-  function shuffled(arr, rng) {
-    const a = arr.slice();
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1));
-      [a[i], a[j]] = [a[j], a[i]];
-    }
-    return a;
-  }
   function keyOf(a, b) { return a < b ? a + "|" + b : b + "|" + a; }
 
-  // Pick s_0 outliers uniformly from eligibility.
+  // Eligibility for outlier pick: mirrors graph_sampler.jl::populate_clusters
+  // hasoutliers branch. Threshold = L + n_out - L*n_out/n - 1, where L is
+  // sum of min(1, xi*w_u). Eligible = nodes with w_u <= threshold.
   function computeEligible(xi) {
     const n = NODES.length;
     let L = 0;
@@ -532,177 +527,116 @@ window.MathJax = {
     return { eligible: NODES.filter(u => DEG_KEPT[u] <= threshold), threshold };
   }
   function pickOutliers(eligible, seed) {
+    // sampleWithoutReplacement uses Fisher-Yates; matches Julia's
+    // StatsBase.sample(items, k; replace=false) up to RNG byte-equality.
     const rng = seededRng(seed * 2017 + 11);
-    const pool = eligible.slice();
-    const picks = [];
-    for (let k = 0; k < N_OUTLIERS && pool.length; k++) {
-      const i = Math.floor(rng() * pool.length);
-      picks.push(pool[i]);
-      pool.splice(i, 1);
-    }
-    return new Set(picks);
+    return new Set(ABCDKernel.sampleWithoutReplacement(eligible, N_OUTLIERS, rng));
   }
 
-  function configModelWithRewire(stubs, rng, forbidden) {
-    const kept = new Set();
-    const recycle = [];
-    const shuffled_stubs = shuffled(stubs, rng);
-    for (let i = 0; i + 1 < shuffled_stubs.length; i += 2) {
-      const a = shuffled_stubs[i], b = shuffled_stubs[i+1];
-      const k = keyOf(a, b);
-      if (a === b || kept.has(k) || (forbidden && forbidden.has(k))) recycle.push([a, b]);
-      else kept.add(k);
-    }
-    let last_recycle = recycle.length, counter = last_recycle;
-    while (recycle.length > 0) {
-      counter -= 1;
-      if (counter < 0) {
-        if (recycle.length < last_recycle) { last_recycle = recycle.length; counter = last_recycle; }
-        else break;
-      }
-      const p1 = recycle.shift();
-      const fromRecycle = (recycle.length > 0 && kept.size === 0) ? 1.0
-        : (2 * recycle.length / shuffled_stubs.length);
-      let success = false;
-      if (!(recycle.length === 0 && kept.size === 0)) {
-        const maxTries = Math.max(4, shuffled_stubs.length);
-        for (let t = 0; t < maxTries; t++) {
-          let usedRecycle = false, p2, p2Idx = -1;
-          if (rng() < fromRecycle || kept.size === 0) {
-            usedRecycle = true;
-            p2Idx = Math.floor(rng() * recycle.length);
-            p2 = recycle[p2Idx];
-          } else {
-            const keys = [...kept];
-            const idx = Math.floor(rng() * keys.length);
-            p2 = keys[idx].split("|").map(Number);
-          }
-          let newp1, newp2;
-          if (rng() < 0.5) { newp1 = [p1[0], p2[0]]; newp2 = [p1[1], p2[1]]; }
-          else             { newp1 = [p1[0], p2[1]]; newp2 = [p1[1], p2[0]]; }
-          const k1 = keyOf(newp1[0], newp1[1]);
-          const k2 = keyOf(newp2[0], newp2[1]);
-          if (k1 === k2) continue;
-          if (newp1[0] === newp1[1] || kept.has(k1) || (forbidden && forbidden.has(k1))) continue;
-          if (newp2[0] === newp2[1] || kept.has(k2) || (forbidden && forbidden.has(k2))) continue;
-          if (usedRecycle) {
-            recycle[p2Idx] = recycle[recycle.length - 1];
-            recycle.pop();
-          } else {
-            kept.delete(keyOf(p2[0], p2[1]));
-          }
-          kept.add(k1); kept.add(k2);
-          success = true;
-          break;
-        }
-      }
-      if (!success) recycle.push(p1);
-    }
-    return {
-      kept: [...kept].map(k => k.split("|").map(Number)),
-      residue: recycle,
-    };
-  }
+  // Page pins non-outlier vertices to a real cluster: original CLUSTER_OF
+  // for clustered nodes; 19 → C1 and 20 → C3 (their dominant edge sides) for
+  // input-outlier nodes when they are NOT picked as model outliers. This
+  // way KERNEL_S = [n_picked, |C1|, |C2|, |C3|] matches the canonical stage-2
+  // cluster_sizes prepend, and configModel zeros wInternalRaw only for the
+  // truly picked outliers.
+  const KERNEL_REAL_CLUSTER_BY_NODE = {};
+  C1.forEach(n => { KERNEL_REAL_CLUSTER_BY_NODE[n] = 2; });
+  C2.forEach(n => { KERNEL_REAL_CLUSTER_BY_NODE[n] = 3; });
+  C3.forEach(n => { KERNEL_REAL_CLUSTER_BY_NODE[n] = 4; });
+  KERNEL_REAL_CLUSTER_BY_NODE[19] = 2;  // OUT → fallback to C1
+  KERNEL_REAL_CLUSTER_BY_NODE[20] = 4;  // OUT → fallback to C3
+  const NAMED_CLUSTER_OF_KERNEL = { 2: "C1", 3: "C2", 4: "C3" };
+  const PAGE_NODE_BY_KIDX = NODES.slice();
+  const KERNEL_W = NODES.map(n => DEG_KEPT[n]);
 
   // Full realisation cache, keyed by (o_seed, u_seed, stub_seed, xi).
   const REAL_CACHE = new Map();
   function buildRealization(o_seed, u_seed, stub_seed, xi) {
     const key = o_seed + "|" + u_seed + "|" + stub_seed + "|" + xi.toFixed(4);
     if (REAL_CACHE.has(key)) return REAL_CACHE.get(key);
-    // Outlier pick
     const { eligible, threshold } = computeEligible(xi);
     const outliers = pickOutliers(eligible, o_seed);
-    // U draw
-    const uRng = seededRng(u_seed * 1009 + 17);
-    const U = {}; NODES.forEach(n => { U[n] = uRng(); });
-    const split = {};
-    NODES.forEach(n => {
-      const w = DEG_KEPT[n];
-      if (outliers.has(n)) {
-        split[n] = { w, y: 0, z: w };
-      } else {
-        const yf = (1 - xi) * w;
-        const y = Math.floor(yf) + (U[n] < (yf - Math.floor(yf)) ? 1 : 0);
-        split[n] = { w, y, z: w - y };
-      }
+    // Build kernel cluster ids: cluster 1 = picked outliers ∪ {19, 20};
+    // cluster 2..4 = real clusters per CLUSTER_OF for everyone else.
+    const clusters = NODES.map(n => outliers.has(n) ? 1 : KERNEL_REAL_CLUSTER_BY_NODE[n]);
+    const KERNEL_S = [N_OUTLIERS, C1.length, C2.length, C3.length];
+    const seedInt = ((u_seed * 1009 + 17) ^ (stub_seed * 131 + 7)) >>> 0;
+    const rng = seededRng(seedInt + 1);
+    const cm = ABCDKernel.configModel({
+      clusters,
+      w: KERNEL_W,
+      s: KERNEL_S,
+      hasOutliers: true,
+      xi,
+      rng,
+      traceStages: true,
     });
-    // Per-cluster leader parity (non-outlier clusters only).
-    ["C1", "C2", "C3"].forEach(cname => {
-      const members = (cname === "C1" ? C1 : cname === "C2" ? C2 : C3).filter(n => !outliers.has(n));
-      if (members.length === 0) return;
-      const leader = members.slice().sort((a,b) => DEG_KEPT[b] - DEG_KEPT[a] || a - b)[0];
-      const sumY = members.reduce((a, n) => a + split[n].y, 0);
-      if (sumY % 2 === 1) {
-        if (split[leader].y < split[leader].w) { split[leader].y += 1; split[leader].z -= 1; }
-        else if (split[leader].y > 0) { split[leader].y -= 1; split[leader].z += 1; }
-      }
-    });
-    // Global z parity
-    const zSum = NODES.reduce((a, n) => a + split[n].z, 0);
-    if (zSum % 2 === 1) {
-      const maxZN = NODES.slice().sort((a,b) => split[b].z - split[a].z)[0];
-      split[maxZN].z -= 1;
-      split[maxZN].w -= 1;
-    }
-    // Cluster graphs per real cluster (non-outlier members only).
-    const clusterPre = [], clusterPost = [];
-    const clusterForbidden = new Set();
-    const carryStubs = [];
-    ["C1", "C2", "C3"].forEach(cname => {
-      const members = (cname === "C1" ? C1 : cname === "C2" ? C2 : C3).filter(n => !outliers.has(n));
-      const stubs = [];
-      members.forEach(n => { for (let k = 0; k < split[n].y; k++) stubs.push(n); });
-      const preRng = seededRng(stub_seed * 131 + cname.charCodeAt(1));
-      const sh = shuffled(stubs, preRng);
-      const seenPre = new Set();
-      for (let k = 0; k + 1 < sh.length; k += 2) {
-        const a = sh[k], b = sh[k+1];
-        const kkey = keyOf(a, b);
-        clusterPre.push({ u: a, v: b, cluster: cname, loop: a === b, multi: seenPre.has(kkey) && a !== b });
-        seenPre.add(kkey);
-      }
-      const postRng = seededRng(stub_seed * 131 + cname.charCodeAt(1));
-      const R = configModelWithRewire(stubs, postRng, null);
-      R.kept.forEach(([a, b]) => {
-        clusterPost.push({ u: a, v: b, cluster: cname });
-        clusterForbidden.add(keyOf(a, b));
+    const wInternalPreForward = new Array(NODES.length).fill(0);
+    cm.stages.perCluster.forEach(stage => {
+      stage.members.forEach((v, idx) => {
+        wInternalPreForward[v - 1] = stage.wInternalPreForward[idx];
       });
-      R.residue.forEach(([a, b]) => { carryStubs.push(a, b); });
     });
-    // Background graph: all z-stubs (including outliers') + cluster residue.
-    const bgStubs = [];
-    NODES.forEach(n => { for (let k = 0; k < split[n].z; k++) bgStubs.push(n); });
-    carryStubs.forEach(s => bgStubs.push(s));
-    const bgPreRng = seededRng(stub_seed * 131 + 7777);
-    const bgSh = shuffled(bgStubs, bgPreRng);
-    const seenBg = new Set();
-    const bgPre = [];
-    for (let k = 0; k + 1 < bgSh.length; k += 2) {
-      const a = bgSh[k], b = bgSh[k+1];
-      const kkey = keyOf(a, b);
-      const loop = a === b;
-      const multi = !loop && seenBg.has(kkey);
-      const crossDup = !loop && !multi && clusterForbidden.has(kkey);
-      bgPre.push({ u: a, v: b, loop, multi, crossDup,
-        isOO: outliers.has(a) && outliers.has(b),
-        isCO: (outliers.has(a) !== outliers.has(b)) });
-      if (!loop) seenBg.add(kkey);
-    }
-    const bgPostRng = seededRng(stub_seed * 131 + 7777);
-    const R = configModelWithRewire(bgStubs, bgPostRng, clusterForbidden);
-    const bgPost = R.kept.map(([a, b]) => ({
-      u: a, v: b,
-      isOO: outliers.has(a) && outliers.has(b),
-      isCO: (outliers.has(a) !== outliers.has(b)),
-    }));
-    const residueCount = R.residue.length;
-    const finalEdges = clusterPost.concat(bgPost);
+    const split = {};
+    NODES.forEach((n, i) => {
+      const w = KERNEL_W[i];
+      const y = wInternalPreForward[i];
+      split[n] = { w, y, z: w - y };
+    });
+    const clusterPre = [], clusterPost = [];
+    cm.stages.perCluster.forEach(stage => {
+      const cname = NAMED_CLUSTER_OF_KERNEL[stage.cluster];
+      if (!cname) return;
+      stage.prePairs.forEach(([a, b, loop, multi]) => {
+        clusterPre.push({
+          u: PAGE_NODE_BY_KIDX[a - 1], v: PAGE_NODE_BY_KIDX[b - 1],
+          cluster: cname, loop, multi,
+        });
+      });
+      stage.postEdges.forEach(([a, b]) => {
+        clusterPost.push({
+          u: PAGE_NODE_BY_KIDX[a - 1], v: PAGE_NODE_BY_KIDX[b - 1],
+          cluster: cname,
+        });
+      });
+    });
+    const g = cm.stages.global;
+    const bgPre = g.prePairs.map(([a, b, loop, multi, crossDup]) => {
+      const u = PAGE_NODE_BY_KIDX[a - 1], v = PAGE_NODE_BY_KIDX[b - 1];
+      return {
+        u, v, loop, multi, crossDup,
+        isOO: outliers.has(u) && outliers.has(v),
+        isCO: outliers.has(u) !== outliers.has(v),
+      };
+    });
+    const bgPost = g.postEdges.map(([a, b]) => {
+      const u = PAGE_NODE_BY_KIDX[a - 1], v = PAGE_NODE_BY_KIDX[b - 1];
+      return {
+        u, v,
+        isOO: outliers.has(u) && outliers.has(v),
+        isCO: outliers.has(u) !== outliers.has(v),
+      };
+    });
+    const clusterForbidden = new Set();
+    clusterPost.forEach(e => clusterForbidden.add(keyOf(e.u, e.v)));
+    const finalEdges = [];
+    cm.edges.forEach(([a, b]) => {
+      const u = PAGE_NODE_BY_KIDX[a - 1], v = PAGE_NODE_BY_KIDX[b - 1];
+      const k = keyOf(u, v);
+      const named = clusterPost.find(e => keyOf(e.u, e.v) === k);
+      finalEdges.push(named ? { u, v, cluster: named.cluster } : {
+        u, v,
+        isOO: outliers.has(u) && outliers.has(v),
+        isCO: outliers.has(u) !== outliers.has(v),
+      });
+    });
     const outDeg = {};
     NODES.forEach(n => { outDeg[n] = 0; });
     finalEdges.forEach(e => { outDeg[e.u]++; outDeg[e.v]++; });
     const RR = {
       split, outliers, eligible, threshold,
-      clusterPre, clusterPost, bgPre, bgPost, finalEdges, outDeg, residueCount,
+      clusterPre, clusterPost, bgPre, bgPost, finalEdges, outDeg,
+      residueCount: cm.residueAfter,
     };
     REAL_CACHE.set(key, RR);
     return RR;
