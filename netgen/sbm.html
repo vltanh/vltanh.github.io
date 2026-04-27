@@ -122,7 +122,9 @@
   height:auto;
   aspect-ratio: 1 / 1;
   max-height: 560px;
+  position:relative; /* anchor for .gx-panel overlays */
 }
+.profile-table thead th{ font-size:.62rem; }
 /* Floating top-right collapsible panel: lives over a .graph-canvas
    that's been positioned relative. Used by g-deg, g2, g3, g4. */
 .gx-panel{
@@ -204,7 +206,7 @@
       <span>input G &middot; hover a node or row to link</span>
       <span class="right">degree.csv</span>
     </div>
-    <div class="graph-canvas" id="g-deg-cy" style="position:relative"></div>
+    <div class="graph-canvas" id="g-deg-cy"></div>
   </div>
 </section>
 
@@ -222,7 +224,7 @@
       <span>input G &middot; hover an edge or a cell</span>
       <span class="right" id="g2-cell">cell: (none)</span>
     </div>
-    <div class="graph-canvas" id="g2-cy" style="position:relative"></div>
+    <div class="graph-canvas" id="g2-cy"></div>
   </div>
   <div class="callout">
     <div class="tag">why this is the whole contract</div>
@@ -250,7 +252,7 @@
       <span>stub-matching</span>
       <span class="right" id="g3-stats">&middot;</span>
     </div>
-    <div class="graph-canvas" id="g3-cy" style="position:relative"></div>
+    <div class="graph-canvas" id="g3-cy"></div>
     <div class="widget-row" style="padding:.9rem 0 0;border-top:1px dashed rgba(139,117,65,.45)">
       <button class="btn" id="g3-prev" type="button">&larr; back</button>
       <button class="btn primary" id="g3-next" type="button">next &rarr;</button>
@@ -281,7 +283,7 @@
       <span id="g4-label">dedup</span>
       <span class="right" id="g4-edges">edges: &middot;</span>
     </div>
-    <div class="graph-canvas" id="g4-cy" style="position:relative"></div>
+    <div class="graph-canvas" id="g4-cy"></div>
     <div class="widget-row">
       <label class="toggle">
         <input type="checkbox" id="g4-toggle">
@@ -300,7 +302,7 @@
   <p>Default run on <code>dnc</code> + <code>sbm-flat-best+cc</code> at <code>--seed 1</code>:</p>
   <table class="profile-table">
     <thead>
-      <tr><th style="font-size:.62rem">stat</th><th style="font-size:.62rem">input</th><th style="font-size:.62rem">sbm output</th><th style="font-size:.62rem">note</th></tr>
+      <tr><th>stat</th><th>input</th><th>sbm output</th><th>note</th></tr>
     </thead>
     <tbody>
       <tr><th>N</th><td class="val">906</td><td class="val">902</td><td class="desc">Four isolated nodes after dedup have zero output-edges and drop out of <code>edge.csv</code>'s node set.</td></tr>
@@ -473,6 +475,29 @@ window.MathJax = {
     });
   }
 
+  // Mount a force-graph card with dashed block enclosures + tick-bound
+  // rect sync + per-block tooltip. Used by g-shared-input + g-assign,
+  // which share everything but their edge set + nodeColor option.
+  function mountBlockGraph(hostId, edges, opts) {
+    opts = opts || {};
+    const host = document.getElementById(hostId);
+    if (!host) return null;
+    host.innerHTML = "";
+    const svg = d3.select(host).append("svg")
+      .attr("class", "viz-svg")
+      .attr("viewBox", NETGEN.fitViewBoxAttr({ pad: 40 }))
+      .attr("preserveAspectRatio", "xMidYMid meet");
+    const syncBlockRects = makeBlockRects(svg);
+    const initOpts = { svg, showLabels: true, edges };
+    if (opts.nodeColor) initOpts.nodeColor = opts.nodeColor;
+    const viz = NETGEN.VIZ.init(hostId, initOpts);
+    const parentId = hostId.replace(/-cy$/, "");
+    NETGEN.makeTooltip(viz, document.getElementById(parentId));
+    syncBlockRects(viz);
+    viz.sim.on("tick.blockRects", () => syncBlockRects(viz));
+    return viz;
+  }
+
   // Hover focus shared by g-deg + g4: hovering a graph node or a bar
   // row dims everything except the node, its incident edges, and its row.
   function bindFocusLink(viz, gBars) {
@@ -524,30 +549,12 @@ window.MathJax = {
   EDGES.forEach(e => { TARGET_DEG[e.u]++; TARGET_DEG[e.v]++; });
 
   // Shared input fixture: input graph + singleton-mode 5-cluster colour
-  // + cluster enclosure boxes via makeBlockRects. Must run after
-  // BLOCK_NAMES / BLOCK_LABELS / BLOCK_NODES / BLOCK_COLOR are defined
-  // above; const declarations are NOT hoisted, so positioning this IIFE
-  // earlier crashes the page (TDZ on BLOCK_NAMES).
-  (function () {
-    const host = document.getElementById("g-shared-input-cy");
-    if (!host) return;
-    host.innerHTML = "";
-    const svg = d3.select(host).append("svg")
-      .attr("class", "viz-svg")
-      .attr("viewBox", NETGEN.fitViewBoxAttr({ pad: 40 }))
-      .attr("preserveAspectRatio", "xMidYMid meet");
-    const syncBlockRects = makeBlockRects(svg);
-    const edges = EDGES.map(e => ({
-      u: e.u, v: e.v, color: pickInputColor(e), w: 1.4,
-    }));
-    const viz = NETGEN.VIZ.init("g-shared-input-cy", {
-      svg, showLabels: true, edges,
-      nodeColor: (id) => COL[CLUSTER_OF[id]] || COL.OUT,
-    });
-    NETGEN.makeTooltip(viz, document.getElementById("g-shared-input"));
-    syncBlockRects(viz);
-    viz.sim.on("tick.blockRects", () => syncBlockRects(viz));
-  })();
+  // + cluster enclosure boxes. Must run after BLOCK_NAMES / BLOCK_LABELS
+  // / BLOCK_NODES / BLOCK_COLOR are defined above; const declarations
+  // are NOT hoisted, so positioning this earlier crashes on TDZ.
+  mountBlockGraph("g-shared-input-cy",
+    EDGES.map(e => ({ u: e.u, v: e.v, color: pickInputColor(e), w: 1.4 })),
+    { nodeColor: (id) => COL[CLUSTER_OF[id]] || COL.OUT });
 
   // Helper: create one dashed rounded rectangle + handwritten label per
   // block. Returns a callback that, given the force-sim `viz` handle,
@@ -609,26 +616,10 @@ window.MathJax = {
   }
 
   // ── Profiling · block assignment (graph with dashed block rings) ──
-  (function () {
-    const host = document.getElementById("g-assign-cy");
-    if (!host) return;
-    host.innerHTML = "";
-    const svg = d3.select(host).append("svg")
-      .attr("class", "viz-svg")
-      .attr("viewBox", NETGEN.fitViewBoxAttr({ pad: 40 }))
-      .attr("preserveAspectRatio", "xMidYMid meet");
-    const syncBlockRects = makeBlockRects(svg);
-    // Block-assignment stage is about the partition, not the edges.
-    // Edges already showed up in the singleton-mode opener; here we
-    // strip them so the block colours and enclosure rings carry the
-    // story.
-    const viz = NETGEN.VIZ.init("g-assign-cy", { svg, showLabels: true, edges: [] });
-    NETGEN.makeTooltip(viz, document.getElementById("g-assign"));
-    // Live-bind the rects to current node positions: fires on every force
-    // tick and on drags (drags call sim.alphaTarget so ticks keep firing).
-    syncBlockRects(viz);
-    viz.sim.on("tick.blockRects", () => syncBlockRects(viz));
-  })();
+  // Edges already showed up in the singleton-mode opener; the block-
+  // assignment stage is about the partition, not the edges, so the
+  // colours + enclosure rings carry the story alone.
+  mountBlockGraph("g-assign-cy", []);
 
   // ── Profiling · degree sequence (horizontal bars + hover link) ──
   (function () {
