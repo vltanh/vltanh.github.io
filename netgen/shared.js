@@ -190,7 +190,7 @@ const CORE_EDGES = {
 // saturated-dark for contrast on cream paper.
 const COLORS = {
   C1: "#7b9bd6", C2: "#e0a649", C3: "#8fbb70", OUT: "#e07c6a",
-  edge_intra: {C1:"#3559a0", C2:"#b4741d", C3:"#4e7a3a"},
+  edge_intra: {C1:"#3559a0", C2:"#b4741d", C3:"#4e7a3a", OUT:"#a04030"},
   edge_inter: "#3a3f4a",
   edge_stage2: "#567ad8",
   edge_stage3: "#7e468f",

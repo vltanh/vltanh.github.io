@@ -927,6 +927,23 @@ window.MathJax = {
       const seen = new Map();
       trace = SBMKernel.buildTraceFrom(urns, budget, blockPairs, seen, d3.randomLcg(seed));
       totalPairs = trace.length;
+      publishSample();
+    }
+    function deriveSampleFromTrace() {
+      const raw = trace.map(t => ({ u: t.u, v: t.v, intra: t.intra, loop: t.loop, multi: t.multi }));
+      const kept = raw.filter(e => !e.loop && !e.multi);
+      const dropped = raw.filter(e => e.loop || e.multi);
+      const achievedDeg = {};
+      NODES.forEach(n => { achievedDeg[n] = 0; });
+      kept.forEach(e => { achievedDeg[e.u]++; achievedDeg[e.v]++; });
+      const nLoops = raw.filter(t => t.loop).length;
+      const nParallels = raw.filter(t => t.multi).length;
+      return { all: raw, kept, dropped, achievedDeg,
+        stats: { preEdges: raw.length, postEdges: kept.length, nLoops, nParallels } };
+    }
+    function publishSample() {
+      SAMPLE = deriveSampleFromTrace();
+      sampleListeners.forEach(fn => fn(SAMPLE));
     }
     function reseedFrom(k) {
       currentSeed += 1;
@@ -942,6 +959,7 @@ window.MathJax = {
       const tail = SBMKernel.buildTraceFrom(urns, budget, blockPairs, seen, d3.randomLcg(currentSeed));
       trace = trace.slice(0, k).concat(tail);
       totalPairs = trace.length;
+      publishSample();
     }
 
     function pairColor(t) {
@@ -1074,7 +1092,6 @@ window.MathJax = {
       currentSeed += 1;
       freshTrace(currentSeed);
       stepIdx = Math.min(keep, totalPairs);
-      triggerReroll();
       render({ snap: true });
     });
   })();
