@@ -326,7 +326,8 @@
     </div>
     <div style="margin-top:1rem">
       <div class="step-desc" style="text-align:center; margin-bottom:.3rem"><span class="st">per-cell dedup loss</span> &middot; input minus output, log-scaled. Darker red = more edges lost in that cell.</div>
-      <svg id="heat-loss" viewBox="0 0 640 320" preserveAspectRatio="xMidYMid meet"></svg>
+      <svg id="heat-loss" viewBox="0 0 320 320" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;margin:0 auto"></svg>
+      <div class="step-desc" id="heat-loss-legend" style="text-align:center;margin-top:.3rem"></div>
     </div>
     <div class="readout" style="justify-content:center">
       <span class="item">edges in <b id="dnc-ein">&middot;</b></span>
@@ -1391,47 +1392,16 @@ window.MathJax = {
     drawHeat("#heat-in",  (i, j) => getCell(i, j).p, colorIn,  { highlights: stdHighlights });
     drawHeat("#heat-out", (i, j) => getCell(i, j).e, colorOut, { highlights: stdHighlights });
 
-    // Loss heatmap is wider (640x320) so it can sit full-width under the pair.
-    (function () {
-      const svg = d3.select("#heat-loss");
-      svg.selectAll("*").remove();
-      const W = 640, H = 320;
-      const pad = { top: 14, right: 16, bottom: 18, left: 16 };
-      const iw = W - pad.left - pad.right;
-      const ih = H - pad.top - pad.bottom;
-      const size = Math.min(iw, ih);
-      const offsetX = pad.left + (iw - size) / 2;
-      const cellSize = size / B;
-      const g = svg.append("g").attr("transform", `translate(${offsetX},${pad.top})`);
-      g.append("rect").attr("x", 0).attr("y", 0)
-        .attr("width", size).attr("height", size)
-        .attr("fill", "#ede4c9").attr("stroke", "#8e7a3c").attr("stroke-width", 1);
-
-      const maxLoss = d3.max(d.cells, c => Math.max(c[2] - c[3], 0)) || 1;
-      const colorLoss = d3.scaleSequential(d3.interpolateReds).domain([0, Math.log1p(maxLoss)]);
-      for (const [i, j, p, e] of d.cells) {
-        const loss = p - e;
-        if (loss <= 0) continue;
-        g.append("rect")
-          .attr("class", "heat-cell")
-          .attr("x", j * cellSize).attr("y", i * cellSize)
-          .attr("width", cellSize + 0.5).attr("height", cellSize + 0.5)
-          .attr("fill", colorLoss(Math.log1p(loss)))
-          .attr("opacity", 0.95);
-      }
-      g.append("line")
-        .attr("x1", 0).attr("y1", 0).attr("x2", size).attr("y2", size)
-        .attr("stroke", "#b9a263").attr("stroke-dasharray", "2 3").attr("opacity", 0.35);
-      // Outlier-block highlight square at (0,0) + hardest-hit in amber.
-      drawRingHighlight(g, cellSize, 0, 0, "#c92a2a");
-      drawRingHighlight(g, cellSize, hardest.i, hardest.j, "#c7801e");
-      // Legend label
-      svg.append("text")
-        .attr("x", offsetX + size / 2).attr("y", H - 2)
-        .attr("text-anchor", "middle").style("fill", "#6b6a54")
-        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10px")
-        .text("red = outlier pseudo-block · amber = hardest-hit cell (loss " + maxLoss + " half-edges)");
-    })();
+    // Loss heatmap shares drawHeat with the input/output pair; legend
+    // is a sibling .step-desc so the SVG itself stays just the data.
+    const maxLoss = d3.max(d.cells, c => Math.max(c[2] - c[3], 0)) || 1;
+    const colorLoss = d3.scaleSequential(d3.interpolateReds)
+      .domain([0, Math.log1p(maxLoss)]);
+    drawHeat("#heat-loss",
+      (i, j) => Math.max(getCell(i, j).p - getCell(i, j).e, 0),
+      colorLoss, { highlights: stdHighlights });
+    document.getElementById("heat-loss-legend").textContent =
+      "red = outlier pseudo-block · amber = hardest-hit cell (loss " + maxLoss + " half-edges)";
 
     // Hover tooltip over the three heatmaps: piggyback on a shared div.
     const container = document.querySelector("#heat-in").closest(".disk-panel");
