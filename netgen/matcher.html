@@ -873,8 +873,27 @@ window.MathJax = {
     // edges via spoke_layer: per-deficit-node spokes around the rim,
     // active pair animates dashed bridge → solid edge. Other algos
     // keep the plain addEdges renderer.
+    // Spoke layer applies pick + dim during the active animation by
+    // default. On settle, it strips both classes; this onSettle
+    // restores the matcher's deficit-driven baseline (deficit-zero
+    // nodes dim, drained-mid-walk dim, abandoned bright).
+    let lastResidual = {};
+    let lastUnplaced = {};
+    function applyBaseDim() {
+      const anyActiveNow = DEFICIT_NODES.some(n => (lastResidual[n] || 0) > 0);
+      NODES.forEach(n => {
+        const inDeficit = (DEFICIT[n] || 0) > 0;
+        const aDef = lastResidual[n] || 0;
+        const bDef = (lastUnplaced && lastUnplaced[n]) || 0;
+        if (!inDeficit) {
+          viz.addNodeClass(n, "dim");
+        } else if (anyActiveNow && aDef === 0 && bDef === 0) {
+          viz.addNodeClass(n, "dim");
+        }
+      });
+    }
     const spokes = useSpokes
-      ? NETGEN.spokeLayer.attach(viz, { showCounter: false })
+      ? NETGEN.spokeLayer.attach(viz, { onSettle: applyBaseDim })
       : null;
 
     let seed = 1;
@@ -969,18 +988,18 @@ window.MathJax = {
       //   end-state: when nothing is active any more, un-dim drained
       //     deficit nodes (they read as "completed"), keep non-deficit
       //     nodes dimmed.
-      const anyActiveNow = DEFICIT_NODES.some(n => (s.residual[n] || 0) > 0);
-      viz.clearAllNodeClass("dim");
-      NODES.forEach(n => {
-        const inDeficit = (DEFICIT[n] || 0) > 0;
-        const aDef = s.residual[n] || 0;
-        const bDef = (s.unplaced && s.unplaced[n]) || 0;
-        if (!inDeficit) {
-          viz.addNodeClass(n, "dim");
-        } else if (anyActiveNow && aDef === 0 && bDef === 0) {
-          viz.addNodeClass(n, "dim");
-        }
-      });
+      // Spoke-mode renders own pick + dim during animation; on settle
+      // they call applyBaseDim via onSettle. Cache the snapshot so
+      // applyBaseDim sees this step's residual/unplaced.
+      lastResidual = s.residual;
+      lastUnplaced = s.unplaced;
+      if (!useSpokes) {
+        viz.clearAllNodeClass("dim");
+        applyBaseDim();
+      } else if (!spokes || !spokes.isAnimating || !spokes.isAnimating()) {
+        viz.clearAllNodeClass("dim");
+        applyBaseDim();
+      }
       prevBtn.disabled = stepIdx <= 0;
       nextBtn.disabled = stepIdx >= steps.length - 1;
     }

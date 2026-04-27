@@ -39,13 +39,52 @@ NETGEN.spokeLayer = (function () {
     const onLockChange = opts.onLockChange || function () {};
     const spokeOuter   = opts.spokeLen != null ? opts.spokeLen : 16;
     const fanCap       = opts.fanCap != null ? opts.fanCap : 14;
-    const showCounter  = opts.showCounter !== false;
+    const showCounter  = !!opts.showCounter;
 
+    const onActiveChange = opts.onActiveChange || function () {};
+    const onSettle       = opts.onSettle       || function () {};
     let lockTimer = null;
+    let animating = false;
+    // Default dim + pick: during the active animation, the active u/v
+    // get .pick (mint outline), every other node gets .dim. Both
+    // classes are stripped on settle so the page reverts to whatever
+    // baseline its onSettle callback applies (matcher's deficit-driven
+    // dim, etc.). Pages with no baseline pass no onSettle and end up
+    // with everything undimmed.
+    function applyActiveDimPick(just) {
+      viz.clearAllNodeClass("pick");
+      viz.clearAllNodeClass("dim");
+      if (!just) return;
+      viz.eachNode(function (n) {
+        if (String(n.id) !== String(just.u) && String(n.id) !== String(just.v)) {
+          viz.addNodeClass(n.id, "dim");
+        }
+      });
+      viz.addNodeClass(just.u, "pick");
+      if (String(just.u) !== String(just.v)) viz.addNodeClass(just.v, "pick");
+    }
+    function clearActiveDimPick() {
+      viz.clearAllNodeClass("pick");
+      viz.clearAllNodeClass("dim");
+    }
     function lockFor(ms) {
+      const wasAnimating = animating;
+      animating = true;
       onLockChange(true);
+      if (!wasAnimating) {
+        applyActiveDimPick(state.just);
+        onActiveChange(true, state.just);
+      }
       if (lockTimer) clearTimeout(lockTimer);
-      lockTimer = setTimeout(function () { lockTimer = null; onLockChange(false); }, ms);
+      lockTimer = setTimeout(function () {
+        lockTimer = null;
+        animating = false;
+        onLockChange(false);
+        clearActiveDimPick();
+        onActiveChange(false, null);
+        onSettle();
+        renderPlaced();
+      }, ms);
     }
 
     // Layer order: placed-edges < bridges < spokes < counter < nodes.
@@ -118,7 +157,7 @@ NETGEN.spokeLayer = (function () {
           if (i1 === i2) return;
         }
         if (isJust) {
-          a.justIdx = [i1, i2]; a.justPartner = p.u; a.justFixed = (p.slotU != null && p.slotV != null);
+          a.justIdx = [i1, i2]; a.justPartner = p.u;
         } else {
           a.free[i1] = false; a.free[i2] = false;
           a.partnerOf[i1] = p.v; a.partnerOf[i2] = p.u;
@@ -141,7 +180,6 @@ NETGEN.spokeLayer = (function () {
       if (isJust) {
         au.justIdx = [iu]; av.justIdx = [iv];
         au.justPartner = p.v; av.justPartner = p.u;
-        au.justFixed = (p.slotU != null); av.justFixed = (p.slotV != null);
       } else {
         au.free[iu] = false; av.free[iv] = false;
         au.partnerOf[iu] = p.v; av.partnerOf[iv] = p.u;
@@ -153,9 +191,28 @@ NETGEN.spokeLayer = (function () {
       const a = assigned[nid];
       if (!a || !a.justIdx || a.justIdx.length === 0) return null;
       if (state.just && state.just.u === state.just.v) return null;
-      // Fixed-slot mode: stay at the rest angle (no partner-aim drift).
-      if (a.justFixed) return null;
       return partnerDir(nid, a.justPartner);
+    }
+
+    // Effective angle of a slot: rest if free, partner-direction if
+    // consumed (so the placed edge runs straight from tip to tip),
+    // partner-direction if active-just (so the orbit lands here and
+    // the bridge anchors there). Self-loop slots stay at rest since
+    // the partner is the node itself.
+    function effectiveAngle(nid, slotIdx) {
+      const a = assigned[nid];
+      if (!a) return 0;
+      const restA = a.angles[slotIdx];
+      const isJust = a.justIdx && a.justIdx.indexOf(slotIdx) >= 0;
+      if (isJust) {
+        if (state.just && state.just.u === state.just.v) return restA;
+        return partnerDir(nid, a.justPartner);
+      }
+      const partner = a.partnerOf[slotIdx];
+      if (partner != null && String(partner) !== String(nid)) {
+        return partnerDir(nid, partner);
+      }
+      return restA;
     }
 
     function spokeTip(nid, slotIdx, opt) {
@@ -247,9 +304,10 @@ NETGEN.spokeLayer = (function () {
         .attr("stroke", function (d) { return d.color; })
         .attr("stroke-width", function (d) { return d.isJust ? 2.8 : 2.4; })
         .attr("opacity", function (d) { return d.isJust ? 1 : (d.consumed ? 0.22 : 0.92); });
-      // Snap rest-angle position for non-active spokes.
+      // Snap non-active spokes to their effective angle (rest if free,
+      // partner-direction if consumed).
       merged.filter(function (d) { return !d.isJust; }).each(function (d) {
-        const t = spokeTip(d.nid, d.slot);
+        const t = spokeTip(d.nid, d.slot, { angle: effectiveAngle(d.nid, d.slot) });
         if (!t) return;
         d3.select(this).attr("x1", t.x1).attr("y1", t.y1).attr("x2", t.x2).attr("y2", t.y2);
       });
@@ -293,25 +351,29 @@ NETGEN.spokeLayer = (function () {
     function placedPath(d) {
       if (d.u === d.v) {
         if (d.slotU == null || d.slotV == null) return "";
-        const e1 = spokeTip(d.u, d.slotU);
-        const e2 = spokeTip(d.v, d.slotV);
+        const e1 = spokeTip(d.u, d.slotU, { angle: effectiveAngle(d.u, d.slotU) });
+        const e2 = spokeTip(d.v, d.slotV, { angle: effectiveAngle(d.v, d.slotV) });
         if (!e1 || !e2) return "";
         const node = viz.nodeById[String(d.u)];
-        const mx = (e1.x2 + e2.x2) / 2, my = (e1.y2 + e2.y2) / 2;
+        const mx = (e1.x1 + e2.x1) / 2, my = (e1.y1 + e2.y1) / 2;
         const dx = mx - node.x, dy = my - node.y;
         const dist = Math.hypot(dx, dy) || 1;
         const push = nodeR(d.u) * 1.6;
         const cx = mx + (dx / dist) * push, cy = my + (dy / dist) * push;
-        return "M" + e1.x2 + "," + e1.y2 + " Q" + cx + "," + cy + " " + e2.x2 + "," + e2.y2;
+        return "M" + e1.x1 + "," + e1.y1 + " Q" + cx + "," + cy + " " + e2.x1 + "," + e2.y1;
       }
       if (d.slotU == null || d.slotV == null) return "";
-      const eu = spokeTip(d.u, d.slotU);
-      const ev = spokeTip(d.v, d.slotV);
+      const eu = spokeTip(d.u, d.slotU, { angle: effectiveAngle(d.u, d.slotU) });
+      const ev = spokeTip(d.v, d.slotV, { angle: effectiveAngle(d.v, d.slotV) });
       if (!eu || !ev) return "";
-      return "M" + eu.x2 + "," + eu.y2 + " L" + ev.x2 + "," + ev.y2;
+      return "M" + eu.x1 + "," + eu.y1 + " L" + ev.x1 + "," + ev.y1;
     }
 
     function renderPlaced() {
+      // During the active animation, every placed edge whose neither
+      // endpoint is in the active pair fades. After the animation
+      // settles, all edges restore to full opacity.
+      const j = animating && state.just ? state.just : null;
       const sel = placedLayer.selectAll("path.sp-placed-edge").data(state.placed, function (d) { return d.id || (d.u + "-" + d.v); });
       sel.exit().remove();
       const ent = sel.enter().append("path")
@@ -319,18 +381,17 @@ NETGEN.spokeLayer = (function () {
         .attr("stroke-linecap", "round").attr("stroke-width", 1.6);
       ent.merge(sel)
         .attr("stroke", function (d) { return d.color; })
+        .attr("opacity", function (d) {
+          if (!j) return 1;
+          const incident = String(d.u) === String(j.u) || String(d.u) === String(j.v)
+                        || String(d.v) === String(j.u) || String(d.v) === String(j.v);
+          return incident ? 1 : 0.18;
+        })
         .attr("d", placedPath);
     }
 
     function bridgeEndpoint(nid, slotIdx) {
-      const a = assigned[nid];
-      if (!a) return null;
-      let angle = a.angles[slotIdx];
-      if (a.justIdx && a.justIdx.indexOf(slotIdx) >= 0 && state.just && state.just.u !== state.just.v) {
-        const liveA = liveAngleForJust(nid);
-        if (liveA != null) angle = liveA;
-      }
-      return spokeTip(nid, slotIdx, { angle: angle });
+      return spokeTip(nid, slotIdx, { angle: effectiveAngle(nid, slotIdx) });
     }
 
     function bridgePath(d) {
@@ -341,19 +402,19 @@ NETGEN.spokeLayer = (function () {
         const e2 = bridgeEndpoint(d.u, a.justIdx[1]);
         if (!e1 || !e2) return "";
         const node = viz.nodeById[String(d.u)];
-        const mx = (e1.x2 + e2.x2) / 2, my = (e1.y2 + e2.y2) / 2;
+        const mx = (e1.x1 + e2.x1) / 2, my = (e1.y1 + e2.y1) / 2;
         const dx = mx - node.x, dy = my - node.y;
         const dist = Math.hypot(dx, dy) || 1;
         const push = nodeR(d.u) * 1.6;
         const cx = mx + (dx / dist) * push, cy = my + (dy / dist) * push;
-        return "M" + e1.x2 + "," + e1.y2 + " Q" + cx + "," + cy + " " + e2.x2 + "," + e2.y2;
+        return "M" + e1.x1 + "," + e1.y1 + " Q" + cx + "," + cy + " " + e2.x1 + "," + e2.y1;
       }
       const au = assigned[d.u], av = assigned[d.v];
       if (!au || !av || !au.justIdx || !av.justIdx) return "";
       const eu = bridgeEndpoint(d.u, au.justIdx[0]);
       const ev = bridgeEndpoint(d.v, av.justIdx[0]);
       if (!eu || !ev) return "";
-      return "M" + eu.x2 + "," + eu.y2 + " L" + ev.x2 + "," + ev.y2;
+      return "M" + eu.x1 + "," + eu.y1 + " L" + ev.x1 + "," + ev.y1;
     }
 
     function renderBridge(animate) {
@@ -434,12 +495,7 @@ NETGEN.spokeLayer = (function () {
         if (!a) return;
         const trans = d3.active(this, "orbit") || d3.active(this, "rewindFade");
         if (trans) return;
-        let angle = a.angles[d.slot];
-        if (d.isJust && state.just && state.just.u !== state.just.v) {
-          const liveA = liveAngleForJust(d.nid);
-          if (liveA != null) angle = liveA;
-        }
-        const t = spokeTip(d.nid, d.slot, { angle: angle });
+        const t = spokeTip(d.nid, d.slot, { angle: effectiveAngle(d.nid, d.slot) });
         if (!t) return;
         d3.select(this).attr("x1", t.x1).attr("y1", t.y1).attr("x2", t.x2).attr("y2", t.y2);
       });
@@ -460,6 +516,7 @@ NETGEN.spokeLayer = (function () {
     return {
       syncState: syncState,
       rerender: function () { recompute(); render(false); },
+      isAnimating: function () { return animating; },
     };
   }
 
