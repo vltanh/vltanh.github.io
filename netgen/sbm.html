@@ -430,7 +430,6 @@ window.MathJax = {
   const EDGES = NETGEN.EDGES;
   const CLUSTER_OF = NETGEN.CLUSTER_OF;
   const NODES = NETGEN.NODES;
-  const POSITIONS = NETGEN.POSITIONS;
   const C1 = NETGEN.C1, C2 = NETGEN.C2, C3 = NETGEN.C3, OUT_N = NETGEN.OUT;
 
   function pickInputColor(e) {
@@ -475,9 +474,6 @@ window.MathJax = {
   const TARGET_DEG = {};
   NODES.forEach(n => { TARGET_DEG[n] = 0; });
   EDGES.forEach(e => { TARGET_DEG[e.u]++; TARGET_DEG[e.v]++; });
-  const EDGES_TOTAL = EDGES.length;
-  const MEAN_DEG    = EDGES_TOTAL * 2 / NODES.length;
-  const OUT_COUNT   = OUT_N.length;
 
   // Shared input fixture: input graph + singleton-mode 5-cluster colour
   // + cluster enclosure boxes via makeBlockRects. Must run after
@@ -798,55 +794,15 @@ window.MathJax = {
     });
   })();
 
-  // ── Micro-SBM sampler (JS). ──
-  // Mirrors graph-tool's generate_sbm(micro_ers=true, micro_degs=true).
-  // For each block r, build an urn containing each node u repeated k_u
-  // times. Stubs are block-pooled and target-untyped: the urn does not
-  // know which (r, s) cell each stub will end up in. For each pair (r, s)
-  // with r <= s in row-major order, draw e_{rs} stubs without replacement
-  // from urn r (and another e_{rs} from urn s when r != s); each draw
-  // becomes one edge. Output is a multigraph; dedup happens after.
-  function seededRng(seed) {
-    // d3.randomLcg gives deterministic U[0,1). Stable across browsers.
-    return d3.randomLcg(seed);
-  }
-  function sampleMicroSBM(seed) {
-    // Algorithm in SBMKernel; this wrapper just adapts page state into
-    // the kernel's payload shape and re-derives kept/dropped + achieved
-    // degree from the trace for the page's downstream renderers.
-    const blocksByIdx = NODES.map(n => blockIdx(n));
-    const degreesByIdx = NODES.map(n => TARGET_DEG[n]);
-    const out = SBMKernel.sampleMicroSBM({
-      blocks: blocksByIdx,
-      degrees: degreesByIdx,
-      eRs: EDGE_COUNTS,
-      numBlocks: NUM_BLOCKS,
-      rng: seededRng(seed),
-    });
-    const raw = out.trace.map(t => {
-      const u = NODES[t.u], v = NODES[t.v];
-      return { u, v, intra: t.intra, loop: t.loop, multi: t.multi };
-    });
-    const kept = raw.filter(e => !e.loop && !e.multi);
-    const dropped = raw.filter(e => e.loop || e.multi);
-    const achievedDeg = {};
-    NODES.forEach(n => { achievedDeg[n] = 0; });
-    kept.forEach(e => { achievedDeg[e.u]++; achievedDeg[e.v]++; });
-    return {
-      all: raw, kept, dropped, achievedDeg,
-      stats: out.stats,
-    };
-  }
-
-  let currSeed = 1;
-  let SAMPLE = sampleMicroSBM(currSeed);
+  // ── Micro-SBM sample bus ──
+  // Stage-3's stub-pairing IIFE owns the sampler. It builds the trace
+  // via SBMKernel.buildTraceFrom, derives SAMPLE from the trace, and
+  // fires sampleListeners on each reroll. SAMPLE starts null; stage-3
+  // populates it synchronously during init, before stage-4's IIFE
+  // (which is the only consumer) runs.
+  let SAMPLE = null;
   const sampleListeners = [];
   function onSampleReroll(fn) { sampleListeners.push(fn); }
-  function triggerReroll() {
-    currSeed += 1;
-    SAMPLE = sampleMicroSBM(currSeed);
-    sampleListeners.forEach(fn => fn(SAMPLE));
-  }
 
   // ── Generation · stub-pairing, step by step ──
   // Per-node spokes via NETGEN.spokeLayer; kernel trace assigns the
