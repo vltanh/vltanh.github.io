@@ -1169,8 +1169,42 @@ NETGEN.spokeLayer = (function () {
       });
     });
 
+    // Bypass-animation update: kill any in-flight transition, swap
+    // state, jump-render. For reroll buttons (random-step, random-all)
+    // where running the full rewind + forward pipeline reads as
+    // "going back then re-doing the step" instead of a quick re-spin
+    // of the dice. Caller is responsible for passing the new state
+    // object exactly as syncState expects.
+    function snapToState(s) {
+      const myToken = ++token;
+      spokeLayer.selectAll("line.sp-spoke").interrupt();
+      spokeLayer.selectAll("line.sp-spoke").interrupt("orbit");
+      spokeLayer.selectAll("line.sp-spoke").interrupt("justFade");
+      bridgeLayer.selectAll("path.sp-bridge").interrupt();
+      bridgeLayer.selectAll("path.sp-bridge").interrupt("bridge");
+      bridgeLayer.selectAll("path.sp-bridge").interrupt("bridgeFan");
+      bridgeLayer.selectAll("path.sp-bridge").interrupt("rewindBridge");
+      bridgeLayer.selectAll("path.sp-bridge").interrupt("colorize");
+      placedLayer.selectAll("path.sp-placed-edge").interrupt("fan");
+      clearPhaseTimers();
+      if (lockTimer) { clearTimeout(lockTimer); lockTimer = null; }
+      animating = false;
+      onLockChange(false);
+      clearActiveDimPick();
+      onActiveChange(false, null);
+      state = s;
+      lastKey = s.just ? (s.just.u + "/" + s.just.v + "@" + (s.justSeq || "")) : "";
+      lastSeq = s.justSeq;
+      recompute();
+      render(false);
+      // myToken used to keep interface symmetric with syncState; no
+      // pending callbacks reference it, but bumping ensures any
+      // late-firing rewind callback from a prior run no-ops.
+      void myToken;
+    }
     return {
       syncState: syncState,
+      snapToState: snapToState,
       rerender: function () { recompute(); render(false); },
       isAnimating: function () { return animating; },
     };

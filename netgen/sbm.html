@@ -262,8 +262,8 @@
       <button class="btn primary" id="g3-next" type="button">next &rarr;</button>
       <button class="btn" id="g3-reset" type="button">reset</button>
       <button class="btn" id="g3-skip" type="button">skip to end</button>
-      <button class="btn" id="g3-random" type="button">random</button>
-      <button class="btn" id="reroll-btn" type="button">random seed</button>
+      <button class="btn" id="g3-random" type="button">random step</button>
+      <button class="btn" id="reroll-btn" type="button">random all</button>
       <span class="step-label" id="g3-step-label">step <b id="g3-cur">0</b> / <span id="g3-total">0</span></span>
     </div>
   </div>
@@ -956,7 +956,8 @@ window.MathJax = {
     }
     function spokeColor(n) { return COL[CLUSTER_OF[n]] || COL.OUT; }
 
-    function render() {
+    function render(opts) {
+      opts = opts || {};
       viz.setEdges([]);
       const cfg = {};
       NODES.forEach(n => { cfg[n] = { count: TARGET_DEG[n] || 0, color: spokeColor(n) }; });
@@ -980,7 +981,12 @@ window.MathJax = {
           badColor: bad ? COL.edge_drop : null,
         };
       }
-      spokes.syncState({ byNode: cfg, placed, just, justSeq: stepIdx, bridgeColor });
+      const stateObj = { byNode: cfg, placed, just, justSeq: stepIdx, bridgeColor };
+      if (opts.snap && spokes.snapToState) {
+        spokes.snapToState(stateObj);
+      } else {
+        spokes.syncState(stateObj);
+      }
       syncButtons();
       syncStats();
       renderBudget();
@@ -1016,16 +1022,19 @@ window.MathJax = {
       const reset = document.getElementById("g3-reset");
       const skip = document.getElementById("g3-skip");
       const rand = document.getElementById("g3-random");
+      const randAll = document.getElementById("reroll-btn");
       const dis = lockOverride;
       if (prev)  prev.disabled  = dis || (stepIdx <= 0);
       if (reset) reset.disabled = dis || (stepIdx <= 0);
       if (next)  next.disabled  = dis || (stepIdx >= totalPairs);
       if (skip)  skip.disabled  = dis || (stepIdx >= totalPairs);
       if (rand) {
-        rand.disabled = dis;
-        rand.title = (stepIdx === 0 || stepIdx === totalPairs)
-          ? "fresh seed: re-trace from step 0"
-          : "mid-walk reroll: keep first " + stepIdx + " edges, regenerate the rest";
+        rand.disabled = dis || (stepIdx <= 0);
+        rand.title = "random step: redraw the pair at the current step (and re-walk forward from there)";
+      }
+      if (randAll) {
+        randAll.disabled = dis || (stepIdx <= 0);
+        randAll.title = "random all: redraw every pair from step 1 up to and including the current step";
       }
     }
 
@@ -1039,22 +1048,34 @@ window.MathJax = {
       if (stepIdx < totalPairs) { stepIdx++; render(); }
     });
     document.getElementById("g3-reset").addEventListener("click", () => {
-      stepIdx = 0; render();
+      stepIdx = 0; render({ snap: true });
     });
     document.getElementById("g3-skip").addEventListener("click", () => {
-      stepIdx = totalPairs; render();
+      stepIdx = totalPairs; render({ snap: true });
     });
+    // random step: redraw the pair at the CURRENT step (and re-walk
+    // the tail with a fresh seed), keeping every step before it
+    // intact. Snap-render — running the full rewind+forward pipeline
+    // for a same-step reroll reads as "back then redo", especially
+    // jarring at step 1 where there are no placed edges to anchor
+    // the difference. Disabled at stepIdx 0 (no active pair).
     document.getElementById("g3-random").addEventListener("click", () => {
-      reseedFrom(stepIdx);
-      if (stepIdx > totalPairs) stepIdx = totalPairs;
+      if (stepIdx <= 0) return;
+      const savedStep = stepIdx;
+      reseedFrom(stepIdx - 1);
+      stepIdx = Math.min(savedStep, totalPairs);
       render();
     });
+    // random all: redraw every step from 0 up to and including the
+    // current step. Position stays fixed; snap-render — the whole
+    // walk swaps to the new seed in one frame.
     document.getElementById("reroll-btn").addEventListener("click", () => {
-      triggerReroll();
+      const keep = stepIdx;
       currentSeed += 1;
       freshTrace(currentSeed);
-      stepIdx = 0;
-      render();
+      stepIdx = Math.min(keep, totalPairs);
+      triggerReroll();
+      render({ snap: true });
     });
   })();
 
