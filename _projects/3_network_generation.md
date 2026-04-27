@@ -19,9 +19,11 @@ repository:
   - vltanh/network-generation
 ---
 
-Given an empirically observed network $$G$$ (undirected, unweighted, and simple graph) together with a community structure $$\mathcal{C}$$ on its nodes (either ground-truth or produced by a community-detection algorithm), we want to sample a family of networks that are *statistically similar* to $$G$$ and $$\mathcal{C}$$ without being identical. What "statistically similar" means differs from one generator to the next: each freezes a different summary of $$G$$ and $$\mathcal{C}$$, and randomises the rest.
+Given a network $$G$$ (undirected, unweighted, simple) with a community structure $$\mathcal{C}$$ on its nodes, we want to sample a family of networks that are *statistically similar* to $$G$$ and $$\mathcal{C}$$ without being identical. $$\mathcal{C}$$ can be ground-truth or produced by a community-detection algorithm; the generator does not care which. What "statistically similar" means differs from one generator to the next: each freezes a different summary of $$G$$ and $$\mathcal{C}$$, and randomises the rest.
 
-This project wraps seven such generators under a single two-stage pipeline: one stage extracts a small statistical profile from the input, the other consumes the profile and samples a synthetic output. The pipeline is intentionally decoupled, so the same profile can feed different generators, and the same generator can be pointed at different profiles.
+Scoring a community-detection algorithm requires networks whose answer can be checked. An empirical network gives only one labelling, which may itself be wrong, and a single network is a sample of one. Synthetics fix that: each generator emits a network and its ground-truth clustering together, across as many seeds, sizes, and noise levels as the test demands.
+
+This project wraps seven such generators under a single pipeline that is shared across all of them: one stage profiles the input to extract the parameters the generator needs, the next consumes that profile and samples a synthetic output, and an optional post-processing tail aligns the output back to the input. The stages are decoupled, so the same profile can feed different generators, and the same generator can be pointed at different profiles.
 
 <div class="row justify-content-center">
   <div class="col-sm-12 mt-3 mt-md-0">
@@ -35,21 +37,33 @@ This project wraps seven such generators under a single two-stage pipeline: one 
 
 Each generator has its own page: a vertical scroll that starts with the question the generator tries to answer, meets the shared input, walks through the stages one widget at a time, and ends with a plain note on what is preserved and what drifts.
 
-**Block-model-based generators.** Central objects: the cluster assignment $$\mathcal{C}$$, the block-to-block edge-count matrix, and (as the variants here all use the degree-corrected SBM) the per-node degree sequence. Variants add further structural constraints (per-cluster edge connectivity) on top.
+Two labels recur across the pages: a node is either inside a non-trivial community or standing alone, and generators treat the two cases differently.
+- **clustered**: node that belongs to a community of size $$\geq 2$$.
+- **outlier**: node that is unclustered, or the sole member of a singleton community.
 
-- [sbm](/netgen/sbm.html): the degree-corrected variant of the classic SBM. Keeps the cluster assignment $$\mathcal{C}$$, the block-to-block edge counts, and the per-node degree sequence; the rest is random. The baseline the other block-model variants build on.
-- [ec-sbm-v1](/netgen/ec-sbm-v1.html): SBM with an edge-connectivity guarantee: each output cluster is at least as edge-connected as its input counterpart, delivered by stitching a hand-built $$k$$-edge-connected core into each cluster before sampling. Outliers are treated as singleton clusters, which effectively replicates the edges between them; a naive greedy matcher fills any residual degree deficit.
-- [ec-sbm-v2](/netgen/ec-sbm-v2.html): same edge-connectivity guarantee as v1, with two changes. Treating outliers as singleton clusters, as v1 does, can accidentally regenerate community-like structure among them; v2 folds all outliers into a single block instead. Residual accounting is cleaner too: one SBM call, a block-preserving rewire, and a hybrid degree-matching pass.
+**Block-model generators.** Central objects: the cluster assignment $$\mathcal{C}$$, the block-to-block edge-count matrix, and the per-node degree sequence (every variant here uses the degree-corrected SBM). Variants add further structural constraints (per-cluster edge connectivity) on top.
 
-**Mixing-parameter-based generators.** Central object: a single scalar setting the proportion of edges that cross cluster boundaries. Variants differ in what drives the degrees and cluster sizes.
+- [sbm](/netgen/sbm.html): the degree-corrected variant of the classic SBM. Keeps the cluster assignment, the block-to-block edge counts, and the per-node degree sequence; the rest is random. The baseline the other block-model variants build on.
+- [ec-sbm-v1](/netgen/ec-sbm-v1.html): SBM with an edge-connectivity guarantee: a hand-built $$k$$-edge-connected core is stitched into each cluster before sampling, so each output cluster ends up at least as edge-connected as its input counterpart. Outliers are treated as singleton clusters, which replicates the edges between them; a naive greedy matcher fills any residual degree deficit.
+- [ec-sbm-v2](/netgen/ec-sbm-v2.html): same edge-connectivity guarantee as v1, with two changes. Treating outliers as singleton clusters can accidentally regenerate community-like structure among them; v2 folds all outliers into a single block instead. Residual accounting is simpler too: one SBM call, a block-preserving rewire, and a hybrid degree-matching pass.
 
-- [lfr](/netgen/lfr.html): fits power laws to the degree distribution and the cluster sizes, resamples both from scratch, and discards the original. Mixing is the mean of a per-node fraction $$\mu$$; the long-standing community-detection benchmark.
+**Mixing-parameter generators.** Central object: a single scalar setting the fraction of edges that cross cluster boundaries. Variants differ in what drives the degrees and cluster sizes (resampled from a power law, or taken as given).
+
+- [lfr](/netgen/lfr.html): fits power laws to the degree distribution and the cluster sizes, resamples both from scratch, and discards the original. Mixing is the mean of a per-node fraction $$\mu$$. The long-standing community-detection benchmark.
 - [abcd](/netgen/abcd.html): a faster, more tractable alternative to LFR. Takes the degree sequence and cluster sizes as given; a single global mixing parameter $$\xi$$ sets the proportion of edges that cross cluster boundaries.
-- [abcd+o](/netgen/abcd+o.html): ABCD with an explicit outlier block. Outliers connect only outward and never to each other.
+- [abcd+o](/netgen/abcd+o.html): ABCD with an explicit outlier block. The sampler picks the outlier set at random; outlier-outlier edges are not expected.
 
 **Geometric generators.** Nodes placed in a latent geometric space; edges drawn from proximity. The only family here where clustering coefficient is a design goal rather than a side effect.
 
 - [npso](/netgen/npso.html): embeds nodes on a hyperbolic disk and connects pairs that lie close in the geometry; a temperature knob trades clustering coefficient against randomness.
+
+## Pipeline
+
+Every generator runs the same three stages.
+
+1. **Profile.** Read $$G$$ and $$\mathcal{C}$$, extract only the summary the generator needs (block edge counts, degree sequence, mixing parameter, power-law fits, etc.), and write it out as the gen stage's only input.
+2. **Generate.** Consume the profile and sample a fresh graph. This stage runs standalone and never reads the original network.
+3. **Post-process.** Up to three optional steps. *Match-degree* rewires the generated edges so the output degree sequence aligns to the input (see the [degree-matcher comparison](/netgen/matcher.html)). *Simplify* collapses parallel edges and drops self-loops. *Singleton drop* removes size-1 clusters and relabels the lone inhabitant as an outlier.
 
 ## Reproducibility
 
