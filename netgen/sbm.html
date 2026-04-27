@@ -253,10 +253,10 @@
   </div>
   <div class="graph" id="g3">
     <div class="graph-chrome">
-      <span>stub-matching, step by step &middot; multigraph</span>
+      <span>multigraph</span>
       <span class="right" id="g3-stats">&middot;</span>
     </div>
-    <div class="graph-canvas" id="g3-cy"></div>
+    <div class="graph-canvas" id="g3-cy" style="position:relative"></div>
     <div class="widget-row" style="padding:.9rem 0 0;border-top:1px dashed rgba(139,117,65,.45)">
       <button class="btn" id="g3-prev" type="button">&larr; back</button>
       <button class="btn primary" id="g3-next" type="button">next &rarr;</button>
@@ -833,6 +833,73 @@ window.MathJax = {
     function setRandLock(locked) { lockOverride = locked; syncButtons(); }
     const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setRandLock });
 
+    // Top-right collapsible budget matrix: each cell is the remaining
+    // budget for block-pair (r, s). Decrements as pairs land. Helps
+    // explain why the kernel switches off intra-block before all
+    // cluster stubs are consumed.
+    const budgetWrap = document.createElement("div");
+    budgetWrap.id = "g3-budget";
+    budgetWrap.style.cssText = "position:absolute;top:.5rem;right:.5rem;z-index:5;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.78rem;background:rgba(243,236,215,.94);border:1px solid var(--paper-3);border-radius:3px;padding:.4rem .55rem;color:var(--paper-2);";
+    budgetWrap.innerHTML = '<button id="g3-budget-toggle" type="button" style="display:block;margin:0 0 .3rem auto;background:transparent;border:none;color:var(--paper-2);cursor:pointer;font:inherit;font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;padding:0">half-edge budget <span id="g3-budget-arrow">&#9662;</span></button><div id="g3-budget-body"><table id="g3-budget-tbl" style="border-collapse:collapse"></table><div style="margin-top:.3rem;font-size:.65rem;opacity:.7;line-height:1.3;max-width:11rem">cell = remaining (r,s) half-edges. intra (r=s) pulls 2 per pair, inter pulls 1. dim = used up. mint = current pair.</div></div>';
+    document.getElementById("g3-cy").appendChild(budgetWrap);
+    document.getElementById("g3-budget-toggle").addEventListener("click", function () {
+      const body = document.getElementById("g3-budget-body");
+      const arrow = document.getElementById("g3-budget-arrow");
+      const open = body.style.display !== "none";
+      body.style.display = open ? "none" : "block";
+      arrow.innerHTML = open ? "&#9656;" : "&#9662;";
+    });
+    // The matrix tracks graph-tool's mrs (stub-count) convention: each
+    // urn r holds Σ_s mrs[r][s] half-edges. An intra (r,r) pair pulls
+    // 2 stubs from urn r, an inter (r,s) pair pulls 1 from urn r and
+    // 1 from urn s. So the cell decrements by 2 for diagonal pairs
+    // and 1 for off-diagonal — same accounting graph-tool does on the
+    // urns under the hood.
+    function totalForPair(r, s) {
+      return EDGE_COUNTS[r][s] || 0;
+    }
+    function decFor(r, s) {
+      return r === s ? 2 : 1;
+    }
+    function renderBudget() {
+      const tbl = document.getElementById("g3-budget-tbl");
+      if (!tbl) return;
+      const remaining = {};
+      blockPairs.forEach(function (bp) { remaining[bp[0] + "|" + bp[1]] = totalForPair(bp[0], bp[1]); });
+      for (let i = 0; i < stepIdx; i++) {
+        const t = trace[i];
+        if (!t || !t.bp) continue;
+        const k = t.bp[0] + "|" + t.bp[1];
+        if (remaining[k] != null) remaining[k] -= decFor(t.bp[0], t.bp[1]);
+      }
+      const curBp = stepIdx > 0 && trace[stepIdx - 1] && trace[stepIdx - 1].bp
+        ? trace[stepIdx - 1].bp[0] + "|" + trace[stepIdx - 1].bp[1] : null;
+      let html = "<thead><tr><th></th>";
+      for (let s = 0; s < NUM_BLOCKS; s++) {
+        html += '<th style="font-weight:400;padding:2px 6px;color:var(--paper-3);font-size:.7rem">' + BLOCK_NAMES[s] + '</th>';
+      }
+      html += "</tr></thead><tbody>";
+      for (let r = 0; r < NUM_BLOCKS; r++) {
+        html += '<tr><th style="font-weight:400;padding:2px 6px;color:var(--paper-3);font-size:.7rem;text-align:right">' + BLOCK_NAMES[r] + '</th>';
+        for (let s = 0; s < NUM_BLOCKS; s++) {
+          if (s < r) {
+            html += '<td style="padding:2px 6px;color:var(--paper-4);text-align:center">·</td>';
+            continue;
+          }
+          const k = r + "|" + s;
+          const rem = remaining[k] || 0;
+          const total = totalForPair(r, s);
+          let style = "padding:2px 6px;text-align:center;border:1px solid rgba(139,117,65,.3);min-width:2.4rem;font-variant-numeric:tabular-nums";
+          if (rem === 0) style += ";opacity:.35";
+          if (k === curBp) style += ";background:var(--mint);color:var(--ink)";
+          html += '<td style="' + style + '" title="total ' + total + '">' + rem + '</td>';
+        }
+        html += "</tr>";
+      }
+      html += "</tbody>";
+      tbl.innerHTML = html;
+    }
+
     const blockPairs = [];
     for (let r = 0; r < NUM_BLOCKS; r++)
       for (let s = r; s < NUM_BLOCKS; s++) blockPairs.push([r, s]);
@@ -881,6 +948,12 @@ window.MathJax = {
       if (t.loop || t.multi) return COL.edge_drop;
       return t.intra ? (COL.edge_intra[blockOf(t.u)] || COL.edge_stage2) : COL.edge_inter;
     }
+    // The "good" colour of a pair, used during the animation. After
+    // the bridge settles, the layer recolors to badColor on its own
+    // when bad is true.
+    function pairGoodColor(t) {
+      return t.intra ? (COL.edge_intra[blockOf(t.u)] || COL.edge_stage2) : COL.edge_inter;
+    }
     function spokeColor(n) { return COL[CLUSTER_OF[n]] || COL.OUT; }
 
     function render() {
@@ -899,15 +972,18 @@ window.MathJax = {
       let bridgeColor = COL.edge_inter;
       if (stepIdx > 0) {
         const t = trace[stepIdx - 1];
-        bridgeColor = pairColor(t);
+        const bad = t.loop || t.multi;
+        bridgeColor = pairGoodColor(t);
         just = {
           u: t.u, v: t.v,
-          color: bridgeColor, bad: t.loop || t.multi,
+          color: bridgeColor, bad,
+          badColor: bad ? COL.edge_drop : null,
         };
       }
       spokes.syncState({ byNode: cfg, placed, just, justSeq: stepIdx, bridgeColor });
       syncButtons();
       syncStats();
+      renderBudget();
     }
 
     function syncStats() {
@@ -920,13 +996,13 @@ window.MathJax = {
         if (trace[i].multi) nMulti++;
       }
       if (statsEl) {
-        let chrome = stepIdx + "/" + totalPairs + " edges · "
-          + nLoops + " self-loops · " + nMulti + " parallels";
+        let chrome = stepIdx + "/" + totalPairs;
+        if (nLoops) chrome += " · " + nLoops + "L";
+        if (nMulti) chrome += " · " + nMulti + "P";
         if (stepIdx > 0) {
           const t = trace[stepIdx - 1];
           const r = t.bp[0], s = t.bp[1];
-          chrome += " · just placed: pair (" + BLOCK_NAMES[r] + ", " + BLOCK_NAMES[s] + ") "
-            + t.u + " ↔ " + t.v;
+          chrome += " · (" + BLOCK_NAMES[r] + "," + BLOCK_NAMES[s] + ") " + t.u + "↔" + t.v;
         }
         statsEl.textContent = chrome;
       }
