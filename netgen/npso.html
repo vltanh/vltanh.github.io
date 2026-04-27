@@ -824,13 +824,7 @@ window.MathJax = {
     const r_hyp_rank = SHARED.POLAR[rank - 1].r_hyp;
     SHARED.POLAR[rank - 1] = { ...SHARED.POLAR[rank - 1], theta: drawTheta };
     SHARED.ASSIGNED[rank - 1] = CLUSTER_DEFS[k_chosen].id;
-    function hypD(r1, r2, dth) {
-      let d = dth;
-      while (d > Math.PI)  d -= 2 * Math.PI;
-      while (d < -Math.PI) d += 2 * Math.PI;
-      const arg = Math.cosh(r1) * Math.cosh(r2) - Math.sinh(r1) * Math.sinh(r2) * Math.cos(d);
-      return arg >= 1 ? Math.acosh(arg) : 0;
-    }
+    const hypD = NPSOKernel.hyperbolicDist;
     for (let i = 1; i < rank; i++) {
       const pi = SHARED.POLAR[i - 1];
       SHARED.DISTS[`${i}-${rank}`] = hypD(pi.r_hyp, r_hyp_rank, pi.theta - drawTheta);
@@ -862,13 +856,7 @@ window.MathJax = {
       SHARED.POLAR[r - 1] = { ...SHARED.POLAR[r - 1], theta: drawTheta };
       SHARED.ASSIGNED[r - 1] = CLUSTER_DEFS[k_chosen].id;
     }
-    function hypD(r1, r2, dth) {
-      let d = dth;
-      while (d > Math.PI)  d -= 2 * Math.PI;
-      while (d < -Math.PI) d += 2 * Math.PI;
-      const arg = Math.cosh(r1) * Math.cosh(r2) - Math.sinh(r1) * Math.sinh(r2) * Math.cos(d);
-      return arg >= 1 ? Math.acosh(arg) : 0;
-    }
+    const hypD = NPSOKernel.hyperbolicDist;
     // Pairs inside the walk: every ordered (i, j) with i < j ≤ uptoRank.
     for (let i = 1; i < uptoRank; i++) {
       const pi = SHARED.POLAR[i - 1];
@@ -1251,16 +1239,11 @@ window.MathJax = {
   })();
 
   // ── Shared Fermi-Dirac helpers (used by hover, geodesic, heatmap) ──
+  // FD_R_at returns NaN at the (0, 1) T boundaries — kernel returns
+  // Infinity in that case; both fail the isFinite() guards downstream.
   function FD_R_at(t, T) {
-    const s = Math.sin(Math.PI * T);
-    if (s <= 0 || t < 2) return NaN;
-    const lnT = Math.log(t);
-    if (Math.abs(BETA - 1) < 1e-9) {
-      return 2 * lnT - 2 * Math.log((2 * T * lnT) / (s * M_PROF));
-    }
-    const num = 2 * T * (1 - Math.exp(-(1 - BETA) * lnT));
-    const den = s * M_PROF * (1 - BETA);
-    return 2 * lnT - 2 * Math.log(num / den);
+    const R = NPSOKernel.R_of_T_at(t, T, M_PROF, GAMMA);
+    return Number.isFinite(R) ? R : NaN;
   }
   // 0-floored radial scaling (lets boundaries pass through origin).
   function FD_rToDisk(r_hyp) {
@@ -1443,7 +1426,7 @@ window.MathJax = {
       // biggest hub), not the original node id. Status follows that
       // convention so the readout matches the visible label.
       const t = rankOf[id] + 1;
-      const Rstr = (R == null || !isFinite(R)) ? "—"
+      const Rstr = !isFinite(R) ? "—"
                   : (R <= 0 ? "≤ 0 (no ball)" : R.toFixed(2));
       infoEl.textContent = `node ${t} · R = ${Rstr}`;
     }
@@ -1560,7 +1543,7 @@ window.MathJax = {
       const R = FD_R_at(t1, T);
       const Rstr = t1 < 2
         ? "undefined"
-        : (R == null || !isFinite(R)) ? "—" : (R <= 0 ? "≤ 0" : R.toFixed(2));
+        : !isFinite(R) ? "—" : (R <= 0 ? "≤ 0" : R.toFixed(2));
       rSource.textContent = `source ${t1} · R = ${Rstr}`;
       if (secondId == null) {
         rTarget.innerHTML = "";
@@ -1679,7 +1662,6 @@ window.MathJax = {
 
     const slider = document.getElementById("heat-T");
     const sliderOut = document.getElementById("heat-T-val");
-    const infoEl = document.getElementById("heat-info");
     const heatToggle = document.getElementById("heat-show");
     function currentT() { return parseFloat(slider.value); }
     function heatOn() { return heatToggle ? heatToggle.checked : true; }
@@ -1761,13 +1743,7 @@ window.MathJax = {
     function rHypAt(rank, tau) {
       return 2 * BETA * Math.log(rank) + 2 * (1 - BETA) * Math.log(tau);
     }
-    function hypDist(r1, r2, dTheta) {
-      let d = dTheta;
-      while (d > Math.PI)  d -= 2 * Math.PI;
-      while (d < -Math.PI) d += 2 * Math.PI;
-      const arg = Math.cosh(r1) * Math.cosh(r2) - Math.sinh(r1) * Math.sinh(r2) * Math.cos(d);
-      return arg >= 1 ? Math.acosh(arg) : 0;
-    }
+    const hypDist = NPSOKernel.hyperbolicDist;
     function currentTau() {
       return SELECTED_ID == null ? N_NODES : (rankOf[SELECTED_ID] + 1);
     }
@@ -1871,8 +1847,7 @@ window.MathJax = {
              .attr("opacity", heatOn() ? 0.55 : 0);
         contourLayer.selectAll("*").remove();
         haloLayer.selectAll("*").remove();
-        infoEl.textContent = "";
-        rSource.textContent = "click any node to set source";
+          rSource.textContent = "click any node to set source";
         rTarget.innerHTML = "";
         rHint.textContent = "";
         return;
@@ -1930,9 +1905,8 @@ window.MathJax = {
         .attr("opacity", 0.95);
       const Rstr = t_u < 2
         ? "undefined"
-        : (R == null || !isFinite(R)) ? "—"
+        : !isFinite(R) ? "—"
         : (R <= 0 ? "≤ 0" : R.toFixed(2));
-      infoEl.textContent = "";
       rSource.textContent = `source ${t_u} · R = ${Rstr}`;
 
       // Readout below the disk: target/p once a target is picked,
@@ -2070,14 +2044,10 @@ window.MathJax = {
         // here, so compute h on the fly.
         const r_hyp_src_now = 2 * Math.log(Math.max(1, t_u));
         const theta_src_raw = SHARED.POLAR[t_u - 1].theta;
-        const a_src = Math.cosh(r_hyp_src_now), s_src = Math.sinh(r_hyp_src_now);
+        const log_t = Math.log(t_u);
         function hAtTau(rj) {
-          const r_other = 2 * BETA * Math.log(rj) + 2 * (1 - BETA) * Math.log(t_u);
-          let dth = theta_src_raw - SHARED.POLAR[rj - 1].theta;
-          while (dth > Math.PI)  dth -= 2 * Math.PI;
-          while (dth < -Math.PI) dth += 2 * Math.PI;
-          const arg = a_src * Math.cosh(r_other) - s_src * Math.sinh(r_other) * Math.cos(dth);
-          return arg >= 1 ? Math.acosh(arg) : 0;
+          const r_other = 2 * BETA * Math.log(rj) + 2 * (1 - BETA) * log_t;
+          return NPSOKernel.hyperbolicDist(r_hyp_src_now, r_other, theta_src_raw - SHARED.POLAR[rj - 1].theta);
         }
         if (rank === t_u) {
           // Arrival: show r_i, θ_i, R, and p(i, j) for every predecessor
@@ -2106,11 +2076,11 @@ window.MathJax = {
           const TOP_K = 8;
           const shown = ps.slice(0, TOP_K);
           const tail = ps.length > TOP_K ? `<div class="dim">… ${ps.length - TOP_K} more</div>` : "";
+          // Outside the bootstrap (t > m+1), there are always ≥ 2
+          // predecessors, so the picks list is never empty.
           const list = isAutoAll
             ? '<div class="dim">all earlier ranks placed (K<sub>m+1</sub> bootstrap)</div>'
-            : (shown.length
-              ? shown.map(x => '<div>p(t=' + t_u + ', j=' + x.rank + ') <b>' + x.p_norm.toFixed(3) + '</b></div>').join("") + tail
-              : '<div class="dim">no predecessors</div>');
+            : shown.map(x => '<div>p(t=' + t_u + ', j=' + x.rank + ') <b>' + x.p_norm.toFixed(3) + '</b></div>').join("") + tail;
           tip.innerHTML =
             '<div class="hd">arrival &middot; rank ' + rank + '</div>' +
             '<div>r<sub>i</sub>(t = ' + t_u + ') <b>' + r_hyp.toFixed(3) + '</b></div>' +
@@ -2156,34 +2126,17 @@ window.MathJax = {
     const totEl     = document.getElementById("impl3-total");
     document.getElementById("target-cc").textContent = TARGET_CC.toFixed(3);
 
-    // Steps 0..N-1 = arrival walk; step N = "settled" terminal state
-    // where every arrival is done and "random" rerolls the whole graph.
-    const FINAL_STEP = sorted.length;
     const LAST_ARRIVAL = sorted.length - 1;
     totEl.textContent = String(N_NODES);
 
     let localEmb = SHARED;
     let edgeNonce = 0;
-    let step = FINAL_STEP;          // start at the settled terminal state
+    let step = 0;
     let arrivals = [];
-    // Per-arrival pick snapshot. Set when a step is committed (NEXT past
-    // it). Read at render time when k < step (mid-walk past arrivals stay
-    // frozen at the T they were committed under). Cleared when step
-    // moves backward across an arrival, on RESET, and on entering
-    // FINAL_STEP (where T-scrub is allowed to randomize everything).
-    const committed = {};
 
-    function R_of_T_at(t, T) {
-      return NPSOKernel.R_of_T_at(t, T, M_PROF, GAMMA);
-    }
-
-    // Delegate to NPSOKernel.computeArrival so distances are evaluated at
-    // arrival time t = i+1 (matching MATLAB's per-iter `coords` update at
-    // nPSO_model.m:129). The previous page-local copy read emb.DISTS, which
-    // is the final-state τ=N matrix and gave systematically larger h, so
-    // the walker disagreed with the kernel + the canonical sampler.
-    // Field-name shim: the kernel uses {newNode, picks:[{node,p}]}; the
-    // renderer below already speaks {newRank, picks:[{rank,p}]}.
+    // Field-name shim around NPSOKernel.computeArrival so distances are
+    // evaluated at arrival time t = i+1 (matching MATLAB's per-iter
+    // `coords` update at nPSO_model.m:129).
     function computeArrival(i, T, emb) {
       const k = NPSOKernel.computeArrival(i, T, emb, M_PROF, GAMMA);
       return {
@@ -2196,49 +2149,28 @@ window.MathJax = {
 
     function recomputeAll() {
       const T = parseFloat(slider.value);
-      // Mid-walk: arrivals strictly before the current step stay locked at
-      // their committed value (frozen at the T at which user moved past
-      // them). The current step + everything beyond re-evaluates at the
-      // current T. At FINAL_STEP, every arrival re-evaluates (T scrub
-      // randomizes the whole graph there).
-      arrivals = sorted.map((_, i) => {
-        if (step !== FINAL_STEP && i < step && committed[i] != null) {
-          return committed[i];
-        }
-        return computeArrival(i, T, localEmb);
-      });
+      arrivals = sorted.map((_, i) => computeArrival(i, T, localEmb));
     }
 
     function render() {
       const T = parseFloat(slider.value);
       tval.textContent = T.toFixed(3);
-      const startBtn = document.getElementById("impl3-start");
-      const prevBtn  = document.getElementById("impl3-prev");
-      const nextBtn  = document.getElementById("impl3-next");
-      const endBtn   = document.getElementById("impl3-end");
-      const stepRBtn = document.getElementById("impl3-reroll-step");
-      const allRBtn  = document.getElementById("impl3-reroll-all");
       const atStart = (step <= 0), atEnd = (step >= LAST_ARRIVAL);
-      if (startBtn) startBtn.disabled = atStart;
-      if (prevBtn)  prevBtn.disabled  = atStart;
-      if (nextBtn)  nextBtn.disabled  = atEnd;
-      if (endBtn)   endBtn.disabled   = atEnd;
+      document.getElementById("impl3-start").disabled = atStart;
+      document.getElementById("impl3-prev") .disabled = atStart;
+      document.getElementById("impl3-next") .disabled = atEnd;
+      document.getElementById("impl3-end")  .disabled = atEnd;
       // Both rerolls are no-ops during the K_{m+1} bootstrap: every
       // arrival up to rank m+1 (step ≤ m) goes through autoAll, which
-      // never reads U_NODE. Random becomes meaningful only at step m+1
-      // (rank m+2), the first weighted-pick arrival.
-      if (stepRBtn) stepRBtn.disabled = (step <= M_PROF);
-      if (allRBtn)  allRBtn.disabled  = (step <= M_PROF);
-      // Build cumulative edge set. Edges added at step=k highlighted;
-      // older edges rendered faint-azure. At FINAL_STEP no arrival is
-      // highlighted: every edge renders as settled.
+      // never reads U_NODE.
+      const inBootstrap = (step <= M_PROF);
+      document.getElementById("impl3-reroll-step").disabled = inBootstrap;
+      document.getElementById("impl3-reroll-all") .disabled = inBootstrap;
       const edges = [];
       const arrivedSet = new Set();
-      const walkUpTo = Math.min(step, LAST_ARRIVAL);
-      const highlightArrival = (step === FINAL_STEP) ? -1 : step;
-      for (let i = 0; i <= walkUpTo; i++) {
+      for (let i = 0; i <= step; i++) {
         arrivedSet.add(sorted[i]);
-        const isLast = (i === highlightArrival);
+        const isLast = (i === step);
         // arrivals[i].placed entries are [rank_a, rank_b, p]; convert to
         // page ids for NETGEN.VIZ (whose node identifiers are page ids).
         arrivals[i].placed.forEach((e, k) => {
@@ -2266,16 +2198,12 @@ window.MathJax = {
       if (!isAutoAllStep && isFinite(Rstep)) {
         const r_hyp_src = 2 * Math.log(tauStep);
         const theta_src = SHARED.POLAR[tauStep - 1].theta;
-        const a_src = Math.cosh(r_hyp_src), s_src = Math.sinh(r_hyp_src);
+        const log_tau = Math.log(tauStep);
         weights = new Array(tauStep);
         let sum = 0;
         for (let j = 1; j < tauStep; j++) {
-          const r_other = 2 * BETA * Math.log(j) + 2 * (1 - BETA) * Math.log(tauStep);
-          let dth = theta_src - SHARED.POLAR[j - 1].theta;
-          while (dth > Math.PI)  dth -= 2 * Math.PI;
-          while (dth < -Math.PI) dth += 2 * Math.PI;
-          const arg = a_src * Math.cosh(r_other) - s_src * Math.sinh(r_other) * Math.cos(dth);
-          const h = arg >= 1 ? Math.acosh(arg) : 0;
+          const r_other = 2 * BETA * Math.log(j) + 2 * (1 - BETA) * log_tau;
+          const h = NPSOKernel.hyperbolicDist(r_hyp_src, r_other, theta_src - SHARED.POLAR[j - 1].theta);
           weights[j] = 1 / (1 + Math.exp((h - Rstep) / (2 * T)));
           sum += weights[j];
         }
@@ -2313,26 +2241,20 @@ window.MathJax = {
       });
       curEl.textContent = String(step + 1);
 
-      // Caption describes the current arrival, or the settled graph at FINAL_STEP.
-      // Node references in captions use the *rank* (1..N), the same label
-      // shown on the disk, so the two readings line up.
+      // Caption refers to nodes by rank (the label shown on the disk).
       const m = M_PROF;
+      const a = arrivals[step];
+      const t = step + 1;
+      const V = step;
       let txt;
-      if (step === FINAL_STEP) {
-        txt = `<span class="st">all arrivals placed</span> &middot; graph is settled. <em>random</em> here resamples every arrival's picks at once for a fresh full draw.`;
+      if (step === 0) {
+        txt = `<span class="st">arrival \\(t=1\\)</span> &middot; node ${a.newRank} placed (the biggest hub). No predecessors, so \\(S_1 = \\emptyset\\).`;
+      } else if (a.autoAll) {
+        const list = a.picks.map(x => x.rank).join(", ");
+        txt = `<span class="st">arrival \\(t=${t}\\)</span> &middot; node ${a.newRank} placed. \\(|V_t|=${V} \\leq m=${m}\\), so connect to <em>all</em> ${V} predecessor${V === 1 ? "" : "s"}: \\(S_t = \\{${list}\\}\\).`;
       } else {
-        const a = arrivals[step];
-        const t = step + 1;
-        const V = step;
-        if (step === 0) {
-          txt = `<span class="st">arrival \\(t=1\\)</span> &middot; node ${a.newRank} placed (the biggest hub). No predecessors, so \\(S_1 = \\emptyset\\).`;
-        } else if (a.autoAll) {
-          const list = a.picks.map(x => x.rank).join(", ");
-          txt = `<span class="st">arrival \\(t=${t}\\)</span> &middot; node ${a.newRank} placed. \\(|V_t|=${V} \\leq m=${m}\\), so connect to <em>all</em> ${V} predecessor${V === 1 ? "" : "s"}: \\(S_t = \\{${list}\\}\\).`;
-        } else {
-          const picks = a.picks.map(x => `${x.rank}&nbsp;(\\(p=${x.p.toFixed(3)}\\))`).join(", ");
-          txt = `<span class="st">arrival \\(t=${t}\\)</span> &middot; node ${a.newRank} placed. \\(|V_t|=${V} &gt; m=${m}\\); weighted pull picks \\(S_t\\) = {${picks}}.`;
-        }
+        const picks = a.picks.map(x => `${x.rank}&nbsp;(\\(p=${x.p.toFixed(3)}\\))`).join(", ");
+        txt = `<span class="st">arrival \\(t=${t}\\)</span> &middot; node ${a.newRank} placed. \\(|V_t|=${V} &gt; m=${m}\\); weighted pull picks \\(S_t\\) = {${picks}}.`;
       }
       descEl.innerHTML = txt;
       if (window.MathJax && window.MathJax.typesetPromise) {
@@ -2349,25 +2271,23 @@ window.MathJax = {
       diffEl.textContent  = cc != null ? Math.abs(cc - TARGET_CC).toFixed(3) : "…";
     }
 
-    // Reroll only the current arrival's uniforms (local to disk 3,
-    // does not propagate to SHARED → secant search untouched).
+    // Disk-3 rerolls mutate localEmb.U_NODE only. Decoupled from SHARED
+    // so the secant section's snapshot stays untouched.
     function rerollEdgesStep() {
-      const target = (step === FINAL_STEP) ? LAST_ARRIVAL : step;
-      if (target < 1 || target > LAST_ARRIVAL) return;
+      if (step < 1) return;
       edgeNonce += 1;
-      const U_NODE = (localEmb.U_NODE || SHARED.U_NODE).map(arr => arr.slice());
-      const rngEdge = d3.randomLcg(edgeNonce * 9973 + 17 + target * 31);
+      const U_NODE = localEmb.U_NODE.map(arr => arr.slice());
+      const rngEdge = d3.randomLcg(edgeNonce * 9973 + 17 + step * 31);
       const fresh = [];
       for (let c = 0; c < M_PROF; c++) fresh.push(rngEdge());
-      U_NODE[target] = fresh;
+      U_NODE[step] = fresh;
       localEmb = { ...localEmb, U_NODE };
       recomputeAll();
       render();
     }
-    // Reroll every arrival's uniforms (local to disk 3).
     function rerollEdgesAll() {
       edgeNonce += 1;
-      const U_NODE = (localEmb.U_NODE || SHARED.U_NODE).map(arr => arr.slice());
+      const U_NODE = localEmb.U_NODE.map(arr => arr.slice());
       const rngAll = d3.randomLcg(edgeNonce * 7919 + 41);
       for (let i = 1; i < U_NODE.length; i++) {
         const fresh = [];
@@ -2379,28 +2299,19 @@ window.MathJax = {
       render();
     }
 
-    function clearCommitted() {
-      for (const k of Object.keys(committed)) delete committed[k];
-    }
-
     slider.addEventListener("input", () => { recomputeAll(); render(); });
     document.getElementById("impl3-reroll-step").addEventListener("click", rerollEdgesStep);
     document.getElementById("impl3-reroll-all") .addEventListener("click", rerollEdgesAll);
-    // Sync to GLOBAL_TAU: step = (t === N) ? FINAL_STEP : t − 1.
-    // External t changes wipe the committed[] freeze (its T-snapshot
-    // semantics conflict with the global step model).
     document.getElementById("impl3-start").addEventListener("click", () => setGlobalTau(1));
     document.getElementById("impl3-prev") .addEventListener("click", () => setGlobalTau(GLOBAL_TAU - 1));
     document.getElementById("impl3-next") .addEventListener("click", () => setGlobalTau(GLOBAL_TAU + 1));
     document.getElementById("impl3-end")  .addEventListener("click", () => setGlobalTau(N_NODES));
     onTauChange((tau) => {
       step = Math.max(0, Math.min(LAST_ARRIVAL, tau - 1));
-      clearCommitted();
       recomputeAll();
       render();
     });
 
-    // Initial step from current GLOBAL_TAU.
     step = Math.max(0, Math.min(LAST_ARRIVAL, GLOBAL_TAU - 1));
     recomputeAll();
     render();
@@ -2408,9 +2319,6 @@ window.MathJax = {
     onEmbeddingReroll((emb) => {
       edgeNonce = 0;
       localEmb = emb;
-      // Fresh embedding invalidates every committed pick; the commits
-      // were tied to the old DISTS / U_NODE.
-      clearCommitted();
       viz.nodesData.forEach(n => {
         const nid = parseInt(n.id, 10);
         const p = emb.POS_POLAR[nid];
@@ -2578,13 +2486,8 @@ window.MathJax = {
         const T_k = 0.005 + 0.99 * (k / (GHOST_N - 1));
         const ccs = [];
         for (let s = 0; s < SAMPLES_PER_T; s++) {
-          const rngEdge = d3.randomLcg(k * 1009 + s * 31 + embedSeed * 97 + 5);
-          const U_NODE = [];
-          for (let i = 0; i < nodesAll.length; i++) {
-            const us = [];
-            for (let c = 0; c < M_PROF; c++) us.push(rngEdge());
-            U_NODE.push(us);
-          }
+          const seed = k * 1009 + s * 31 + embedSeed * 97 + 5;
+          const U_NODE = NPSOKernel.freshUniforms(N_NODES, M_PROF, seed);
           ccs.push(globalCC(edgesAtT(T_k, { ...emb, U_NODE })));
         }
         const mean = ccs.reduce((a, b) => a + b, 0) / ccs.length;
@@ -2816,16 +2719,7 @@ window.MathJax = {
     // so the geometry under all runs is identical; only the sampling
     // uniforms change.
     const ALT_RUNS = 4;
-    function freshUForAlt(seed) {
-      const rng = d3.randomLcg(seed);
-      const U = [];
-      for (let i = 0; i < N_NODES; i++) {
-        const us = [];
-        for (let c = 0; c < M_PROF; c++) us.push(rng());
-        U.push(us);
-      }
-      return U;
-    }
+    const freshUForAlt = (seed) => NPSOKernel.freshUniforms(N_NODES, M_PROF, seed);
     function renderAltRuns(altIters) {
       altRunsG.selectAll("*").remove();
       const line = d3.line().x(d => x(d.T)).y(d => y(d.cc));
