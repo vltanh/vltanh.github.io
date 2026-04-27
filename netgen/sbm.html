@@ -460,6 +460,53 @@ window.MathJax = {
   const blockOf = (n) => CLUSTER_OF[n];
   const blockIdx = (n) => BLOCK_NAMES.indexOf(blockOf(n));
 
+  // Click handler shared by every floating .gx-panel. Each panel ships
+  // <button id="<prefix>-toggle"> + <span id="<prefix>-arrow"> + <div id="<prefix>-body">,
+  // so one prefix is enough to wire it.
+  function bindPanelToggle(prefix) {
+    document.getElementById(prefix + "-toggle").addEventListener("click", function () {
+      const body = document.getElementById(prefix + "-body");
+      const arrow = document.getElementById(prefix + "-arrow");
+      const open = body.style.display !== "none";
+      body.style.display = open ? "none" : "block";
+      arrow.innerHTML = open ? "&#9656;" : "&#9662;";
+    });
+  }
+
+  // Hover focus shared by g-deg + g4: hovering a graph node or a bar
+  // row dims everything except the node, its incident edges, and its row.
+  function bindFocusLink(viz, gBars) {
+    function focusOn(id) {
+      const sid = String(id);
+      viz.eachNode(function (n) {
+        if (String(n.id) !== sid) viz.addNodeClass(n.id, "dim");
+      });
+      viz.eachEdge(function (e) {
+        const su = String(e.source.id || e.source);
+        const sv = String(e.target.id || e.target);
+        if (su !== sid && sv !== sid) viz.addEdgeClass(e.id, "dim");
+      });
+      gBars.selectAll(".deg-bar-row").each(function () {
+        if (this.getAttribute("data-id") !== sid) this.classList.add("dim");
+      });
+    }
+    function focusClear() {
+      viz.eachNode(function (n) { viz.removeNodeClass(n.id, "dim"); });
+      viz.eachEdge(function (e) { viz.removeEdgeClass(e.id, "dim"); });
+      gBars.selectAll(".deg-bar-row").each(function () { this.classList.remove("dim"); });
+    }
+    gBars.on("mouseover", function (ev) {
+      const el = ev.target.closest(".deg-bar-row");
+      if (el) focusOn(el.getAttribute("data-id"));
+    });
+    gBars.on("mouseout", function (ev) {
+      const el = ev.target.closest(".deg-bar-row");
+      if (el) focusClear();
+    });
+    viz.onNodeHoverEnter(function (d) { focusOn(d.id); });
+    viz.onNodeHoverLeave(function () { focusClear(); });
+  }
+
   // e_{rs}: kernel emits sparse triples; inflate into a dense NUM_BLOCKS x NUM_BLOCKS
   // matrix. Diagonal is doubled and off-diagonal counted once per direction by the
   // kernel's computeEdgeCount, so the matrix is symmetric and has graph-tool's
@@ -597,13 +644,7 @@ window.MathJax = {
     dsWrap.style.maxWidth = "20rem";
     dsWrap.innerHTML = '<button id="g-deg-toggle" class="gx-panel-toggle" type="button">degrees <span id="g-deg-arrow">&#9662;</span></button><div id="g-deg-body"><svg id="deg-seq" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet" style="display:block;width:14rem;height:auto"></svg></div>';
     document.getElementById("g-deg-cy").appendChild(dsWrap);
-    document.getElementById("g-deg-toggle").addEventListener("click", function () {
-      const body = document.getElementById("g-deg-body");
-      const arrow = document.getElementById("g-deg-arrow");
-      const open = body.style.display !== "none";
-      body.style.display = open ? "none" : "block";
-      arrow.innerHTML = open ? "&#9656;" : "&#9662;";
-    });
+    bindPanelToggle("g-deg");
 
     const svg = d3.select("#deg-seq");
     svg.selectAll("*").remove();
@@ -662,37 +703,7 @@ window.MathJax = {
         .text(TARGET_DEG[n]);
     });
 
-    function focusOn(id) {
-      const sid = String(id);
-      viz.eachNode(function (n) {
-        if (String(n.id) !== sid) viz.addNodeClass(n.id, "dim");
-      });
-      viz.eachEdge(function (e) {
-        const su = String(e.source.id || e.source);
-        const sv = String(e.target.id || e.target);
-        if (su !== sid && sv !== sid) viz.addEdgeClass(e.id, "dim");
-      });
-      gBars.selectAll(".deg-bar-row").each(function () {
-        if (this.getAttribute("data-id") !== sid) this.classList.add("dim");
-      });
-    }
-    function focusClear() {
-      viz.eachNode(function (n) { viz.removeNodeClass(n.id, "dim"); });
-      viz.eachEdge(function (e) { viz.removeEdgeClass(e.id, "dim"); });
-      gBars.selectAll(".deg-bar-row").each(function () { this.classList.remove("dim"); });
-    }
-    gBars.on("mouseover", function (ev) {
-      const el = ev.target.closest(".deg-bar-row");
-      if (!el) return;
-      focusOn(el.getAttribute("data-id"));
-    });
-    gBars.on("mouseout", function (ev) {
-      const el = ev.target.closest(".deg-bar-row");
-      if (!el) return;
-      focusClear();
-    });
-    viz.onNodeHoverEnter(function (d) { focusOn(d.id); });
-    viz.onNodeHoverLeave(function (d) { focusClear(); });
+    bindFocusLink(viz, gBars);
   })();
 
   // ── Profiling · edge count matrix + two-way edge↔cell interaction ──
@@ -711,13 +722,7 @@ window.MathJax = {
     matWrap.className = "gx-panel";
     matWrap.innerHTML = '<button id="g2-mat-toggle" class="gx-panel-toggle" type="button">edge count matrix <span id="g2-mat-arrow">&#9662;</span></button><div id="g2-mat-body"><div class="blockmat" id="g2-mat" style="max-width:18rem;font-size:.95rem"></div></div>';
     document.getElementById("g2-cy").appendChild(matWrap);
-    document.getElementById("g2-mat-toggle").addEventListener("click", function () {
-      const body = document.getElementById("g2-mat-body");
-      const arrow = document.getElementById("g2-mat-arrow");
-      const open = body.style.display !== "none";
-      body.style.display = open ? "none" : "block";
-      arrow.innerHTML = open ? "&#9656;" : "&#9662;";
-    });
+    bindPanelToggle("g2-mat");
 
     const gm = document.getElementById("g2-mat");
     gm.innerHTML = "";
@@ -828,13 +833,7 @@ window.MathJax = {
     budgetWrap.className = "gx-panel";
     budgetWrap.innerHTML = '<button id="g3-budget-toggle" class="gx-panel-toggle" type="button">half-edge budget <span id="g3-budget-arrow">&#9662;</span></button><div id="g3-budget-body"><table id="g3-budget-tbl" style="border-collapse:collapse"></table><div style="margin-top:.3rem;font-size:.65rem;opacity:.7;line-height:1.3;max-width:11rem">cell = remaining (r,s) half-edges. dim = used up. mint = current pair.</div></div>';
     document.getElementById("g3-cy").appendChild(budgetWrap);
-    document.getElementById("g3-budget-toggle").addEventListener("click", function () {
-      const body = document.getElementById("g3-budget-body");
-      const arrow = document.getElementById("g3-budget-arrow");
-      const open = body.style.display !== "none";
-      body.style.display = open ? "none" : "block";
-      arrow.innerHTML = open ? "&#9656;" : "&#9662;";
-    });
+    bindPanelToggle("g3-budget");
     // The matrix tracks graph-tool's mrs (stub-count) convention: each
     // urn r holds Σ_s mrs[r][s] half-edges. An intra (r,r) pair pulls
     // 2 stubs from urn r, an inter (r,s) pair pulls 1 from urn r and
@@ -1103,13 +1102,7 @@ window.MathJax = {
     degWrap.style.maxWidth = "20rem";
     degWrap.innerHTML = '<button id="g4-deg-toggle" class="gx-panel-toggle" type="button">degrees <span id="g4-deg-arrow">&#9662;</span></button><div id="g4-deg-body"><svg id="deg-bars" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet" style="display:block;width:14rem;height:auto"></svg></div>';
     document.getElementById("g4-cy").appendChild(degWrap);
-    document.getElementById("g4-deg-toggle").addEventListener("click", function () {
-      const body = document.getElementById("g4-deg-body");
-      const arrow = document.getElementById("g4-deg-arrow");
-      const open = body.style.display !== "none";
-      body.style.display = open ? "none" : "block";
-      arrow.innerHTML = open ? "&#9656;" : "&#9662;";
-    });
+    bindPanelToggle("g4-deg");
 
     function render(sample, deduped) {
       const edges = sample.all.map((e, i) => {
@@ -1242,39 +1235,7 @@ window.MathJax = {
     }
     renderDegBars(SAMPLE, deduped);
 
-    // Row ↔ node focus link. Hovering either side dims everything
-    // else: other nodes, non-incident edges, and every other row.
-    function focusOn(id) {
-      const sid = String(id);
-      viz.eachNode(function (n) {
-        if (String(n.id) !== sid) viz.addNodeClass(n.id, "dim");
-      });
-      viz.eachEdge(function (e) {
-        const su = String(e.source.id || e.source);
-        const sv = String(e.target.id || e.target);
-        if (su !== sid && sv !== sid) viz.addEdgeClass(e.id, "dim");
-      });
-      gBars.selectAll(".deg-bar-row").each(function () {
-        if (this.getAttribute("data-id") !== sid) this.classList.add("dim");
-      });
-    }
-    function focusClear() {
-      viz.eachNode(function (n) { viz.removeNodeClass(n.id, "dim"); });
-      viz.eachEdge(function (e) { viz.removeEdgeClass(e.id, "dim"); });
-      gBars.selectAll(".deg-bar-row").each(function () { this.classList.remove("dim"); });
-    }
-    gBars.on("mouseover", function (ev) {
-      const el = ev.target.closest(".deg-bar-row");
-      if (!el) return;
-      focusOn(el.getAttribute("data-id"));
-    });
-    gBars.on("mouseout", function (ev) {
-      const el = ev.target.closest(".deg-bar-row");
-      if (!el) return;
-      focusClear();
-    });
-    viz.onNodeHoverEnter(function (d) { focusOn(d.id); });
-    viz.onNodeHoverLeave(function (d) { focusClear(); });
+    bindFocusLink(viz, gBars);
   })();
 
   // ── Choice callout · singleton-mode e on the 20-node fixture ──
