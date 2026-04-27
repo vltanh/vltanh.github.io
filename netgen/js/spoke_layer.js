@@ -102,16 +102,23 @@ NETGEN.spokeLayer = (function () {
     }
 
     function assignPair(p, isJust) {
+      // Slot overrides: caller may pin slotU / slotV (e.g. SBM picks
+      // exact stub indices via kernel trace). When set, skip greedy
+      // partner-aim and consume that exact slot.
       if (p.u === p.v) {
         const a = assigned[p.u];
         if (!a) return;
-        const free = freeSlots(p.u);
-        if (free.length < 2) return;
-        const i1 = free[0];
-        const i2 = free[Math.min(free.length - 1, Math.floor(free.length / 2))];
+        let i1 = (p.slotU != null && a.free[p.slotU]) ? p.slotU : null;
+        let i2 = (p.slotV != null && a.free[p.slotV]) ? p.slotV : null;
+        if (i1 == null || i2 == null) {
+          const free = freeSlots(p.u);
+          if (free.length < 2) return;
+          if (i1 == null) i1 = free[0];
+          if (i2 == null) i2 = free[Math.min(free.length - 1, Math.floor(free.length / 2))];
+          if (i1 === i2) return;
+        }
         if (isJust) {
-          a.justIdx = [i1, i2];
-          a.justPartner = p.u;
+          a.justIdx = [i1, i2]; a.justPartner = p.u; a.justFixed = (p.slotU != null && p.slotV != null);
         } else {
           a.free[i1] = false; a.free[i2] = false;
           a.partnerOf[i1] = p.v; a.partnerOf[i2] = p.u;
@@ -121,16 +128,20 @@ NETGEN.spokeLayer = (function () {
       }
       const au = assigned[p.u], av = assigned[p.v];
       if (!au || !av) return;
-      const fu = freeSlots(p.u);
-      const fv = freeSlots(p.v);
-      if (fu.length === 0 || fv.length === 0) return;
-      const dirU = partnerDir(p.u, p.v);
-      const dirV = partnerDir(p.v, p.u);
-      const iu = fu[pickClosestIdx(fu.map(function (i) { return au.angles[i]; }), dirU)];
-      const iv = fv[pickClosestIdx(fv.map(function (i) { return av.angles[i]; }), dirV)];
+      let iu = (p.slotU != null && au.free[p.slotU]) ? p.slotU : null;
+      let iv = (p.slotV != null && av.free[p.slotV]) ? p.slotV : null;
+      if (iu == null || iv == null) {
+        const fu = freeSlots(p.u), fv = freeSlots(p.v);
+        if (fu.length === 0 || fv.length === 0) return;
+        const dirU = partnerDir(p.u, p.v);
+        const dirV = partnerDir(p.v, p.u);
+        if (iu == null) iu = fu[pickClosestIdx(fu.map(function (i) { return au.angles[i]; }), dirU)];
+        if (iv == null) iv = fv[pickClosestIdx(fv.map(function (i) { return av.angles[i]; }), dirV)];
+      }
       if (isJust) {
         au.justIdx = [iu]; av.justIdx = [iv];
         au.justPartner = p.v; av.justPartner = p.u;
+        au.justFixed = (p.slotU != null); av.justFixed = (p.slotV != null);
       } else {
         au.free[iu] = false; av.free[iv] = false;
         au.partnerOf[iu] = p.v; av.partnerOf[iv] = p.u;
@@ -142,6 +153,8 @@ NETGEN.spokeLayer = (function () {
       const a = assigned[nid];
       if (!a || !a.justIdx || a.justIdx.length === 0) return null;
       if (state.just && state.just.u === state.just.v) return null;
+      // Fixed-slot mode: stay at the rest angle (no partner-aim drift).
+      if (a.justFixed) return null;
       return partnerDir(nid, a.justPartner);
     }
 

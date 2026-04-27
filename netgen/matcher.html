@@ -495,6 +495,7 @@ window.MathJax = {
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script src="./shared.js"></script>
+<script src="./js/spoke_layer.js"></script>
 <script src="./js/match_degree_kernel.js"></script>
 <script>
 (function () {
@@ -845,6 +846,7 @@ window.MathJax = {
   // orderMode: 'static' | 'dynamic' | 'id' | 'hybrid' (phase 1 id, phase 2 dynamic)
   function setupAlgoSection(opts) {
     const { prefix, algoFn, orderMode } = opts;
+    const useSpokes = !!opts.useSpokes;
     const cyId   = `g-${prefix}-cy`;
     const barsId = `g-${prefix}-bars`;
     const stageEl = document.getElementById(`g-${prefix}-stage`);
@@ -867,6 +869,13 @@ window.MathJax = {
       },
     });
     NETGEN.makeTooltip(viz, document.getElementById(`g-${prefix}`));
+    // Rewire (and any algo with stub-pairing semantics) shows match
+    // edges via spoke_layer: per-deficit-node spokes around the rim,
+    // active pair animates dashed bridge → solid edge. Other algos
+    // keep the plain addEdges renderer.
+    const spokes = useSpokes
+      ? NETGEN.spokeLayer.attach(viz, { showCounter: false })
+      : null;
 
     let seed = 1;
     let steps = algoFn(seed);
@@ -890,15 +899,52 @@ window.MathJax = {
         }
         if (s.phase === 1 && s.action === "add") phase1Count = s.edges.length;
       }
-      s.edges.forEach(([u, v], i) => {
-        const isP2 = (prefix === "hybrid" && i >= phase1Count);
-        viz.addEdges([{
-          u, v,
-          color: isP2 ? phase2Color : phase1Color,
-          w: 2.4,
-          id: `m-${prefix}-${i}`,
-        }]);
-      });
+      if (useSpokes) {
+        // Spoke layer owns match edges. byNode[n].count = initial
+        // deficit. just is the active pair when the action places or
+        // attempts an edge; bridge red on invalid / fail.
+        const cfg = {};
+        DEFICIT_NODES.forEach(n => {
+          cfg[n] = { count: DEFICIT[n] || 0, color: phase1Color };
+        });
+        // For repair_swap: place every cumulative edge, with the most-
+        // recently-added shown as the active just (mint bridge).
+        const placed = [];
+        const upto = Math.max(0, s.edges.length - (s.action === "add" || s.action === "repair_swap" ? 1 : 0));
+        for (let i = 0; i < upto; i++) {
+          const [u, v] = s.edges[i];
+          placed.push({
+            u, v, color: phase1Color, id: `m-${prefix}-${i}`,
+          });
+        }
+        let just = null;
+        let bridgeColor = phase1Color;
+        if (s.action === "add" || s.action === "repair_swap") {
+          const last = s.edges[s.edges.length - 1];
+          if (last) {
+            just = { u: last[0], v: last[1], color: phase1Color };
+            bridgeColor = phase1Color;
+          }
+        } else if (s.action === "pair_invalid" || s.action === "repair_fail" || s.action === "repair_skip") {
+          if (s.u != null && s.v != null) {
+            just = { u: s.u, v: s.v, color: COL.edge_drop, bad: true };
+            bridgeColor = COL.edge_drop;
+          }
+        }
+        spokes.syncState({
+          byNode: cfg, placed, just, justSeq: stepIdx, bridgeColor,
+        });
+      } else {
+        s.edges.forEach(([u, v], i) => {
+          const isP2 = (prefix === "hybrid" && i >= phase1Count);
+          viz.addEdges([{
+            u, v,
+            color: isP2 ? phase2Color : phase1Color,
+            w: 2.4,
+            id: `m-${prefix}-${i}`,
+          }]);
+        });
+      }
       // Highlight u and v of this step.
       // (skipped for brevity; the new edge is the most recent grey/orchid line)
       stageEl.textContent = `step ${stepIdx} · ${s.action}`;
@@ -989,7 +1035,7 @@ window.MathJax = {
   sectionHandles.push(setupAlgoSection({ prefix: "greedy",     algoFn: runGreedy,       orderMode: "static" }));
   sectionHandles.push(setupAlgoSection({ prefix: "truegreedy", algoFn: runTrueGreedy,   orderMode: "dynamic" }));
   sectionHandles.push(setupAlgoSection({ prefix: "randgreedy", algoFn: runRandomGreedy, orderMode: "dynamic" }));
-  sectionHandles.push(setupAlgoSection({ prefix: "rewire",     algoFn: runRewire,       orderMode: "id" }));
+  sectionHandles.push(setupAlgoSection({ prefix: "rewire",     algoFn: runRewire,       orderMode: "id", useSpokes: true }));
   sectionHandles.push(setupAlgoSection({ prefix: "hybrid",     algoFn: runHybrid,       orderMode: "hybrid" }));
 
   // ── Input deficit panel: graph + bars + re-roll ──

@@ -373,6 +373,7 @@ window.MathJax = {
 </script>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 <script src="./shared.js"></script>
+<script src="./js/spoke_layer.js"></script>
 <script src="./js/profile_kernel.js"></script>
 <script src="./js/sbm_kernel.js"></script>
 <script id="sbm-dnc-data" type="application/json">
@@ -819,99 +820,40 @@ window.MathJax = {
   }
 
   // ── Generation · stub-pairing, step by step ──
-  // Per-node spokes (one per stub, coloured by target block) drawn around
-  // each node's perimeter. A "proposal" highlights two candidate stubs;
-  // step commits the pair as an edge. Mid-walk the random button reshuffles
-  // the proposal; at the end it resamples the whole sequence with a fresh
-  // seed.
+  // Per-node spokes via NETGEN.spokeLayer; kernel trace assigns the
+  // exact geomIdx for each consumed stub on each side, so the layer
+  // runs in fixed-slot mode (no greedy partner-aim, no orbit). The
+  // bridge animates dashed → solid then persists as the edge.
   (function () {
-    const host = document.getElementById("g3-cy");
-    if (!host) return;
-    host.innerHTML = "";
-    const svg = d3.select(host).append("svg")
-      .attr("class", "viz-svg")
-      .attr("viewBox", NETGEN.fitViewBoxAttr({ pad: 40 }))
-      .attr("preserveAspectRatio", "xMidYMid meet");
-
-    // Layer order: edges < spokes < proposal < nodes.
-    const gEdges    = svg.append("g").attr("class", "viz-edges");
-    const gSpokes   = svg.append("g").attr("class", "viz-spokes");
-    const gProposal = svg.append("g").attr("class", "viz-proposal");
-    const gNodes    = svg.append("g").attr("class", "viz-nodes");
-
-    const NODE_R = 13;
-    const SPOKE_GAP = 3;
-    const SPOKE_LEN = 14;
-
-    const nodeG = gNodes.selectAll("g.viz-node-group").data(NODES).enter()
-      .append("g").attr("class", "viz-node-group")
-      .attr("transform", n => "translate(" + POSITIONS[n].x + "," + POSITIONS[n].y + ")");
-    nodeG.append("circle").attr("class", "viz-node")
-      .attr("r", NODE_R)
-      .attr("fill", n => COL[CLUSTER_OF[n]] || COL.OUT)
-      .attr("stroke", "#1b2033").attr("stroke-width", 1.5);
-    nodeG.append("text").attr("class", "viz-label")
-      .attr("text-anchor", "middle").attr("dominant-baseline", "central")
-      .attr("pointer-events", "none")
-      .text(n => n);
-
-    // Spoke geometry: TARGET_DEG[n] spokes evenly spaced. Untyped (no
-    // target-block info) to mirror graph-tool's block-pooled urn; the
-    // visible colour is the source block (the node's own block).
-    const spokeGeom = {};
-    NODES.forEach(n => {
-      const total = TARGET_DEG[n] || 0;
-      const list = [];
-      if (total > 0) {
-        const step = (Math.PI * 2) / total;
-        for (let i = 0; i < total; i++) {
-          list.push({ idx: i, angle: -Math.PI / 2 + i * step });
-        }
-      }
-      spokeGeom[n] = list;
+    const viz = NETGEN.VIZ.init("g3-cy", {
+      showLabels: true, edges: [], pinned: true, pad: 40,
+      nodeColor: n => COL[CLUSTER_OF[n]] || COL.OUT,
     });
+    let lockOverride = false;
+    function setRandLock(locked) { lockOverride = locked; syncButtons(); }
+    const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setRandLock });
 
-    function spokeEnds(n, angle) {
-      const p = POSITIONS[n];
-      return {
-        x1: p.x + Math.cos(angle) * (NODE_R + SPOKE_GAP),
-        y1: p.y + Math.sin(angle) * (NODE_R + SPOKE_GAP),
-        x2: p.x + Math.cos(angle) * (NODE_R + SPOKE_GAP + SPOKE_LEN),
-        y2: p.y + Math.sin(angle) * (NODE_R + SPOKE_GAP + SPOKE_LEN),
-      };
-    }
-    const spokeColor = (n) => COL[CLUSTER_OF[n]] || COL.OUT;
-
-    // Block-pair queue, processed (r,s) with r <= s.
     const blockPairs = [];
     for (let r = 0; r < NUM_BLOCKS; r++)
       for (let s = r; s < NUM_BLOCKS; s++) blockPairs.push([r, s]);
 
     let currentSeed = 1;
-    let trace = [];          // pre-computed full trace at currentSeed
+    let trace = [];
     let totalPairs = 0;
-    let stepIdx = 0;         // 0 .. totalPairs (post-commit position)
-    let consumed = new Set();
-    let committed = [];
-    let proposal = null;     // upcoming step preview, for spoke highlight
+    let stepIdx = 0;
 
     function buildPairBudget() {
       return SBMKernel.buildPairBudget(EDGE_COUNTS, blockPairs);
     }
-
     function buildFreshUrns() {
-      // Spoke-aware urn elements: {node, geomIdx} so the renderer can
-      // highlight which specific stub (geomIdx) was consumed. Kernel
-      // treats elements opaquely (via .node when present).
       return BLOCK_NAMES.map((name) => {
         const urn = [];
         BLOCK_NODES[name].forEach(n => {
-          spokeGeom[n].forEach(g => urn.push({ node: n, geomIdx: g.idx }));
+          for (let i = 0; i < TARGET_DEG[n]; i++) urn.push({ node: n, geomIdx: i });
         });
         return urn;
       });
     }
-
     function freshTrace(seed) {
       const urns = buildFreshUrns();
       const budget = buildPairBudget();
@@ -919,10 +861,6 @@ window.MathJax = {
       trace = SBMKernel.buildTraceFrom(urns, budget, blockPairs, seen, d3.randomLcg(seed));
       totalPairs = trace.length;
     }
-
-    // Mid-walk re-roll: keep trace[0..k-1] (already-committed prefix), bump
-    // the seed, and regenerate trace[k..]. Mirrors matcher.html's reroll
-    // semantics: at the end this collapses to a full re-trace from step 0.
     function reseedFrom(k) {
       currentSeed += 1;
       if (k <= 0 || k >= totalPairs) {
@@ -933,119 +871,64 @@ window.MathJax = {
       const urns = buildFreshUrns();
       const budget = buildPairBudget();
       const seen = new Map();
-      // Replay the first k entries via SBMKernel.replayTrace to advance
-      // (urns, budget, seenPairs) to the post-k state. Recorded indices
-      // are valid for swap-with-last because the kernel built the trace
-      // with the same op.
       SBMKernel.replayTrace(urns, budget, seen, trace.slice(0, k));
       const tail = SBMKernel.buildTraceFrom(urns, budget, blockPairs, seen, d3.randomLcg(currentSeed));
       trace = trace.slice(0, k).concat(tail);
       totalPairs = trace.length;
-      // stepIdx unchanged: visible commits stay; preview swaps to the
-      // first reshuffled entry.
     }
 
-    // Materialise (consumed, committed, proposal) for the current stepIdx.
-    function applyStep() {
-      consumed = new Set();
-      committed = [];
-      for (let i = 0; i < stepIdx; i++) {
-        const t = trace[i];
-        consumed.add(t.a.node + "|" + t.a.geomIdx);
-        consumed.add(t.b.node + "|" + t.b.geomIdx);
-        committed.push({
-          u: t.u, v: t.v, intra: t.intra, loop: t.loop, multi: t.multi, bp: t.bp,
-        });
-      }
-      proposal = (stepIdx < trace.length) ? trace[stepIdx] : null;
+    function pairColor(t) {
+      if (t.loop || t.multi) return COL.edge_drop;
+      return t.intra ? (COL.edge_intra[blockOf(t.u)] || COL.edge_stage2) : COL.edge_inter;
     }
-
-    function gotoStep(k) {
-      stepIdx = Math.max(0, Math.min(totalPairs, k));
-      applyStep();
-    }
+    function spokeColor(n) { return COL[CLUSTER_OF[n]] || COL.OUT; }
 
     function render() {
-      const spokeData = [];
-      NODES.forEach(n => {
-        spokeGeom[n].forEach(g => {
-          if (consumed.has(n + "|" + g.idx)) return;
-          spokeData.push({
-            id: "sp-" + n + "-" + g.idx,
-            node: n, ...spokeEnds(n, g.angle),
-          });
+      viz.setEdges([]);
+      const cfg = {};
+      NODES.forEach(n => { cfg[n] = { count: TARGET_DEG[n] || 0, color: spokeColor(n) }; });
+      const placed = [];
+      for (let i = 0; i < stepIdx - 1; i++) {
+        const t = trace[i];
+        placed.push({
+          u: t.u, v: t.v,
+          slotU: t.a.geomIdx, slotV: t.b.geomIdx,
+          color: pairColor(t), id: "ce-" + i, bad: t.loop || t.multi,
         });
-      });
-      const sp = gSpokes.selectAll("line.viz-spoke").data(spokeData, d => d.id);
-      sp.exit().remove();
-      const spEnter = sp.enter().append("line")
-        .attr("class", "viz-spoke")
-        .attr("stroke-width", 2.6).attr("stroke-linecap", "round")
-        .attr("opacity", 0.85);
-      spEnter.merge(sp)
-        .attr("x1", d => d.x1).attr("y1", d => d.y1)
-        .attr("x2", d => d.x2).attr("y2", d => d.y2)
-        .attr("stroke", d => spokeColor(d.node));
+      }
+      let just = null;
+      let bridgeColor = COL.edge_inter;
+      if (stepIdx > 0) {
+        const t = trace[stepIdx - 1];
+        bridgeColor = pairColor(t);
+        just = {
+          u: t.u, v: t.v,
+          slotU: t.a.geomIdx, slotV: t.b.geomIdx,
+          color: bridgeColor, bad: t.loop || t.multi,
+        };
+      }
+      spokes.syncState({ byNode: cfg, placed, just, justSeq: stepIdx, bridgeColor });
+      syncButtons();
+      syncStats();
+    }
 
-      const propData = proposal ? [
-        { side: "a", node: proposal.a.node, idx: proposal.a.geomIdx },
-        { side: "b", node: proposal.b.node, idx: proposal.b.geomIdx },
-      ].map(d => {
-        const g = spokeGeom[d.node].find(x => x.idx === d.idx);
-        return { ...d, ...spokeEnds(d.node, g.angle) };
-      }) : [];
-      const pp = gProposal.selectAll("g.proposal-spoke").data(propData, d => d.side);
-      pp.exit().remove();
-      const ppEnter = pp.enter().append("g").attr("class", "proposal-spoke");
-      ppEnter.append("line").attr("class", "proposal-glow")
-        .attr("stroke-width", 8).attr("stroke-linecap", "round").attr("opacity", 0.4);
-      ppEnter.append("line").attr("class", "proposal-line")
-        .attr("stroke-width", 3.4).attr("stroke-linecap", "round");
-      const ppAll = ppEnter.merge(pp);
-      ppAll.select(".proposal-glow")
-        .attr("x1", d => d.x1).attr("y1", d => d.y1)
-        .attr("x2", d => d.x2).attr("y2", d => d.y2)
-        .attr("stroke", "#f6e15a");
-      ppAll.select(".proposal-line")
-        .attr("x1", d => d.x1).attr("y1", d => d.y1)
-        .attr("x2", d => d.x2).attr("y2", d => d.y2)
-        .attr("stroke", d => spokeColor(d.node));
-
-      const edgeData = committed.map((e, i) => ({ id: "ce-" + i, ...e }));
-      const ee = gEdges.selectAll("path.viz-edge").data(edgeData, d => d.id);
-      ee.exit().remove();
-      const eeEnter = ee.enter().append("path").attr("fill", "none");
-      eeEnter.merge(ee)
-        .attr("class", d => "viz-edge" + ((d.loop || d.multi) ? " dashed thick" : ""))
-        .attr("d", d => {
-          const pu = POSITIONS[d.u], pv = POSITIONS[d.v];
-          if (d.loop) {
-            const r = 18;
-            return "M" + pu.x + "," + pu.y
-              + " C" + (pu.x - r) + "," + (pu.y - r * 2.2)
-              + " " + (pu.x + r) + "," + (pu.y - r * 2.2)
-              + " " + (pu.x + 0.01) + "," + (pu.y - 0.01);
-          }
-          return "M" + pu.x + "," + pu.y + " L" + pv.x + "," + pv.y;
-        })
-        .attr("stroke", d => (d.loop || d.multi)
-          ? COL.edge_drop
-          : (d.intra ? (COL.edge_intra[blockOf(d.u)] || COL.edge_stage2) : COL.edge_inter))
-        .attr("stroke-width", d => (d.loop || d.multi) ? 2 : 1.4);
-
+    function syncStats() {
       const statsEl = document.getElementById("g3-stats");
-      const curEl   = document.getElementById("g3-cur");
-      const totEl   = document.getElementById("g3-total");
-      const nLoops = committed.filter(e => e.loop).length;
-      const nMulti = committed.filter(e => e.multi).length;
-      const done = committed.length;
+      const curEl = document.getElementById("g3-cur");
+      const totEl = document.getElementById("g3-total");
+      let nLoops = 0, nMulti = 0;
+      for (let i = 0; i < stepIdx; i++) {
+        if (trace[i].loop) nLoops++;
+        if (trace[i].multi) nMulti++;
+      }
       if (statsEl) {
-        let chrome = done + "/" + totalPairs + " edges · "
+        let chrome = stepIdx + "/" + totalPairs + " edges · "
           + nLoops + " self-loops · " + nMulti + " parallels";
-        if (proposal) {
-          const [r, s] = proposal.bp;
-          chrome += " · next: pair (" + BLOCK_NAMES[r] + ", " + BLOCK_NAMES[s]
-            + ") " + proposal.a.node + " ↔ " + proposal.b.node;
+        if (stepIdx > 0) {
+          const t = trace[stepIdx - 1];
+          const r = t.bp[0], s = t.bp[1];
+          chrome += " · just placed: pair (" + BLOCK_NAMES[r] + ", " + BLOCK_NAMES[s] + ") "
+            + t.u + " ↔ " + t.v;
         }
         statsEl.textContent = chrome;
       }
@@ -1053,53 +936,51 @@ window.MathJax = {
       if (totEl) totEl.textContent = String(totalPairs);
     }
 
-    freshTrace(currentSeed);
-    applyStep();
-    render();
-
     function syncButtons() {
       const prev = document.getElementById("g3-prev");
       const next = document.getElementById("g3-next");
       const reset = document.getElementById("g3-reset");
       const skip = document.getElementById("g3-skip");
       const rand = document.getElementById("g3-random");
-      if (prev) prev.disabled = (stepIdx <= 0);
-      if (reset) reset.disabled = (stepIdx <= 0);
-      if (next) next.disabled = (stepIdx >= totalPairs);
-      if (skip) skip.disabled = (stepIdx >= totalPairs);
+      const dis = lockOverride;
+      if (prev)  prev.disabled  = dis || (stepIdx <= 0);
+      if (reset) reset.disabled = dis || (stepIdx <= 0);
+      if (next)  next.disabled  = dis || (stepIdx >= totalPairs);
+      if (skip)  skip.disabled  = dis || (stepIdx >= totalPairs);
       if (rand) {
+        rand.disabled = dis;
         rand.title = (stepIdx === 0 || stepIdx === totalPairs)
           ? "fresh seed: re-trace from step 0"
           : "mid-walk reroll: keep first " + stepIdx + " edges, regenerate the rest";
       }
     }
 
-    function rerender() { render(); syncButtons(); }
-    rerender();
+    freshTrace(currentSeed);
+    render();
 
     document.getElementById("g3-prev").addEventListener("click", () => {
-      gotoStep(stepIdx - 1); rerender();
+      if (stepIdx > 0) { stepIdx--; render(); }
     });
     document.getElementById("g3-next").addEventListener("click", () => {
-      gotoStep(stepIdx + 1); rerender();
+      if (stepIdx < totalPairs) { stepIdx++; render(); }
     });
     document.getElementById("g3-reset").addEventListener("click", () => {
-      gotoStep(0); rerender();
+      stepIdx = 0; render();
     });
     document.getElementById("g3-skip").addEventListener("click", () => {
-      gotoStep(totalPairs); rerender();
+      stepIdx = totalPairs; render();
     });
     document.getElementById("g3-random").addEventListener("click", () => {
       reseedFrom(stepIdx);
-      applyStep();
-      rerender();
+      if (stepIdx > totalPairs) stepIdx = totalPairs;
+      render();
     });
     document.getElementById("reroll-btn").addEventListener("click", () => {
-      triggerReroll();        // reshuffles SAMPLE for g4 + dedup viz
+      triggerReroll();
       currentSeed += 1;
       freshTrace(currentSeed);
-      gotoStep(0);
-      rerender();
+      stepIdx = 0;
+      render();
     });
   })();
 
