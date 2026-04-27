@@ -429,8 +429,9 @@ const VIZ = {
     }
     function edgePath(d) {
       if (d.source === d.target) {
-        // self-loop rendered as small upward arc; multiple loops on the
-        // same node fan out in alternating widths.
+        // Self-loop rendered as a small upward arc; multiple loops on
+        // the same node fan out in increasing radii. Endpoints anchor
+        // at node center; the node circle paints on top via z-order.
         const x = d.source.x, y = d.source.y;
         const rBase = 18, step = 7;
         const r = rBase + (d.dupIdx || 0) * step;
@@ -439,14 +440,6 @@ const VIZ = {
       const sx = d.source.x, sy = d.source.y, tx = d.target.x, ty = d.target.y;
       const total = d.dupTotal || 1;
       if (total <= 1) return "M" + sx + "," + sy + "L" + tx + "," + ty;
-      // Parallel edges: quadratic bezier through a midpoint shifted
-      // perpendicular by a per-duplicate amount. The perpendicular must
-      // be computed from a CANONICAL direction (lower id → higher id),
-      // not d.source → d.target, because two duplicate links may list
-      // endpoints in opposite orders; using source/target directly flips
-      // the perpendicular and makes both arcs land on the same side.
-      // Spread scales with edge length so short edges still visibly
-      // separate and long edges do not arc wildly.
       const lo = d.source.id < d.target.id ? d.source : d.target;
       const hi = d.source.id < d.target.id ? d.target : d.source;
       const cdx = hi.x - lo.x, cdy = hi.y - lo.y;
@@ -653,32 +646,72 @@ function scrubSlider(opts) {
 }
 
 // ── Step-controller ──────────────────────────────────────────
+// opts (all optional unless noted):
+//   total            (required) number of steps including step 0
+//   prevBtn, nextBtn, resetBtn (= "to start"), endBtn (= "to end")
+//   randStepBtn, randAllBtn    walker locking rule per
+//                              feedback_matcher_reroll_ux.md:
+//                              randStep mid-walk only reseeds current
+//                              step, randAll reseeds everything
+//   labelCur, labelTotal       output spans for "k / N"
+//   onRender(idx)              called on every state change
+//   onRandStep(idx)            invoked on random-step button click
+//   onRandAll()                invoked on random-all button click
+//   keyboard: true             enable arrow + space keybinds (default true)
 function stepController(opts) {
-  const { prevBtn, nextBtn, resetBtn, labelCur, labelTotal, onRender } = opts;
+  const {
+    prevBtn, nextBtn, resetBtn, endBtn,
+    randStepBtn, randAllBtn,
+    labelCur, labelTotal,
+    onRender, onRandStep, onRandAll,
+  } = opts;
+  const useKeys = opts.keyboard !== false;
   let total = opts.total;
   let idx = 0;
   function render() {
     if (labelCur) labelCur.textContent = idx;
     if (labelTotal) labelTotal.textContent = total - 1;
-    if (prevBtn) prevBtn.disabled = (idx <= 0);
-    if (nextBtn) nextBtn.disabled = (idx >= total - 1);
+    const atStart = (idx <= 0);
+    const atEnd = (idx >= total - 1);
+    if (prevBtn) prevBtn.disabled = atStart;
+    if (nextBtn) nextBtn.disabled = atEnd;
+    if (resetBtn) resetBtn.disabled = atStart;
+    if (endBtn)   endBtn.disabled   = atEnd;
+    // No active step at idx 0 → nothing to reroll.
+    if (randStepBtn) randStepBtn.disabled = atStart;
+    if (randAllBtn)  randAllBtn.disabled  = atStart;
     if (onRender) onRender(idx);
   }
   prevBtn && prevBtn.addEventListener("click", () => { if (idx>0) { idx--; render(); } });
   nextBtn && nextBtn.addEventListener("click", () => { if (idx<total-1) { idx++; render(); } });
   resetBtn && resetBtn.addEventListener("click", () => { idx = 0; render(); });
-  // keyboard: ←, →, space
-  document.addEventListener("keydown", (ev) => {
-    if (ev.target.tagName === "INPUT") return;
-    if (ev.key === "ArrowLeft") { if (idx>0) { idx--; render(); } }
-    else if (ev.key === "ArrowRight" || ev.key === " ") {
-      if (idx<total-1) { idx++; render(); ev.preventDefault(); }
-    }
+  endBtn && endBtn.addEventListener("click", () => { idx = total-1; render(); });
+  randStepBtn && randStepBtn.addEventListener("click", () => {
+    if (onRandStep) onRandStep(idx);
+    render();
   });
+  randAllBtn && randAllBtn.addEventListener("click", () => {
+    if (onRandAll) onRandAll();
+    render();
+  });
+  // keyboard: ←, →, space, home, end
+  if (useKeys) {
+    document.addEventListener("keydown", (ev) => {
+      if (ev.target.tagName === "INPUT") return;
+      if (ev.key === "ArrowLeft") { if (idx>0) { idx--; render(); } }
+      else if (ev.key === "ArrowRight" || ev.key === " ") {
+        if (idx<total-1) { idx++; render(); ev.preventDefault(); }
+      }
+      else if (ev.key === "Home") { if (idx>0) { idx = 0; render(); } }
+      else if (ev.key === "End")  { if (idx<total-1) { idx = total-1; render(); } }
+    });
+  }
   render();
   return {
     get idx() { return idx; },
+    get total() { return total; },
     set: (i) => { idx = Math.max(0, Math.min(total-1, i)); render(); },
+    rerender: () => render(),
     // Callers that regenerate their data (e.g. nPSO's trajectory on a
     // random-button reroll) can swap `total` and reset idx without
     // reconstructing the controller.

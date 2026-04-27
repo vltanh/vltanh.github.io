@@ -38,25 +38,93 @@ NETGEN.spokeLayer = (function () {
     const fanCap       = opts.fanCap != null ? opts.fanCap : 14;
     const showCounter  = !!opts.showCounter;
     // Animation phase durations (ms). Caller may override any of these
-    // via opts.timings.<key>. Total active-pair animation lasts
-    // orbit + bridgeFadeIn + bridgeSolid + fan. The fan phase runs
-    // both the existing parallels and the new bridge to their
-    // with-just slots simultaneously, after the bridge has fully
-    // solidified.
+    // via opts.timings.<key>.
+    // Forward sequence: orbit → grow → fan → colorize.
+    //   orbit    : spoke rotates rest → partner-aim, in build colour.
+    //   grow     : dashed bridge draws inward from each spoke tip,
+    //              meeting at midpoint. Just-spoke fades out during
+    //              the last portion of this phase (handoff: spoke tip
+    //              becomes the leading edge of the growing stub).
+    //   fan      : parallels make room, bridge slides to its slot.
+    //              No-op for non-parallel.
+    //   colorize : dashed-black → settled appearance. Non-bad goes to
+    //              solid cluster / inter colour. Bad stays dashed and
+    //              goes red.
+    // Step-back mirrors this in reverse:
+    //   uncolor  : settled → dashed-black (runs first, while still
+    //              dimmed).
+    //   fan-in   : bridge un-fans, placed parallels collapse to
+    //              collinear.
+    //   retract  : bridge stubs shrink back into the node centres,
+    //              just-spoke fades in during the last portion (the
+    //              stubs hand off to the spoke tip as they shrink).
+    //   orbit    : spoke rotates partner-aim → rest.
     const T = Object.assign({
-      orbit:        165,   // active spoke rotates from rest to partner
-      bridgeFadeIn: 105,   // dashed bridge fades in (collinear)
-      bridgeSolid:  105,   // dashed → solid (still collinear)
-      justFade:     120,   // active just-spoke fades out before the fan
-      fan:          210,   // every parallel + bridge fans into its slot
-      rewindBridge: 120,   // step-back: bridge fades out
-      rewindFade:   120,   // step-back: just-spoke fades back
-      rewindIdle:   135,   // step-back: settle delay before re-animate
+      orbit:        260,
+      bridgeGrow:   280,
+      justFade:     180,   // duration of the just-spoke crossfade with grow / retract
+      fan:          480,
+      colorize:     280,
+      spokeRetract: 200,   // self-loop only: spoke length shrinks from r0+spokeOuter to r0 between orbit and grow
+      rewindUncolor:280,
+      rewindFanIn:  480,
+      rewindBridge: 280,
+      rewindOrbit:  260,
+      rewindIdle:   40,
     }, opts.timings || {});
-    function t_bridgeStart() { return T.orbit; }
-    function t_justFade()    { return T.orbit + T.bridgeFadeIn + T.bridgeSolid; }
-    function t_fan()         { return t_justFade() + T.justFade; }
-    function t_total()       { return t_fan() + T.fan; }
+    // Build-phase colour: bridge + just-spoke wear this from orbit
+    // through fan. Colorize crossfades to the type colour. Override
+    // via opts.buildColor if a page wants a different "in flight"
+    // shade.
+    const buildColor = opts.buildColor || "#1b2033";
+    // Orbit duration scales linearly with angular distance so the
+    // visible angular speed stays roughly constant. baseDuration is
+    // calibrated for a π/2 swing (≈ partner-to-rest typical case);
+    // tighter swings (parallel-second-pick where the closest slot is
+    // already gone) get less time, wider swings get more, capped to
+    // keep the animation snappy at both extremes.
+    function scaleOrbitDuration(baseDuration, delta) {
+      const ref = Math.PI / 2;
+      const frac = Math.min(1.5, Math.max(0.35, Math.abs(delta) / ref));
+      return Math.round(baseDuration * frac);
+    }
+    // Buffer between the longest just-spoke orbit and the bridge
+    // start so the spoke has visibly settled at partner-aim before
+    // the bridge stub takes over.
+    const ORBIT_BRIDGE_BUFFER = 60;
+    // Per-render value: the longest orbit (in ms) among the active
+    // just-spokes plus ORBIT_BRIDGE_BUFFER. Updated before lockFor /
+    // render(true) by computeBridgeStartMs. Default falls back to
+    // T.orbit for jump-renders / non-just states.
+    let bridgeStartMs = T.orbit;
+    function computeBridgeStartMs() {
+      let maxOrbit = 0;
+      Object.keys(assigned).forEach(function (nid) {
+        const a = assigned[nid];
+        if (!a || !a.justIdx) return;
+        a.justIdx.forEach(function (slot) {
+          const restA = a.angles[slot];
+          const liveA = effectiveAngle(nid, slot);
+          if (liveA == null) return;
+          const delta = shortDelta(restA, liveA);
+          if (Math.abs(delta) < 1e-3) return;
+          const ms = scaleOrbitDuration(T.orbit, delta);
+          if (ms > maxOrbit) maxOrbit = ms;
+        });
+      });
+      return (maxOrbit > 0 ? maxOrbit : T.orbit) + ORBIT_BRIDGE_BUFFER;
+    }
+    function isSelfLoopJust() { return !!(state.just && state.just.u === state.just.v); }
+    function t_bridgeStart() { return bridgeStartMs; }
+    // For self-loops the four phases are: orbit → spoke retract →
+    // bridge grow → colorize. Non-loop has no spoke retract and adds
+    // a fan phase between grow and colorize.
+    function t_growStart()   { return t_bridgeStart() + (isSelfLoopJust() ? T.spokeRetract : 0); }
+    function t_growEnd()     { return t_growStart() + T.bridgeGrow; }
+    function t_justFade()    { return Math.max(t_growStart(), t_growEnd() - T.justFade); }
+    function t_fan()         { return t_growEnd(); }
+    function t_colorize()    { return t_fan() + (isSelfLoopJust() ? 0 : T.fan); }
+    function t_total()       { return t_colorize() + T.colorize; }
 
     const onActiveChange = opts.onActiveChange || function () {};
     const onSettle       = opts.onSettle       || function () {};
@@ -98,17 +166,11 @@ NETGEN.spokeLayer = (function () {
         clearActiveDimPick();
         onActiveChange(false, null);
         // Animation done: restore placed-edge opacity (they were dimmed
-        // while the bridge was front-and-centre).
+        // while the bridge was front-and-centre). Type-colour recolour
+        // (cluster blue / bad red) is handled by the colorize phase
+        // BEFORE this lockTimer fires, so the un-dim runs after the
+        // bridge already wears its final colour.
         renderPlaced();
-        // Bad-pair recolor: bridge stroked the cluster colour all
-        // through the animation; on settle, fade to the caller's
-        // badColor so the user sees "the pair landed, but it is a
-        // collision".
-        if (state.just && state.just.bad && state.just.badColor) {
-          bridgeLayer.selectAll("path.sp-bridge")
-            .transition("badStroke").duration(T.fan).ease(d3.easeCubicInOut)
-            .attr("stroke", state.just.badColor);
-        }
         onSettle();
       }, ms);
     }
@@ -118,6 +180,22 @@ NETGEN.spokeLayer = (function () {
     const bridgeLayer = viz.svg.insert("g", "g.viz-nodes").attr("class", "sp-bridges");
     const spokeLayer  = viz.svg.insert("g", "g.viz-nodes").attr("class", "sp-spokes");
     const countLayer  = viz.svg.insert("g", "g.viz-nodes").attr("class", "sp-counter");
+    // Defensive: any code that re-appends g.viz-nodes (e.g. a viz
+    // refresh) would push it back into the middle of the children
+    // and break paint order. Re-assert "all spoke layers before
+    // viz-nodes" once at attach time and after every render.
+    function ensureLayerOrder() {
+      const svgEl = viz.svg.node();
+      const vizNodes = viz.svg.select("g.viz-nodes").node();
+      if (!vizNodes || !svgEl) return;
+      [placedLayer, bridgeLayer, spokeLayer, countLayer].forEach(function (layer) {
+        const node = layer.node();
+        if (node && node.parentNode === svgEl && node.nextSibling !== vizNodes) {
+          svgEl.insertBefore(node, vizNodes);
+        }
+      });
+    }
+    ensureLayerOrder();
 
     let state = { byNode: {}, placed: [], just: null, justSeq: null, bridgeColor: null };
     let lastKey = "";
@@ -355,7 +433,7 @@ NETGEN.spokeLayer = (function () {
       bridgeLayer.selectAll("path.sp-bridge").interrupt("bridge");
       bridgeLayer.selectAll("path.sp-bridge").interrupt("bridgeFan");
       bridgeLayer.selectAll("path.sp-bridge").interrupt("rewindBridge");
-      bridgeLayer.selectAll("path.sp-bridge").interrupt("badStroke");
+      bridgeLayer.selectAll("path.sp-bridge").interrupt("colorize");
       placedLayer.selectAll("path.sp-placed-edge").interrupt("fan");
       const newKey = s.just ? (s.just.u + "/" + s.just.v + "@" + (s.justSeq || "")) : "";
       const sameStep = (s.justSeq != null && s.justSeq === lastSeq);
@@ -367,7 +445,8 @@ NETGEN.spokeLayer = (function () {
 
       if (shouldRewind) {
         const willOrbit = newKey !== "" && !wasJump && !isStepBack;
-        lockFor(T.rewindIdle + (willOrbit ? t_total() : 0));
+        const rewindTotal = T.rewindUncolor + T.rewindFanIn + T.rewindBridge + T.rewindOrbit + T.rewindIdle;
+        lockFor(rewindTotal + (willOrbit ? t_total() : 0));
         runRewind(function () {
           if (myToken !== token) return;
           state = s; lastKey = newKey; lastSeq = s.justSeq;
@@ -378,18 +457,186 @@ NETGEN.spokeLayer = (function () {
       state = s;
       const fresh = newKey !== "" && newKey !== lastKey && !wasJump;
       lastKey = newKey; lastSeq = s.justSeq;
-      if (fresh) lockFor(t_total());
-      recompute(); render(fresh);
+      recompute();
+      if (fresh) {
+        bridgeStartMs = computeBridgeStartMs();
+        lockFor(t_total());
+      }
+      render(fresh);
     }
 
     function runRewind(done) {
+      // Reverse-play the forward animation in four phases:
+      //   1. uncolor    (T.rewindUncolor): settled bridge crossfades
+      //                                    back to dashed build-black.
+      //                                    Mirror of the forward
+      //                                    colorize step that ran
+      //                                    last.
+      //   2. fan-in     (T.rewindFanIn):   bridge un-fans from its
+      //                                    slot back to collinear,
+      //                                    placed parallels collapse
+      //                                    out of their fanned slots,
+      //                                    just-spoke fades back in.
+      //   3. bridge     (T.rewindBridge):  collinear bridge retracts
+      //                                    into the node centres.
+      //   4. orbit      (T.rewindOrbit):   active just-spoke orbits
+      //                                    from partner / loop tangent
+      //                                    back to rest.
       bridgeLayer.selectAll("path.sp-bridge")
-        .interrupt("bridge")
-        .transition("rewindBridge").duration(T.rewindBridge).attr("opacity", 0);
+        .interrupt("bridge").interrupt("bridgeFan").interrupt("colorize");
+      // Phase 1 · uncolor. Settled bridge crossfades back to the
+      // build appearance: build-black stroke at active thickness.
+      // Build is SOLID (forward grow uses an all-zero-gap dash
+      // pattern, never visibly dashed); a settled bad bridge that's
+      // currently "4 4" dashed is flipped to solid synchronously at
+      // uncolor start so reverse mirrors forward — no dashed period
+      // on Back that doesn't exist on Next.
+      bridgeLayer.selectAll("path.sp-bridge")
+        .attr("stroke-dasharray", null)
+        .transition("colorize").duration(T.rewindUncolor).ease(d3.easeCubicInOut)
+        .attr("stroke", buildColor)
+        .attr("stroke-width", 2.6);
+      // Dim placed edges so the active bridge stays the focus, mirror
+      // of forward where renderPlaced sees animating=true and applies
+      // opacity 0.18. lockTimer's renderPlaced() will restore them at
+      // settle.
+      placedLayer.selectAll("path.sp-placed-edge").attr("opacity", 0.18);
+      schedulePhase(T.rewindUncolor, function () { runRewindFanIn(done); });
+    }
+
+    function runRewindFanIn(done) {
+      // Just-spokes stay invisible through fan-in; they fade back in
+      // during the first portion of the retract phase (mirror of the
+      // forward justFade at the END of grow).
       spokeLayer.selectAll("line.sp-spoke.just")
-        .interrupt("orbit")
-        .transition("rewindFade").duration(T.rewindFade).attr("opacity", 0.85);
-      setTimeout(done, T.rewindIdle);
+        .interrupt("justFade")
+        .attr("opacity", 0)
+        .attr("stroke", buildColor);
+      // Reverse fan-in is the time-mirror of forward fan: tween from
+      // the with-just (fanT=1) layout back to no-just (fanT=0). Same
+      // attrTween reasoning as forward — chord-cut + tick-race.
+      placedLayer.selectAll("path.sp-placed-edge")
+        .interrupt("fan")
+        .transition("fan").duration(T.rewindFanIn).ease(d3.easeCubicInOut)
+        .attrTween("d", function (d) {
+          const f = placedPathTween(d);
+          return function (k) { return f(1 - k); };
+        })
+        .on("end.fanFlag", function () { placedFanCollapsed = true; });
+      const isSelfLoop = state.just && state.just.u === state.just.v;
+      if (!isSelfLoop) {
+        bridgeLayer.selectAll("path.sp-bridge")
+          .transition("bridgeFan").duration(T.rewindFanIn).ease(d3.easeCubicInOut)
+          .attrTween("d", function (d) {
+            const f = bridgePathTween(d);
+            return function (k) { return f(1 - k); };
+          })
+          .on("end.fanFlag", function () { bridgeCollinear = true; });
+      } else {
+        bridgeCollinear = true;
+      }
+      placedFanCollapsed = false; // tween starts from with-just layout
+      bridgeCollinear    = false;
+      schedulePhase(T.rewindFanIn, function () { runRewindRetract(done); });
+    }
+
+    function runRewindRetract(done) {
+      // Just-spokes fade in during the first portion of retract —
+      // mirror of forward grow's justFade-out at the end. Spokes
+      // appear right as the bridge starts shrinking; the visual is
+      // "stub shrinks back into the spoke tip".
+      spokeLayer.selectAll("line.sp-spoke.just")
+        .interrupt("justFade")
+        .transition("justFade").duration(T.justFade).ease(d3.easeCubicInOut)
+        .attr("opacity", 1);
+      bridgeLayer.selectAll("path.sp-bridge").each(function (d) {
+        const len = (this.getTotalLength && this.getTotalLength()) || 100;
+        const sel = d3.select(this);
+        if (d.isLoop) {
+          // Self-loop half: retract the dashoffset to full length so
+          // the bridge fully shrinks toward the node.
+          sel
+            .attr("stroke-dasharray", len + " " + len)
+            .attr("stroke-dashoffset", 0)
+            .transition("rewindBridge").duration(T.rewindBridge).ease(d3.easeCubicIn)
+            .attr("stroke-dashoffset", len);
+        } else {
+          // Two-way retract: dasharray "stub gap stub" with stub
+          // shrinking from L/2 to 0 so the bridge fully disappears at
+          // each node. The just-spoke beneath remains visible and
+          // takes over the visual.
+          const halfLen = len / 2;
+          // 4-value pattern (even count) so SVG doesn't auto-double the
+          // 3-value form into "stub 0 stub stub 0 stub" — that doubling
+          // injects a `stub`-wide GAP at length 2*stub which clips the
+          // far end of the path once it stretches past straight_len
+          // (e.g. once the bridge curves into its fan slot).
+          sel
+            .attr("stroke-dashoffset", 0)
+            .attr("stroke-dasharray", halfLen + " 0 " + halfLen + " 0")
+            .transition("rewindBridge").duration(T.rewindBridge).ease(d3.easeCubicIn)
+            .attrTween("stroke-dasharray", function () {
+              return function (k) {
+                const stub = halfLen * (1 - k);
+                const gap  = len - 2 * stub;
+                return stub + " " + gap + " " + stub + " 0";
+              };
+            });
+        }
+      });
+      // After the bridge has fully retracted, orbit each just-spoke
+      // back from its current effective angle to the slot's rest
+      // angle. Visibility was restored at the top of runRewind.
+      setTimeout(function () {
+        // First pass: capture (restA, fromA) for every just-spoke. We
+        // defer clearing justIdx until each spoke's orbit transition
+        // ends (.on("end")) — clearing it pre-orbit risks a one-frame
+        // gap between the synchronous clear and the transition's first
+        // rAF in which tick.spokeLayer reads effectiveAngle as restA
+        // (slot looks free), snaps the spoke to rest, then the
+        // transition starts from fromA again, snapping it back. The
+        // visible artifact is a quick rest → partner-aim → orbit to
+        // rest stutter at orbit-start.
+        const orbits = [];
+        spokeLayer.selectAll("line.sp-spoke.just").each(function (d) {
+          const a = assigned[d.nid];
+          if (!a) return;
+          orbits.push({
+            el: this,
+            d: d,
+            a: a,
+            restA: a.angles[d.slot],
+            fromA: effectiveAngle(d.nid, d.slot),
+          });
+        });
+        function clearJust(info) {
+          const a = info.a;
+          if (!a.justIdx) return;
+          a.justIdx = a.justIdx.filter(function (i) { return i !== info.d.slot; });
+          if (a.justIdx.length === 0) { a.justIdx = null; a.justPartner = null; }
+        }
+        orbits.forEach(function (info) {
+          const { el, d, a, restA, fromA } = info;
+          if (fromA == null || Math.abs(shortDelta(fromA, restA)) < 1e-3) {
+            clearJust(info);
+            return;
+          }
+          const node = viz.nodeById[String(d.nid)];
+          const r0 = nodeR(d.nid);
+          const r1 = r0 + spokeOuterFor(d.nid, d.slot) * lenScale(a.count);
+          const delta = shortDelta(fromA, restA);
+          const orbitMs = scaleOrbitDuration(T.rewindOrbit, delta);
+          d3.select(el)
+            .interrupt("orbit")
+            .transition("orbit").duration(orbitMs).ease(d3.easeCubicInOut)
+            .attrTween("x1", function () { return function (k) { return node.x + Math.cos(fromA + delta * k) * r0; }; })
+            .attrTween("y1", function () { return function (k) { return node.y + Math.sin(fromA + delta * k) * r0; }; })
+            .attrTween("x2", function () { return function (k) { return node.x + Math.cos(fromA + delta * k) * r1; }; })
+            .attrTween("y2", function () { return function (k) { return node.y + Math.sin(fromA + delta * k) * r1; }; })
+            .on("end", function () { clearJust(info); });
+        });
+      }, T.rewindBridge);
+      setTimeout(done, T.rewindBridge + T.rewindOrbit + T.rewindIdle);
     }
 
     function render(animate) {
@@ -402,45 +649,80 @@ NETGEN.spokeLayer = (function () {
       if (animate) {
         placedFanCollapsed = true;
         bridgeCollinear = true;
+        // bridgeStartMs was already computed by syncState before
+        // lockFor — phase delays below honour the actual longest
+        // just-spoke orbit so the bridge stub never starts forming
+        // before the spoke has settled at partner-aim.
         renderSpokes(true);
         renderPlaced();         // existing parallels stay collinear under the bridge
-        renderBridge(true);     // bridge fades in collinear over the parallel
+        renderBridge(true);     // bridge stubs grow inward from each spoke tip
         renderCounter();
-        // Just-spoke fades out before the fan. It has been pointing at
-        // the node-to-node line; clearing it first prevents the lag
-        // when the bridge curves away.
         if (isSelfLoop) {
-          // Self-loop: spoke orbits to its tangent during the orbit
-          // phase, then fades while the bridge half grows out of the
-          // same point. The two together read as the spoke extending
-          // outward into the loop arc.
+          // Self-loop sequence: orbit → spoke retract → grow →
+          // colorize. Spoke shrinks length-to-zero between orbit and
+          // grow; bridge halves then emerge from the node centre to
+          // tell the loop story on their own.
           schedulePhase(t_bridgeStart(), function () {
-            spokeLayer.selectAll("line.sp-spoke.just")
-              .transition("justFade").duration(T.bridgeFadeIn).ease(d3.easeCubicInOut)
-              .attr("opacity", 0);
+            spokeLayer.selectAll("line.sp-spoke.just").each(function () {
+              const sel = d3.select(this);
+              const x1 = +sel.attr("x1");
+              const y1 = +sel.attr("y1");
+              sel.interrupt("justFade")
+                .transition("justFade").duration(T.spokeRetract).ease(d3.easeCubicIn)
+                .attr("x2", x1).attr("y2", y1)
+                .attr("opacity", 0);
+            });
+          });
+          // No fan for self-loop. Mark the layout flags as resolved
+          // immediately so tick / subsequent renders don't think a
+          // fan is pending.
+          schedulePhase(t_growEnd(), function () {
+            placedFanCollapsed = false;
+            bridgeCollinear = false;
           });
         } else {
+          // Just-spoke fades out during the last portion of grow, so
+          // the bridge stubs visually take over from the spoke tips
+          // (handoff: tip → growing stub).
           schedulePhase(t_justFade(), function () {
             spokeLayer.selectAll("line.sp-spoke.just")
               .transition("justFade").duration(T.justFade).ease(d3.easeCubicInOut)
               .attr("opacity", 0);
           });
-        }
-        // Fan: existing parallels + new bridge slide outward into their
-        // with-just slots together, after the just-spoke is gone. The
-        // self-loop branch has no fan — its two halves already landed
-        // at the apex during the bridge phase.
-        schedulePhase(t_fan(), function () {
-          placedFanCollapsed = false;
-          bridgeCollinear = false;
-          placedLayer.selectAll("path.sp-placed-edge")
-            .transition("fan").duration(T.fan).ease(d3.easeCubicInOut)
-            .attr("d", placedPath);
-          if (!isSelfLoop) {
+          // Fan: parallels + bridge slide into their with-just slots.
+          // attrTween (rather than plain .attr) so the perpendicular
+          // fan offset interpolates as a real arc — string-interp on
+          // d would cut a chord through the node — and so a tick-race
+          // can't snap d to the fanned value before the transition's
+          // first frame.
+          schedulePhase(t_fan(), function () {
+            placedLayer.selectAll("path.sp-placed-edge")
+              .transition("fan").duration(T.fan).ease(d3.easeCubicInOut)
+              .attrTween("d", function (d) { return placedPathTween(d); })
+              .on("end.fanFlag", function () { placedFanCollapsed = false; });
             bridgeLayer.selectAll("path.sp-bridge")
               .transition("bridgeFan").duration(T.fan).ease(d3.easeCubicInOut)
-              .attr("d", bridgePath);
-          }
+              .attrTween("d", function (d) { return bridgePathTween(d); })
+              .on("end.fanFlag", function () { bridgeCollinear = false; });
+          });
+        }
+        // Colorize: bridge has fanned to its slot in build-colour
+        // (dashed black). Now crossfade to the settled appearance:
+        //   non-bad → solid + cluster colour
+        //   bad     → still dashed + bad colour (red)
+        // Runs before the lockTimer fires (so before the un-dim) by
+        // virtue of t_total() = t_colorize() + T.colorize.
+        schedulePhase(t_colorize(), function () {
+          const j = state.just;
+          if (!j) return;
+          const finalColor = (j.bad && j.badColor) ? j.badColor
+                            : (state.bridgeColor || j.color);
+          const finalDash = j.bad ? "4 4" : null;
+          const sel = bridgeLayer.selectAll("path.sp-bridge");
+          sel.transition("colorize").duration(T.colorize).ease(d3.easeCubicInOut)
+            .attr("stroke", finalColor)
+            .attr("stroke-dasharray", finalDash)
+            .attr("stroke-width", 1.6);
         });
       } else {
         placedFanCollapsed = false;
@@ -449,13 +731,10 @@ NETGEN.spokeLayer = (function () {
         renderPlaced();
         renderBridge(false);
         renderCounter();
-        // Jump render lands in the post-settle state, so a bad just
-        // shows the badColor stroke immediately rather than the
-        // mid-animation cluster colour.
-        if (state.just && state.just.bad && state.just.badColor) {
-          bridgeLayer.selectAll("path.sp-bridge").attr("stroke", state.just.badColor);
-        }
+        // Jump-render bridge appearance is handled inside renderBridge:
+        // bad → dashed + bad colour, non-bad → solid + cluster colour.
       }
+      ensureLayerOrder();
     }
 
     function renderSpokes(animate) {
@@ -481,12 +760,15 @@ NETGEN.spokeLayer = (function () {
       const ent = sel.enter().append("line")
         .attr("class", "sp-spoke")
         .attr("stroke-linecap", "round");
-      const bridgeStroke = state.bridgeColor || (state.just && state.just.color) || null;
+      // Just-spokes wear the build colour during animate=true (they
+      // belong to the bridge that's being built / un-built). On a
+      // jump render they're hidden anyway, so colour doesn't matter.
+      const justStroke = animate ? buildColor : (state.bridgeColor || (state.just && state.just.color) || buildColor);
       const merged = ent.merge(sel)
         .attr("class", function (d) {
           return "sp-spoke" + (d.isJust ? " just" : "") + (d.consumed ? " consumed" : "");
         })
-        .attr("stroke", function (d) { return d.isJust && bridgeStroke ? bridgeStroke : d.color; })
+        .attr("stroke", function (d) { return d.isJust ? justStroke : d.color; })
         .attr("stroke-width", function (d) { return d.isJust ? 2.6 : 2.4; })
         .attr("opacity", function (d) { return d.isJust ? 1 : (d.consumed ? 0.22 : 0.92); });
       // Snap non-active spokes to their effective angle (rest if free,
@@ -518,13 +800,19 @@ NETGEN.spokeLayer = (function () {
           const r0 = nodeR(d.nid);
           const r1 = r0 + spokeOuterFor(d.nid, d.slot) * lenScale(a.count);
           const node = viz.nodeById[String(d.nid)];
+          // Constant angular velocity: T.orbit covers a π/2 swing;
+          // scale duration by the actual angular distance so a tiny
+          // hop doesn't over-and-back the same easing curve and a
+          // large swing doesn't whip past at the same total duration.
+          const delta = shortDelta(restA, liveA);
+          const orbitMs = scaleOrbitDuration(T.orbit, delta);
           d3.select(this)
             .interrupt("orbit")
-            .transition("orbit").duration(T.orbit).ease(d3.easeCubicInOut)
-            .attrTween("x1", function () { return function (k) { return node.x + Math.cos(restA + shortDelta(restA, liveA) * k) * r0; }; })
-            .attrTween("y1", function () { return function (k) { return node.y + Math.sin(restA + shortDelta(restA, liveA) * k) * r0; }; })
-            .attrTween("x2", function () { return function (k) { return node.x + Math.cos(restA + shortDelta(restA, liveA) * k) * r1; }; })
-            .attrTween("y2", function () { return function (k) { return node.y + Math.sin(restA + shortDelta(restA, liveA) * k) * r1; }; });
+            .transition("orbit").duration(orbitMs).ease(d3.easeCubicInOut)
+            .attrTween("x1", function () { return function (k) { return node.x + Math.cos(restA + delta * k) * r0; }; })
+            .attrTween("y1", function () { return function (k) { return node.y + Math.sin(restA + delta * k) * r0; }; })
+            .attrTween("x2", function () { return function (k) { return node.x + Math.cos(restA + delta * k) * r1; }; })
+            .attrTween("y2", function () { return function (k) { return node.y + Math.sin(restA + delta * k) * r1; }; });
         });
       } else {
         justSel.each(function (d) {
@@ -545,11 +833,20 @@ NETGEN.spokeLayer = (function () {
     // → control) by the node radius so the visible curve starts at
     // the node boundary instead of the centre, keeping the inside
     // of the circle clean even when the node is dimmed.
+    // dupTotal <= 1 ⇒ collinear straight, dupIdx ignored.
     function fanPath(p1, p2, dupIdx, dupTotal, r1, r2) {
+      const centered = dupTotal <= 1 ? 0 : (dupIdx - (dupTotal - 1) / 2);
+      return fanPathCentered(p1, p2, centered, r1, r2);
+    }
+    // Same as fanPath but takes the perpendicular fan offset directly,
+    // so callers can interpolate `centered` smoothly during the fan
+    // animation (each tween-step recomputes endpoints from the current
+    // Q-control direction → endpoints stay on the node boundary,
+    // instead of cutting a chord through the node).
+    function fanPathCentered(p1, p2, centered, r1, r2) {
       const dx = p2.x - p1.x, dy = p2.y - p1.y;
       const len = Math.hypot(dx, dy) || 1;
       const nx = -dy / len, ny = dx / len;
-      const centered = dupTotal <= 1 ? 0 : (dupIdx - (dupTotal - 1) / 2);
       const spread = Math.max(22, Math.min(42, len * 0.18));
       const mx = (p1.x + p2.x) / 2 + nx * centered * spread * 2;
       const my = (p1.y + p2.y) / 2 + ny * centered * spread * 2;
@@ -585,6 +882,58 @@ NETGEN.spokeLayer = (function () {
       return fanPath({ x: a.x, y: a.y }, { x: b.x, y: b.y }, idx, grp.total, ra, rb);
     }
 
+    // For a non-loop placed edge: returns a function (fanT) → path d
+    // that linearly interpolates the perpendicular fan offset between
+    // the no-just layout (fanT=0) and the with-just layout (fanT=1).
+    // Used by the fan transition's attrTween so endpoints stay on the
+    // node boundary throughout (string interpolation cuts a chord).
+    function placedPathTween(d) {
+      if (d.u === d.v) {
+        const fixed = placedPath(d);
+        return function () { return fixed; };
+      }
+      const nu = viz.nodeById[String(d.u)];
+      const nv = viz.nodeById[String(d.v)];
+      if (!nu || !nv) return function () { return ""; };
+      const swap = String(d.u) > String(d.v);
+      const a = swap ? nv : nu, b = swap ? nu : nv;
+      const ra = swap ? nodeR(d.v) : nodeR(d.u), rb = swap ? nodeR(d.u) : nodeR(d.v);
+      const k = pairKey(d.u, d.v);
+      const grpNoJust = dupInfoNoJust[k] || { total: 1 };
+      const grpWithJust = dupInfo[k] || { total: 1 };
+      const idx = d._dupIdx != null ? d._dupIdx : 0;
+      const cFrom = grpNoJust.total <= 1 ? 0 : (idx - (grpNoJust.total - 1) / 2);
+      const cTo   = grpWithJust.total <= 1 ? 0 : (idx - (grpWithJust.total - 1) / 2);
+      const ax = a.x, ay = a.y, bx = b.x, by = b.y;
+      return function (k) {
+        const c = cFrom + (cTo - cFrom) * k;
+        return fanPathCentered({ x: ax, y: ay }, { x: bx, y: by }, c, ra, rb);
+      };
+    }
+    function bridgePathTween(d) {
+      if (d.isLoop) {
+        const fixed = loopHalfPath(d, d.side);
+        return function () { return fixed; };
+      }
+      const nu = viz.nodeById[String(d.u)];
+      const nv = viz.nodeById[String(d.v)];
+      if (!nu || !nv) return function () { return ""; };
+      const swap = String(d.u) > String(d.v);
+      const a = swap ? nv : nu, b = swap ? nu : nv;
+      const ra = swap ? nodeR(d.v) : nodeR(d.u), rb = swap ? nodeR(d.u) : nodeR(d.v);
+      const k = pairKey(d.u, d.v);
+      const grp = dupInfo[k] || { total: 1 };
+      const targetIdx = state.just && state.just._dupIdx != null ? state.just._dupIdx : (grp.total - 1);
+      // From: collinear (centered=0). To: target slot in the with-just
+      // fan (centered = idx - (total-1)/2).
+      const cTo = grp.total <= 1 ? 0 : (targetIdx - (grp.total - 1) / 2);
+      const ax = a.x, ay = a.y, bx = b.x, by = b.y;
+      return function (k) {
+        const c = cTo * k;
+        return fanPathCentered({ x: ax, y: ay }, { x: bx, y: by }, c, ra, rb);
+      };
+    }
+
     function renderPlaced() {
       // During the active animation, every placed edge dims so the
       // new bridge stands alone. After the animation settles, all
@@ -597,6 +946,7 @@ NETGEN.spokeLayer = (function () {
         .attr("stroke-linecap", "round").attr("stroke-width", 1.6);
       ent.merge(sel)
         .attr("stroke", function (d) { return d.color; })
+        .attr("stroke-dasharray", function (d) { return d.bad ? "4 4" : null; })
         .attr("opacity", dim ? 0.18 : 1)
         .attr("d", placedPath);
     }
@@ -619,7 +969,17 @@ NETGEN.spokeLayer = (function () {
       const apex = loopApex(d);
       const cx = nu.x + side * r * LOOP_OFFX;
       const cy = nu.y - r * LOOP_OFFY;
-      return "M" + nu.x + "," + nu.y + " Q" + cx + "," + cy + " " + apex.x + "," + apex.y;
+      // Path starts at the node BOUNDARY along this half's tangent
+      // (LOOP_TANGENT_START / END), not at the node centre, so the
+      // stroke never enters the node circle's interior in the first
+      // place. Avoids dashes / round line caps poking through the
+      // node fill when paint order can't reliably keep the loop
+      // behind the node.
+      const r0 = nodeR(d.u);
+      const tangent = side < 0 ? LOOP_TANGENT_START : LOOP_TANGENT_END;
+      const sx = nu.x + Math.cos(tangent) * r0;
+      const sy = nu.y + Math.sin(tangent) * r0;
+      return "M" + sx + "," + sy + " Q" + cx + "," + cy + " " + apex.x + "," + apex.y;
     }
     function bridgePath(d) {
       const nu = viz.nodeById[String(d.u)];
@@ -627,9 +987,16 @@ NETGEN.spokeLayer = (function () {
       if (!nu || !nv) return "";
       if (d.isLoop) {
         const r = nodeR(d.u) + 8;
+        const r0 = nodeR(d.u);
         const x = nu.x, y = nu.y;
-        return "M" + x + "," + y + " C" + (x - r * LOOP_OFFX) + "," + (y - r * LOOP_OFFY)
-             + " " + (x + r * LOOP_OFFX) + "," + (y - r * LOOP_OFFY) + " " + (x + 0.01) + "," + (y - 0.01);
+        // Loop endpoints sit on the node boundary at the two loop
+        // tangents (start / end). Same rationale as loopHalfPath.
+        const sx = x + Math.cos(LOOP_TANGENT_START) * r0;
+        const sy = y + Math.sin(LOOP_TANGENT_START) * r0;
+        const ex = x + Math.cos(LOOP_TANGENT_END) * r0;
+        const ey = y + Math.sin(LOOP_TANGENT_END) * r0;
+        return "M" + sx + "," + sy + " C" + (x - r * LOOP_OFFX) + "," + (y - r * LOOP_OFFY)
+             + " " + (x + r * LOOP_OFFX) + "," + (y - r * LOOP_OFFY) + " " + ex + "," + ey;
       }
       const swap = String(d.u) > String(d.v);
       const a = swap ? nv : nu, b = swap ? nu : nv;
@@ -646,13 +1013,22 @@ NETGEN.spokeLayer = (function () {
     function renderBridge(animate) {
       const data = [];
       if (state.just) {
-        const isLoop = state.just.u === state.just.v;
-        const color = state.bridgeColor || state.just.color || "#4e7a3a";
+        const j = state.just;
+        const isLoop = j.u === j.v;
+        const settledColor = state.bridgeColor || j.color || "#4e7a3a";
+        const settledBad = !!j.bad;
+        const buildStroke = animate ? buildColor : ((settledBad && j.badColor) ? j.badColor : settledColor);
+        // During animate=true, the bridge is born in build colour
+        // (dashed black). The colorize phase later swaps it to the
+        // settled colour (cluster solid for non-bad, bad-red dashed
+        // for collisions). For animate=false (jump-render), skip the
+        // build phase and paint the settled appearance directly.
+        const baseRow = { color: buildStroke, finalColor: (settledBad && j.badColor) ? j.badColor : settledColor, bad: settledBad, u: j.u, v: j.v };
         if (isLoop) {
-          data.push({ id: "bridgeL", color, u: state.just.u, v: state.just.v, isLoop: true, side: -1 });
-          data.push({ id: "bridgeR", color, u: state.just.u, v: state.just.v, isLoop: true, side: +1 });
+          data.push(Object.assign({ id: "bridgeL", isLoop: true, side: -1 }, baseRow));
+          data.push(Object.assign({ id: "bridgeR", isLoop: true, side: +1 }, baseRow));
         } else {
-          data.push({ id: "bridge", color, u: state.just.u, v: state.just.v, isLoop: false });
+          data.push(Object.assign({ id: "bridge", isLoop: false }, baseRow));
         }
       }
       const sel = bridgeLayer.selectAll("path.sp-bridge").data(data, function (d) { return d.id; });
@@ -666,26 +1042,48 @@ NETGEN.spokeLayer = (function () {
         .attr("stroke", function (d) { return d.color; })
         .attr("d", function (d) { return d.isLoop ? loopHalfPath(d, d.side) : bridgePath(d); });
       if (animate) {
+        // Reset to build-phase thickness — a persistent bridge from
+        // a prior step settled to 1.6, but a new build cycle wants
+        // 2.6 throughout grow / fan, dropping to 1.6 only at colorize.
+        merged.attr("stroke-width", 2.6);
         merged.each(function (d) {
           const sel = d3.select(this);
           if (d.isLoop) {
-            // Each half "grows" outward from the node toward the apex
-            // via stroke-dashoffset. Two halves meet in the middle.
+            // Self-loop half: each half grows outward from the node
+            // toward the apex via stroke-dashoffset.
             const len = this.getTotalLength ? this.getTotalLength() : 100;
             sel
               .attr("opacity", 1)
               .attr("stroke-dasharray", len + " " + len)
               .attr("stroke-dashoffset", len)
-              .transition("bridge").delay(t_bridgeStart())
-              .duration(T.bridgeFadeIn + T.bridgeSolid)
+              .transition("bridge").delay(t_growStart())
+              .duration(T.bridgeGrow)
               .ease(d3.easeCubicOut)
               .attr("stroke-dashoffset", 0);
           } else {
+            // Straight bridge: stubs draw inward from each spoke tip,
+            // meeting at midpoint. Reverse of retract — dasharray
+            // "0 len 0" (nothing drawn) → "halfLen 0 halfLen" (full
+            // path drawn from both ends).
+            const len = this.getTotalLength ? this.getTotalLength() : 100;
+            const halfLen = len / 2;
+            // 4-value pattern (see retract for why) keeps the path
+            // fully stroked even after fan stretches it past
+            // straight_len; with a 3-value pattern SVG auto-doubles
+            // and injects a gap that clips the far end.
             sel
-              .attr("opacity", 0)
-              .attr("stroke-dasharray", "4 4")
-              .transition("bridge").delay(t_bridgeStart()).duration(T.bridgeFadeIn).attr("opacity", 1)
-              .transition("bridge").duration(T.bridgeSolid).attr("stroke-dasharray", null);
+              .attr("opacity", 1)
+              .attr("stroke-dashoffset", 0)
+              .attr("stroke-dasharray", "0 " + len + " 0 0")
+              .transition("bridge").delay(t_growStart())
+              .duration(T.bridgeGrow).ease(d3.easeCubicOut)
+              .attrTween("stroke-dasharray", function () {
+                return function (k) {
+                  const stub = halfLen * k;
+                  const gap  = len - 2 * stub;
+                  return stub + " " + gap + " " + stub + " 0";
+                };
+              });
           }
         });
       } else {
@@ -693,9 +1091,14 @@ NETGEN.spokeLayer = (function () {
           const sel = d3.select(this);
           if (d.isLoop) {
             const len = this.getTotalLength ? this.getTotalLength() : 100;
-            sel.attr("opacity", 1).attr("stroke-dasharray", len + " " + len).attr("stroke-dashoffset", 0);
+            sel.attr("opacity", 1)
+              .attr("stroke-dasharray", d.bad ? "4 4" : (len + " " + len))
+              .attr("stroke-dashoffset", 0)
+              .attr("stroke-width", 1.6);
           } else {
-            sel.attr("opacity", 1).attr("stroke-dasharray", null);
+            sel.attr("opacity", 1)
+              .attr("stroke-dasharray", d.bad ? "4 4" : null)
+              .attr("stroke-width", 1.6);
           }
         });
       }
