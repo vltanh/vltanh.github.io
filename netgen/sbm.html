@@ -75,7 +75,8 @@
   .graph.g-with-side .side-body{ grid-template-columns: 1fr; align-items: start; }
 }
 .viz-node.ringed{ stroke:#c7801e; stroke-width:3.4; }
-.deg-bar-row{ cursor:default; }
+.deg-bar-row{ cursor:default; transition: opacity .12s ease; }
+.deg-bar-row.dim{ opacity: .25; }
 .deg-bar-row.hot rect.hitbox{ fill: rgba(199, 128, 30, .15); }
 .deg-bar-row.hot rect.target-frame{ stroke:#c7801e; stroke-width:2; }
 .deg-bar-row.hot rect.bar{ stroke:#c7801e; stroke-width:1.2; }
@@ -176,12 +177,6 @@
     </div>
     <div class="graph-canvas" id="g-assign-cy"></div>
   </div>
-  <div class="callout warn">
-    <div class="tag">caveat: <code>outlier_mode=singleton</code> replicates the outlier subgraph</div>
-    <p>Switch <code>--outlier-mode</code> to <code>singleton</code> and every outlier becomes its own size-1 block, with its own row and column in \(e\). The urn for that block contains a single node repeated \(k_u\) times, so the sampler has no choice on the outlier side.</p>
-    <p>Outlier&ndash;outlier edges come back exactly (one stub from each singleton urn lands on the only resident), and outlier&ndash;cluster edges keep the outlier's per-cluster degree exact (only the specific cluster-side neighbour is rerolled).</p>
-    <p>The motivation for this project is benchmarking community detection algorithms, which is a contract: we hand the algorithm a synthetic graph plus a ground-truth clustering and ask whether the algorithm can recover it. Singleton mode breaks that contract whenever the outliers themselves carry community structure that the reference clustering missed. The synthetic preserves that structure verbatim while the ground truth claims those nodes are unclustered. An algorithm that finds the hidden communities looks wrong; one that misses them looks right. Use the default <code>combined</code> mode for benchmarking. Singleton mode is fine when the goal is replication, not benchmarking.</p>
-  </div>
 </section>
 
 <!-- ─────────── Profiling · degree sequence ─────────── -->
@@ -189,20 +184,12 @@
   <div class="stage-num">profiling · degree sequence</div>
   <h2>How many edges each node has.</h2>
   <p>The second vector in the contract is <code>degree.csv</code>: \(k_i\) per node. Below, the bars on the right are the degree sequence, one row per node sorted by degree desc and coloured by block. Hover a node to find its bar, or a bar to find its node. The edge count matrix (the third and last input) is in the next section.</p>
-  <div class="graph g-with-side" id="g-deg">
+  <div class="graph" id="g-deg">
     <div class="graph-chrome">
-      <span>input G + degree bars &middot; hover to link</span>
+      <span>input G &middot; hover a node or row to link</span>
       <span class="right">degree.csv</span>
     </div>
-    <div class="side-caption">
-      <span class="st">left</span>input graph &middot; <span class="st">right</span>degree sequence, one row per node sorted by \(k_u\) desc, coloured by input block.
-    </div>
-    <div class="side-body">
-      <div class="graph-canvas" id="g-deg-cy"></div>
-      <div class="side-right">
-        <svg id="deg-seq" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet"></svg>
-      </div>
-    </div>
+    <div class="graph-canvas" id="g-deg-cy" style="position:relative"></div>
   </div>
 </section>
 
@@ -214,21 +201,13 @@
   \[
     e_{rr} \;=\; 2 \cdot \bigl| \{\, \{u, v\} \in E \,:\, b_u = b_v = r \,\} \bigr|.
   \]
-  <p>This half-edge reading makes the diagonal doubling natural and matches graph-tool's undirected convention. It is not how most SBM write-ups introduce \(e_{rs}\) (they usually call it "edge count" and then note the factor of two as a bookkeeping detail), so expect a small re-orientation if you are coming from there.</p>
   <p>The matrix has one row and column per block, so on this synthetic it is a compact 4x4. Each edge contributes to exactly one cell (diagonal) or to the pair \((r, s), (s, r)\) (off-diagonal). Click any edge to highlight the cell it lands in, or click a cell to light up every edge that contributes to its count: the sampler will not remember which specific edges were there, only that the cell owes that many.</p>
-  <div class="graph g-with-side" id="g2">
+  <div class="graph" id="g2">
     <div class="graph-chrome">
       <span>input G &middot; hover an edge or a cell</span>
       <span class="right" id="g2-cell">cell: (none)</span>
     </div>
-    <div class="side-caption">
-      <span class="st">left</span>input graph &middot; <span class="st">right</span>edge count matrix \(e\), diagonal cells doubled. Hover an edge to find its cell, or a cell to light up every edge that contributes to its count.</div>
-    <div class="side-body">
-      <div class="graph-canvas" id="g2-cy"></div>
-      <div class="side-right">
-        <div class="blockmat" id="g2-mat"></div>
-      </div>
-    </div>
+    <div class="graph-canvas" id="g2-cy" style="position:relative"></div>
   </div>
   <div class="callout">
     <div class="tag">why this is the whole contract</div>
@@ -253,7 +232,7 @@
   </div>
   <div class="graph" id="g3">
     <div class="graph-chrome">
-      <span>multigraph</span>
+      <span>stub-matching</span>
       <span class="right" id="g3-stats">&middot;</span>
     </div>
     <div class="graph-canvas" id="g3-cy" style="position:relative"></div>
@@ -267,6 +246,12 @@
       <span class="step-label" id="g3-step-label">step <b id="g3-cur">0</b> / <span id="g3-total">0</span></span>
     </div>
   </div>
+  <div class="callout">
+    <div class="tag">why not <code style="text-transform:none">singleton</code> as the profiling stage's outlier mode?</div>
+    <p>Switch <code>--outlier-mode</code> to <code>singleton</code> and every outlier becomes its own size-1 block. The urn for that block holds a single node repeated \(k_u\) times, so the sampler has no choice on the outlier side: outlier&ndash;outlier edges come back exactly and outlier&ndash;cluster edges keep the outlier's per-cluster degree exact (only the cluster-side neighbour is rerolled). Below: \(e\) on the 20-node fixture under singleton mode. The bottom-right 2x2 corner (highlighted) is exactly the half-edge adjacency on the outlier subgraph and the sampler reproduces it bit-for-bit.</p>
+    <div id="g3-singleton-mat" style="margin:.6rem auto .8rem;display:flex;justify-content:center"></div>
+    <p>The cost: this project benchmarks community-detection algorithms, which is a contract between a synthetic graph and a ground-truth clustering. Singleton mode breaks that contract whenever outliers carry community structure the reference missed: the synthetic preserves the structure verbatim while the ground truth still labels those nodes unclustered, so any algorithm that finds the hidden communities looks wrong. Use <code>combined</code> for benchmarking; <code>singleton</code> is for replication.</p>
+  </div>
 </section>
 
 <!-- ─────────── Generation · dedup ─────────── -->
@@ -276,27 +261,19 @@
   <p>Every generator in this project ships a simple graph, so the last step of <code>gen.py</code> is a shared utility, <code>simplify_edges</code>, that drops self-loops and collapses parallels in pandas. graph-tool's own <code>remove_parallel_edges</code> + <code>remove_self_loops</code> would do the same job; we keep the pandas version so the guard is identical across sbm, ec-sbm, abcd, lfr, and npso.</p>
   <p>Each parallel edge between \((u, v)\) is collapsed to one; each self-loop on \(u\) is dropped. Every dropped half-edge is a unit of degree the sampler can no longer account for, so the output degree sequence sits at-or-below the target.</p>
   <p>Toggle the switch to watch the same multigraph from above simplify. The bars on the right compare target vs achieved degree per node, sorted by target; a node whose bar shrinks after the toggle lost a duplicate or a self-loop. Hover a node or a row to link them.</p>
-  <div class="graph g-with-side" id="g4">
+  <div class="graph" id="g4">
     <div class="graph-chrome">
-      <span id="g4-label">multigraph (pre-dedup)</span>
+      <span id="g4-label">dedup</span>
       <span class="right" id="g4-edges">edges: &middot;</span>
     </div>
-    <div class="side-caption">
-      <span class="st">left</span>multigraph (toggle dedup to simplify) &middot; <span class="st">right</span>degree per node, target vs achieved, one row per node sorted by target desc. Mint = achieved, faint red = target minus achieved.
-    </div>
-    <div class="side-body">
-      <div class="graph-canvas" id="g4-cy"></div>
-      <div class="side-right">
-        <svg id="deg-bars" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet"></svg>
-      </div>
-    </div>
+    <div class="graph-canvas" id="g4-cy" style="position:relative"></div>
     <div class="widget-row">
       <label class="toggle">
         <input type="checkbox" id="g4-toggle">
         <span class="toggle-track"></span>
         <span>apply dedup</span>
       </label>
-      <span class="step-label">toggle drops the red-dashed edges</span>
+      <span class="step-label">toggle drops the red-dashed edges &middot; degree bars: target vs achieved (mint = achieved, faint red = lost)</span>
     </div>
   </div>
 </section>
@@ -599,7 +576,21 @@ window.MathJax = {
     const edges = EDGES.map(e => ({
       u: e.u, v: e.v, color: pickInputColor(e), w: 1.2,
     }));
-    const viz = NETGEN.VIZ.init("g-deg-cy", { showLabels: true, edges, pad: 40 });
+    const viz = NETGEN.VIZ.init("g-deg-cy", { showLabels: true, edges, pad: 40, padRight: 90 });
+
+    // Top-right collapsible degrees panel.
+    const dsWrap = document.createElement("div");
+    dsWrap.id = "g-deg-panel";
+    dsWrap.style.cssText = "position:absolute;top:.5rem;right:.5rem;z-index:5;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.78rem;background:rgba(243,236,215,.94);border:1px solid var(--paper-3);border-radius:3px;padding:.4rem .55rem;color:var(--paper-2);max-width:20rem;";
+    dsWrap.innerHTML = '<button id="g-deg-toggle" type="button" style="display:block;margin:0 0 .3rem auto;background:transparent;border:none;color:var(--paper-2);cursor:pointer;font:inherit;font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;padding:0">degrees <span id="g-deg-arrow">&#9662;</span></button><div id="g-deg-body"><svg id="deg-seq" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet" style="display:block;width:14rem;height:auto"></svg></div>';
+    document.getElementById("g-deg-cy").appendChild(dsWrap);
+    document.getElementById("g-deg-toggle").addEventListener("click", function () {
+      const body = document.getElementById("g-deg-body");
+      const arrow = document.getElementById("g-deg-arrow");
+      const open = body.style.display !== "none";
+      body.style.display = open ? "none" : "block";
+      arrow.innerHTML = open ? "&#9656;" : "&#9662;";
+    });
 
     const svg = d3.select("#deg-seq");
     svg.selectAll("*").remove();
@@ -658,35 +649,63 @@ window.MathJax = {
         .text(TARGET_DEG[n]);
     });
 
-    function setRowHot(id, on) {
-      gBars.select('.deg-bar-row[data-id="' + id + '"]').classed("hot", on);
+    function focusOn(id) {
+      const sid = String(id);
+      viz.eachNode(function (n) {
+        if (String(n.id) !== sid) viz.addNodeClass(n.id, "dim");
+      });
+      viz.eachEdge(function (e) {
+        const su = String(e.source.id || e.source);
+        const sv = String(e.target.id || e.target);
+        if (su !== sid && sv !== sid) viz.addEdgeClass(e.id, "dim");
+      });
+      gBars.selectAll(".deg-bar-row").each(function () {
+        if (this.getAttribute("data-id") !== sid) this.classList.add("dim");
+      });
+    }
+    function focusClear() {
+      viz.eachNode(function (n) { viz.removeNodeClass(n.id, "dim"); });
+      viz.eachEdge(function (e) { viz.removeEdgeClass(e.id, "dim"); });
+      gBars.selectAll(".deg-bar-row").each(function () { this.classList.remove("dim"); });
     }
     gBars.on("mouseover", function (ev) {
       const el = ev.target.closest(".deg-bar-row");
       if (!el) return;
-      const id = el.getAttribute("data-id");
-      setRowHot(id, true);
-      viz.addNodeClass(id, "ringed");
+      focusOn(el.getAttribute("data-id"));
     });
     gBars.on("mouseout", function (ev) {
       const el = ev.target.closest(".deg-bar-row");
       if (!el) return;
-      const id = el.getAttribute("data-id");
-      setRowHot(id, false);
-      viz.removeNodeClass(id, "ringed");
+      focusClear();
     });
-    viz.onNodeHoverEnter(function (d) {
-      setRowHot(d.id, true);
-      viz.addNodeClass(d.id, "ringed");
-    });
-    viz.onNodeHoverLeave(function (d) {
-      setRowHot(d.id, false);
-      viz.removeNodeClass(d.id, "ringed");
-    });
+    viz.onNodeHoverEnter(function (d) { focusOn(d.id); });
+    viz.onNodeHoverLeave(function (d) { focusClear(); });
   })();
 
   // ── Profiling · edge count matrix + two-way edge↔cell interaction ──
   (function () {
+    const edges = EDGES.map(e => ({
+      u: e.u, v: e.v,
+      color: pickInputColor(e), w: 1.4,
+      id: "e2-" + e.u + "-" + e.v,
+    }));
+    const viz = NETGEN.VIZ.init("g2-cy", { showLabels: true, edges, pad: 40, padRight: 130 });
+
+    // Top-right collapsible matrix panel hosting #g2-mat. Must be
+    // appended AFTER VIZ.init since init clears the host's children.
+    const matWrap = document.createElement("div");
+    matWrap.id = "g2-panel";
+    matWrap.style.cssText = "position:absolute;top:.5rem;right:.5rem;z-index:5;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.78rem;background:rgba(243,236,215,.94);border:1px solid var(--paper-3);border-radius:3px;padding:.4rem .55rem;color:var(--paper-2);";
+    matWrap.innerHTML = '<button id="g2-mat-toggle" type="button" style="display:block;margin:0 0 .3rem auto;background:transparent;border:none;color:var(--paper-2);cursor:pointer;font:inherit;font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;padding:0">edge count matrix <span id="g2-mat-arrow">&#9662;</span></button><div id="g2-mat-body"><div class="blockmat" id="g2-mat" style="max-width:18rem;font-size:.95rem"></div></div>';
+    document.getElementById("g2-cy").appendChild(matWrap);
+    document.getElementById("g2-mat-toggle").addEventListener("click", function () {
+      const body = document.getElementById("g2-mat-body");
+      const arrow = document.getElementById("g2-mat-arrow");
+      const open = body.style.display !== "none";
+      body.style.display = open ? "none" : "block";
+      arrow.innerHTML = open ? "&#9656;" : "&#9662;";
+    });
+
     const gm = document.getElementById("g2-mat");
     gm.innerHTML = "";
     const cellFactory = (extraCls, text) => {
@@ -706,12 +725,6 @@ window.MathJax = {
       }
     }
 
-    const edges = EDGES.map(e => ({
-      u: e.u, v: e.v,
-      color: pickInputColor(e), w: 1.4,
-      id: "e2-" + e.u + "-" + e.v,
-    }));
-    const viz = NETGEN.VIZ.init("g2-cy", { showLabels: true, edges, pad: 40 });
     const readout = document.getElementById("g2-cell");
 
     function clearAllHighlights() {
@@ -826,7 +839,7 @@ window.MathJax = {
   // bridge animates dashed → solid then persists as the edge.
   (function () {
     const viz = NETGEN.VIZ.init("g3-cy", {
-      showLabels: true, edges: [], pinned: true, pad: 40,
+      showLabels: true, edges: [], pinned: true, pad: 110, padRight: 110,
       nodeColor: n => COL[CLUSTER_OF[n]] || COL.OUT,
     });
     let lockOverride = false;
@@ -840,7 +853,7 @@ window.MathJax = {
     const budgetWrap = document.createElement("div");
     budgetWrap.id = "g3-budget";
     budgetWrap.style.cssText = "position:absolute;top:.5rem;right:.5rem;z-index:5;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.78rem;background:rgba(243,236,215,.94);border:1px solid var(--paper-3);border-radius:3px;padding:.4rem .55rem;color:var(--paper-2);";
-    budgetWrap.innerHTML = '<button id="g3-budget-toggle" type="button" style="display:block;margin:0 0 .3rem auto;background:transparent;border:none;color:var(--paper-2);cursor:pointer;font:inherit;font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;padding:0">half-edge budget <span id="g3-budget-arrow">&#9662;</span></button><div id="g3-budget-body"><table id="g3-budget-tbl" style="border-collapse:collapse"></table><div style="margin-top:.3rem;font-size:.65rem;opacity:.7;line-height:1.3;max-width:11rem">cell = remaining (r,s) half-edges. intra (r=s) pulls 2 per pair, inter pulls 1. dim = used up. mint = current pair.</div></div>';
+    budgetWrap.innerHTML = '<button id="g3-budget-toggle" type="button" style="display:block;margin:0 0 .3rem auto;background:transparent;border:none;color:var(--paper-2);cursor:pointer;font:inherit;font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;padding:0">half-edge budget <span id="g3-budget-arrow">&#9662;</span></button><div id="g3-budget-body"><table id="g3-budget-tbl" style="border-collapse:collapse"></table><div style="margin-top:.3rem;font-size:.65rem;opacity:.7;line-height:1.3;max-width:11rem">cell = remaining (r,s) half-edges. dim = used up. mint = current pair.</div></div>';
     document.getElementById("g3-cy").appendChild(budgetWrap);
     document.getElementById("g3-budget-toggle").addEventListener("click", function () {
       const body = document.getElementById("g3-budget-body");
@@ -1102,31 +1115,50 @@ window.MathJax = {
       showLabels: true,
       edges: [],
       pad: 40,
+      padRight: 90,
     });
     const label     = document.getElementById("g4-label");
     const edgeCount = document.getElementById("g4-edges");
     const toggleIn  = document.getElementById("g4-toggle");
+
+    // Top-right collapsible degree-bars panel (mirror of g3's
+    // half-edge budget widget). Hosts the target-vs-achieved bars
+    // SVG; collapses to a single header line when not needed.
+    const degWrap = document.createElement("div");
+    degWrap.id = "g4-degbars";
+    degWrap.style.cssText = "position:absolute;top:.5rem;right:.5rem;z-index:5;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.78rem;background:rgba(243,236,215,.94);border:1px solid var(--paper-3);border-radius:3px;padding:.4rem .55rem;color:var(--paper-2);max-width:20rem;";
+    degWrap.innerHTML = '<button id="g4-deg-toggle" type="button" style="display:block;margin:0 0 .3rem auto;background:transparent;border:none;color:var(--paper-2);cursor:pointer;font:inherit;font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;padding:0">degrees <span id="g4-deg-arrow">&#9662;</span></button><div id="g4-deg-body"><svg id="deg-bars" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet" style="display:block;width:14rem;height:auto"></svg></div>';
+    document.getElementById("g4-cy").appendChild(degWrap);
+    document.getElementById("g4-deg-toggle").addEventListener("click", function () {
+      const body = document.getElementById("g4-deg-body");
+      const arrow = document.getElementById("g4-deg-arrow");
+      const open = body.style.display !== "none";
+      body.style.display = open ? "none" : "block";
+      arrow.innerHTML = open ? "&#9656;" : "&#9662;";
+    });
 
     function render(sample, deduped) {
       const edges = sample.all.map((e, i) => {
         const bad = e.loop || e.multi;
         if (bad && deduped) return null;  // omit entirely when deduped on
         if (bad) {
+          // Match stub-matching settled bad: dashed red at the
+          // walker's settled stroke-width (see spoke_layer colorize).
           return {
             u: e.u, v: e.v,
-            color: COL.edge_drop, w: 2,
-            id: "s4-" + i, classes: "dashed thick",
+            color: COL.edge_drop, w: 1.6,
+            id: "s4-" + i, classes: "dashed",
           };
         }
         return {
           u: e.u, v: e.v,
           color: e.intra ? (COL.edge_intra[blockOf(e.u)] || COL.edge_stage2) : COL.edge_inter,
-          w: 1.4,
+          w: 1.6,
           id: "s4-" + i,
         };
       }).filter(Boolean);
       viz.setEdges(edges);
-      label.textContent = deduped ? "simple graph (post-dedup)" : "multigraph (pre-dedup)";
+      label.textContent = "dedup";
       const pre  = sample.stats.preEdges;
       const post = sample.stats.postEdges;
       if (deduped) {
@@ -1236,33 +1268,84 @@ window.MathJax = {
     }
     renderDegBars(SAMPLE, deduped);
 
-    // Row ↔ node hover linking.
-    function setRowHot(id, on) {
-      const row = gBars.select('.deg-bar-row[data-id="' + id + '"]');
-      row.classed("hot", on);
+    // Row ↔ node focus link. Hovering either side dims everything
+    // else: other nodes, non-incident edges, and every other row.
+    function focusOn(id) {
+      const sid = String(id);
+      viz.eachNode(function (n) {
+        if (String(n.id) !== sid) viz.addNodeClass(n.id, "dim");
+      });
+      viz.eachEdge(function (e) {
+        const su = String(e.source.id || e.source);
+        const sv = String(e.target.id || e.target);
+        if (su !== sid && sv !== sid) viz.addEdgeClass(e.id, "dim");
+      });
+      gBars.selectAll(".deg-bar-row").each(function () {
+        if (this.getAttribute("data-id") !== sid) this.classList.add("dim");
+      });
+    }
+    function focusClear() {
+      viz.eachNode(function (n) { viz.removeNodeClass(n.id, "dim"); });
+      viz.eachEdge(function (e) { viz.removeEdgeClass(e.id, "dim"); });
+      gBars.selectAll(".deg-bar-row").each(function () { this.classList.remove("dim"); });
     }
     gBars.on("mouseover", function (ev) {
       const el = ev.target.closest(".deg-bar-row");
       if (!el) return;
-      const id = el.getAttribute("data-id");
-      setRowHot(id, true);
-      viz.addNodeClass(id, "ringed");
+      focusOn(el.getAttribute("data-id"));
     });
     gBars.on("mouseout", function (ev) {
       const el = ev.target.closest(".deg-bar-row");
       if (!el) return;
-      const id = el.getAttribute("data-id");
-      setRowHot(id, false);
-      viz.removeNodeClass(id, "ringed");
+      focusClear();
     });
-    viz.onNodeHoverEnter(function (d) {
-      setRowHot(d.id, true);
-      viz.addNodeClass(d.id, "ringed");
+    viz.onNodeHoverEnter(function (d) { focusOn(d.id); });
+    viz.onNodeHoverLeave(function (d) { focusClear(); });
+  })();
+
+  // ── Choice callout · singleton-mode e on the 20-node fixture ──
+  // Renders e_{rs} with each cluster + each outlier as its own block.
+  // The outlier-outlier corner is exactly the (graph-tool half-edge
+  // convention) adjacency matrix on the outlier subgraph.
+  (function () {
+    const host = document.getElementById("g3-singleton-mat");
+    if (!host) return;
+    const clusterBlocks = ["C1", "C2", "C3"];
+    const outlierIds = NODES.filter(n => CLUSTER_OF[n] === "OUT");
+    const blockOfNode = (n) => CLUSTER_OF[n] === "OUT" ? String(n) : CLUSTER_OF[n];
+    const labels = clusterBlocks.concat(outlierIds.map(String));
+    const idx = {};
+    labels.forEach((l, i) => { idx[l] = i; });
+    const B = labels.length;
+    const e = Array.from({ length: B }, () => new Array(B).fill(0));
+    EDGES.forEach(ed => {
+      const bu = idx[blockOfNode(ed.u)];
+      const bv = idx[blockOfNode(ed.v)];
+      if (bu == null || bv == null) return;
+      if (bu === bv) e[bu][bv] += 2;       // half-edge convention: diagonal doubled
+      else { e[bu][bv] += 1; e[bv][bu] += 1; }
     });
-    viz.onNodeHoverLeave(function (d) {
-      setRowHot(d.id, false);
-      viz.removeNodeClass(d.id, "ringed");
-    });
+    const outlierStart = clusterBlocks.length;
+    const cell = (cls, txt, hl) => {
+      const d = document.createElement("div");
+      d.className = "cell " + (cls || "");
+      d.textContent = txt;
+      if (hl) d.style.cssText = "background:rgba(199,128,30,.18);border-color:#c7801e;color:var(--paper)";
+      return d;
+    };
+    const wrap = document.createElement("div");
+    wrap.className = "blockmat";
+    wrap.style.cssText = "max-width:340px;grid-template-columns:repeat(" + (B + 1) + ", minmax(0, 1fr));margin:0";
+    wrap.appendChild(cell("head", ""));
+    labels.forEach(l => wrap.appendChild(cell("head", l)));
+    for (let i = 0; i < B; i++) {
+      wrap.appendChild(cell("head", labels[i]));
+      for (let j = 0; j < B; j++) {
+        const hl = i >= outlierStart && j >= outlierStart;
+        wrap.appendChild(cell("", String(e[i][j]), hl));
+      }
+    }
+    host.appendChild(wrap);
   })();
 
   // ── Centerpiece: dnc input vs output block heatmaps + per-cell loss ──

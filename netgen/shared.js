@@ -239,6 +239,7 @@ const VIZ = {
             ? NODES.filter(n => CLUSTER_OF[n] !== "OUT")
             : NODES,
           pad: opts.pad,
+          padRight: opts.padRight,
         }))
         .attr("preserveAspectRatio", "xMidYMid meet");
     }
@@ -428,18 +429,37 @@ const VIZ = {
       });
     }
     function edgePath(d) {
+      const r1 = (d.source && d.source.r) || nodeR;
+      const r2 = (d.target && d.target.r) || nodeR;
       if (d.source === d.target) {
-        // Self-loop rendered as a small upward arc; multiple loops on
-        // the same node fan out in increasing radii. Endpoints anchor
-        // at node center; the node circle paints on top via z-order.
+        // Self-loop: anchor endpoints on the node boundary at the two
+        // loop tangents (matches spoke_layer's loopHalfPath /
+        // bridgePath loop branch). Apex height keeps the original
+        // rBase + step ramp for parallel loops on the same node.
         const x = d.source.x, y = d.source.y;
         const rBase = 18, step = 7;
         const r = rBase + (d.dupIdx || 0) * step;
-        return "M" + x + "," + y + " C" + (x - r) + "," + (y - r * 2.2) + " " + (x + r) + "," + (y - r * 2.2) + " " + (x + 0.01) + "," + (y - 0.01);
+        const LOOP_OFFX = 1.1, LOOP_OFFY = 2.0;
+        const tangentS = Math.atan2(-LOOP_OFFY, -LOOP_OFFX);
+        const tangentE = Math.atan2(-LOOP_OFFY,  LOOP_OFFX);
+        const sx = x + Math.cos(tangentS) * r1;
+        const sy = y + Math.sin(tangentS) * r1;
+        const ex = x + Math.cos(tangentE) * r1;
+        const ey = y + Math.sin(tangentE) * r1;
+        return "M" + sx + "," + sy + " C" + (x - r) + "," + (y - r * 2.2) + " " + (x + r) + "," + (y - r * 2.2) + " " + ex + "," + ey;
       }
       const sx = d.source.x, sy = d.source.y, tx = d.target.x, ty = d.target.y;
       const total = d.dupTotal || 1;
-      if (total <= 1) return "M" + sx + "," + sy + "L" + tx + "," + ty;
+      if (total <= 1) {
+        // Straight edge: shift each endpoint along the centreline by
+        // the node radius so the visible stroke starts at the node
+        // boundary, not the centre.
+        const dx = tx - sx, dy = ty - sy;
+        const len = Math.hypot(dx, dy) || 1;
+        const ux = dx / len, uy = dy / len;
+        return "M" + (sx + ux * r1) + "," + (sy + uy * r1) +
+               "L" + (tx - ux * r2) + "," + (ty - uy * r2);
+      }
       const lo = d.source.id < d.target.id ? d.source : d.target;
       const hi = d.source.id < d.target.id ? d.target : d.source;
       const cdx = hi.x - lo.x, cdy = hi.y - lo.y;
@@ -449,7 +469,18 @@ const VIZ = {
       const spread = Math.max(22, Math.min(42, len * 0.18));
       const mx = (lo.x + hi.x) / 2 + nx * centered * spread * 2;
       const my = (lo.y + hi.y) / 2 + ny * centered * spread * 2;
-      return "M" + sx + "," + sy + " Q" + mx + "," + my + " " + tx + "," + ty;
+      // Shift the source / target endpoints from node centre toward
+      // the Q control by their respective node radii — same boundary
+      // anchor convention as spoke_layer's fanPathCentered.
+      const dxs = mx - sx, dys = my - sy;
+      const ds = Math.hypot(dxs, dys) || 1;
+      const ssx = sx + (dxs / ds) * r1;
+      const ssy = sy + (dys / ds) * r1;
+      const dxe = mx - tx, dye = my - ty;
+      const de = Math.hypot(dxe, dye) || 1;
+      const eex = tx + (dxe / de) * r2;
+      const eey = ty + (dye / de) * r2;
+      return "M" + ssx + "," + ssy + " Q" + mx + "," + my + " " + eex + "," + eey;
     }
     sim.on("tick", () => {
       gLinks.selectAll("path.viz-edge").attr("d", edgePath);
@@ -808,6 +839,7 @@ function fitViewBoxAttr(opts) {
   const positions = opts.positions || POSITIONS;
   const ids = opts.includeIds || NODES;
   const pad = opts.pad != null ? opts.pad : 42;
+  const padRight = opts.padRight || 0;  // extra right slack — leaves room for a top-right overlay panel without nodes flowing under it
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   ids.forEach(id => {
     const p = positions[id];
@@ -819,11 +851,15 @@ function fitViewBoxAttr(opts) {
   });
   if (!isFinite(minX)) return "-320 -320 640 640";
   let x = minX - pad, y = minY - pad;
-  let w = (maxX - minX) + 2 * pad;
+  let w = (maxX - minX) + 2 * pad + padRight;
   let h = (maxY - minY) + 2 * pad;
-  // Square out: pages set CSS aspect-ratio: 1/1 so the rendered SVG
-  // has matching x and y scales; padding the shorter axis to match
-  // keeps the content centred.
+  // With padRight, leave the viewBox at its natural (wider) aspect
+  // — squaring would also pad the vertical axis, shrinking the
+  // graph inside its host. Without padRight, square out so x/y
+  // scales match (page CSS sets aspect-ratio: 1/1 in some layouts).
+  if (padRight > 0) {
+    return `${x} ${y} ${w} ${h}`;
+  }
   const side = Math.max(w, h);
   x -= (side - w) / 2;
   y -= (side - h) / 2;
