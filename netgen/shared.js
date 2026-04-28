@@ -1509,11 +1509,36 @@ function rewireSpokeSwapAnimate(opts) {
       });
   });
 
+  // Phase 4.5 (spoke retract, self-loop place only): mirrors SBM's
+  // spoke_layer self-loop sequence — orbit → spoke retract → grow.
+  // The two stubs hugging the same node first shrink length to zero
+  // and fade out, then the loop teardrop emerges from the node
+  // centre. Without this, both spokes stay visible while the loop
+  // grows over them and reads as a chord through the node.
+  const SPOKE_RETRACT_MS = 200;
+  const loopStubs = new Set();
+  placePairs.forEach(function (pp) {
+    if (pp.s1.node === pp.s2.node) { loopStubs.add(pp.s1); loopStubs.add(pp.s2); }
+  });
+  const hasLoopPlace = loopStubs.size > 0;
+  const tRetract = tForward + T.orbitFwd;
+  if (hasLoopPlace) {
+    later(tRetract, function () {
+      stubSel.filter(function (s) { return loopStubs.has(s); })
+        .interrupt("stubOut")
+        .transition("loopRetract").duration(SPOKE_RETRACT_MS).ease(d3.easeCubicIn)
+        .attr("x2", function () { return d3.select(this).attr("x1"); })
+        .attr("y2", function () { return d3.select(this).attr("y1"); })
+        .attr("opacity", 0)
+        .remove();
+    });
+  }
+
   // Phase 5 (bridge grow): for each place, draw a path between its two
   // stub-tips and animate the same 4-value stub-gap-stub pattern in
   // reverse (mirror of retract). Stubs fade out as the bridge stitches
   // them together — the spoke tip becomes the bridge endpoint.
-  const tGrow = tForward + T.orbitFwd;
+  const tGrow = tRetract + (hasLoopPlace ? SPOKE_RETRACT_MS : 0);
   later(tGrow, function () {
     placePairs.forEach(function (pp) {
       const meta = pp.p;
@@ -1525,17 +1550,28 @@ function rewireSpokeSwapAnimate(opts) {
         .attr("stroke-linecap", "round");
       const node = path.node();
       const len = (node.getTotalLength && node.getTotalLength()) || 100;
-      const halfLen = len / 2;
-      path.attr("stroke-dashoffset", 0)
-        .attr("stroke-dasharray", "0 " + len + " 0 0")
-        .transition("grow").duration(T.grow).ease(d3.easeCubicOut)
-        .attrTween("stroke-dasharray", function () {
-          return function (k) {
-            const stub = halfLen * k;
-            const gap = len - 2 * stub;
-            return stub + " " + gap + " " + stub + " 0";
-          };
-        });
+      const isLoop = pp.s1.node === pp.s2.node;
+      if (isLoop) {
+        // Self-loop teardrop: two-quadratic curve. Grow with a single
+        // dashoffset sweep (M start → apex → end) so the bridge draws
+        // continuously around the loop instead of from both ends.
+        path.attr("stroke-dasharray", len + " " + len)
+          .attr("stroke-dashoffset", len)
+          .transition("grow").duration(T.grow).ease(d3.easeCubicOut)
+          .attr("stroke-dashoffset", 0);
+      } else {
+        const halfLen = len / 2;
+        path.attr("stroke-dashoffset", 0)
+          .attr("stroke-dasharray", "0 " + len + " 0 0")
+          .transition("grow").duration(T.grow).ease(d3.easeCubicOut)
+          .attrTween("stroke-dasharray", function () {
+            return function (k) {
+              const stub = halfLen * k;
+              const gap = len - 2 * stub;
+              return stub + " " + gap + " " + stub + " 0";
+            };
+          });
+      }
       pp._path = path;
     });
     // Stubs fade out across the entire grow phase. With the bridge
@@ -1544,7 +1580,9 @@ function rewireSpokeSwapAnimate(opts) {
     // avoids the snap that the old half-grow fade produced when the
     // bridge raced past the still-visible stubs (most visible on
     // close-by node pairs where the stubs already nearly meet).
-    stubSel.transition("stubOut").duration(T.grow).ease(d3.easeCubicInOut)
+    // Self-loop stubs already retracted + removed in phase 4.5.
+    stubSel.filter(function (s) { return !loopStubs.has(s); })
+      .transition("stubOut").duration(T.grow).ease(d3.easeCubicInOut)
       .attr("opacity", 0)
       .remove();
   });
