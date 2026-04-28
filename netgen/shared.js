@@ -913,6 +913,13 @@ function stepController(opts) {
     // random-button reroll) can swap `total` and reset idx without
     // reconstructing the controller.
     reconfigure: (newTotal) => { total = newTotal; idx = 0; render(); },
+    // Atomic swap of total + idx, single render. Used by random-all
+    // handlers that want to keep the cursor near its prior position.
+    reconfigureKeep: (newTotal, newIdx) => {
+      total = newTotal;
+      idx = Math.max(0, Math.min(total - 1, newIdx));
+      render();
+    },
   };
 }
 
