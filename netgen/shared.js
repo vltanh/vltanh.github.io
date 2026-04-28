@@ -1252,9 +1252,29 @@ function rewireSpokeSwapAnimate(opts) {
     const me = nodeXY(s.node);
     return { x: me.x + Math.cos(s._currA) * me.r, y: me.y + Math.sin(s._currA) * me.r };
   }
+  // Cap the stub so its tip cannot cross close to its partner's node
+  // boundary. Without the cap, close-by node pairs end up with stubs
+  // that poke past their partner's node, producing a visible jiggle
+  // as the bridge grows underneath. Cap is the min over old + new
+  // partners so it stays consistent through the orbit.
+  function capForPartner(me, pid) {
+    if (pid == null || pid === s_nullSentinel) return SPOKE_LEN;
+    const partner = nodeXY(pid);
+    const D = Math.hypot(partner.x - me.x, partner.y - me.y);
+    return Math.max(2, Math.min(SPOKE_LEN, (D - me.r - partner.r) / 2 - 1));
+  }
+  const s_nullSentinel = Symbol("noPartner");
+  function spokeEffectiveLen(s) {
+    if (s._cachedEff != null) return s._cachedEff;
+    const me = nodeXY(s.node);
+    const oldCap = (s.oldPartner != null && s.oldPartner !== s.node) ? capForPartner(me, s.oldPartner) : SPOKE_LEN;
+    const newCap = (s.newPartner != null && s.newPartner !== s.node) ? capForPartner(me, s.newPartner) : SPOKE_LEN;
+    s._cachedEff = Math.min(oldCap, newCap);
+    return s._cachedEff;
+  }
   function spokeTip(s) {
     const me = nodeXY(s.node);
-    const r = me.r + SPOKE_LEN;
+    const r = me.r + spokeEffectiveLen(s);
     return { x: me.x + Math.cos(s._currA) * r, y: me.y + Math.sin(s._currA) * r };
   }
 
@@ -1414,13 +1434,15 @@ function rewireSpokeSwapAnimate(opts) {
         if (s.newAngle == null) return function () { return d3.select(this).attr("x2"); };
         const me = nodeXY(s.node);
         const start = s.oldAngle, delta = shortDelta(start, s.newAngle);
-        return function (k) { return me.x + Math.cos(start + delta * k) * (me.r + SPOKE_LEN); };
+        const r = me.r + spokeEffectiveLen(s);
+        return function (k) { return me.x + Math.cos(start + delta * k) * r; };
       })
       .attrTween("y2", function (s) {
         if (s.newAngle == null) return function () { return d3.select(this).attr("y2"); };
         const me = nodeXY(s.node);
         const start = s.oldAngle, delta = shortDelta(start, s.newAngle);
-        return function (k) { return me.y + Math.sin(start + delta * k) * (me.r + SPOKE_LEN); };
+        const r = me.r + spokeEffectiveLen(s);
+        return function (k) { return me.y + Math.sin(start + delta * k) * r; };
       });
   });
 
