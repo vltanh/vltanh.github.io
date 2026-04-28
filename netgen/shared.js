@@ -1000,6 +1000,12 @@ function mountGxPanel(opts) {
     };
     requestAnimationFrame(sync);
     window.addEventListener("resize", sync);
+    // Toggle re-syncs after the body show/hide transition lands so the
+    // graph reclaims (or yields) the right slack.
+    const toggleBtn = document.getElementById(opts.prefix + "-toggle");
+    if (toggleBtn) toggleBtn.addEventListener("click", () => {
+      requestAnimationFrame(() => requestAnimationFrame(sync));
+    });
   }
   return wrap;
 }
