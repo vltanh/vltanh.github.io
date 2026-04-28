@@ -1501,6 +1501,33 @@ function retypeset(target) {
   window.MathJax.typesetPromise(list).catch(function () {});
 }
 
+// Bidirectional row↔node hover linkage. Each row child of `gBars` carries
+// a [data-id] attribute matching a viz node id; hovering either side
+// toggles the row's `.hot` class and the node's `.ringed` viz class.
+function bindRowNodeHover(gBars, viz, opts) {
+  const sel = (opts && opts.rowSelector) || ".deg-bar-row";
+  const attr = (opts && opts.idAttr) || "data-id";
+  function setRowHot(id, on) {
+    gBars.select(sel + "[" + attr + '="' + id + '"]').classed("hot", on);
+  }
+  gBars.on("mouseover", function (ev) {
+    const el = ev.target.closest(sel);
+    if (!el) return;
+    const id = el.getAttribute(attr);
+    setRowHot(id, true);
+    viz.addNodeClass(id, "ringed");
+  });
+  gBars.on("mouseout", function (ev) {
+    const el = ev.target.closest(sel);
+    if (!el) return;
+    const id = el.getAttribute(attr);
+    setRowHot(id, false);
+    viz.removeNodeClass(id, "ringed");
+  });
+  viz.onNodeHoverEnter(function (d) { setRowHot(d.id, true); viz.addNodeClass(d.id, "ringed"); });
+  viz.onNodeHoverLeave(function (d) { setRowHot(d.id, false); viz.removeNodeClass(d.id, "ringed"); });
+}
+
 // ── Export ────────────────────────────────────────────────────
 global.NETGEN = {
   POSITIONS, NODES, EDGES, CLUSTER_OF, DEGREES, DEGREES_EXCL, MINCUTS,
@@ -1512,6 +1539,7 @@ global.NETGEN = {
   linksRow, kinSection,
   fitViewBoxAttr,
   retypeset,
+  bindRowNodeHover,
   rewireSwapAnimate,
   rewireSpokeSwapAnimate,
 };
