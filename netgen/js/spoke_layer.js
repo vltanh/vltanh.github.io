@@ -895,7 +895,7 @@ NETGEN.spokeLayer = (function () {
         .attr("stroke-linecap", "round").attr("stroke-width", 1.6);
       ent.merge(sel)
         .attr("stroke", function (d) { return d.color; })
-        .attr("stroke-dasharray", function (d) { return d.bad ? "4 4" : null; })
+        .attr("stroke-dasharray", null)
         .attr("opacity", dim ? 0.18 : 1)
         .attr("d", placedPath);
     }

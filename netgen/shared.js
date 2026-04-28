@@ -386,12 +386,13 @@ const BridgeAnim = (function () {
     const tName = opts.transitionName || "colorize";
     const finalColor = opts.color;
     const finalWidth = opts.width != null ? opts.width : 1.6;
-    const dasharray = opts.bad ? "4 4" : null;
+    // Settled bad edges (collisions) render solid red — dedup is the
+    // step that flips them to dashed (see sbm dedup viz).
     const t = pathSel.transition(tName).duration(duration);
     if (ease) t.ease(ease);
     t.attr("stroke", finalColor)
       .attr("stroke-width", finalWidth)
-      .attr("stroke-dasharray", dasharray);
+      .attr("stroke-dasharray", null);
     return t;
   }
   return { grow, retract, colorize };

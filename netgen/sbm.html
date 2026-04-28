@@ -281,12 +281,7 @@
     </div>
     <div class="graph-canvas" id="g4-cy"></div>
     <div class="widget-row">
-      <label class="toggle">
-        <input type="checkbox" id="g4-toggle">
-        <span class="toggle-track"></span>
-        <span>apply dedup</span>
-      </label>
-      <span class="step-label">toggle drops the red-dashed edges &middot; degree bars: target vs achieved (mint = achieved, faint red = lost)</span>
+      <span class="step-label">red-dashed edges = dedup removes them &middot; degree bars: target vs achieved (mint = achieved, faint red = lost)</span>
     </div>
   </div>
 </section>
@@ -1008,7 +1003,6 @@ window.MathJax = {
     });
     const label     = document.getElementById("g4-label");
     const edgeCount = document.getElementById("g4-edges");
-    const toggleIn  = document.getElementById("g4-toggle");
 
     NETGEN.mountGxPanel({
       viz, hostId: "g4-cy", prefix: "g4-deg",
@@ -1016,18 +1010,18 @@ window.MathJax = {
       bodyHTML: '<svg id="deg-bars" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet" style="display:block;width:18rem;height:auto"></svg>',
     });
 
-    function render(sample, deduped) {
+    function render(sample) {
       const edges = sample.all.map((e, i) => {
         const bad = e.loop || e.multi;
         if (bad) {
-          // Pre-dedup: bad edge solid red (visible collision in the
-          // multigraph). Dedup-on: switch to dashed red so the removal
-          // reads as the dashed-line "about to disappear" cue.
+          // Dedup viz always shows bad edges dashed red — the dashed
+          // pattern IS the "removal" cue, no toggle needed. The pre-
+          // dedup multigraph view (with bad edges solid red) lives in
+          // the stub-matching + rewiring panels above.
           return {
             u: e.u, v: e.v,
             color: COL.edge_drop, w: 1.6,
-            id: "s4-" + i,
-            classes: deduped ? "dashed" : "",
+            id: "s4-" + i, classes: "dashed",
           };
         }
         return {
@@ -1041,24 +1035,14 @@ window.MathJax = {
       label.textContent = "dedup";
       const pre  = sample.stats.preEdges;
       const post = sample.stats.postEdges;
-      if (deduped) {
-        const lostPct = pre > 0 ? ((pre - post) / pre * 100).toFixed(1) : "0.0";
-        edgeCount.textContent = "edges: " + pre + " → " + post + " (" + lostPct + "% lost)";
-      } else {
-        edgeCount.textContent = "edges: " + pre;
-      }
+      const lostPct = pre > 0 ? ((pre - post) / pre * 100).toFixed(1) : "0.0";
+      edgeCount.textContent = "edges: " + pre + " → " + post + " (" + lostPct + "% lost)";
     }
 
-    let deduped = false;
-    render(SAMPLE, deduped);
-    toggleIn.addEventListener("change", () => {
-      deduped = toggleIn.checked;
-      render(SAMPLE, deduped);
-      renderDegBars(SAMPLE, deduped);
-    });
+    render(SAMPLE);
     onSampleReroll((sample) => {
-      render(sample, deduped);
-      renderDegBars(sample, deduped);
+      render(sample);
+      renderDegBars(sample);
     });
 
     // Target-vs-achieved degree bars, horizontal, one row per node.
@@ -1095,8 +1079,8 @@ window.MathJax = {
 
     const gBars = g.append("g").attr("class", "deg-bars");
 
-    function renderDegBars(sample, deduped) {
-      const achOf = (d) => deduped ? sample.achievedDeg[d] : TARGET_DEG[d];
+    function renderDegBars(sample) {
+      const achOf = (d) => sample.achievedDeg[d];
       const lossOf = (d) => Math.max(0, TARGET_DEG[d] - achOf(d));
       const orderedNodes = NODES.slice().sort((a, b) =>
         (lossOf(b) - lossOf(a)) ||
@@ -1156,9 +1140,9 @@ window.MathJax = {
         .attr("width", d => lossOf(d) * scale);
       merged.select(".dlbl")
         .attr("x", d => dividerX + lossOf(d) * scale + 5)
-        .text(d => deduped ? (achOf(d) + "/" + TARGET_DEG[d]) : String(TARGET_DEG[d]));
+        .text(d => achOf(d) + "/" + TARGET_DEG[d]);
     }
-    renderDegBars(SAMPLE, deduped);
+    renderDegBars(SAMPLE);
 
     bindFocusLink(viz, gBars);
   })();
