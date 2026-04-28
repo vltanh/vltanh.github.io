@@ -301,6 +301,99 @@ const EdgePaths = (function () {
   };
 })();
 
+// ── Bridge animation primitives ─────────────────────────────
+// Both spoke_layer (SBM stub-matcher) and rewireSpokeSwapAnimate
+// paint bridges using the same SVG dasharray choreography. Three
+// shared primitives live here so the two layers can never drift:
+//   bridgeGrow    : 0-len → full-length (dashoffset for self-loop,
+//                   4-value stub-gap-stub for straight bridges).
+//   bridgeRetract : the time-mirror of bridgeGrow.
+//   bridgeColorize: settled-style crossfade (stroke + dasharray +
+//                   width). Used at the end of the build sequence.
+const BridgeAnim = (function () {
+  function lengthOf(node) { return (node.getTotalLength && node.getTotalLength()) || 100; }
+  function grow(pathSel, opts) {
+    opts = opts || {};
+    const isLoop = !!opts.isLoop;
+    const duration = opts.duration != null ? opts.duration : 300;
+    const ease = opts.ease || (typeof d3 !== "undefined" ? d3.easeCubicOut : null);
+    const tName = opts.transitionName || "grow";
+    pathSel.each(function () {
+      const sel = d3.select(this);
+      const len = lengthOf(this);
+      if (isLoop) {
+        sel.attr("stroke-dasharray", len + " " + len)
+          .attr("stroke-dashoffset", len);
+        const t = sel.transition(tName).duration(duration);
+        if (ease) t.ease(ease);
+        if (opts.delay) t.delay(opts.delay);
+        t.attr("stroke-dashoffset", 0);
+      } else {
+        const halfLen = len / 2;
+        sel.attr("stroke-dashoffset", 0)
+          .attr("stroke-dasharray", "0 " + len + " 0 0");
+        const t = sel.transition(tName).duration(duration);
+        if (ease) t.ease(ease);
+        if (opts.delay) t.delay(opts.delay);
+        t.attrTween("stroke-dasharray", function () {
+          return function (k) {
+            const stub = halfLen * k;
+            const gap = len - 2 * stub;
+            return stub + " " + gap + " " + stub + " 0";
+          };
+        });
+      }
+    });
+  }
+  function retract(pathSel, opts) {
+    opts = opts || {};
+    const isLoop = !!opts.isLoop;
+    const duration = opts.duration != null ? opts.duration : 280;
+    const ease = opts.ease || (typeof d3 !== "undefined" ? d3.easeCubicIn : null);
+    const tName = opts.transitionName || "retract";
+    pathSel.each(function () {
+      const sel = d3.select(this);
+      const len = lengthOf(this);
+      if (isLoop) {
+        sel.attr("stroke-dasharray", len + " " + len)
+          .attr("stroke-dashoffset", 0);
+        const t = sel.transition(tName).duration(duration);
+        if (ease) t.ease(ease);
+        t.attr("stroke-dashoffset", len);
+      } else {
+        const halfLen = len / 2;
+        sel.attr("stroke-dashoffset", 0)
+          .attr("stroke-dasharray", halfLen + " 0 " + halfLen + " 0");
+        const t = sel.transition(tName).duration(duration);
+        if (ease) t.ease(ease);
+        t.attrTween("stroke-dasharray", function () {
+          return function (k) {
+            const stub = halfLen * (1 - k);
+            const gap = len - 2 * stub;
+            return stub + " " + gap + " " + stub + " 0";
+          };
+        });
+      }
+    });
+  }
+  function colorize(pathSel, opts) {
+    opts = opts || {};
+    const duration = opts.duration != null ? opts.duration : 220;
+    const ease = opts.ease || (typeof d3 !== "undefined" ? d3.easeCubicInOut : null);
+    const tName = opts.transitionName || "colorize";
+    const finalColor = opts.color;
+    const finalWidth = opts.width != null ? opts.width : 1.6;
+    const dasharray = opts.bad ? "4 4" : null;
+    const t = pathSel.transition(tName).duration(duration);
+    if (ease) t.ease(ease);
+    t.attr("stroke", finalColor)
+      .attr("stroke-width", finalWidth)
+      .attr("stroke-dasharray", dasharray);
+    return t;
+  }
+  return { grow, retract, colorize };
+})();
+
 // ── VIZ: d3-force graph helper ───────────────────────────────
 // Replaces the old Cytoscape-backed CY. Each stage graph mounts
 // an <svg> inside its .graph-canvas container, runs a force sim
@@ -1203,8 +1296,6 @@ function rewireSwapAnimate(opts) {
 //                     paint each new edge's settled colour.
 //   four            : participant ids; viz dim/pick is applied by the
 //                     caller for the duration of the animation
-//   edgeIdPrefix    : reserved (unused in spoke variant; the helper
-//                     paints into its own overlay layer)
 //   settle          : optional callback after the final commit frame
 function rewireSpokeSwapAnimate(opts) {
   const { viz, cuts, places, before, after } = opts;
@@ -1328,17 +1419,13 @@ function rewireSpokeSwapAnimate(opts) {
   // as the bridge grows underneath. Cap is the min over old + new
   // partners so it stays consistent through the orbit.
   function capForPartner(me, pid) {
-    if (pid == null || pid === s_nullSentinel) return SPOKE_LEN;
     const partner = nodeXY(pid);
     const D = Math.hypot(partner.x - me.x, partner.y - me.y);
     // Stub tip lands exactly at the midpoint between the two boundaries
     // when partner is closer than 2 * SPOKE_LEN away, so a pair of
-    // stubs across that bridge meets cleanly at the centre. No -1
-    // safety: with the bridge anchored on the boundary the visual
-    // handoff from stub to bridge wants stub tip == bridge midpoint.
+    // stubs across the bridge meets cleanly at the centre.
     return Math.max(2, Math.min(SPOKE_LEN, (D - me.r - partner.r) / 2));
   }
-  const s_nullSentinel = Symbol("noPartner");
   function spokeEffectiveLen(s) {
     if (s._cachedEff != null) return s._cachedEff;
     const me = nodeXY(s.node);
@@ -1368,18 +1455,10 @@ function rewireSpokeSwapAnimate(opts) {
     const a = nodeXY(uid), b = nodeXY(vid);
     return EdgePaths.makeEdge(a, b, a.r, b.r);
   }
-  function selfLoopPath(nid) {
-    const me = nodeXY(nid);
-    return EdgePaths.makeSelfLoop(me, me.r);
-  }
   function placeBridgeViaStubs(s1, s2) {
-    // Self-loop place: bridge is the same teardrop the static viz +
-    // spoke layer paint, so animation → settle has no shape change.
-    if (s1.node === s2.node) return EdgePaths.makeSelfLoop(nodeXY(s1.node), nodeXY(s1.node).r);
-    // Bridge endpoints sit on the node boundary along the new-partner
-    // aim. Stubs render on top from boundary outward; they fade during
-    // grow so the bridge is already anchored on the node when the
-    // stubs go away.
+    // Bridge endpoints anchor on the node boundary along the new-
+    // partner aim. Stubs sit on top boundary-out; they fade during
+    // grow so the bridge is anchored before the stubs disappear.
     const me1 = nodeXY(s1.node), me2 = nodeXY(s2.node);
     const a = { x: me1.x + Math.cos(s1._currA) * me1.r, y: me1.y + Math.sin(s1._currA) * me1.r };
     const b = { x: me2.x + Math.cos(s2._currA) * me2.r, y: me2.y + Math.sin(s2._currA) * me2.r };
@@ -1403,7 +1482,10 @@ function rewireSpokeSwapAnimate(opts) {
   // Initial appearance: cut bridges painted at their before-style
   // (settled colour, dashed if bad). Stubs hidden until after retract.
   const cutSel = cutLayer.selectAll("path").data(cutMeta).enter().append("path")
-    .attr("d", c => c.u === c.v ? selfLoopPath(c.u) : straightBoundaryPath(c.u, c.v))
+    .attr("d", function (c) {
+      const me = nodeXY(c.u);
+      return c.u === c.v ? EdgePaths.makeSelfLoop(me, me.r) : straightBoundaryPath(c.u, c.v);
+    })
     .attr("fill", "none")
     .attr("stroke", c => c.bad ? BAD_COLOR : c.color)
     .attr("stroke-width", 1.6)
@@ -1443,22 +1525,7 @@ function rewireSpokeSwapAnimate(opts) {
   // half of the retract so the visual handoff (bridge tip → spoke
   // tip) has no gap.
   later(T.uncolor, function () {
-    cutSel.each(function (c) {
-      const node = this;
-      const sel = d3.select(this);
-      const len = (node.getTotalLength && node.getTotalLength()) || 100;
-      const halfLen = len / 2;
-      sel.attr("stroke-dashoffset", 0)
-        .attr("stroke-dasharray", halfLen + " 0 " + halfLen + " 0")
-        .transition("retract").duration(T.retract).ease(d3.easeCubicIn)
-        .attrTween("stroke-dasharray", function () {
-          return function (k) {
-            const stub = halfLen * (1 - k);
-            const gap = len - 2 * stub;
-            return stub + " " + gap + " " + stub + " 0";
-          };
-        });
-    });
+    BridgeAnim.retract(cutSel, { duration: T.retract });
     stubSel.transition("stubFade").delay(T.retract * 0.5).duration(T.spokeFade)
       .attr("opacity", 1);
   });
@@ -1547,50 +1614,23 @@ function rewireSpokeSwapAnimate(opts) {
       .attr("stroke-width", 2.6)
       .attr("stroke-linecap", "round");
   }
-  function growLoopHalf(path) {
-    const len = (path.node().getTotalLength && path.node().getTotalLength()) || 100;
-    path.attr("stroke-dasharray", len + " " + len)
-      .attr("stroke-dashoffset", len)
-      .transition("grow").duration(T.grow).ease(d3.easeCubicOut)
-      .attr("stroke-dashoffset", 0);
-  }
   later(tGrow, function () {
     placePairs.forEach(function (pp) {
       const isLoop = pp.s1.node === pp.s2.node;
       if (isLoop) {
-        // Self-loop: paint two halves (left + right). Each grows
-        // inward toward the apex via dashoffset, mirroring SBM
-        // stub-matcher's bridgeL + bridgeR teardrop aesthetic.
         const me = nodeXY(pp.s1.node);
-        const halfL = appendBridgePath(EdgePaths.makeSelfLoopHalf(me, me.r, -1));
-        const halfR = appendBridgePath(EdgePaths.makeSelfLoopHalf(me, me.r, +1));
-        growLoopHalf(halfL);
-        growLoopHalf(halfR);
-        pp._paths = [halfL, halfR];
+        pp._paths = [-1, +1].map(function (side) {
+          return appendBridgePath(EdgePaths.makeSelfLoopHalf(me, me.r, side));
+        });
+        pp._paths.forEach(function (p) { BridgeAnim.grow(p, { isLoop: true, duration: T.grow }); });
       } else {
         const path = appendBridgePath(placeBridgeViaStubs(pp.s1, pp.s2));
-        const len = (path.node().getTotalLength && path.node().getTotalLength()) || 100;
-        const halfLen = len / 2;
-        path.attr("stroke-dashoffset", 0)
-          .attr("stroke-dasharray", "0 " + len + " 0 0")
-          .transition("grow").duration(T.grow).ease(d3.easeCubicOut)
-          .attrTween("stroke-dasharray", function () {
-            return function (k) {
-              const stub = halfLen * k;
-              const gap = len - 2 * stub;
-              return stub + " " + gap + " " + stub + " 0";
-            };
-          });
+        BridgeAnim.grow(path, { isLoop: false, duration: T.grow });
         pp._paths = [path];
       }
     });
-    // Stubs fade out across the entire grow phase. With the bridge
-    // anchored on the node boundary the stub now sits on top of the
-    // growing bridge over its full length; matching their lifetimes
-    // avoids the snap that the old half-grow fade produced when the
-    // bridge raced past the still-visible stubs (most visible on
-    // close-by node pairs where the stubs already nearly meet).
-    // Self-loop stubs already retracted + removed in phase 4.5.
+    // Non-loop stubs fade across grow so they hand off to the bridge.
+    // Self-loop stubs were already retracted + removed in phase 4.5.
     stubSel.filter(function (s) { return !loopStubs.has(s); })
       .transition("stubOut").duration(T.grow).ease(d3.easeCubicInOut)
       .attr("opacity", 0)
@@ -1611,15 +1651,11 @@ function rewireSpokeSwapAnimate(opts) {
       const paths = pp._paths || [];
       if (!paths.length) return;
       const isLoop = pp.p.u === pp.p.v;
-      // Self-loop bridges are already on their final boundary-anchored
-      // path coords (two halves built via makeSelfLoopHalf). Straight
-      // bridges still need to tween from stub-tip to node-boundary so
-      // the SPOKE_LEN gap closes before commit.
+      const finalColor = pp.p.bad ? BAD_COLOR : pp.p.color;
       paths.forEach(function (path) {
-        const t = path.transition("colorize").duration(T.colorize).ease(d3.easeCubicInOut)
-          .attr("stroke", pp.p.bad ? BAD_COLOR : pp.p.color)
-          .attr("stroke-width", 1.6)
-          .attr("stroke-dasharray", pp.p.bad ? "4 4" : null);
+        const t = BridgeAnim.colorize(path, {
+          duration: T.colorize, color: finalColor, bad: pp.p.bad,
+        });
         if (!isLoop) {
           const fromD = placeBridgeViaStubs(pp.s1, pp.s2);
           const toD = straightBoundaryPath(pp.p.u, pp.p.v);
@@ -1629,13 +1665,10 @@ function rewireSpokeSwapAnimate(opts) {
     });
   });
 
-  // Phase 7 (commit): viz.setEdges takes ownership of the new edges
-  // and the overlay disappears in the same frame. No fade — viz CSS
-  // sets edge opacity to 0.82 while the overlay sat at 1.0, so any
-  // crossfade reads as a brief dim flash. Painting both at the same
-  // path coords + popping the overlay synchronously hands off cleanly
-  // (the user perceives a constant edge with a one-frame alpha tick
-  // from 1.0 to 0.82, much less jarring than a 140 ms blend).
+  // Phase 7 (commit): viz takes ownership in the same frame the
+  // overlay disappears. Crossfading the overlay down would blend with
+  // viz's CSS opacity 0.82 and read as a dim flash; popping the
+  // overlay synchronously instead hands off cleanly.
   const tCommit = tColor + T.colorize;
   later(tCommit, function () {
     if (manageEdges && after) viz.setEdges(after);
@@ -1688,39 +1721,31 @@ function fourFromOp(op) {
 function runRewireOpStep(opts) {
   const {
     viz, step, lastStep, ops, buildEdges, cutsFor, placesFor,
-    edgeIdPrefix, setLock, prevTimer,
+    setLock, prevTimer,
   } = opts;
   const fourFor = opts.fourFor || fourFromOp;
   const fallback = opts.fallback || function () {};
-  if (prevTimer) { prevTimer.cancel(); setLock(false); }
-  function play(beforeIdx, afterIdx, cuts, places, op, suffix) {
+  if (prevTimer) prevTimer.cancel();
+  function play(beforeIdx, afterIdx, cuts, places, op) {
     const four = fourFor(op);
     setLock(true);
-    let timer = null;
-    timer = NETGEN.rewireSpokeSwapAnimate({
+    return NETGEN.rewireSpokeSwapAnimate({
       viz,
       before: buildEdges(beforeIdx),
       after: buildEdges(afterIdx),
       cuts, places, four,
-      edgeIdPrefix: edgeIdPrefix + "-" + suffix + "-" + step,
-      settle: function () {
-        // The same closure-captured slot the caller's prevTimer points
-        // at clears here; setLock(false) un-locks the buttons.
-        timer = null;
-        setLock(false);
-      },
+      settle: function () { setLock(false); },
     });
-    return timer;
   }
   const fwdOp = step > 0 ? ops[step - 1] : null;
   const fwdPlaces = (step === lastStep + 1 && fwdOp && fwdOp.success) ? placesFor(fwdOp) : null;
   if (fwdPlaces && fwdPlaces.length > 0) {
-    return play(step - 1, step, cutsFor(fwdOp), fwdPlaces, fwdOp, "fwd");
+    return play(step - 1, step, cutsFor(fwdOp), fwdPlaces, fwdOp);
   }
   const undone = (step === lastStep - 1 && lastStep > 0) ? ops[lastStep - 1] : null;
   const undonePlaces = (undone && undone.success) ? placesFor(undone) : null;
   if (undonePlaces && undonePlaces.length > 0) {
-    return play(lastStep, step, undonePlaces, cutsFor(undone), undone, "rev");
+    return play(lastStep, step, undonePlaces, cutsFor(undone), undone);
   }
   fallback(buildEdges(step), fwdOp ? fourFor(fwdOp) : []);
   return null;
@@ -1778,6 +1803,7 @@ global.NETGEN = {
   fourFromOp,
   dimSettleFallback,
   EdgePaths,
+  BridgeAnim,
 };
 
 })(window);

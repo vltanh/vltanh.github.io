@@ -549,39 +549,11 @@ NETGEN.spokeLayer = (function () {
         .transition("justFade").duration(T.justFade).ease(d3.easeCubicInOut)
         .attr("opacity", 1);
       bridgeLayer.selectAll("path.sp-bridge").each(function (d) {
-        const len = (this.getTotalLength && this.getTotalLength()) || 100;
-        const sel = d3.select(this);
-        if (d.isLoop) {
-          // Self-loop half: retract the dashoffset to full length so
-          // the bridge fully shrinks toward the node.
-          sel
-            .attr("stroke-dasharray", len + " " + len)
-            .attr("stroke-dashoffset", 0)
-            .transition("rewindBridge").duration(T.rewindBridge).ease(d3.easeCubicIn)
-            .attr("stroke-dashoffset", len);
-        } else {
-          // Two-way retract: dasharray "stub gap stub" with stub
-          // shrinking from L/2 to 0 so the bridge fully disappears at
-          // each node. The just-spoke beneath remains visible and
-          // takes over the visual.
-          const halfLen = len / 2;
-          // 4-value pattern (even count) so SVG doesn't auto-double the
-          // 3-value form into "stub 0 stub stub 0 stub" — that doubling
-          // injects a `stub`-wide GAP at length 2*stub which clips the
-          // far end of the path once it stretches past straight_len
-          // (e.g. once the bridge curves into its fan slot).
-          sel
-            .attr("stroke-dashoffset", 0)
-            .attr("stroke-dasharray", halfLen + " 0 " + halfLen + " 0")
-            .transition("rewindBridge").duration(T.rewindBridge).ease(d3.easeCubicIn)
-            .attrTween("stroke-dasharray", function () {
-              return function (k) {
-                const stub = halfLen * (1 - k);
-                const gap  = len - 2 * stub;
-                return stub + " " + gap + " " + stub + " 0";
-              };
-            });
-        }
+        NETGEN.BridgeAnim.retract(d3.select(this), {
+          isLoop: d.isLoop,
+          duration: T.rewindBridge,
+          transitionName: "rewindBridge",
+        });
       });
       // After the bridge has fully retracted, orbit each just-spoke
       // back from its current effective angle to the slot's rest
@@ -716,12 +688,9 @@ NETGEN.spokeLayer = (function () {
           if (!j) return;
           const finalColor = (j.bad && j.badColor) ? j.badColor
                             : (state.bridgeColor || j.color);
-          const finalDash = j.bad ? "4 4" : null;
-          const sel = bridgeLayer.selectAll("path.sp-bridge");
-          sel.transition("colorize").duration(T.colorize).ease(d3.easeCubicInOut)
-            .attr("stroke", finalColor)
-            .attr("stroke-dasharray", finalDash)
-            .attr("stroke-width", 1.6);
+          NETGEN.BridgeAnim.colorize(bridgeLayer.selectAll("path.sp-bridge"), {
+            duration: T.colorize, color: finalColor, bad: j.bad,
+          });
         });
       } else {
         placedFanCollapsed = false;
@@ -998,46 +967,14 @@ NETGEN.spokeLayer = (function () {
         // Reset to build-phase thickness — a persistent bridge from
         // a prior step settled to 1.6, but a new build cycle wants
         // 2.6 throughout grow / fan, dropping to 1.6 only at colorize.
-        merged.attr("stroke-width", 2.6);
+        merged.attr("opacity", 1).attr("stroke-width", 2.6);
         merged.each(function (d) {
-          const sel = d3.select(this);
-          if (d.isLoop) {
-            // Self-loop half: each half grows outward from the node
-            // toward the apex via stroke-dashoffset.
-            const len = this.getTotalLength ? this.getTotalLength() : 100;
-            sel
-              .attr("opacity", 1)
-              .attr("stroke-dasharray", len + " " + len)
-              .attr("stroke-dashoffset", len)
-              .transition("bridge").delay(t_growStart())
-              .duration(T.bridgeGrow)
-              .ease(d3.easeCubicOut)
-              .attr("stroke-dashoffset", 0);
-          } else {
-            // Straight bridge: stubs draw inward from each spoke tip,
-            // meeting at midpoint. Reverse of retract — dasharray
-            // "0 len 0" (nothing drawn) → "halfLen 0 halfLen" (full
-            // path drawn from both ends).
-            const len = this.getTotalLength ? this.getTotalLength() : 100;
-            const halfLen = len / 2;
-            // 4-value pattern (see retract for why) keeps the path
-            // fully stroked even after fan stretches it past
-            // straight_len; with a 3-value pattern SVG auto-doubles
-            // and injects a gap that clips the far end.
-            sel
-              .attr("opacity", 1)
-              .attr("stroke-dashoffset", 0)
-              .attr("stroke-dasharray", "0 " + len + " 0 0")
-              .transition("bridge").delay(t_growStart())
-              .duration(T.bridgeGrow).ease(d3.easeCubicOut)
-              .attrTween("stroke-dasharray", function () {
-                return function (k) {
-                  const stub = halfLen * k;
-                  const gap  = len - 2 * stub;
-                  return stub + " " + gap + " " + stub + " 0";
-                };
-              });
-          }
+          NETGEN.BridgeAnim.grow(d3.select(this), {
+            isLoop: d.isLoop,
+            duration: T.bridgeGrow,
+            delay: t_growStart(),
+            transitionName: "bridge",
+          });
         });
       } else {
         merged.each(function (d) {
