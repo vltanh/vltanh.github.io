@@ -1070,26 +1070,18 @@ window.MathJax = {
     const ih = H - PAD.top - PAD.bottom;
     const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
 
-    // Bars right-anchor at TARGET_RIGHT so every row's target line lines
-    // up. Loss (dropped) renders as the rightmost slice, so every red
-    // tail ends at the same vertical regardless of target. Sorting is
-    // by loss desc so the worst discrepancies bubble to the top.
-    const maxD = d3.max(NODES, n => TARGET_DEG[n]) || 1;
+    // Matcher-style layout: a vertical divider sits at maxAchieved and
+    // every row pivots around it. Achieved (mint) extends leftward from
+    // the divider, loss (red) extends rightward — so every dropped slice
+    // starts at the same vertical line. Sorted by loss desc.
     const y = d3.scaleBand().domain(NODES.map(String)).range([0, ih]).padding(0.24);
-    const x = d3.scaleLinear().domain([0, maxD + 1]).range([0, iw]);
-    const TARGET_RIGHT = x(maxD);
-
-    g.append("g").call(d3.axisLeft(y).tickSize(0).tickPadding(6))
+    const maxD = d3.max(NODES, n => TARGET_DEG[n]) || 1;
+    const yAxisG = g.append("g");
+    const xAxisG = g.append("g").attr("transform", `translate(0,${ih})`);
+    yAxisG.call(d3.axisLeft(y).tickSize(0).tickPadding(6))
       .selectAll("text").style("fill", "#6b6a54")
         .style("font-family", "Special Elite, Courier New, monospace")
         .style("font-size", "10px");
-    g.append("g").attr("transform", `translate(0,${ih})`)
-      .call(d3.axisBottom(x).ticks(4))
-      .selectAll("text").style("fill", "#6b6a54")
-        .style("font-family", "Special Elite, Courier New, monospace")
-        .style("font-size", "10px");
-    g.selectAll(".domain").style("stroke", "#b9a263");
-    g.selectAll(".tick line").style("stroke", "#cdbf8d");
 
     svg.append("text").attr("x", PAD.left - 26).attr("y", PAD.top - 4)
       .style("fill", "#6b6a54")
@@ -1103,14 +1095,33 @@ window.MathJax = {
     const gBars = g.append("g").attr("class", "deg-bars");
 
     function renderDegBars(sample, deduped) {
-      const lossOf = (d) => deduped ? Math.max(0, TARGET_DEG[d] - sample.achievedDeg[d]) : 0;
-      // Loss desc, then target desc, then id asc.
+      const achOf = (d) => deduped ? sample.achievedDeg[d] : TARGET_DEG[d];
+      const lossOf = (d) => Math.max(0, TARGET_DEG[d] - achOf(d));
       const orderedNodes = NODES.slice().sort((a, b) =>
         (lossOf(b) - lossOf(a)) ||
         (TARGET_DEG[b] - TARGET_DEG[a]) ||
         (a - b)
       );
       y.domain(orderedNodes.map(String));
+      yAxisG.call(d3.axisLeft(y).tickSize(0).tickPadding(6));
+      yAxisG.selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace")
+        .style("font-size", "10px");
+      // dividerX = max achieved across rows. Each row's achieved bar
+      // right-anchors at dividerX, loss extends right of it.
+      const maxAchieved = d3.max(orderedNodes, achOf) || 1;
+      const maxLoss = d3.max(orderedNodes, lossOf) || 0;
+      const totalUnits = maxAchieved + maxLoss + 1;
+      const scale = iw / totalUnits;
+      const dividerX = maxAchieved * scale;
+      const xScale = d3.scaleLinear().domain([0, totalUnits]).range([0, iw]);
+      xAxisG.call(d3.axisBottom(xScale).ticks(4));
+      xAxisG.selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace")
+        .style("font-size", "10px");
+      g.selectAll(".domain").style("stroke", "#b9a263");
+      g.selectAll(".tick line").style("stroke", "#cdbf8d");
+
       const rows = gBars.selectAll(".deg-bar-row").data(orderedNodes, d => d);
       rows.exit().remove();
       const enter = rows.enter().append("g")
@@ -1127,10 +1138,6 @@ window.MathJax = {
       enter.append("rect").attr("class", "dropped")
         .attr("y", 0).attr("height", y.bandwidth())
         .attr("fill", COL.edge_drop).attr("opacity", 0.35);
-      enter.append("rect").attr("class", "target-frame")
-        .attr("y", 0).attr("height", y.bandwidth())
-        .attr("fill", "none")
-        .attr("stroke", "transparent").attr("stroke-width", 1);
       enter.append("text").attr("class", "dlbl")
         .attr("dominant-baseline", "central")
         .attr("y", y.bandwidth() / 2)
@@ -1141,32 +1148,14 @@ window.MathJax = {
       const merged = enter.merge(rows);
       merged.attr("transform", d => `translate(0,${y(String(d))})`);
       merged.select(".achieved")
-        .attr("x", d => {
-          const a = deduped ? sample.achievedDeg[d] : TARGET_DEG[d];
-          return TARGET_RIGHT - x(TARGET_DEG[d]);
-        })
-        .attr("width", d => {
-          const a = deduped ? sample.achievedDeg[d] : TARGET_DEG[d];
-          return x(a);
-        });
+        .attr("x", d => dividerX - achOf(d) * scale)
+        .attr("width", d => achOf(d) * scale);
       merged.select(".dropped")
-        .attr("x", d => {
-          const a = deduped ? sample.achievedDeg[d] : TARGET_DEG[d];
-          return TARGET_RIGHT - (x(TARGET_DEG[d]) - x(a));
-        })
-        .attr("width", d => {
-          const a = deduped ? sample.achievedDeg[d] : TARGET_DEG[d];
-          return Math.max(0, x(TARGET_DEG[d]) - x(a));
-        });
-      merged.select(".target-frame")
-        .attr("x", d => TARGET_RIGHT - x(TARGET_DEG[d]))
-        .attr("width", d => x(TARGET_DEG[d]));
+        .attr("x", dividerX)
+        .attr("width", d => lossOf(d) * scale);
       merged.select(".dlbl")
-        .attr("x", TARGET_RIGHT + 5)
-        .text(d => {
-          const a = deduped ? sample.achievedDeg[d] : TARGET_DEG[d];
-          return deduped ? (a + "/" + TARGET_DEG[d]) : String(TARGET_DEG[d]);
-        });
+        .attr("x", d => dividerX + lossOf(d) * scale + 5)
+        .text(d => deduped ? (achOf(d) + "/" + TARGET_DEG[d]) : String(TARGET_DEG[d]));
     }
     renderDegBars(SAMPLE, deduped);
 

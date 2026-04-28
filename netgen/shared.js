@@ -992,20 +992,24 @@ function mountGxPanel(opts) {
       if (!hostW || !wrapW) return;
       const vb = (opts.viz.svg.attr("viewBox") || "0 0 0 0").split(/\s+/).map(Number);
       const vbW = vb[2];
-      // Convert px -> viewBox units. Add a small buffer + the
-      // panel's right inset (gx-panel: right .5rem ≈ 8px).
       const px = wrapW + 16;
       const units = px * (vbW / hostW);
       opts.viz.setPadRight(units);
     };
     requestAnimationFrame(sync);
     window.addEventListener("resize", sync);
-    // Toggle re-syncs after the body show/hide transition lands so the
-    // graph reclaims (or yields) the right slack.
-    const toggleBtn = document.getElementById(opts.prefix + "-toggle");
-    if (toggleBtn) toggleBtn.addEventListener("click", () => {
-      requestAnimationFrame(() => requestAnimationFrame(sync));
-    });
+    // ResizeObserver catches every wrap resize — toggle collapse / expand,
+    // browser zoom, font load. More reliable than the toggle-click path
+    // since it fires AFTER layout, not before.
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver(() => sync());
+      ro.observe(wrap);
+    } else {
+      const toggleBtn = document.getElementById(opts.prefix + "-toggle");
+      if (toggleBtn) toggleBtn.addEventListener("click", () => {
+        requestAnimationFrame(() => requestAnimationFrame(sync));
+      });
+    }
   }
   return wrap;
 }
