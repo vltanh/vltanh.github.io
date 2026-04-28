@@ -1070,10 +1070,14 @@ window.MathJax = {
     const ih = H - PAD.top - PAD.bottom;
     const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
 
-    const orderedNodes = NODES.slice().sort((a, b) => TARGET_DEG[b] - TARGET_DEG[a] || a - b);
+    // Bars right-anchor at TARGET_RIGHT so every row's target line lines
+    // up. Loss (dropped) renders as the rightmost slice, so every red
+    // tail ends at the same vertical regardless of target. Sorting is
+    // by loss desc so the worst discrepancies bubble to the top.
     const maxD = d3.max(NODES, n => TARGET_DEG[n]) || 1;
-    const y = d3.scaleBand().domain(orderedNodes.map(String)).range([0, ih]).padding(0.24);
+    const y = d3.scaleBand().domain(NODES.map(String)).range([0, ih]).padding(0.24);
     const x = d3.scaleLinear().domain([0, maxD + 1]).range([0, iw]);
+    const TARGET_RIGHT = x(maxD);
 
     g.append("g").call(d3.axisLeft(y).tickSize(0).tickPadding(6))
       .selectAll("text").style("fill", "#6b6a54")
@@ -1099,25 +1103,32 @@ window.MathJax = {
     const gBars = g.append("g").attr("class", "deg-bars");
 
     function renderDegBars(sample, deduped) {
+      const lossOf = (d) => deduped ? Math.max(0, TARGET_DEG[d] - sample.achievedDeg[d]) : 0;
+      // Loss desc, then target desc, then id asc.
+      const orderedNodes = NODES.slice().sort((a, b) =>
+        (lossOf(b) - lossOf(a)) ||
+        (TARGET_DEG[b] - TARGET_DEG[a]) ||
+        (a - b)
+      );
+      y.domain(orderedNodes.map(String));
       const rows = gBars.selectAll(".deg-bar-row").data(orderedNodes, d => d);
       rows.exit().remove();
       const enter = rows.enter().append("g")
         .attr("class", "deg-bar-row")
-        .attr("data-id", d => String(d))
-        .attr("transform", d => `translate(0,${y(String(d))})`);
+        .attr("data-id", d => String(d));
       enter.append("rect").attr("class", "hitbox")
         .attr("x", -PAD.left + 4).attr("y", 0)
         .attr("height", y.bandwidth())
         .attr("width", iw + PAD.left + PAD.right - 8)
         .attr("fill", "transparent");
       enter.append("rect").attr("class", "achieved")
-        .attr("x", 0).attr("y", 0).attr("height", y.bandwidth())
+        .attr("y", 0).attr("height", y.bandwidth())
         .attr("fill", COL.mint).attr("opacity", 0.92);
       enter.append("rect").attr("class", "dropped")
         .attr("y", 0).attr("height", y.bandwidth())
         .attr("fill", COL.edge_drop).attr("opacity", 0.35);
       enter.append("rect").attr("class", "target-frame")
-        .attr("x", 0).attr("y", 0).attr("height", y.bandwidth())
+        .attr("y", 0).attr("height", y.bandwidth())
         .attr("fill", "none")
         .attr("stroke", "transparent").attr("stroke-width", 1);
       enter.append("text").attr("class", "dlbl")
@@ -1128,18 +1139,30 @@ window.MathJax = {
         .attr("fill", "#2f3a54");
 
       const merged = enter.merge(rows);
+      merged.attr("transform", d => `translate(0,${y(String(d))})`);
       merged.select(".achieved")
-        .attr("width", d => x(deduped ? sample.achievedDeg[d] : TARGET_DEG[d]));
+        .attr("x", d => {
+          const a = deduped ? sample.achievedDeg[d] : TARGET_DEG[d];
+          return TARGET_RIGHT - x(TARGET_DEG[d]);
+        })
+        .attr("width", d => {
+          const a = deduped ? sample.achievedDeg[d] : TARGET_DEG[d];
+          return x(a);
+        });
       merged.select(".dropped")
-        .attr("x", d => x(deduped ? sample.achievedDeg[d] : TARGET_DEG[d]))
+        .attr("x", d => {
+          const a = deduped ? sample.achievedDeg[d] : TARGET_DEG[d];
+          return TARGET_RIGHT - (x(TARGET_DEG[d]) - x(a));
+        })
         .attr("width", d => {
           const a = deduped ? sample.achievedDeg[d] : TARGET_DEG[d];
           return Math.max(0, x(TARGET_DEG[d]) - x(a));
         });
       merged.select(".target-frame")
+        .attr("x", d => TARGET_RIGHT - x(TARGET_DEG[d]))
         .attr("width", d => x(TARGET_DEG[d]));
       merged.select(".dlbl")
-        .attr("x", d => x(TARGET_DEG[d]) + 5)
+        .attr("x", TARGET_RIGHT + 5)
         .text(d => {
           const a = deduped ? sample.achievedDeg[d] : TARGET_DEG[d];
           return deduped ? (a + "/" + TARGET_DEG[d]) : String(TARGET_DEG[d]);
