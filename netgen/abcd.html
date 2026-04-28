@@ -813,13 +813,14 @@ window.MathJax = {
       const y = wInternalPreForward[i];
       split[n] = { w, y, z: w - y };
     });
-    // Per-cluster pre / post snapshots (only for C1/C2/C3; singleton clusters
-    // 4 + 5 forward all stubs to background and have no intra viz).
+    // Per-cluster pre / post snapshots. ABCD treats singleton clusters
+    // as full clusters (outlier_mode=singleton), so their prePairs are
+    // walked too. Singletons get the OUT color since they live as their
+    // own real-but-tiny cluster on the same canvas as C1/C2/C3.
     const clusterPre = [];
     const clusterPost = [];
     cm.stages.perCluster.forEach(stage => {
-      const cname = NAMED_CLUSTER_OF_KERNEL[stage.cluster];
-      if (!cname) return;
+      const cname = NAMED_CLUSTER_OF_KERNEL[stage.cluster] || "OUT";
       stage.prePairs.forEach(([a, b, loop, multi]) => {
         clusterPre.push({
           u: PAGE_NODE_BY_KIDX[a - 1], v: PAGE_NODE_BY_KIDX[b - 1],
@@ -1070,16 +1071,19 @@ window.MathJax = {
       if (step >= total) step = total - 1;
       // Spoke layer owns every pair edge; viz.setEdges stays empty.
       viz.setEdges([]);
-      // Spokes only for nodes that actually pair in this phase. Singleton-
-      // cluster outliers forward all stubs to the bg phase, so they have
-      // no clusterPre entries and would otherwise show unconsumed spokes
-      // forever.
-      const cpNodes = new Set();
-      R.clusterPre.forEach(e => { cpNodes.add(e.u); cpNodes.add(e.v); });
+      // Spoke count per node = number of cluster-pair stubs that will
+      // actually consume that node. Derive from clusterPre so every
+      // stub corresponds to an emitted pair (post leader-bump): no
+      // orphan spokes that never pair.
+      const yByNode = {};
+      NODES.forEach(n => { yByNode[n] = 0; });
+      R.clusterPre.forEach(e => {
+        yByNode[e.u] = (yByNode[e.u] || 0) + 1;
+        yByNode[e.v] = (yByNode[e.v] || 0) + 1;
+      });
       const cfg = {};
       NODES.forEach(n => {
-        if (!cpNodes.has(n)) return;
-        cfg[n] = { count: R.split[n].y, color: COL.edge_intra[CLUSTER_OF[n]] || COL.edge_stage2 };
+        cfg[n] = { count: yByNode[n], color: COL.edge_intra[CLUSTER_OF[n]] || COL.edge_stage2 };
       });
       // Resolve effective pairs (kernel order + per-position overrides
       // from rollPair); shared helpers tag dup-vs-kept and the active
