@@ -731,6 +731,15 @@ const VIZ = {
 
       fit()    {},
       resize() {},
+      // Width of the viewBox without padRight (positions + 2*pad). Used
+      // by mountGxPanel's px -> viewBox-units conversion so the math
+      // is anchored to a constant baseline, not the current padded vb.
+      get naturalVbWidth() {
+        const baseFit = Object.assign({}, fitOpts, { padRight: 0 });
+        const vbStr = fitViewBoxAttr(baseFit);
+        const parts = vbStr.split(/\s+/).map(Number);
+        return parts[2];
+      },
       // Recompute the viewBox with a new padRight (in viewBox units).
       // mountGxPanel calls this after measuring its panel so the graph
       // reserves exactly enough right slack for the current panel size.
@@ -991,10 +1000,15 @@ function mountGxPanel(opts) {
       const hostW = host.clientWidth;
       const wrapW = wrap.offsetWidth;
       if (!hostW || !wrapW) return;
-      const vb = (opts.viz.svg.attr("viewBox") || "0 0 0 0").split(/\s+/).map(Number);
-      const vbW = vb[2];
+      // Anchor the conversion to the un-padded viewBox so the ratio
+      // doesn't drift when setPadRight has already shifted things.
+      // hostW is the canvas px; wrap covers wrapW px of it. The graph
+      // wants padRight = (wrapW + buffer) * (naturalVb / canvasPx).
+      // canvasPx = naturalVb * (hostW / naturalVbCanvas), but the SVG
+      // is sized to fit the host so 1 px ~= naturalVb / hostW units.
+      const baseW = (opts.viz.naturalVbWidth) || 1;
       const px = wrapW + 16;
-      const units = px * (vbW / hostW);
+      const units = px * (baseW / hostW);
       opts.viz.setPadRight(units);
     };
     requestAnimationFrame(sync);
