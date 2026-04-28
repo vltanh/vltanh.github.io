@@ -885,7 +885,7 @@ function rewireSwapAnimate(opts) {
   const settle = opts.settle || function () {};
   const ID = edgeIdPrefix || "swap";
 
-  // Phase 1 (200ms): dim everything except the 4 endpoints, render the
+  // Phase 1 (450ms): dim everything except the 4 endpoints, render the
   // before-state with the cut edges replaced by 'swap-pick' boldface
   // versions so the user sees what's about to break.
   const cutKey = (a, b) => (a < b ? a + "|" + b : b + "|" + a);
@@ -916,7 +916,7 @@ function rewireSwapAnimate(opts) {
     pickEdges.forEach(e => viz.removeEdgeClass(e.id, "dim-strong"));
   }
 
-  // Phase 2 (400ms): swap animation. Cut edges run vizSwapCut; place
+  // Phase 2 (900ms): swap animation. Cut edges run vizSwapCut; place
   // edges run vizSwapPlace. Both are inserted into the edge list with
   // the special classes so CSS keyframes pick them up on insertion.
   const t1 = setTimeout(() => {
@@ -937,7 +937,7 @@ function rewireSwapAnimate(opts) {
         }
       });
     }
-  }, 220);
+  }, 500);
 
   // Phase 3 (post-settle): drop the animation overlays + un-dim.
   const t2 = setTimeout(() => {
@@ -948,7 +948,7 @@ function rewireSwapAnimate(opts) {
       viz.clearAllNodeClass("swap-pick");
     }
     settle();
-  }, 680);
+  }, 1600);
 
   return {
     cancel() {
