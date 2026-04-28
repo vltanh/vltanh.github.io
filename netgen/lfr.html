@@ -846,6 +846,8 @@ window.MathJax = {
       return { edges: map, invalid };
     }
     let CACHE_KEY = "", CACHE = null;
+    let lastStep = 0;
+    let settleTimer = null;
     function getTrace() {
       const key = EDGE_SEED + "|" + RESAMPLE_SEED;
       if (CACHE_KEY === key) return CACHE;
@@ -896,8 +898,27 @@ window.MathJax = {
           });
         });
       }
-      viz.setEdges(edges);
+      if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
+      const isForward = step === lastStep + 1;
+      const cleanupOp = !inPair ? trace.rewireOps[step - total1 - 1] : null;
+      const isSwap = cleanupOp && cleanupOp.success;
+      if (isForward && isSwap) {
+        const ghosts = [cleanupOp.p1];
+        if (cleanupOp.p2) ghosts.push(cleanupOp.p2);
+        const ghostEdges = ghosts.map((g, k) => ({
+          u: g[0], v: g[1], color: COL.edge_drop, w: 1.4,
+          id: "lfr-cm-ghost-" + step + "-" + k, classes: "ghost",
+        }));
+        viz.setEdges(edges.concat(ghostEdges));
+        settleTimer = setTimeout(() => {
+          viz.setEdges(edges);
+          settleTimer = null;
+        }, 380);
+      } else {
+        viz.setEdges(edges);
+      }
       clearDimPick();
+      lastStep = step;
       let label, desc;
       if (inPair) {
         const p = trace.prePairs[step - 1];

@@ -1058,6 +1058,8 @@ window.MathJax = {
   (function () {
     const viz = NETGEN.VIZ.init("g-cm-cy", { showLabels: true, edges: [] });
     NETGEN.makeTooltip(viz, document.getElementById("g-cm"));
+    let lastStep = 0;
+    let settleTimer = null;
 
     function render(step) {
       const xi = parseFloat(document.getElementById("xi-slider").value);
@@ -1143,10 +1145,34 @@ window.MathJax = {
           });
         }
       }
-      viz.setEdges(edges);
-      clearDimPick(viz);
-
+      // Pre-compute trace entry so we can decide whether to ghost-flash
+      // a swap before settling. The dispatch below sets label/desc and
+      // collects the four highlight nodes; here we only need to know
+      // if it's a forward rewire op + which pair was cut.
       const t = trace[step] || trace[trace.length - 1];
+      if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
+      const isForward = step === lastStep + 1;
+      const isSwap = (t.kind === "crewire" || t.kind === "bgrewire") && t.op && t.op.success;
+      if (isForward && isSwap) {
+        const ghosts = [t.op.p1];
+        if (t.op.p2) ghosts.push(t.op.p2);
+        const isBg = t.kind === "bgrewire";
+        const ghostEdges = ghosts.map((g, k) => ({
+          u: g[0], v: g[1], color: COL.edge_drop, w: 1.4,
+          id: (isBg ? "bg-ghost-" : "cg-ghost-") + step + "-" + k, classes: "ghost",
+        }));
+        viz.setEdges(edges.concat(ghostEdges));
+        settleTimer = setTimeout(() => {
+          viz.setEdges(edges);
+          settleTimer = null;
+        }, 380);
+      } else {
+        viz.setEdges(edges);
+      }
+      clearDimPick(viz);
+      lastStep = step;
+
+
       let label, desc;
       if (t.kind === "init") {
         const outList = [...R.outliers].sort((a,b) => a-b).join(", ");

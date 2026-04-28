@@ -1192,6 +1192,7 @@ window.MathJax = {
   (function () {
     const viz = NETGEN.VIZ.init("g-crewire-cy", { showLabels: true, edges: [] });
     let lastStep = 0;
+    let settleTimer = null;
     // Apply ops 0..k-1 to a working edge map (key -> {u,v,cluster}); ops
     // mutate by removing p1/p2 keys and adding newp1/newp2 keys (when
     // success). The clusterPre snapshot is the seed.
@@ -1257,35 +1258,61 @@ window.MathJax = {
       }
 
       const op = R.clusterRewireOps[step - 1];
+      const stateBefore = stateAtStep(R, step - 1);
       const stateAfter = stateAtStep(R, step);
       const four = new Set();
       [op.p1, op.p2, op.newp1, op.newp2].forEach(p => {
         if (p) { four.add(p[0]); four.add(p[1]); }
       });
-
-      // Build edge list for the post-op state. Highlight newly-placed
-      // edges with a brief "fresh" class for the forward transition.
-      const isForward = step > lastStep;
-      const edges = [];
-      let i = 0;
-      stateAfter.forEach(e => {
-        const isNew = op.success && (
-          (op.newp1 && keyOf(op.newp1[0], op.newp1[1]) === keyOf(e.u, e.v)) ||
-          (op.newp2 && keyOf(op.newp2[0], op.newp2[1]) === keyOf(e.u, e.v))
-        );
-        const baseColor = COL.edge_intra[e.cluster] || COL.edge_stage2;
-        edges.push({
-          u: e.u, v: e.v,
-          color: e.bad ? COL.edge_drop : baseColor,
-          w: 1.5,
-          id: "cr-state-" + (i++),
-          classes: isNew && isForward ? "fresh" : (e.bad ? "pick" : ""),
+      // Forward + successful: 2-frame transition. Frame 1 keeps the cut
+      // pair rendered as a ghost-dashed pair while the new edges fade
+      // in with the .fresh class. Frame 2 settles to stateAfter without
+      // ghosts. Backward / random-jump skips straight to stateAfter so
+      // the user does not see a phantom flash.
+      if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
+      const isForward = step === lastStep + 1;
+      function buildEdges(state, ghosts) {
+        const out = [];
+        let i = 0;
+        state.forEach(e => {
+          const baseColor = COL.edge_intra[e.cluster] || COL.edge_stage2;
+          const isNew = op.success && (
+            (op.newp1 && keyOf(op.newp1[0], op.newp1[1]) === keyOf(e.u, e.v)) ||
+            (op.newp2 && keyOf(op.newp2[0], op.newp2[1]) === keyOf(e.u, e.v))
+          );
+          out.push({
+            u: e.u, v: e.v,
+            color: e.bad ? COL.edge_drop : baseColor,
+            w: 1.5,
+            id: "cr-state-" + (i++),
+            classes: isNew ? "fresh" : (e.bad ? "pick" : ""),
+          });
         });
-      });
-      viz.setEdges(edges);
-      clearDimPick(viz);
-      four.forEach(id => viz.addNodeClass(id, "pick"));
-      dimAllExcept(viz, [...four]);
+        (ghosts || []).forEach((g, k) => {
+          out.push({
+            u: g[0], v: g[1], color: COL.edge_drop, w: 1.4,
+            id: "cr-ghost-" + step + "-" + k, classes: "ghost",
+          });
+        });
+        return out;
+      }
+      if (isForward && op.success) {
+        const ghosts = [op.p1];
+        if (op.p2) ghosts.push(op.p2);
+        viz.setEdges(buildEdges(stateAfter, ghosts));
+        clearDimPick(viz);
+        four.forEach(id => viz.addNodeClass(id, "pick"));
+        dimAllExcept(viz, [...four]);
+        settleTimer = setTimeout(() => {
+          viz.setEdges(buildEdges(stateAfter, null));
+          settleTimer = null;
+        }, 380);
+      } else {
+        viz.setEdges(buildEdges(stateAfter, null));
+        clearDimPick(viz);
+        four.forEach(id => viz.addNodeClass(id, "pick"));
+        dimAllExcept(viz, [...four]);
+      }
 
       const tag = op.success
         ? (op.src === "valid" ? "swap with valid edge" : "swap with recycled pair")
@@ -1490,6 +1517,7 @@ window.MathJax = {
   (function () {
     const viz = NETGEN.VIZ.init("g-bgrewire-cy", { showLabels: true, edges: [] });
     let lastStep = 0;
+    let settleTimer = null;
     function stateAtStep(R, k) {
       const map = new Map();
       R.bgPre.forEach(e => {
@@ -1558,28 +1586,50 @@ window.MathJax = {
       [op.p1, op.p2, op.newp1, op.newp2].forEach(p => {
         if (p) { four.add(p[0]); four.add(p[1]); }
       });
-
-      const isForward = step > lastStep;
-      const edges = backdrop.slice();
-      let i = 0;
-      stateAfter.forEach(e => {
-        const placedKey = keyOf(e.u, e.v);
-        const isNew = op.success && (
-          (op.placedNewp1 && op.newp1 && keyOf(op.newp1[0], op.newp1[1]) === placedKey) ||
-          (op.placedNewp2 && op.newp2 && keyOf(op.newp2[0], op.newp2[1]) === placedKey)
-        );
-        edges.push({
-          u: e.u, v: e.v,
-          color: e.bad ? COL.edge_drop : COL.edge_inter,
-          w: 1.5,
-          id: "br-state-" + (i++),
-          classes: isNew && isForward ? "fresh" : (e.bad ? "pick" : ""),
+      if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
+      const isForward = step === lastStep + 1;
+      function buildEdges(state, ghosts) {
+        const out = backdrop.slice();
+        let i = 0;
+        state.forEach(e => {
+          const placedKey = keyOf(e.u, e.v);
+          const isNew = op.success && (
+            (op.placedNewp1 && op.newp1 && keyOf(op.newp1[0], op.newp1[1]) === placedKey) ||
+            (op.placedNewp2 && op.newp2 && keyOf(op.newp2[0], op.newp2[1]) === placedKey)
+          );
+          out.push({
+            u: e.u, v: e.v,
+            color: e.bad ? COL.edge_drop : COL.edge_inter,
+            w: 1.5,
+            id: "br-state-" + (i++),
+            classes: isNew ? "fresh" : (e.bad ? "pick" : ""),
+          });
         });
-      });
-      viz.setEdges(edges);
-      clearDimPick(viz);
-      four.forEach(id => viz.addNodeClass(id, "pick"));
-      dimAllExcept(viz, [...four]);
+        (ghosts || []).forEach((g, k) => {
+          out.push({
+            u: g[0], v: g[1], color: COL.edge_drop, w: 1.4,
+            id: "br-ghost-" + step + "-" + k, classes: "ghost",
+          });
+        });
+        return out;
+      }
+      if (isForward && op.success) {
+        const ghosts = [op.p1];
+        if (op.p2) ghosts.push(op.p2);
+        viz.setEdges(buildEdges(stateAfter, ghosts));
+        clearDimPick(viz);
+        four.forEach(id => viz.addNodeClass(id, "pick"));
+        dimAllExcept(viz, [...four]);
+        settleTimer = setTimeout(() => {
+          viz.setEdges(buildEdges(stateAfter, null));
+          settleTimer = null;
+        }, 380);
+      } else {
+        viz.setEdges(buildEdges(stateAfter, null));
+        clearDimPick(viz);
+        four.forEach(id => viz.addNodeClass(id, "pick"));
+        dimAllExcept(viz, [...four]);
+      }
 
       const tag = op.success
         ? (op.src === "valid" ? "swap with valid bg edge" : "swap with recycled pair")
