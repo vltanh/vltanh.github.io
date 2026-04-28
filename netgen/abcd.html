@@ -492,9 +492,17 @@ window.MathJax = {
   const NODES = NETGEN.NODES;
   const C1 = NETGEN.C1, C2 = NETGEN.C2, C3 = NETGEN.C3, OUT_N = NETGEN.OUT;
 
+  // Singleton-as-cluster palette, shared with the cpair / bgpair walkers
+  // and matching nPSO's neutral palette. Each singleton gets a distinct
+  // hue rather than the site-wide outlier red.
+  const OUTLIER_CLUSTER_PALETTE = ["#9e7ec4", "#6fa6b0", "#c49a6c", "#78a06f"];
   const BLOCK_NAMES  = ["C1", "C2", "C3", "{19}", "{20}"];
   const BLOCK_NODES  = { "C1": C1, "C2": C2, "C3": C3, "{19}": [19], "{20}": [20] };
-  const BLOCK_COLOR  = { "C1": COL.C1, "C2": COL.C2, "C3": COL.C3, "{19}": COL.OUT, "{20}": COL.OUT };
+  const BLOCK_COLOR  = {
+    "C1": COL.C1, "C2": COL.C2, "C3": COL.C3,
+    "{19}": OUTLIER_CLUSTER_PALETTE[0],
+    "{20}": OUTLIER_CLUSTER_PALETTE[1],
+  };
   const BLOCK_SIZE   = { "C1": C1.length, "C2": C2.length, "C3": C3.length, "{19}": 1, "{20}": 1 };
   const blockOfNode  = (n) => (n === 19 ? "{19}" : n === 20 ? "{20}" : CLUSTER_OF[n]);
 
@@ -523,15 +531,26 @@ window.MathJax = {
   const TOTAL_EDGES = EDGES.length;
 
   // Shared input fixture: input graph + singleton-mode 5-cluster colour.
+  // Dashed block rings on every cluster (incl. each singleton) match
+  // the nPSO + SBM input opener style; ring colour follows BLOCK_COLOR.
   (function () {
+    const host = document.getElementById("g-shared-input-cy");
+    if (!host) return;
+    host.innerHTML = "";
+    const svg = d3.select(host).append("svg")
+      .attr("class", "viz-svg").attr("viewBox", NETGEN.fitViewBoxAttr())
+      .attr("preserveAspectRatio", "xMidYMid meet");
+    const syncBlockRects = makeBlockRects(svg);
     const edges = EDGES.map(e => ({
       u: e.u, v: e.v, color: pickInputColor(e), w: 1.4,
     }));
-    NETGEN.VIZ.init("g-shared-input-cy", {
-      showLabels: true,
-      edges,
+    const viz = NETGEN.VIZ.init("g-shared-input-cy", {
+      svg, showLabels: true, edges,
       nodeColor: (id) => BLOCK_COLOR[blockOfNode(id)] || COL.OUT,
     });
+    NETGEN.makeTooltip(viz, document.getElementById("g-shared-input"));
+    syncBlockRects(viz);
+    viz.sim.on("tick.blockRects", () => syncBlockRects(viz));
   })();
 
   (function () {
@@ -621,7 +640,10 @@ window.MathJax = {
     const host = document.getElementById("g-deg-cy");
     if (!host) return;
     const edges = EDGES.map(e => ({ u: e.u, v: e.v, color: pickInputColor(e), w: 1.2 }));
-    const viz = NETGEN.VIZ.init("g-deg-cy", { showLabels: true, edges });
+    const viz = NETGEN.VIZ.init("g-deg-cy", {
+      showLabels: true, edges,
+      nodeColor: (id) => BLOCK_COLOR[blockOfNode(parseInt(id, 10))] || COL.OUT,
+    });
     NETGEN.makeTooltip(viz, document.getElementById("g-deg"));
 
     const svg = d3.select("#deg-seq");
@@ -660,7 +682,7 @@ window.MathJax = {
         .attr("height", y.bandwidth()).attr("fill", "transparent");
       row.append("rect").attr("class", "bar")
         .attr("x", 0).attr("y", 0).attr("width", x(DEGREES[n]))
-        .attr("height", y.bandwidth()).attr("fill", COL[CLUSTER_OF[n]]).attr("opacity", 0.92);
+        .attr("height", y.bandwidth()).attr("fill", BLOCK_COLOR[blockOfNode(n)] || COL.paper_3).attr("opacity", 0.92);
       row.append("text").attr("x", x(DEGREES[n]) + 5).attr("y", y.bandwidth() / 2)
         .attr("dominant-baseline", "central")
         .attr("font-family", "Special Elite, Courier New, monospace")
@@ -680,7 +702,10 @@ window.MathJax = {
       .attr("preserveAspectRatio", "xMidYMid meet");
     const syncBlockRects = makeBlockRects(svg);
     const edges = EDGES.map(e => ({ u: e.u, v: e.v, color: pickInputColor(e), w: 1.1 }));
-    const viz = NETGEN.VIZ.init("g-cs-cy", { svg, showLabels: true, edges });
+    const viz = NETGEN.VIZ.init("g-cs-cy", {
+      svg, showLabels: true, edges,
+      nodeColor: (id) => BLOCK_COLOR[blockOfNode(parseInt(id, 10))] || COL.OUT,
+    });
     NETGEN.makeTooltip(viz, document.getElementById("g-cs"));
     syncBlockRects(viz);
     viz.sim.on("tick.blockRects", () => syncBlockRects(viz));
@@ -767,11 +792,10 @@ window.MathJax = {
   KERNEL_CLUSTER_BY_NODE[20] = 5;
   const KERNEL_S = [C1.length, C2.length, C3.length, 1, 1];
   // ABCD's outlier_mode=singleton turns each outlier into its own real
-  // cluster, exactly as nPSO does. Mirror nPSO's neutral-palette colour
-  // choice (a singleton is "just another colour", not the site-wide
-  // outlier red): each singleton gets a distinct hue, drawn from the
-  // shared OUTLIER_CLUSTER_PALETTE.
-  const OUTLIER_CLUSTER_PALETTE = ["#9e7ec4", "#6fa6b0", "#c49a6c", "#78a06f"];
+  // cluster, exactly as nPSO does. OUTLIER_CLUSTER_PALETTE is defined
+  // up where BLOCK_COLOR uses it; the rest of this block reuses those
+  // colours so the input graph, profile views, and the four walker
+  // panels all agree on each singleton's hue.
   const SINGLETON_KIDS = [4, 5];
   const SINGLETON_NODE_BY_KID = { 4: 19, 5: 20 };
   const NAMED_CLUSTER_OF_KERNEL = { 1: "C1", 2: "C2", 3: "C3" };
@@ -957,7 +981,7 @@ window.MathJax = {
       .attr("class", "bar").attr("transform", d => `translate(${x(String(d))},0)`);
     bars.append("rect").attr("class", "internal")
       .attr("x", 0).attr("y", ih).attr("width", x.bandwidth()).attr("height", 0)
-      .attr("fill", d => COL[CLUSTER_OF[d]]).attr("opacity", 0.92);
+      .attr("fill", d => BLOCK_COLOR[blockOfNode(d)] || COL.paper_3).attr("opacity", 0.92);
     bars.append("rect").attr("class", "external")
       .attr("x", 0).attr("y", ih).attr("width", x.bandwidth()).attr("height", 0)
       .attr("fill", COL.edge_drop).attr("opacity", 0.78);
@@ -1276,7 +1300,7 @@ window.MathJax = {
       function buildEdges(list) {
         return list.map(e => ({
           u: e.u, v: e.v,
-          color: e.bad ? COL.edge_drop : (COL.edge_intra[e.cluster] || COL.edge_stage2),
+          color: e.bad ? COL.edge_drop : (CLUSTER_COLOR_OF[e.cluster] || COL.edge_stage2),
           w: e.bad ? 1.6 : 1.5,
           id: e.id,
           classes: e.bad ? "pick" : "",
@@ -1397,7 +1421,7 @@ window.MathJax = {
       // Backdrop: faded cluster-post; spoke layer owns bg pair edges.
       const edges = R.clusterPost.map((e, i) => ({
         u: e.u, v: e.v,
-        color: COL.edge_intra[e.cluster] || COL.edge_stage2,
+        color: CLUSTER_COLOR_OF[e.cluster] || COL.edge_stage2,
         w: 1.2, id: "bp-cluster-" + i, classes: "fade",
       }));
       viz.setEdges(edges);
@@ -1539,7 +1563,7 @@ window.MathJax = {
       // Cluster post backdrop renders behind the bg state on every step.
       const backdrop = R.clusterPost.map((e, i) => ({
         u: e.u, v: e.v,
-        color: COL.edge_intra[e.cluster] || COL.edge_stage2,
+        color: CLUSTER_COLOR_OF[e.cluster] || COL.edge_stage2,
         w: 1.2, id: "br-cluster-" + i, classes: "fade",
       }));
 
