@@ -163,7 +163,7 @@
   <p>where \(d_u^{\text{ref}}\) is \(u\)'s degree in the reference and \(d_u^{\text{input}}\) is its degree in the current graph. The matcher's job is to add new edges so that, post-match, \(d_u^{\text{out}} \approx d_u^{\text{ref}}\) for every \(u\). It can never <em>reduce</em> a degree; if some node already has more edges than its target, the matcher leaves it alone.</p>
   <div class="callout">
     <div class="tag">when each generator calls it</div>
-    <p>EC-SBM-v1 hardcodes <code>greedy</code> (legacy from the original paper implementation). EC-SBM-v2 defaults to <code>hybrid</code>. The simple gens (sbm, abcd, abcd+o, lfr, npso) leave it off by default; their pipelines accept <code>--match-degree</code> as an opt-in flag, paired with the optional <code>--remap</code> mode below for gens that emit fresh node IDs.</p>
+    <p>EC-SBM-v1 hardcodes <code>greedy</code> (legacy from the original paper implementation). EC-SBM-v2 defaults to <code>true_greedy</code>. The simple gens (sbm, abcd, abcd+o, lfr, npso) leave it off by default; their pipelines accept <code>--match-degree</code> as an opt-in flag, paired with the optional <code>--remap</code> mode below for gens that emit fresh node IDs.</p>
   </div>
 </section>
 
@@ -182,8 +182,8 @@
         <td class="desc">Heap-based. Pop \(u\) with max residual; connect to <code>min(residual, |non-neighbours|)</code> partners drawn via <code>set.pop()</code>.</td>
         <td class="desc">Silent gridlock: drops stubs without logging.</td>
       </tr>
-      <tr>
-        <th>true_greedy</th>
+      <tr class="pref">
+        <th>true_greedy (default)</th>
         <td class="desc">Max-heap with dynamic re-push. Pop \(u\), pick \(v\) via <code>argmax</code> over current degrees among valid targets, push updated residuals back.</td>
         <td class="desc">Logs gridlock when no partner is left.</td>
       </tr>
@@ -197,14 +197,14 @@
         <td class="desc">Configuration-model pairing then 2-opt repair. Build a flat stub list (each node repeated <code>residual</code> times), shuffle, pair adjacent. Invalid pairs queue for <code>run_rewire_attempts</code>.</td>
         <td class="desc">Logs gridlock; almost always resolves on realistic inputs.</td>
       </tr>
-      <tr class="pref">
-        <th>hybrid (default)</th>
+      <tr>
+        <th>hybrid</th>
         <td class="desc">Run <code>rewire</code> first, then <code>true_greedy</code> on whatever <code>rewire</code> could not place. Rewire handles the bulk unbiased; greedy handles the stuck tail deterministically.</td>
         <td class="desc">Logs gridlock; drops near zero on realistic inputs.</td>
       </tr>
     </tbody>
   </table>
-  <p>The table reads as a spectrum from determinism to randomness. <code>greedy</code> and <code>true_greedy</code> produce the same output every run on the same input (no seed needed). <code>random_greedy</code> and <code>rewire</code> sample fresh draws each call. <code>hybrid</code> sits at the favourable end: <code>rewire</code>'s unbiased bulk drain followed by <code>true_greedy</code>'s deterministic finishing pass. Hybrid is the one least likely to gridlock on dense or hub-heavy inputs because each phase covers the other's weakness.</p>
+  <p>The table reads as a spectrum from determinism to randomness. <code>greedy</code> and <code>true_greedy</code> produce the same output every run on the same input (no seed needed). <code>random_greedy</code> and <code>rewire</code> sample fresh draws each call. <code>true_greedy</code> is the default: dynamic re-push closes the residual deterministically with negligible drop on realistic inputs. <code>hybrid</code> stays available when randomized config-model pairing is preferred (rewire bulk drain + true_greedy tail).</p>
   <p>The five sections below walk each algorithm step by step on the same residual deficit, drawn at the top of the page from a fresh SBM-style stub-pairing on the 20-node fixture. Click <em>re-roll input</em> at the top to draw a new pile and reset every walker.</p>
 </section>
 
@@ -373,9 +373,9 @@
 
 <!-- ─────────── algorithm · hybrid ─────────── -->
 <section class="stage">
-  <div class="stage-num">algorithm · hybrid (default)</div>
+  <div class="stage-num">algorithm · hybrid</div>
   <h2><code>rewire</code>, then <code>true_greedy</code> on what is left.</h2>
-  <p>The default and the recommended one. Run <code>rewire</code> first to drain the bulk unbiased; whatever stubs are still unplaced after rewire's repair budget go to <code>true_greedy</code> for a deterministic finishing pass. Almost every realistic deficit drains to zero this way; what cannot is logged.</p>
+  <p>Run <code>rewire</code> first to drain the bulk unbiased; whatever stubs are still unplaced after rewire's repair budget go to <code>true_greedy</code> for a deterministic finishing pass. Almost every realistic deficit drains to zero this way; what cannot is logged.</p>
   <div class="pseudo"><span class="kw">def</span> hybrid(residual, adj, rng):
     rewire(residual, adj, rng)              <span class="cm"># phase 1: stochastic bulk drain</span>
     <span class="kw">if</span> any(residual[u] &gt; 0):
@@ -478,9 +478,9 @@ window.MathJax = {
     title: "callers",
     siblings: [
       { gen: "ec-sbm-v1", label: "EC-SBM v1",
-        diff: "Hardcodes <code>greedy</code> in stage 4. Inherited from the legacy paper implementation; switching to <code>hybrid</code> is a v2 design choice." },
+        diff: "Hardcodes <code>greedy</code> in stage 4. Inherited from the legacy paper implementation; switching to <code>true_greedy</code> is a v2 design choice." },
       { gen: "ec-sbm-v2", label: "EC-SBM v2",
-        diff: "Default <code>hybrid</code>, with the dropdown above as the menu. Stage 4 in the v2 page is a thin wrapper over this tool." },
+        diff: "Default <code>true_greedy</code>, with the dropdown above as the menu. Stage 4 in the v2 page is a thin wrapper over this tool." },
     ],
   });
 
