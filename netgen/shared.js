@@ -884,10 +884,13 @@ function rewireSwapAnimate(opts) {
   const { viz, before, after, cuts, places, four, edgeIdPrefix } = opts;
   const settle = opts.settle || function () {};
   const ID = edgeIdPrefix || "swap";
+  const PHASE1 = 500;
+  const PHASE2 = 950;
+  const PHASE3 = 200;
 
-  // Phase 1 (450ms): dim everything except the 4 endpoints, render the
+  // Phase 1: dim everything except the 4 endpoints, render the
   // before-state with the cut edges replaced by 'swap-pick' boldface
-  // versions so the user sees what's about to break.
+  // so the viewer sees what is about to break.
   const cutKey = (a, b) => (a < b ? a + "|" + b : b + "|" + a);
   const cutKeys = new Set(cuts.map(c => cutKey(c[0], c[1])));
   const beforeMinusCuts = before.filter(e => !cutKeys.has(cutKey(e.u, e.v)));
@@ -904,11 +907,8 @@ function rewireSwapAnimate(opts) {
   const fourSet = new Set((four || []).map(x => String(x)));
   if (viz.eachNode) {
     viz.eachNode(n => {
-      if (fourSet.has(String(n.id))) {
-        viz.addNodeClass(n.id, "swap-pick");
-      } else {
-        viz.addNodeClass(n.id, "dim");
-      }
+      if (fourSet.has(String(n.id))) viz.addNodeClass(n.id, "swap-pick");
+      else viz.addNodeClass(n.id, "dim");
     });
   }
   if (viz.eachEdge) {
@@ -916,43 +916,125 @@ function rewireSwapAnimate(opts) {
     pickEdges.forEach(e => viz.removeEdgeClass(e.id, "dim-strong"));
   }
 
-  // Phase 2 (900ms): swap animation. Cut edges run vizSwapCut; place
-  // edges run vizSwapPlace. Both are inserted into the edge list with
-  // the special classes so CSS keyframes pick them up on insertion.
-  const t1 = setTimeout(() => {
-    const cutAnim = cuts.map((c, k) => ({
-      u: c[0], v: c[1], color: "#7e9b6d",
-      w: 3.6, id: ID + "-cut-" + k, classes: "swap-cut",
-    }));
-    const placeAnim = places.map((p, k) => ({
-      u: p[0], v: p[1], color: "#3559a0",
-      w: 3.4, id: ID + "-place-" + k, classes: "swap-place",
-    }));
-    viz.setEdges(beforeMinusCuts.concat(cutAnim, placeAnim));
-    if (viz.eachEdge) {
-      viz.eachEdge(e => {
-        if (!String(e.id).startsWith(ID + "-cut-") &&
-            !String(e.id).startsWith(ID + "-place-")) {
-          viz.addEdgeClass(e.id, "dim-strong");
-        }
-      });
+  // Phase 2: spoke decompose + reconnect. Each cut edge splits at its
+  // midpoint into two half-edges (one per endpoint). The free ends of
+  // those half-edges then migrate to the midpoints of the new place
+  // edges, dragging their stub stroke with them so the viewer sees
+  // the stubs swap partners. Final state: each pair of half-edges
+  // meets at a new midpoint, forming the placed edges.
+  //
+  // Pairing: for each new place [u, v], the half-edge at u comes from
+  // whichever cut contained u, and the half-edge at v comes from
+  // whichever cut contained v. We tag each half-edge with the new
+  // midpoint it should migrate to so the d3 transition can animate
+  // the (x2, y2) attributes.
+  const pairing = [];
+  function findCutFor(node) {
+    for (let i = 0; i < cuts.length; i++) {
+      if (cuts[i][0] === node || cuts[i][1] === node) return i;
     }
-  }, 500);
+    return -1;
+  }
+  cuts.forEach((c, k) => {
+    pairing.push({ side: "a", node: c[0], cutIdx: k, partner: c[1] });
+    pairing.push({ side: "b", node: c[1], cutIdx: k, partner: c[0] });
+  });
+  // For each place, route the half-edges from each endpoint's source
+  // cut to the new midpoint.
+  const halfMoves = [];
+  places.forEach(([u, v]) => {
+    const cu = findCutFor(u);
+    const cv = findCutFor(v);
+    if (cu < 0 || cv < 0) return;
+    halfMoves.push({ node: u, oldCut: cuts[cu], newPartner: v });
+    halfMoves.push({ node: v, oldCut: cuts[cv], newPartner: u });
+  });
 
-  // Phase 3 (post-settle): drop the animation overlays + un-dim.
-  const t2 = setTimeout(() => {
+  let t1 = null, t2 = null, t3 = null;
+  let spokeG = null;
+  function midpoint(a, b) {
+    const na = viz.nodeById[String(a)];
+    const nb = viz.nodeById[String(b)];
+    if (!na || !nb) return [0, 0];
+    return [(na.x + nb.x) / 2, (na.y + nb.y) / 2];
+  }
+  function nodeXY(id) {
+    const n = viz.nodeById[String(id)];
+    return n ? [n.x, n.y] : [0, 0];
+  }
+
+  t1 = setTimeout(() => {
+    // Hide the cut edges entirely while spokes carry the visual; the
+    // place edges aren't drawn yet — half-edges grow into them.
+    viz.setEdges(beforeMinusCuts);
+    if (viz.eachEdge) {
+      viz.eachEdge(e => viz.addEdgeClass(e.id, "dim-strong"));
+    }
+    // Build a fresh spoke layer above the edge layer.
+    const svg = viz.svg;
+    if (!svg) return;
+    // Insert before .viz-nodes so spokes paint behind nodes.
+    const nodesG = svg.select("g.viz-nodes");
+    spokeG = svg.insert("g", "g.viz-nodes")
+      .attr("class", "rewire-spoke-anim")
+      .attr("pointer-events", "none");
+    halfMoves.forEach((hm, i) => {
+      const [nx, ny] = nodeXY(hm.node);
+      const [oldMx, oldMy] = midpoint(hm.oldCut[0], hm.oldCut[1]);
+      const [newMx, newMy] = midpoint(hm.node, hm.newPartner);
+      const line = spokeG.append("line")
+        .attr("x1", nx).attr("y1", ny)
+        .attr("x2", oldMx).attr("y2", oldMy)
+        .attr("stroke", "#1a3478")
+        .attr("stroke-width", 3.4)
+        .attr("stroke-linecap", "round")
+        .attr("opacity", 0.9);
+      // Phase 2a: brief boldface hold (160ms) so the decomposition
+      // reads as "edge cracked into two stubs" before stubs migrate.
+      line.transition()
+        .delay(160)
+        .duration(PHASE2 - 320)
+        .ease(d3.easeCubicInOut)
+        .attr("x2", newMx).attr("y2", newMy)
+        .attr("stroke", "#3559a0");
+    });
+    // Also draw a faint cracked-line from the OLD midpoint splitting
+    // the boldface in two so the "decompose" beat is visible.
+    cuts.forEach((c, k) => {
+      const [mx, my] = midpoint(c[0], c[1]);
+      spokeG.append("circle")
+        .attr("cx", mx).attr("cy", my)
+        .attr("r", 4)
+        .attr("fill", "#7e9b6d")
+        .attr("opacity", 0.7)
+        .transition().duration(PHASE2 - 200)
+        .attr("r", 1.5).attr("opacity", 0);
+    });
+  }, PHASE1);
+
+  // Phase 3: drop spoke layer, render the after-state with new edges
+  // placed (now visible since the spokes have already merged at the
+  // new midpoints). Un-dim every node + edge.
+  t2 = setTimeout(() => {
     viz.setEdges(after);
     if (viz.clearAllNodeClass) {
       viz.clearAllNodeClass("dim");
       viz.clearAllNodeClass("pick");
       viz.clearAllNodeClass("swap-pick");
     }
+    if (spokeG) {
+      spokeG.transition().duration(PHASE3).attr("opacity", 0)
+        .on("end", function () { spokeG.remove(); spokeG = null; });
+    }
     settle();
-  }, 1600);
+  }, PHASE1 + PHASE2);
 
   return {
     cancel() {
-      clearTimeout(t1); clearTimeout(t2);
+      if (t1) clearTimeout(t1);
+      if (t2) clearTimeout(t2);
+      if (t3) clearTimeout(t3);
+      if (spokeG) { spokeG.remove(); spokeG = null; }
       viz.setEdges(after);
       if (viz.clearAllNodeClass) {
         viz.clearAllNodeClass("dim");
