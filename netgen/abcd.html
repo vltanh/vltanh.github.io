@@ -1074,35 +1074,25 @@ window.MathJax = {
       NODES.forEach(n => {
         cfg[n] = { count: R.split[n].y, color: COL.edge_intra[CLUSTER_OF[n]] || COL.edge_stage2 };
       });
-      // Build placed[] (pairs 0..step-2) and just (pair step-1).
-      const placed = [];
-      const seenKey = {};
-      for (let i = 0; i < step - 1; i++) {
-        const e = effectivePair(R, i);
-        const k = keyOf(e.u, e.v);
-        const dup = seenKey[k] = (seenKey[k] || 0) + 1;
-        const bad = e.loop || e.multi || dup > 1;
-        placed.push({
-          u: e.u, v: e.v,
-          color: bad ? COL.edge_drop : (COL.edge_intra[e.cluster] || COL.edge_stage2),
-          id: "cp-" + i, bad,
-        });
-      }
+      // Resolve effective pairs (kernel order + per-position overrides
+      // from rollPair); shared helpers tag dup-vs-kept and the active
+      // just pair. See NETGEN.walkerMarkPlaced for the rule.
+      const effPairs = [];
+      for (let i = 0; i < step; i++) effPairs.push(effectivePair(R, i));
+      const placed = NETGEN.walkerMarkPlaced(effPairs.slice(0, step - 1), {
+        idPrefix: "cp-",
+        goodColor: (e) => COL.edge_intra[e.cluster] || COL.edge_stage2,
+        badColor: COL.edge_drop,
+        keyOf,
+      });
       let just = null;
       let bridgeColor = COL.mint || "#4e7a3a";
-      if (step > 0) {
-        const cur = effectivePair(R, step - 1);
-        const k = keyOf(cur.u, cur.v);
-        let parallelIdx = 0;
-        for (let i = 0; i < step - 1; i++) {
-          const e = effectivePair(R, i);
-          if (keyOf(e.u, e.v) === k) parallelIdx += 1;
-        }
-        const bad = cur.loop || cur.multi || parallelIdx > 0;
-        bridgeColor = COL.edge_intra[cur.cluster] || COL.edge_stage2;
+      const j = NETGEN.walkerMarkJust(effPairs, step, { keyOf });
+      if (j) {
+        bridgeColor = COL.edge_intra[j.e.cluster] || COL.edge_stage2;
         just = {
-          u: cur.u, v: cur.v, color: bridgeColor, bad,
-          badColor: bad ? COL.edge_drop : null,
+          u: j.e.u, v: j.e.v, color: bridgeColor, bad: j.bad,
+          badColor: j.bad ? COL.edge_drop : null,
         };
       }
       NETGEN.snapOrSync(spokes, { byNode: cfg, placed, just, justSeq: step, bridgeColor }, snap);
@@ -1116,8 +1106,8 @@ window.MathJax = {
         label = "stubs ready";
         desc = "Each node sprouts \\(\\hat y_u\\) intra-cluster stubs in its cluster's colour (current \\(\\xi = " + xi.toFixed(3) + "\\)). The kernel shuffles each cluster's stubs and pairs them adjacent in shuffled order.";
       } else {
-        const cur = effectivePair(R, step - 1);
-        const tag = cur.loop ? " (self-loop)" : cur.multi ? " (parallel of an existing edge)" : "";
+        const cur = j.e;
+        const tag = cur.loop ? " (self-loop)" : j.bad ? " (parallel of an existing edge)" : "";
         label = "pair " + step + " / " + R.clusterPre.length;
         desc = "Cluster " + cur.cluster + ": stubs of <b>" + cur.u + "</b> and <b>" + cur.v + "</b> pair up" + tag + ". The 2 mint spokes are the stubs just consumed; remaining stubs around each node await later pairs.";
       }
@@ -1370,34 +1360,22 @@ window.MathJax = {
       // Cluster-post keys = duplicate-detection set for crossDup colour.
       const clusterKeys = {};
       R.clusterPost.forEach(e => { clusterKeys[keyOf(e.u, e.v)] = true; });
-      const placed = [];
-      const seenKey = {};
-      for (let i = 0; i < step - 1; i++) {
-        const e = effectiveBg(R, i);
-        const k = keyOf(e.u, e.v);
-        const dup = seenKey[k] = (seenKey[k] || 0) + 1;
-        const bad = e.loop || e.multi || e.crossDup || dup > 1 || clusterKeys[k];
-        placed.push({
-          u: e.u, v: e.v,
-          color: bad ? COL.edge_drop : COL.edge_inter,
-          id: "bp-" + i, bad,
-        });
-      }
+      const effPairs = [];
+      for (let i = 0; i < step; i++) effPairs.push(effectiveBg(R, i));
+      const isExtraBad = (e, k) => !!e.crossDup || !!clusterKeys[k];
+      const placed = NETGEN.walkerMarkPlaced(effPairs.slice(0, step - 1), {
+        idPrefix: "bp-",
+        goodColor: COL.edge_inter,
+        badColor: COL.edge_drop,
+        keyOf, isExtraBad,
+      });
       let just = null;
       let bridgeColor = COL.edge_inter;
-      if (step > 0) {
-        const cur = effectiveBg(R, step - 1);
-        const k = keyOf(cur.u, cur.v);
-        let parallelIdx = 0;
-        for (let i = 0; i < step - 1; i++) {
-          const e = effectiveBg(R, i);
-          if (keyOf(e.u, e.v) === k) parallelIdx += 1;
-        }
-        const bad = cur.loop || cur.multi || cur.crossDup || parallelIdx > 0 || clusterKeys[k];
-        bridgeColor = COL.edge_inter;
+      const j = NETGEN.walkerMarkJust(effPairs, step, { keyOf, isExtraBad });
+      if (j) {
         just = {
-          u: cur.u, v: cur.v, color: bridgeColor, bad,
-          badColor: bad ? COL.edge_drop : null,
+          u: j.e.u, v: j.e.v, color: bridgeColor, bad: j.bad,
+          badColor: j.bad ? COL.edge_drop : null,
         };
       }
       NETGEN.snapOrSync(spokes, { byNode: cfg, placed, just, justSeq: step, bridgeColor }, snap);
@@ -1411,8 +1389,10 @@ window.MathJax = {
         label = "background stubs ready";
         desc = "Every node sprouts \\(\\hat z_u\\) bg-pool stubs (cobalt). Faded edges in the back are the cluster phase's output.";
       } else {
-        const cur = effectiveBg(R, step - 1);
-        const tag = cur.loop ? " (self-loop)" : cur.multi ? " (parallel)" : cur.crossDup ? " (duplicate of a cluster edge)" : "";
+        const cur = j.e;
+        const tag = cur.loop ? " (self-loop)"
+          : cur.crossDup ? " (duplicate of a cluster edge)"
+          : j.bad ? " (parallel)" : "";
         label = "bg pair " + step + " / " + R.bgPre.length;
         desc = "Stubs of <b>" + cur.u + "</b> and <b>" + cur.v + "</b> pair up" + tag + ". Mint spokes = the just-consumed pair; remaining spokes await later draws.";
       }

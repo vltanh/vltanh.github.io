@@ -908,9 +908,15 @@ NETGEN.spokeLayer = (function () {
       const nu = viz.nodeById[String(d.u)];
       return EP.loopApex(nu, nodeR(d.u));
     }
+    function loopROffset(d) {
+      // Stack parallel self-loops outward by dupIdx so a 2nd or 3rd
+      // self-loop on the same node doesn't paint over the 1st.
+      const idx = (d && d._dupIdx) || 0;
+      return 8 + 10 * idx;
+    }
     function loopHalfPath(d, side) {
       const nu = viz.nodeById[String(d.u)];
-      return EP.makeSelfLoopHalf(nu, nodeR(d.u), side);
+      return EP.makeSelfLoopHalf(nu, nodeR(d.u), side, { rOffset: loopROffset(d) });
     }
     function bridgePath(d) {
       const nu = viz.nodeById[String(d.u)];
@@ -919,7 +925,7 @@ NETGEN.spokeLayer = (function () {
       // Self-loop bridge: bridgeL + bridgeR each carry one half so the
       // two arcs grow inward from each tangent toward the apex (the
       // SBM stub-matcher aesthetic — two halves meet at the top).
-      if (d.isLoop) return EP.makeSelfLoopHalf(nu, nodeR(d.u), d.side);
+      if (d.isLoop) return EP.makeSelfLoopHalf(nu, nodeR(d.u), d.side, { rOffset: loopROffset(d) });
       const swap = String(d.u) > String(d.v);
       const a = swap ? nv : nu, b = swap ? nu : nv;
       const ra = swap ? nodeR(d.v) : nodeR(d.u), rb = swap ? nodeR(d.u) : nodeR(d.v);
@@ -945,7 +951,7 @@ NETGEN.spokeLayer = (function () {
         // settled colour (cluster solid for non-bad, bad-red dashed
         // for collisions). For animate=false (jump-render), skip the
         // build phase and paint the settled appearance directly.
-        const baseRow = { color: buildStroke, finalColor: (settledBad && j.badColor) ? j.badColor : settledColor, bad: settledBad, u: j.u, v: j.v };
+        const baseRow = { color: buildStroke, finalColor: (settledBad && j.badColor) ? j.badColor : settledColor, bad: settledBad, u: j.u, v: j.v, _dupIdx: j._dupIdx || 0 };
         if (isLoop) {
           data.push(Object.assign({ id: "bridgeL", isLoop: true, side: -1 }, baseRow));
           data.push(Object.assign({ id: "bridgeR", isLoop: true, side: +1 }, baseRow));

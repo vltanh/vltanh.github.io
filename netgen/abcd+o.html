@@ -1135,20 +1135,17 @@ window.MathJax = {
       document.getElementById("g-cpair-cur").textContent = String(step);
       const labelEl = document.getElementById("g-cpair-stage");
       const descEl = document.getElementById("g-cpair-desc");
-      const edges = [];
-      const seen = new Set();
-      for (let i = 0; i < step; i++) {
-        const e = R.clusterPre[i];
-        const k = keyOf(e.u, e.v);
-        const bad = e.loop || e.multi || seen.has(k);
-        seen.add(k);
-        edges.push({
-          u: e.u, v: e.v,
-          color: bad ? COL.edge_drop : (COL.edge_intra[e.cluster] || COL.edge_stage2),
-          w: bad ? 1.6 : 1.5,
-          id: "cg-pre-" + i, classes: bad ? "cm-bad" : "",
-        });
-      }
+      const placed = NETGEN.walkerMarkPlaced(R.clusterPre.slice(0, step), {
+        idPrefix: "cg-pre-",
+        goodColor: (e) => COL.edge_intra[e.cluster] || COL.edge_stage2,
+        badColor: COL.edge_drop,
+        keyOf,
+      });
+      const edges = placed.map(p => ({
+        u: p.u, v: p.v, color: p.color,
+        w: p.bad ? 1.6 : 1.5,
+        id: p.id, classes: p.bad ? "cm-bad" : "",
+      }));
       viz.setEdges(edges);
       clearDimPick(viz);
       if (step === 0) {
@@ -1158,8 +1155,9 @@ window.MathJax = {
           (R.clusterPre.length === 1 ? "" : "s") + " ahead.";
         return;
       }
-      const e = R.clusterPre[step - 1];
-      const tag = (e.loop || e.multi) ? " (collision)" : "";
+      const j = NETGEN.walkerMarkJust(R.clusterPre, step, { keyOf });
+      const e = j.e;
+      const tag = (e.loop || j.bad) ? " (collision)" : "";
       labelEl.textContent = "cluster pair " + step + " / " + R.clusterPre.length + tag;
       descEl.innerHTML = '<span class="st">cluster pair</span> &middot; pair ' +
         e.u + " &harr; " + e.v + " inside <code>" + e.cluster + "</code>.";
@@ -1290,19 +1288,22 @@ window.MathJax = {
           w: 1.2, id: "bp-cluster-" + (i++), classes: "fade",
         });
       });
-      const edges = backdrop.slice();
-      const seen = new Set();
-      for (let j = 0; j < step; j++) {
-        const e = R.bgPre[j];
-        const k = keyOf(e.u, e.v);
-        const bad = e.loop || e.multi || e.crossDup || seen.has(k);
-        seen.add(k);
-        edges.push({
-          u: e.u, v: e.v, color: bgEdgeColor({ ...e, bad }),
-          w: bad ? 1.6 : (e.isOO ? 1.8 : 1.5),
-          id: "bp-pre-" + j, classes: bad ? "cm-bad" : "",
-        });
-      }
+      const isExtraBad = (e) => !!e.crossDup;
+      const placed = NETGEN.walkerMarkPlaced(R.bgPre.slice(0, step), {
+        idPrefix: "bp-pre-",
+        goodColor: (e) => bgEdgeColor({ ...e, bad: false }),
+        badColor: bgEdgeColor({ bad: true }),
+        keyOf, isExtraBad,
+      });
+      // Width policy: bad → 1.6, OO non-bad → 1.8, default → 1.5.
+      const edges = backdrop.concat(placed.map((p, k) => {
+        const src = R.bgPre[k];
+        return {
+          u: p.u, v: p.v, color: p.color,
+          w: p.bad ? 1.6 : (src.isOO ? 1.8 : 1.5),
+          id: p.id, classes: p.bad ? "cm-bad" : "",
+        };
+      }));
       viz.setEdges(edges);
       clearDimPick(viz);
       if (step === 0) {
@@ -1312,8 +1313,9 @@ window.MathJax = {
           (R.bgPre.length === 1 ? "" : "s") + " ahead.";
         return;
       }
-      const e = R.bgPre[step - 1];
-      const tag = (e.loop || e.multi || e.crossDup) ? " (collision)" : "";
+      const jm = NETGEN.walkerMarkJust(R.bgPre, step, { keyOf, isExtraBad });
+      const e = jm.e;
+      const tag = (e.loop || jm.bad) ? " (collision)" : "";
       const cls = e.isOO ? "outlier-outlier" : (e.isCO ? "clustered-outlier" : "non-outlier inter");
       labelEl.textContent = "bg pair " + step + " / " + R.bgPre.length + tag;
       descEl.innerHTML = '<span class="st">bg pair</span> &middot; pair ' +

@@ -939,6 +939,59 @@ function snapOrSync(spokes, state, snap) {
   else if (spokes && spokes.syncState) spokes.syncState(state);
 }
 
+// Walk a list of pair entries {u, v, loop, ...} and tag each with
+// bad-ness driven by in-render dup detection: first occurrence is the
+// kept edge, every later occurrence is a parallel. Self-loops are
+// always bad. Optional isExtraBad callback handles cross-bucket dups
+// (e.g. bg pair landing on a cluster edge).
+//
+//   pairs       array of {u, v, loop?, ...} entries
+//   idPrefix    e.g. "cp-" — placed-edge id is `${idPrefix}${i}`
+//   goodColor   string or (e) => string for the kept-edge stroke
+//   badColor    stroke for parallels / self-loops
+//   keyOf       (u, v) => string canonical pair key
+//   isExtraBad  optional (e, key) => bool for upstream-flagged dups
+//
+// Returns the placed[] array each walker hands to spoke_layer's
+// syncState / snapToState. Drop-in replacement for the per-page seenKey
+// loops; ensures the e.multi flag (which the kernel sets on BOTH
+// copies of a parallel) is never used to decide bad-ness.
+function walkerMarkPlaced(pairs, opts) {
+  const { idPrefix, goodColor, badColor, keyOf, isExtraBad } = opts;
+  const seen = {};
+  const out = [];
+  for (let i = 0; i < pairs.length; i++) {
+    const e = pairs[i];
+    const k = keyOf(e.u, e.v);
+    const wasSeen = !!seen[k];
+    seen[k] = (seen[k] || 0) + 1;
+    const bad = !!e.loop || wasSeen || (isExtraBad ? !!isExtraBad(e, k) : false);
+    out.push({
+      u: e.u, v: e.v,
+      color: bad ? badColor : (typeof goodColor === "function" ? goodColor(e) : goodColor),
+      id: idPrefix + i,
+      bad,
+    });
+  }
+  return out;
+}
+
+// Companion to walkerMarkPlaced: classify the "just" pair (the active
+// pair at step idx, 1-indexed). Returns { e, bad, key } or null when
+// idx <= 0. Same parallel-by-prefix rule, same extra-bad escape hatch.
+function walkerMarkJust(pairs, idx, opts) {
+  if (idx <= 0) return null;
+  const { keyOf, isExtraBad } = opts;
+  const e = pairs[idx - 1];
+  const k = keyOf(e.u, e.v);
+  let parallel = false;
+  for (let i = 0; i < idx - 1; i++) {
+    if (keyOf(pairs[i].u, pairs[i].v) === k) { parallel = true; break; }
+  }
+  const bad = !!e.loop || parallel || (isExtraBad ? !!isExtraBad(e, k) : false);
+  return { e, bad, key: k };
+}
+
 // ── Walker markup + wiring ───────────────────────────────────
 // Standard 2-row block:
 //   row 1 (random):  random step | random all   <stepLabel>
@@ -1890,7 +1943,7 @@ global.NETGEN = {
   C1, C2, C3, OUT, INTRA, INTER, OUT_EDGES,
   CORE_NODES, CORE_EDGES, topK, cliqueEdges,
   COLORS, CY, VIZ,
-  makeTooltip, scrubSlider, stepController, walkerRow, wireWalker, snapOrSync, toggle,
+  makeTooltip, scrubSlider, stepController, walkerRow, wireWalker, snapOrSync, walkerMarkPlaced, walkerMarkJust, toggle,
   linksRow, kinSection,
   fitViewBoxAttr,
   retypeset,
