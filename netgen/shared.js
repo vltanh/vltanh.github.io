@@ -1290,14 +1290,16 @@ function rewireSpokeSwapAnimate(opts) {
     return { d, sx, sy, ex, ey };
   }
   function placeBridgeViaStubs(s1, s2) {
-    // Bridge goes from s1's stub-tip to s2's stub-tip (along the new-
-    // partner aim of each), so the stubs flow into the bridge on each
-    // end without a kink.
+    // Bridge endpoints sit on the node boundary along the new-partner
+    // aim so the visible stroke ends at the node circle, not at the
+    // stub tip. Stubs still render on top from boundary out to
+    // (boundary + SPOKE_LEN); they fade out during the bridge grow,
+    // leaving the bridge already anchored on the node.
     const me1 = nodeXY(s1.node), me2 = nodeXY(s2.node);
-    const sx = me1.x + Math.cos(s1._currA) * (me1.r + SPOKE_LEN);
-    const sy = me1.y + Math.sin(s1._currA) * (me1.r + SPOKE_LEN);
-    const ex = me2.x + Math.cos(s2._currA) * (me2.r + SPOKE_LEN);
-    const ey = me2.y + Math.sin(s2._currA) * (me2.r + SPOKE_LEN);
+    const sx = me1.x + Math.cos(s1._currA) * me1.r;
+    const sy = me1.y + Math.sin(s1._currA) * me1.r;
+    const ex = me2.x + Math.cos(s2._currA) * me2.r;
+    const ey = me2.y + Math.sin(s2._currA) * me2.r;
     return "M" + sx + "," + sy + " L" + ex + "," + ey;
   }
 
