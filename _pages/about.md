@@ -39,7 +39,7 @@ Greetings. :heart_eyes:
 
 I am a fourth-year Ph.D. student at the [Siebel School of Computing and Data Science](https://siebelschool.illinois.edu/), [University of Illinois Urbana-Champaign](https://illinois.edu/) (UIUC). I also earned my Master's degree along the way from UIUC.
 
-I am blessed to be advised by Professor [Tandy Warnow](https://tandy.cs.illinois.edu/), who is both a great mentor and scientist. I am also fortunate to receive guidance from Professor [George Chackoge](https://siebelschool.illinois.edu/about/people/faculty/chackoge), who is just as brilliant.
+I am blessed to be advised by Professor [Tandy Warnow](https://tandy.cs.illinois.edu/), who is both a great mentor and scientist. I am also fortunate to receive guidance from Professor [George Chacko](https://siebelschool.illinois.edu/about/people/faculty/chackoge), who is just as brilliant.
 
 **Research** My main research focus is network science, specifically detection and analysis of community structures in large and complex networks. Previously, I studied the theoretical aspect of machine learning and related fields, especially deep learning, generative models, reinforcement learning, and many other cool things. I also dabbled in pure mathematics, with a keen interest in using Lean to formalize theorems and proofs in various fields.
 
