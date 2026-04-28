@@ -976,7 +976,9 @@ function singletonOpener(opts) {
       .text(cd.id + (cd.isOutlier ? " · singleton" : ""));
     return { cd, rect, label };
   });
-  const edgesIn = opts.edges || NODES.length === 0 ? [] : NETGEN_EDGES_FAINT();
+  const edgesIn = opts.edges || EDGES.map(e => ({
+    u: e.u, v: e.v, color: COLORS.paper_3, w: 0.9,
+  }));
   const viz = VIZ.init(opts.hostId, {
     svg, showLabels: true, includeOutliers: true,
     edges: edgesIn,
@@ -1013,10 +1015,6 @@ function singletonOpener(opts) {
   viz.sim.on("tick.blockRects", syncRects);
   return viz;
 }
-function NETGEN_EDGES_FAINT() {
-  return EDGES.map(e => ({ u: e.u, v: e.v, color: COLORS.paper_3, w: 0.9 }));
-}
-
 // Spoke-layer snap-or-sync: the universal render router for any walker
 // whose match-edges are owned by NETGEN.spokeLayer. Pass the snap flag
 // from onRender(idx, snap) straight through.

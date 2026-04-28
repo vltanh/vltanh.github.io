@@ -524,88 +524,10 @@ window.MathJax = {
   document.getElementById("prof-C").textContent     = C;
   document.getElementById("prof-tcc").textContent   = TARGET_CC.toFixed(3);
 
-  // ── Profiling · input graph coloured by 5-cluster assignment ──
-  // Singleton outliers get neutral (non-red) colours so the viewer sees
-  // that nPSO treats them as "just more clusters", not as a special
-  // category.
-  (function () {
-    const host = document.getElementById("g-input-cy");
-    if (!host) return;
-    host.innerHTML = "";
-    const svg = d3.select(host).append("svg")
-      .attr("class", "viz-svg")
-      .attr("viewBox", NETGEN.fitViewBoxAttr())
-      .attr("preserveAspectRatio", "xMidYMid meet");
-
-    // Per-node colour: walk CLUSTER_DEFS (which already includes singletons)
-    // and find the cluster containing the node. Precompute for speed.
-    const colourOf = {};
-    CLUSTER_DEFS.forEach(cd => cd.nodes.forEach(n => { colourOf[n] = cd.color; }));
-
-    // Block rects: one per cluster, dashed rounded rect with the cluster
-    // id in the top-left. Singletons get their own rect too, to reinforce
-    // "they are clusters".
-    const layer = svg.append("g").attr("class", "block-rects");
-    const rectsBy = CLUSTER_DEFS.map(cd => {
-      const rect = layer.append("rect")
-        .attr("rx", 10).attr("ry", 10)
-        .attr("fill", cd.color).attr("fill-opacity", 0.07)
-        .attr("stroke", cd.color).attr("stroke-width", 1.5)
-        .attr("stroke-dasharray", "7 5")
-        .attr("opacity", 0.92);
-      const label = layer.append("text")
-        .attr("class", "block-ring-label")
-        .attr("text-anchor", "start")
-        .attr("fill", cd.color)
-        .attr("opacity", 0.95)
-        .style("font-family", "Caveat Brush, cursive")
-        .style("font-size", "18px")
-        .text(cd.id + (cd.isOutlier ? " · singleton" : ""));
-      return { cd, rect, label };
-    });
-
-    const edges = NETGEN.EDGES.map(e => ({
-      u: e.u, v: e.v,
-      color: COL.paper_3,
-      w: 0.9,
-    }));
-    const viz = NETGEN.VIZ.init("g-input-cy", {
-      svg, showLabels: true, includeOutliers: true, edges,
-      nodeColor: (id) => colourOf[parseInt(id, 10)] || COL.paper_3,
-    });
-    NETGEN.makeTooltip(viz, document.getElementById("g-input"));
-
-    function syncRects() {
-      const padX = 30, padY = 34;
-      rectsBy.forEach(s => {
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        s.cd.nodes.forEach(id => {
-          const n = viz.nodeById[String(id)];
-          if (!n) return;
-          if (n.x < minX) minX = n.x;
-          if (n.x > maxX) maxX = n.x;
-          if (n.y < minY) minY = n.y;
-          if (n.y > maxY) maxY = n.y;
-        });
-        if (!isFinite(minX)) return;
-        let x = minX - padX, y = minY - padY;
-        let w = (maxX - minX) + 2 * padX;
-        let h = (maxY - minY) + 2 * padY;
-        const labelW = s.label.node().getComputedTextLength
-          ? s.label.node().getComputedTextLength() : 0;
-        const wanted = labelW + 18;
-        if (w < wanted) {
-          const cx = (minX + maxX) / 2;
-          w = wanted;
-          x = cx - w / 2;
-        }
-        s.rect.attr("x", x).attr("y", y).attr("width", w).attr("height", h);
-        s.label.attr("x", x + 10).attr("y", y + 18);
-      });
-    }
-    syncRects();
-    viz.sim.on("tick.inputRects", syncRects);
-  })();
+  // Singleton-mode input opener. Shared with abcd + lfr via
+  // NETGEN.singletonOpener; CLUSTER_DEFS is already in the right shape
+  // (id, nodes, color, isOutlier).
+  NETGEN.singletonOpener({ hostId: "g-input-cy", clusters: CLUSTER_DEFS });
 
   // ── Stage 1 plot: degree histogram + Hill fit ──────────────
   (function () {
