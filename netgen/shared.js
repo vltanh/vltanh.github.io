@@ -1403,7 +1403,7 @@ function rewireSpokeSwapAnimate(opts) {
   // Initial appearance: cut bridges painted at their before-style
   // (settled colour, dashed if bad). Stubs hidden until after retract.
   const cutSel = cutLayer.selectAll("path").data(cutMeta).enter().append("path")
-    .attr("d", c => c.u === c.v ? selfLoopPath(c.u).d : straightBoundaryPath(c.u, c.v).d)
+    .attr("d", c => c.u === c.v ? selfLoopPath(c.u) : straightBoundaryPath(c.u, c.v))
     .attr("fill", "none")
     .attr("stroke", c => c.bad ? BAD_COLOR : c.color)
     .attr("stroke-width", 1.6)
@@ -1564,8 +1564,8 @@ function rewireSpokeSwapAnimate(opts) {
       if (!path) return;
       const fromD = placeBridgeViaStubs(pp.s1, pp.s2);
       const toD = (pp.p.u === pp.p.v)
-        ? selfLoopPath(pp.p.u).d
-        : straightBoundaryPath(pp.p.u, pp.p.v).d;
+        ? selfLoopPath(pp.p.u)
+        : straightBoundaryPath(pp.p.u, pp.p.v);
       path.transition("colorize").duration(T.colorize).ease(d3.easeCubicInOut)
         .attr("stroke", pp.p.bad ? BAD_COLOR : pp.p.color)
         .attr("stroke-width", 1.6)
@@ -1574,16 +1574,18 @@ function rewireSpokeSwapAnimate(opts) {
     });
   });
 
-  // Phase 7 (commit): swap viz.setEdges to the after-state (which sits
-  // at exactly the same coords as the grown overlay bridges) and fade
-  // the overlay out so any pixel seam between the two paintings is
-  // imperceptible.
+  // Phase 7 (commit): viz.setEdges takes ownership of the new edges
+  // and the overlay disappears in the same frame. No fade — viz CSS
+  // sets edge opacity to 0.82 while the overlay sat at 1.0, so any
+  // crossfade reads as a brief dim flash. Painting both at the same
+  // path coords + popping the overlay synchronously hands off cleanly
+  // (the user perceives a constant edge with a one-frame alpha tick
+  // from 1.0 to 0.82, much less jarring than a 140 ms blend).
   const tCommit = tColor + T.colorize;
   later(tCommit, function () {
     if (manageEdges && after) viz.setEdges(after);
     if (typeof opts.onPlacesShown === "function") opts.onPlacesShown();
-    layer.transition("commit").duration(T.fade).attr("opacity", 0)
-      .on("end", function () { layer.remove(); });
+    layer.remove();
     settle();
   });
 

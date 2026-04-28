@@ -1220,13 +1220,14 @@ window.MathJax = {
     }
     function buildResidualEdges(map) {
       const out = [];
-      let i = 0;
-      map.forEach(e => {
+      // Stable id keyed by canonical edge key so D3 reuses the same
+      // DOM element across before/after — no blink on swap commit.
+      map.forEach((e, key) => {
         out.push({
           u: e.u, v: e.v,
           color: e.bad ? COL.edge_drop : COL.edge_stage3,
           w: e.bad ? 1.8 : 1.6,
-          id: `res-state-${i++}`,
+          id: "res-state-" + key,
           classes: e.bad ? "pick" : "",
         });
       });
@@ -1277,9 +1278,9 @@ window.MathJax = {
       }
 
       const op = R.ops[step - 1];
-      // Stage 2 edges always render under the rewire state.
-      viz.clearEdges();
-      viz.addEdges(stage2);
+      // Helper sets viz.setEdges(before) at animation start; page must
+      // not pre-clear viz here or every surviving edge would exit +
+      // re-enter (visible blink).
       settleTimer = NETGEN.runRewireOpStep({
         viz, step, lastStep,
         ops: R.ops,
