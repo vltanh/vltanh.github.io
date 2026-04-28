@@ -1013,16 +1013,12 @@ window.MathJax = {
   // Stage 1: cluster pairing (per-pair walker, single-step-per-pair)
   (function () {
     const viz = NETGEN.VIZ.init("g-cpair-cy", { showLabels: true, edges: [], pinned: true });
-    const rsBtn = document.getElementById("g-cpair-rand-step");
-    const raBtn = document.getElementById("g-cpair-rand-all");
     let lockOverride = false;
-    let curStep = 0;
-    function applyRandButtons() {
-      const dis = lockOverride || curStep <= 0;
-      rsBtn.disabled = dis;
-      raBtn.disabled = dis;
+    let ctl = null;
+    function setRandLock(locked) {
+      lockOverride = locked;
+      if (ctl) ctl.refreshButtons();
     }
-    function setRandLock(locked) { lockOverride = locked; applyRandButtons(); }
     const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setRandLock });
     function totalFromR(R) { return 1 + R.clusterPre.length; }
 
@@ -1143,13 +1139,11 @@ window.MathJax = {
       if (window.MathJax && window.MathJax.typesetPromise) {
         window.MathJax.typesetPromise([descEl]).catch(() => {});
       }
-      curStep = step;
-      applyRandButtons();
     }
 
     const xi0 = parseFloat(document.getElementById("xi-slider").value);
     const R0 = buildRealization(U_SEED, STUB_SEED, xi0);
-    const ctl = NETGEN.stepController({
+    ctl = NETGEN.stepController({
       prevBtn: document.getElementById("g-cpair-prev"),
       nextBtn: document.getElementById("g-cpair-next"),
       resetBtn: document.getElementById("g-cpair-reset"),
@@ -1158,6 +1152,7 @@ window.MathJax = {
       randAllBtn: document.getElementById("g-cpair-rand-all"),
       total: totalFromR(R0),
       onRender: render,
+      getLocked: () => lockOverride,
       // random step: swap the active pair with another pair from the
       // same cluster in the prefix.
       onRandStep: idx => {
@@ -1193,37 +1188,58 @@ window.MathJax = {
     const viz = NETGEN.VIZ.init("g-crewire-cy", { showLabels: true, edges: [] });
     let lastStep = 0;
     let settleTimer = null;
+    let lockBusy = false;
+    let ctl = null;
+    function setLock(b) {
+      if (lockBusy === b) return;
+      lockBusy = b;
+      if (ctl) ctl.refreshButtons();
+    }
     // Apply ops 0..k-1 to a working edge map (key -> {u,v,cluster}); ops
     // mutate by removing p1/p2 keys and adding newp1/newp2 keys (when
     // success). The clusterPre snapshot is the seed.
+    function sameXY(e, p) {
+      return (e.u === p[0] && e.v === p[1]) || (e.u === p[1] && e.v === p[0]);
+    }
+    // Stable per-instance edge list at step k. Each clusterPre entry
+    // gets its own id ("cr-pre-N") so parallels and self-loops survive
+    // as distinct entries; new edges from successful ops append with
+    // their own ids. Unsuccessful ops requeue p1, so they leave the
+    // list untouched.
     function stateAtStep(R, k) {
-      const map = new Map();
-      R.clusterPre.forEach(e => {
-        const k2 = keyOf(e.u, e.v);
-        // Pre-pairs include duplicates (self-loop + parallel candidates);
-        // collapse to a single edge per key but tag bad on first hit.
-        if (!map.has(k2)) {
-          map.set(k2, { u: e.u, v: e.v, cluster: e.cluster, bad: e.loop || e.multi });
-        }
+      const list = [];
+      const seenKey = new Set();
+      R.clusterPre.forEach((e, i) => {
+        const key = keyOf(e.u, e.v);
+        const isLoop = e.loop;
+        const isMulti = e.multi || (!isLoop && seenKey.has(key));
+        if (!isLoop && !isMulti) seenKey.add(key);
+        list.push({
+          u: e.u, v: e.v, cluster: e.cluster,
+          bad: isLoop || isMulti,
+          id: "cr-pre-" + i,
+        });
       });
-      for (let i = 0; i < k; i++) {
-        const op = R.clusterRewireOps[i];
-        if (!op) break;
-        const k1 = keyOf(op.p1[0], op.p1[1]);
-        map.delete(k1);
-        if (op.success) {
-          if (op.p2) {
-            const k2 = keyOf(op.p2[0], op.p2[1]);
-            map.delete(k2);
-          }
-          [op.newp1, op.newp2].forEach(np => {
-            if (!np) return;
-            const kn = keyOf(np[0], np[1]);
-            map.set(kn, { u: np[0], v: np[1], cluster: op.cluster, bad: false });
-          });
+      for (let oi = 0; oi < k; oi++) {
+        const op = R.clusterRewireOps[oi];
+        if (!op || !op.success) continue;
+        const i1 = list.findIndex(e => sameXY(e, op.p1) && e.bad);
+        if (i1 >= 0) list.splice(i1, 1);
+        if (op.p2) {
+          const wantBad = op.src === "recycle";
+          const i2 = list.findIndex(e => sameXY(e, op.p2) && e.bad === wantBad);
+          if (i2 >= 0) list.splice(i2, 1);
         }
+        if (op.newp1) list.push({
+          u: op.newp1[0], v: op.newp1[1], cluster: op.cluster,
+          bad: false, id: "cr-op" + oi + "-1",
+        });
+        if (op.newp2) list.push({
+          u: op.newp2[0], v: op.newp2[1], cluster: op.cluster,
+          bad: false, id: "cr-op" + oi + "-2",
+        });
       }
-      return map;
+      return list;
     }
     function render(step) {
       const xi = parseFloat(document.getElementById("xi-slider").value);
@@ -1233,21 +1249,22 @@ window.MathJax = {
       document.getElementById("g-crewire-cur").textContent = String(step);
       const labelEl = document.getElementById("g-crewire-stage");
       const descEl = document.getElementById("g-crewire-desc");
+      // Clear any pick/dim left over from the previous step so the next
+      // render starts from a neutral baseline.
+      clearDimPick(viz);
+
+      function buildEdges(list) {
+        return list.map(e => ({
+          u: e.u, v: e.v,
+          color: e.bad ? COL.edge_drop : (COL.edge_intra[e.cluster] || COL.edge_stage2),
+          w: e.bad ? 1.6 : 1.5,
+          id: e.id,
+          classes: e.bad ? "pick" : "",
+        }));
+      }
 
       if (step === 0) {
-        // Pre-rewire snapshot. Collisions flagged red-dashed.
-        const edges = [];
-        R.clusterPre.forEach((e, i) => {
-          const bad = e.loop || e.multi;
-          edges.push({
-            u: e.u, v: e.v,
-            color: bad ? COL.edge_drop : (COL.edge_intra[e.cluster] || COL.edge_stage2),
-            w: bad ? 1.6 : 1.5,
-            id: "cr-" + i, classes: bad ? "pick" : "",
-          });
-        });
-        viz.setEdges(edges);
-        clearDimPick(viz);
+        viz.setEdges(buildEdges(stateAtStep(R, 0)));
         labelEl.textContent = "pre-rewire";
         descEl.innerHTML = '<span class="st">pre-rewire</span> &middot; ' +
           R.clusterRewireOps.length + " collision op" +
@@ -1264,26 +1281,14 @@ window.MathJax = {
       [op.p1, op.p2, op.newp1, op.newp2].forEach(p => {
         if (p) { four.add(p[0]); four.add(p[1]); }
       });
-      function buildEdges(state) {
-        const out = [];
-        let i = 0;
-        state.forEach(e => {
-          out.push({
-            u: e.u, v: e.v,
-            color: e.bad ? COL.edge_drop : (COL.edge_intra[e.cluster] || COL.edge_stage2),
-            w: 1.5,
-            id: "cr-state-" + (i++),
-            classes: e.bad ? "pick" : "",
-          });
-        });
-        return out;
-      }
       const isForward = step === lastStep + 1;
-      if (settleTimer) { settleTimer.cancel(); settleTimer = null; }
+      if (settleTimer) { settleTimer.cancel(); settleTimer = null; setLock(false); }
       if (isForward && op.success) {
-        // 3-phase animation: dim everything but the 4 endpoints,
-        // boldface + cut the chosen edges, then place the new ones.
-        settleTimer = NETGEN.rewireSwapAnimate({
+        // SBM stub-matcher animation: cut bridges decompose into the 4
+        // affected stubs, stubs orbit to rest, then orbit to their new
+        // partner aim, then new bridges grow from the stub tips.
+        setLock(true);
+        settleTimer = NETGEN.rewireSpokeSwapAnimate({
           viz,
           before: buildEdges(stateBefore),
           after: buildEdges(stateAfter),
@@ -1291,9 +1296,13 @@ window.MathJax = {
           places: [op.newp1, op.newp2].filter(Boolean),
           four: [...four],
           edgeIdPrefix: "cr-swap-" + step,
-          settle: () => { settleTimer = null; },
+          settle: () => { settleTimer = null; setLock(false); },
         });
       } else {
+        // Jump / back / unsuccessful: settle directly with the four
+        // affected nodes picked + everything else dimmed, mirroring the
+        // bg-rewire fallback. SBM stub-matcher animation handles its
+        // own focus during the forward branch.
         viz.setEdges(buildEdges(stateAfter));
         clearDimPick(viz);
         four.forEach(id => viz.addNodeClass(id, "pick"));
@@ -1318,7 +1327,7 @@ window.MathJax = {
       const R = buildRealization(U_SEED, STUB_SEED, xi);
       return 1 + R.clusterRewireOps.length;
     }
-    const ctl = NETGEN.stepController({
+    ctl = NETGEN.stepController({
       prevBtn: document.getElementById("g-crewire-prev"),
       nextBtn: document.getElementById("g-crewire-next"),
       resetBtn: document.getElementById("g-crewire-reset"),
@@ -1328,6 +1337,7 @@ window.MathJax = {
       labelCur: null, labelTotal: document.getElementById("g-crewire-total"),
       total: totalForCurrent(),
       onRender: render,
+      getLocked: () => lockBusy,
       onRandStep: rerollStub,
       onRandAll: () => {
         U_SEED += 1; STUB_SEED += 1;
@@ -1345,16 +1355,12 @@ window.MathJax = {
   // node; cluster post-rewire backdrop in faded grey).
   (function () {
     const viz = NETGEN.VIZ.init("g-bgpair-cy", { showLabels: true, edges: [], pinned: true });
-    const rsBtn = document.getElementById("g-bgpair-rand-step");
-    const raBtn = document.getElementById("g-bgpair-rand-all");
     let lockOverride = false;
-    let curStep = 0;
-    function applyRandButtons() {
-      const dis = lockOverride || curStep <= 0;
-      rsBtn.disabled = dis;
-      raBtn.disabled = dis;
+    let ctl = null;
+    function setRandLock(locked) {
+      lockOverride = locked;
+      if (ctl) ctl.refreshButtons();
     }
-    function setRandLock(locked) { lockOverride = locked; applyRandButtons(); }
     const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setRandLock });
     function totalFromR(R) { return 1 + R.bgPre.length; }
     let bgOverride = {};
@@ -1457,13 +1463,11 @@ window.MathJax = {
       if (window.MathJax && window.MathJax.typesetPromise) {
         window.MathJax.typesetPromise([descEl]).catch(() => {});
       }
-      curStep = step;
-      applyRandButtons();
     }
 
     const xi0 = parseFloat(document.getElementById("xi-slider").value);
     const R0 = buildRealization(U_SEED, STUB_SEED, xi0);
-    const ctl = NETGEN.stepController({
+    ctl = NETGEN.stepController({
       prevBtn: document.getElementById("g-bgpair-prev"),
       nextBtn: document.getElementById("g-bgpair-next"),
       resetBtn: document.getElementById("g-bgpair-reset"),
@@ -1471,6 +1475,7 @@ window.MathJax = {
       randStepBtn: document.getElementById("g-bgpair-rand-step"),
       randAllBtn: document.getElementById("g-bgpair-rand-all"),
       total: totalFromR(R0),
+      getLocked: () => lockOverride,
       onRender: render,
       onRandStep: idx => {
         if (idx <= 0) return;
@@ -1504,6 +1509,13 @@ window.MathJax = {
     const viz = NETGEN.VIZ.init("g-bgrewire-cy", { showLabels: true, edges: [] });
     let lastStep = 0;
     let settleTimer = null;
+    let lockBusy = false;
+    let ctl = null;
+    function setLock(b) {
+      if (lockBusy === b) return;
+      lockBusy = b;
+      if (ctl) ctl.refreshButtons();
+    }
     function stateAtStep(R, k) {
       const map = new Map();
       R.bgPre.forEach(e => {
@@ -1537,6 +1549,7 @@ window.MathJax = {
       document.getElementById("g-bgrewire-cur").textContent = String(step);
       const labelEl = document.getElementById("g-bgrewire-stage");
       const descEl = document.getElementById("g-bgrewire-desc");
+      clearDimPick(viz);
       // Cluster post backdrop renders behind the bg state on every step.
       const backdrop = R.clusterPost.map((e, i) => ({
         u: e.u, v: e.v,
@@ -1588,12 +1601,13 @@ window.MathJax = {
         return out;
       }
       const isForward = step === lastStep + 1;
-      if (settleTimer) { settleTimer.cancel(); settleTimer = null; }
+      if (settleTimer) { settleTimer.cancel(); settleTimer = null; setLock(false); }
       const places = [];
       if (op.placedNewp1 && op.newp1) places.push(op.newp1);
       if (op.placedNewp2 && op.newp2) places.push(op.newp2);
       if (isForward && op.success && places.length > 0) {
-        settleTimer = NETGEN.rewireSwapAnimate({
+        setLock(true);
+        settleTimer = NETGEN.rewireSpokeSwapAnimate({
           viz,
           before: buildEdges(stateBefore),
           after: buildEdges(stateAfter),
@@ -1601,7 +1615,7 @@ window.MathJax = {
           places,
           four: [...four],
           edgeIdPrefix: "br-swap-" + step,
-          settle: () => { settleTimer = null; },
+          settle: () => { settleTimer = null; setLock(false); },
         });
       } else {
         viz.setEdges(buildEdges(stateAfter));
@@ -1630,7 +1644,7 @@ window.MathJax = {
       const R = buildRealization(U_SEED, STUB_SEED, xi);
       return 1 + R.globalRewireOps.length;
     }
-    const ctl = NETGEN.stepController({
+    ctl = NETGEN.stepController({
       prevBtn: document.getElementById("g-bgrewire-prev"),
       nextBtn: document.getElementById("g-bgrewire-next"),
       resetBtn: document.getElementById("g-bgrewire-reset"),
@@ -1640,6 +1654,7 @@ window.MathJax = {
       labelCur: null, labelTotal: document.getElementById("g-bgrewire-total"),
       total: totalForCurrent(),
       onRender: render,
+      getLocked: () => lockBusy,
       onRandStep: rerollStub,
       onRandAll: () => {
         U_SEED += 1; STUB_SEED += 1;

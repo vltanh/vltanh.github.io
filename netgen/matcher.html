@@ -892,18 +892,34 @@ window.MathJax = {
         }
       });
     }
+    let spokeLockHeld = false;
     const spokes = useSpokes
-      ? NETGEN.spokeLayer.attach(viz, { onSettle: applyBaseDim })
+      ? NETGEN.spokeLayer.attach(viz, {
+          onSettle: applyBaseDim,
+          onLockChange: (locked) => { spokeLockHeld = locked; refreshButtons(); },
+        })
       : null;
 
     let seed = 1;
     let steps = algoFn(seed);
     let stepIdx = 0;
+    let swapAnim = null;
+    let lastRenderIdx = -1;
+    function isLocked() { return spokeLockHeld || !!swapAnim; }
+    function refreshButtons() {
+      const locked = isLocked();
+      prevBtn.disabled = locked || stepIdx <= 0;
+      nextBtn.disabled = locked || stepIdx >= steps.length - 1;
+      if (resetBtn) resetBtn.disabled = locked || stepIdx <= 0;
+      if (endBtn)   endBtn.disabled   = locked || stepIdx >= steps.length - 1;
+      if (rerollBtn) rerollBtn.disabled = locked;
+    }
 
     function render() {
       const s = steps[stepIdx];
       // Replace match edges with the snapshot for this step.
       viz.removeEdges(id => String(id).startsWith(`m-${prefix}-`));
+      if (swapAnim) { swapAnim.cancel(); swapAnim = null; }
       const isPhase2 = s.phase === 2;
       const phase1Color = COL.edge_stage4;
       const phase2Color = COL.edge_stage3;
@@ -938,7 +954,7 @@ window.MathJax = {
         }
         let just = null;
         let bridgeColor = phase1Color;
-        if (s.action === "add" || s.action === "repair_swap") {
+        if (s.action === "add") {
           const last = s.edges[s.edges.length - 1];
           if (last) {
             just = { u: last[0], v: last[1], color: phase1Color };
@@ -950,9 +966,71 @@ window.MathJax = {
             bridgeColor = COL.edge_drop;
           }
         }
-        spokes.syncState({
-          byNode: cfg, placed, just, justSeq: stepIdx, bridgeColor,
-        });
+        // repair_swap is the 2-opt rewire: cut e1 (invalid) + e2
+        // (sacrificed valid), place newE1 + newE2. Drive it as the
+        // shared SBM-style swap animation: cuts retract into the 4
+        // affected stubs, stubs orbit to their new partner aim, new
+        // bridges grow. Triggered only on a forward step from the
+        // previous index so back / jump renders settle directly.
+        const isForwardSwap = s.action === "repair_swap"
+          && lastRenderIdx === stepIdx - 1
+          && stepIdx > 0;
+        if (s.action === "repair_swap" && !isForwardSwap) {
+          // Settle directly into the post-swap state.
+          const last = s.edges[s.edges.length - 1];
+          for (let i = upto; i < s.edges.length; i++) {
+            const [u, v] = s.edges[i];
+            placed.push({ u, v, color: phase1Color, id: `m-${prefix}-${i}` });
+          }
+          spokes.syncState({ byNode: cfg, placed, just: null, justSeq: stepIdx, bridgeColor: phase1Color });
+        } else if (isForwardSwap) {
+          // Snap to the pre-swap state without e2 (e1 was never placed),
+          // then play the overlay swap animation, then commit to the
+          // post-swap state.
+          const e1 = [s.u, s.v];
+          const e2 = [s.x, s.y];
+          const newE1 = s.edges[s.edges.length - 2];
+          const newE2 = s.edges[s.edges.length - 1];
+          const isE2 = (e) =>
+            (e.u === e2[0] && e.v === e2[1]) || (e.u === e2[1] && e.v === e2[0]);
+          const prePlaced = placed.filter(e => !isE2(e));
+          spokes.syncState({
+            byNode: cfg, placed: prePlaced, just: null,
+            justSeq: stepIdx * 100, bridgeColor: phase1Color,
+          });
+          const before = [
+            { u: e1[0], v: e1[1], color: COL.edge_drop, classes: "pick" },
+            { u: e2[0], v: e2[1], color: phase1Color },
+          ];
+          const after = [
+            { u: newE1[0], v: newE1[1], color: phase1Color },
+            { u: newE2[0], v: newE2[1], color: phase1Color },
+          ];
+          swapAnim = NETGEN.rewireSpokeSwapAnimate({
+            viz, before, after,
+            cuts: [e1, e2], places: [newE1, newE2],
+            four: [e1[0], e1[1], e2[0], e2[1]],
+            manageEdges: false,
+            settle: () => {
+              swapAnim = null;
+              const finalPlaced = [];
+              for (let i = 0; i < s.edges.length; i++) {
+                const [u, v] = s.edges[i];
+                finalPlaced.push({ u, v, color: phase1Color, id: `m-${prefix}-${i}` });
+              }
+              spokes.syncState({
+                byNode: cfg, placed: finalPlaced, just: null,
+                justSeq: stepIdx * 100 + 1, bridgeColor: phase1Color,
+              });
+              refreshButtons();
+            },
+          });
+          refreshButtons();
+        } else {
+          spokes.syncState({
+            byNode: cfg, placed, just, justSeq: stepIdx, bridgeColor,
+          });
+        }
       } else {
         s.edges.forEach(([u, v], i) => {
           const isP2 = (prefix === "hybrid" && i >= phase1Count);
@@ -1000,16 +1078,17 @@ window.MathJax = {
         viz.clearAllNodeClass("dim");
         applyBaseDim();
       }
-      prevBtn.disabled = stepIdx <= 0;
-      nextBtn.disabled = stepIdx >= steps.length - 1;
+      refreshButtons();
+      lastRenderIdx = stepIdx;
     }
 
-    prevBtn.addEventListener("click", () => { if (stepIdx > 0) { stepIdx--; render(); } });
-    nextBtn.addEventListener("click", () => { if (stepIdx < steps.length - 1) { stepIdx++; render(); } });
-    resetBtn.addEventListener("click", () => { stepIdx = 0; render(); });
-    endBtn.addEventListener("click", () => { stepIdx = steps.length - 1; render(); });
+    prevBtn.addEventListener("click", () => { if (!isLocked() && stepIdx > 0) { stepIdx--; render(); } });
+    nextBtn.addEventListener("click", () => { if (!isLocked() && stepIdx < steps.length - 1) { stepIdx++; render(); } });
+    resetBtn.addEventListener("click", () => { if (!isLocked()) { stepIdx = 0; render(); } });
+    endBtn.addEventListener("click", () => { if (!isLocked()) { stepIdx = steps.length - 1; render(); } });
     if (rerollBtn) {
       rerollBtn.addEventListener("click", () => {
+        if (isLocked()) return;
         const newSeed = Math.floor(Math.random() * 1e9);
         const atFinal = stepIdx >= steps.length - 1;
         if (atFinal) {

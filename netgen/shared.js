@@ -695,33 +695,41 @@ function stepController(opts) {
     randStepBtn, randAllBtn,
     labelCur, labelTotal,
     onRender, onRandStep, onRandAll,
+    getLocked,
   } = opts;
   const useKeys = opts.keyboard !== false;
   let total = opts.total;
   let idx = 0;
+  function isLocked() { return !!(getLocked && getLocked()); }
+  function refreshButtons() {
+    const locked = isLocked();
+    const atStart = (idx <= 0);
+    const atEnd = (idx >= total - 1);
+    if (prevBtn) prevBtn.disabled = locked || atStart;
+    if (nextBtn) nextBtn.disabled = locked || atEnd;
+    if (resetBtn) resetBtn.disabled = locked || atStart;
+    if (endBtn)   endBtn.disabled   = locked || atEnd;
+    // No active step at idx 0 → nothing to reroll.
+    if (randStepBtn) randStepBtn.disabled = locked || atStart;
+    if (randAllBtn)  randAllBtn.disabled  = locked || atStart;
+  }
   function render() {
     if (labelCur) labelCur.textContent = idx;
     if (labelTotal) labelTotal.textContent = total - 1;
-    const atStart = (idx <= 0);
-    const atEnd = (idx >= total - 1);
-    if (prevBtn) prevBtn.disabled = atStart;
-    if (nextBtn) nextBtn.disabled = atEnd;
-    if (resetBtn) resetBtn.disabled = atStart;
-    if (endBtn)   endBtn.disabled   = atEnd;
-    // No active step at idx 0 → nothing to reroll.
-    if (randStepBtn) randStepBtn.disabled = atStart;
-    if (randAllBtn)  randAllBtn.disabled  = atStart;
+    refreshButtons();
     if (onRender) onRender(idx);
   }
-  prevBtn && prevBtn.addEventListener("click", () => { if (idx>0) { idx--; render(); } });
-  nextBtn && nextBtn.addEventListener("click", () => { if (idx<total-1) { idx++; render(); } });
-  resetBtn && resetBtn.addEventListener("click", () => { idx = 0; render(); });
-  endBtn && endBtn.addEventListener("click", () => { idx = total-1; render(); });
+  prevBtn && prevBtn.addEventListener("click", () => { if (!isLocked() && idx>0) { idx--; render(); } });
+  nextBtn && nextBtn.addEventListener("click", () => { if (!isLocked() && idx<total-1) { idx++; render(); } });
+  resetBtn && resetBtn.addEventListener("click", () => { if (!isLocked()) { idx = 0; render(); } });
+  endBtn && endBtn.addEventListener("click", () => { if (!isLocked()) { idx = total-1; render(); } });
   randStepBtn && randStepBtn.addEventListener("click", () => {
+    if (isLocked()) return;
     if (onRandStep) onRandStep(idx);
     render();
   });
   randAllBtn && randAllBtn.addEventListener("click", () => {
+    if (isLocked()) return;
     if (onRandAll) onRandAll();
     render();
   });
@@ -729,6 +737,7 @@ function stepController(opts) {
   if (useKeys) {
     document.addEventListener("keydown", (ev) => {
       if (ev.target.tagName === "INPUT") return;
+      if (isLocked()) return;
       if (ev.key === "ArrowLeft") { if (idx>0) { idx--; render(); } }
       else if (ev.key === "ArrowRight" || ev.key === " ") {
         if (idx<total-1) { idx++; render(); ev.preventDefault(); }
@@ -743,6 +752,7 @@ function stepController(opts) {
     get total() { return total; },
     set: (i) => { idx = Math.max(0, Math.min(total-1, i)); render(); },
     rerender: () => render(),
+    refreshButtons: () => refreshButtons(),
     // Callers that regenerate their data (e.g. nPSO's trajectory on a
     // random-button reroll) can swap `total` and reset idx without
     // reconstructing the controller.
@@ -1111,6 +1121,379 @@ function rewireSwapAnimate(opts) {
   };
 }
 
+// Spoke-style rewire-swap animator. Drop-in replacement for callers
+// that want the SBM stub-matcher feel (spoke_layer.js phase shape) on
+// a per-op rewire. Each cut bridge runs through the back-rewind (uncolor
+// → retract → just-spoke fade-in → orbit to rest) and each new bridge
+// runs through the forward grow (orbit from rest → bridge stubs grow
+// → meet at midpoint → colorize). Stubs are conserved across the swap:
+// the same stub at node u that was paired with v in a cut is the stub
+// that pairs with the new partner in a place. The rest of the graph
+// stays static (viz.setEdges keeps every non-affected edge at full
+// opacity throughout).
+//
+// opts (mostly compatible with rewireSwapAnimate):
+//   viz             : NETGEN.VIZ instance
+//   cuts            : [[u, v], ...] in order
+//   places          : [[u, v], ...] in order
+//   before / after  : edge arrays for the settled state on either side
+//                     (each entry { u, v, color, classes? }); used to
+//                     read each cut's badness + canonical colour and to
+//                     paint each new edge's settled colour.
+//   four            : participant ids; viz dim/pick is applied by the
+//                     caller for the duration of the animation
+//   edgeIdPrefix    : reserved (unused in spoke variant; the helper
+//                     paints into its own overlay layer)
+//   settle          : optional callback after the final commit frame
+function rewireSpokeSwapAnimate(opts) {
+  const { viz, cuts, places, before, after } = opts;
+  const settle = opts.settle || function () {};
+  // Phase durations. Match spoke_layer.js T defaults but trimmed so the
+  // full sequence reads as one continuous swap, not four chained pulses.
+  const T = {
+    uncolor:      220,
+    retract:      280,
+    spokeFade:    160,
+    orbitHold:    120,
+    orbitFwd:     360,
+    grow:         300,
+    colorize:     220,
+    fade:         140,
+  };
+  const SPOKE_LEN = 16;
+  const BUILD_COLOR = "#1b2033";
+  const BAD_COLOR = "#a92020";
+
+  function nodeXY(id) {
+    const n = viz.nodeById[String(id)];
+    return n ? { x: n.x, y: n.y, r: (n.r || 13) } : { x: 0, y: 0, r: 13 };
+  }
+  function dirAngle(from, to) {
+    return Math.atan2(to.y - from.y, to.x - from.x);
+  }
+  function shortDelta(a0, a1) {
+    return Math.atan2(Math.sin(a1 - a0), Math.cos(a1 - a0));
+  }
+
+  const cutKey = (a, b) => (String(a) < String(b) ? a + "|" + b : b + "|" + a);
+  const beforeByKey = {};
+  (before || []).forEach(e => { beforeByKey[cutKey(e.u, e.v)] = e; });
+  const afterByKey = {};
+  (after || []).forEach(e => { afterByKey[cutKey(e.u, e.v)] = e; });
+  function isBadEdge(e) {
+    if (!e) return false;
+    const cls = e.classes || "";
+    return cls.indexOf("cm-bad") >= 0 || cls.indexOf("pick") >= 0;
+  }
+  function styleFor(e) {
+    return {
+      color: (e && e.color) || "#1a3478",
+      bad: isBadEdge(e),
+    };
+  }
+  const cutMeta = (cuts || []).map(c => Object.assign({ u: c[0], v: c[1] }, styleFor(beforeByKey[cutKey(c[0], c[1])])));
+  const placeMeta = (places || []).map(p => Object.assign({ u: p[0], v: p[1] }, styleFor(afterByKey[cutKey(p[0], p[1])])));
+
+  // Stub graph: each cut endpoint is one stub. For self-loop cuts, both
+  // stubs sit at the same node and use the loop-tangent angles. Stubs
+  // are matched 1:1 with place endpoints (each place consumes 2 stubs:
+  // one per endpoint). Greedy: walk places in order, take the first
+  // unpaired stub at each endpoint.
+  const LOOP_TANGENT_START = Math.atan2(-2.0, -1.1);
+  const LOOP_TANGENT_END   = Math.atan2(-2.0,  1.1);
+  const stubs = [];
+  cutMeta.forEach((c, ci) => {
+    if (c.u === c.v) {
+      stubs.push({ node: c.u, oldPartner: c.u, oldEdge: ci, oldAngle: LOOP_TANGENT_START, paired: false });
+      stubs.push({ node: c.v, oldPartner: c.v, oldEdge: ci, oldAngle: LOOP_TANGENT_END,   paired: false });
+    } else {
+      stubs.push({ node: c.u, oldPartner: c.v, oldEdge: ci, paired: false });
+      stubs.push({ node: c.v, oldPartner: c.u, oldEdge: ci, paired: false });
+    }
+  });
+  stubs.forEach(s => {
+    if (s.oldAngle == null) {
+      const me = nodeXY(s.node), other = nodeXY(s.oldPartner);
+      s.oldAngle = dirAngle(me, other);
+    }
+    // Rest angle: rotate 90° outward from the cut direction so each
+    // stub visibly leaves its old partner without snapping all stubs
+    // to the same heading. The sign of the rotation is picked so that
+    // stubs at the same node go to opposite sides when feasible (avoids
+    // overlap on self-loops + close pairs).
+    const sign = (s.oldEdge % 2 === 0) ? 1 : -1;
+    s.restAngle = s.oldAngle + sign * Math.PI / 2;
+    while (s.restAngle >  Math.PI) s.restAngle -= 2 * Math.PI;
+    while (s.restAngle < -Math.PI) s.restAngle += 2 * Math.PI;
+  });
+  function takeStub(nodeId) {
+    for (const s of stubs) {
+      if (s.node === nodeId && !s.paired) { s.paired = true; return s; }
+    }
+    return null;
+  }
+  // Each place pairs 2 stubs. If a stub is missing (e.g. cuts and
+  // places don't have matched cardinality), we synthesise a fresh one.
+  const placePairs = placeMeta.map(p => {
+    const s1 = takeStub(p.u) || { node: p.u, oldAngle: null, restAngle: null, _synth: true };
+    const s2 = takeStub(p.v) || { node: p.v, oldAngle: null, restAngle: null, _synth: true };
+    s1.newPartner = p.v; s1.newEdge = p;
+    s2.newPartner = p.u; s2.newEdge = p;
+    const me1 = nodeXY(s1.node), part1 = nodeXY(s1.newPartner);
+    const me2 = nodeXY(s2.node), part2 = nodeXY(s2.newPartner);
+    s1.newAngle = dirAngle(me1, part1);
+    s2.newAngle = dirAngle(me2, part2);
+    if (s1._synth) { s1.oldAngle = s1.newAngle; s1.restAngle = s1.newAngle + Math.PI / 2; }
+    if (s2._synth) { s2.oldAngle = s2.newAngle; s2.restAngle = s2.newAngle + Math.PI / 2; }
+    return { p, s1, s2 };
+  });
+
+  function spokeBase(s) {
+    const me = nodeXY(s.node);
+    return { x: me.x + Math.cos(s._currA) * me.r, y: me.y + Math.sin(s._currA) * me.r };
+  }
+  function spokeTip(s) {
+    const me = nodeXY(s.node);
+    const r = me.r + SPOKE_LEN;
+    return { x: me.x + Math.cos(s._currA) * r, y: me.y + Math.sin(s._currA) * r };
+  }
+
+  // Spawn the overlay layer. Layer order: cut bridges < stubs < new
+  // bridges, all in front of the existing viz edges (still painted by
+  // viz.setEdges) but behind the node group so node circles cover the
+  // stub bases cleanly.
+  const layer = viz.svg.insert("g", "g.viz-nodes")
+    .attr("class", "rewire-spoke-anim")
+    .attr("pointer-events", "none");
+  const cutLayer   = layer.append("g").attr("class", "rs-cuts");
+  const stubLayer  = layer.append("g").attr("class", "rs-stubs");
+  const placeLayer = layer.append("g").attr("class", "rs-places");
+
+  function straightBoundaryPath(uid, vid) {
+    const a = nodeXY(uid), b = nodeXY(vid);
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const sx = a.x + (dx / len) * a.r, sy = a.y + (dy / len) * a.r;
+    const ex = b.x - (dx / len) * b.r, ey = b.y - (dy / len) * b.r;
+    return { d: "M" + sx + "," + sy + " L" + ex + "," + ey, len: len - a.r - b.r };
+  }
+  function selfLoopPath(nid) {
+    const me = nodeXY(nid);
+    const r = me.r + 8;
+    const sx = me.x + Math.cos(LOOP_TANGENT_START) * me.r;
+    const sy = me.y + Math.sin(LOOP_TANGENT_START) * me.r;
+    const ex = me.x + Math.cos(LOOP_TANGENT_END)   * me.r;
+    const ey = me.y + Math.sin(LOOP_TANGENT_END)   * me.r;
+    const cx1 = me.x - r * 1.1, cy1 = me.y - r * 2.0;
+    const cx2 = me.x + r * 1.1, cy2 = me.y - r * 2.0;
+    const d = "M" + sx + "," + sy + " C" + cx1 + "," + cy1 + " " + cx2 + "," + cy2 + " " + ex + "," + ey;
+    return { d, sx, sy, ex, ey };
+  }
+  function placeBridgeViaStubs(s1, s2) {
+    // Bridge goes from s1's stub-tip to s2's stub-tip (along the new-
+    // partner aim of each), so the stubs flow into the bridge on each
+    // end without a kink.
+    const me1 = nodeXY(s1.node), me2 = nodeXY(s2.node);
+    const sx = me1.x + Math.cos(s1._currA) * (me1.r + SPOKE_LEN);
+    const sy = me1.y + Math.sin(s1._currA) * (me1.r + SPOKE_LEN);
+    const ex = me2.x + Math.cos(s2._currA) * (me2.r + SPOKE_LEN);
+    const ey = me2.y + Math.sin(s2._currA) * (me2.r + SPOKE_LEN);
+    return "M" + sx + "," + sy + " L" + ex + "," + ey;
+  }
+
+  // Hide cut edges from viz so the overlay's cut bridges are the only
+  // copy on screen; everything else stays painted by viz at full opacity
+  // (no whole-graph dim). Mirrors rewireSwapAnimate's beforeMinusCuts.
+  // Pages that own edges via a non-viz layer (e.g. spokeLayer in
+  // matcher.html) pass manageEdges: false and handle hide / show
+  // themselves via opts.onCutsHidden / opts.onPlacesShown hooks.
+  const manageEdges = opts.manageEdges !== false;
+  if (manageEdges && before) {
+    const cutKeys = new Set((cuts || []).map(c => cutKey(c[0], c[1])));
+    const beforeMinusCuts = before.filter(e => !cutKeys.has(cutKey(e.u, e.v)));
+    viz.setEdges(beforeMinusCuts);
+  }
+  if (typeof opts.onCutsHidden === "function") opts.onCutsHidden();
+
+  // Initial appearance: cut bridges painted at their before-style
+  // (settled colour, dashed if bad). Stubs hidden until after retract.
+  const cutSel = cutLayer.selectAll("path").data(cutMeta).enter().append("path")
+    .attr("d", c => c.u === c.v ? selfLoopPath(c.u).d : straightBoundaryPath(c.u, c.v).d)
+    .attr("fill", "none")
+    .attr("stroke", c => c.bad ? BAD_COLOR : c.color)
+    .attr("stroke-width", 1.6)
+    .attr("stroke-dasharray", c => c.bad ? "4 4" : null)
+    .attr("stroke-linecap", "round");
+  // Stubs start at their oldAngle; opacity 0 until just-fade.
+  stubs.forEach(s => { s._currA = s.oldAngle; });
+  const stubSel = stubLayer.selectAll("line").data(stubs).enter().append("line")
+    .attr("class", "rs-stub")
+    .attr("x1", s => spokeBase(s).x)
+    .attr("y1", s => spokeBase(s).y)
+    .attr("x2", s => spokeTip(s).x)
+    .attr("y2", s => spokeTip(s).y)
+    .attr("stroke", BUILD_COLOR)
+    .attr("stroke-width", 2.4)
+    .attr("stroke-linecap", "round")
+    .attr("opacity", 0);
+
+  const TIMERS = [];
+  let cancelled = false;
+  function later(ms, fn) {
+    TIMERS.push(setTimeout(function () {
+      if (cancelled) return;
+      fn();
+    }, ms));
+  }
+
+  // Phase 1 (uncolor): cut bridge → build colour, dash off, slight
+  // thicken. Mirror spoke_layer.js's runRewind phase 1.
+  cutSel.transition("uncolor").duration(T.uncolor).ease(d3.easeCubicInOut)
+    .attr("stroke", BUILD_COLOR)
+    .attr("stroke-dasharray", null)
+    .attr("stroke-width", 2.6);
+
+  // Phase 2 (retract): cut bridges shrink to their endpoints via the
+  // 4-value stub-gap-stub dash pattern. Stubs fade in during the last
+  // half of the retract so the visual handoff (bridge tip → spoke
+  // tip) has no gap.
+  later(T.uncolor, function () {
+    cutSel.each(function (c) {
+      const node = this;
+      const sel = d3.select(this);
+      const len = (node.getTotalLength && node.getTotalLength()) || 100;
+      const halfLen = len / 2;
+      sel.attr("stroke-dashoffset", 0)
+        .attr("stroke-dasharray", halfLen + " 0 " + halfLen + " 0")
+        .transition("retract").duration(T.retract).ease(d3.easeCubicIn)
+        .attrTween("stroke-dasharray", function () {
+          return function (k) {
+            const stub = halfLen * (1 - k);
+            const gap = len - 2 * stub;
+            return stub + " " + gap + " " + stub + " 0";
+          };
+        });
+    });
+    stubSel.transition("stubFade").delay(T.retract * 0.5).duration(T.spokeFade)
+      .attr("opacity", 1);
+  });
+
+  // Phase 3 (orbit hold): stubs sit at oldAngle for a brief beat so the
+  // viewer can read the decomposed state before the partner swing
+  // starts. No actual tween, just dwell.
+  later(T.uncolor + T.retract, function () {
+    cutSel.transition("cutFade").duration(80).attr("opacity", 0).remove();
+  });
+
+  // Phase 4 (orbit-to-new): stubs swing in one continuous arc from
+  // their old-partner aim straight to their new-partner aim. Picking a
+  // synthetic "rest" mid-position landed stubs on arbitrary headings
+  // that overlapped neighbouring nodes; a single fluid swing reads as
+  // "stub keeps the same owner, partner changes" without that artifact.
+  const tForward = T.uncolor + T.retract + T.orbitHold;
+  later(tForward, function () {
+    stubSel.transition("orbitFwd").duration(T.orbitFwd).ease(d3.easeCubicInOut)
+      .attrTween("x1", function (s) {
+        if (s.newAngle == null) return function () { return d3.select(this).attr("x1"); };
+        const me = nodeXY(s.node);
+        const start = s.oldAngle, delta = shortDelta(start, s.newAngle);
+        return function (k) {
+          s._currA = start + delta * k;
+          return me.x + Math.cos(s._currA) * me.r;
+        };
+      })
+      .attrTween("y1", function (s) {
+        if (s.newAngle == null) return function () { return d3.select(this).attr("y1"); };
+        const me = nodeXY(s.node);
+        const start = s.oldAngle, delta = shortDelta(start, s.newAngle);
+        return function (k) { return me.y + Math.sin(start + delta * k) * me.r; };
+      })
+      .attrTween("x2", function (s) {
+        if (s.newAngle == null) return function () { return d3.select(this).attr("x2"); };
+        const me = nodeXY(s.node);
+        const start = s.oldAngle, delta = shortDelta(start, s.newAngle);
+        return function (k) { return me.x + Math.cos(start + delta * k) * (me.r + SPOKE_LEN); };
+      })
+      .attrTween("y2", function (s) {
+        if (s.newAngle == null) return function () { return d3.select(this).attr("y2"); };
+        const me = nodeXY(s.node);
+        const start = s.oldAngle, delta = shortDelta(start, s.newAngle);
+        return function (k) { return me.y + Math.sin(start + delta * k) * (me.r + SPOKE_LEN); };
+      });
+  });
+
+  // Phase 5 (bridge grow): for each place, draw a path between its two
+  // stub-tips and animate the same 4-value stub-gap-stub pattern in
+  // reverse (mirror of retract). Stubs fade out as the bridge stitches
+  // them together — the spoke tip becomes the bridge endpoint.
+  const tGrow = tForward + T.orbitFwd;
+  later(tGrow, function () {
+    placePairs.forEach(function (pp) {
+      const meta = pp.p;
+      const path = placeLayer.append("path")
+        .attr("d", placeBridgeViaStubs(pp.s1, pp.s2))
+        .attr("fill", "none")
+        .attr("stroke", BUILD_COLOR)
+        .attr("stroke-width", 2.6)
+        .attr("stroke-linecap", "round");
+      const node = path.node();
+      const len = (node.getTotalLength && node.getTotalLength()) || 100;
+      const halfLen = len / 2;
+      path.attr("stroke-dashoffset", 0)
+        .attr("stroke-dasharray", "0 " + len + " 0 0")
+        .transition("grow").duration(T.grow).ease(d3.easeCubicOut)
+        .attrTween("stroke-dasharray", function () {
+          return function (k) {
+            const stub = halfLen * k;
+            const gap = len - 2 * stub;
+            return stub + " " + gap + " " + stub + " 0";
+          };
+        });
+      pp._path = path;
+    });
+    // Stubs fade out during the first half of grow (the bridge stub
+    // overtakes them visually).
+    stubSel.transition("stubOut").duration(T.spokeFade)
+      .attr("opacity", 0)
+      .remove();
+  });
+
+  // Phase 6 (colorize): newly grown bridges crossfade to settled style.
+  const tColor = tGrow + T.grow;
+  later(tColor, function () {
+    placePairs.forEach(function (pp) {
+      const path = pp._path;
+      if (!path) return;
+      path.transition("colorize").duration(T.colorize).ease(d3.easeCubicInOut)
+        .attr("stroke", pp.p.bad ? BAD_COLOR : pp.p.color)
+        .attr("stroke-width", 1.6)
+        .attr("stroke-dasharray", pp.p.bad ? "4 4" : null);
+    });
+  });
+
+  // Phase 7 (commit): swap viz.setEdges to the after-state (which sits
+  // at exactly the same coords as the grown overlay bridges) and fade
+  // the overlay out so any pixel seam between the two paintings is
+  // imperceptible.
+  const tCommit = tColor + T.colorize;
+  later(tCommit, function () {
+    if (manageEdges && after) viz.setEdges(after);
+    if (typeof opts.onPlacesShown === "function") opts.onPlacesShown();
+    layer.transition("commit").duration(T.fade).attr("opacity", 0)
+      .on("end", function () { layer.remove(); });
+    settle();
+  });
+
+  return {
+    cancel: function () {
+      cancelled = true;
+      TIMERS.forEach(function (id) { clearTimeout(id); });
+      TIMERS.length = 0;
+      try { layer.remove(); } catch (e) {}
+    },
+  };
+}
+
 // ── Export ────────────────────────────────────────────────────
 global.NETGEN = {
   POSITIONS, NODES, EDGES, CLUSTER_OF, DEGREES, DEGREES_EXCL, MINCUTS,
@@ -1122,6 +1505,7 @@ global.NETGEN = {
   linksRow, kinSection,
   fitViewBoxAttr,
   rewireSwapAnimate,
+  rewireSpokeSwapAnimate,
 };
 
 })(window);

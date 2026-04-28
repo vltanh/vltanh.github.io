@@ -886,6 +886,13 @@ window.MathJax = {
     let CACHE_KEY = "", CACHE = null;
     let lastStep = 0;
     let settleTimer = null;
+    let lockBusy = false;
+    let ctl = null;
+    function setLock(b) {
+      if (lockBusy === b) return;
+      lockBusy = b;
+      if (ctl) ctl.refreshButtons();
+    }
     function getTrace() {
       const key = EDGE_SEED + "|" + RESAMPLE_SEED;
       if (CACHE_KEY === key) return CACHE;
@@ -900,9 +907,9 @@ window.MathJax = {
       document.getElementById("g-cm-total").textContent = String(totalForCurrent() - 1);
       const labelEl = document.getElementById("g-cm-stage");
       const descEl = document.getElementById("g-cm-desc");
+      clearDimPick();
       if (step === 0) {
         viz.setEdges([]);
-        clearDimPick();
         labelEl.textContent = "stubs ready";
         descEl.innerHTML = '<span class="st">stubs ready</span> &middot; ' +
           trace.prePairs.length + " pre-pair step" +
@@ -936,7 +943,7 @@ window.MathJax = {
           });
         });
       }
-      if (settleTimer) { settleTimer.cancel(); settleTimer = null; }
+      if (settleTimer) { settleTimer.cancel(); settleTimer = null; setLock(false); }
       const isForward = step === lastStep + 1;
       const cleanupOp = !inPair ? trace.rewireOps[step - total1 - 1] : null;
       const isSwap = cleanupOp && cleanupOp.success;
@@ -957,7 +964,8 @@ window.MathJax = {
         [cleanupOp.p1, cleanupOp.p2, cleanupOp.newp1, cleanupOp.newp2].forEach(p => {
           if (p) { fourSet.push(p[0]); fourSet.push(p[1]); }
         });
-        settleTimer = NETGEN.rewireSwapAnimate({
+        setLock(true);
+        settleTimer = NETGEN.rewireSpokeSwapAnimate({
           viz,
           before: beforeEdges,
           after: edges,
@@ -965,7 +973,7 @@ window.MathJax = {
           places: [cleanupOp.newp1, cleanupOp.newp2].filter(Boolean),
           four: fourSet,
           edgeIdPrefix: "lfr-cm-swap-" + step,
-          settle: () => { settleTimer = null; },
+          settle: () => { settleTimer = null; setLock(false); },
         });
       } else {
         viz.setEdges(edges);
@@ -998,7 +1006,7 @@ window.MathJax = {
       labelEl.textContent = label;
       descEl.innerHTML = '<span class="st">' + label + "</span> &middot; " + desc;
     }
-    const ctl = NETGEN.stepController({
+    ctl = NETGEN.stepController({
       prevBtn: document.getElementById("g-cm-prev"),
       nextBtn: document.getElementById("g-cm-next"),
       resetBtn: document.getElementById("g-cm-reset"),
@@ -1006,10 +1014,12 @@ window.MathJax = {
       labelTotal: document.getElementById("g-cm-total"),
       total: totalForCurrent(),
       onRender: render,
+      getLocked: () => lockBusy,
     });
     document.getElementById("g-cm-end").addEventListener("click",
-      () => ctl.set(totalForCurrent() - 1));
-    document.getElementById("g-cm-reroll").addEventListener("click", rerollEdges);
+      () => { if (!lockBusy) ctl.set(totalForCurrent() - 1); });
+    document.getElementById("g-cm-reroll").addEventListener("click",
+      () => { if (!lockBusy) rerollEdges(); });
     onResampleChanged.push(() => { CACHE_KEY = ""; ctl.reconfigure(totalForCurrent()); });
     onEdgeChanged.push(() => { CACHE_KEY = ""; ctl.reconfigure(totalForCurrent()); });
   })();
@@ -1021,6 +1031,11 @@ window.MathJax = {
   // step replays the trace forward to compute the current edge set.
   (function () {
     const viz = NETGEN.VIZ.init("g-bs-cy", { showLabels: true, edges: [] });
+    function clearDimPick() {
+      viz.clearAllNodeClass("dim");
+      viz.clearAllNodeClass("pick");
+      viz.clearAllNodeClass("swap-pick");
+    }
     let CACHE_KEY_BS = "", CACHE_BS = null;
     function getRunBS() {
       const key = EDGE_SEED + "|" + RESAMPLE_SEED + "|" +
@@ -1101,6 +1116,13 @@ window.MathJax = {
     }
     let lastStep = 0;
     let settleTimer = null;
+    let lockBusy = false;
+    let ctl = null;
+    function setLock(b) {
+      if (lockBusy === b) return;
+      lockBusy = b;
+      if (ctl) ctl.refreshButtons();
+    }
     function totalForCurrent() {
       const r = getRunBS();
       return 1 + buildBsTrace(r).length;
@@ -1133,6 +1155,7 @@ window.MathJax = {
       document.getElementById("g-bs-total").textContent = String(total - 1);
       const labelEl = document.getElementById("g-bs-stage");
       const descEl = document.getElementById("g-bs-desc");
+      clearDimPick();
       if (!r || !r.ok || !r.perCluster) {
         viz.setEdges([]);
         labelEl.textContent = "pipeline gave up";
@@ -1152,7 +1175,7 @@ window.MathJax = {
         descEl.innerHTML = '<span class="st">step 0</span> &middot; ' + r.perCluster.length +
           " cluster" + (r.perCluster.length === 1 ? "" : "s") + " seeded by Phase 1's deterministic multimap. " +
           trace.length + " op" + (trace.length === 1 ? "" : "s") + " ahead (Phase 2 randomization swaps + Phase 3 multi-edge rewires).";
-        if (settleTimer) { settleTimer.cancel(); settleTimer = null; }
+        if (settleTimer) { settleTimer.cancel(); settleTimer = null; setLock(false); }
         lastStep = step;
         return;
       }
@@ -1196,7 +1219,7 @@ window.MathJax = {
       }
 
       const isForward = step === lastStep + 1;
-      if (settleTimer) { settleTimer.cancel(); settleTimer = null; }
+      if (settleTimer) { settleTimer.cancel(); settleTimer = null; setLock(false); }
       const opForAnim = trace[step - 1].op;
       const cuts = (opForAnim.cuts || []).map(p => [p[0] + 1, p[1] + 1]);
       const places = (opForAnim.places || []).map(p => [p[0] + 1, p[1] + 1]);
@@ -1204,14 +1227,15 @@ window.MathJax = {
       if (isSwap) {
         const clusterSetsBefore = stateAtStep(r, trace, step - 1);
         const beforeEdges = cumulativeEdges(clusterSetsBefore, r);
-        settleTimer = NETGEN.rewireSwapAnimate({
+        setLock(true);
+        settleTimer = NETGEN.rewireSpokeSwapAnimate({
           viz,
           before: beforeEdges,
           after: afterEdges,
           cuts, places,
           four: [...four],
           edgeIdPrefix: "lfr-bs-swap-" + step,
-          settle: () => { settleTimer = null; },
+          settle: () => { settleTimer = null; setLock(false); },
         });
       } else {
         viz.setEdges(afterEdges);
@@ -1229,7 +1253,7 @@ window.MathJax = {
       descEl.innerHTML = desc;
       lastStep = step;
     }
-    const ctl = NETGEN.stepController({
+    ctl = NETGEN.stepController({
       prevBtn: document.getElementById("g-bs-prev"),
       nextBtn: document.getElementById("g-bs-next"),
       resetBtn: document.getElementById("g-bs-reset"),
@@ -1237,10 +1261,12 @@ window.MathJax = {
       labelTotal: document.getElementById("g-bs-total"),
       total: totalForCurrent(),
       onRender: render,
+      getLocked: () => lockBusy,
     });
     document.getElementById("g-bs-end").addEventListener("click",
-      () => ctl.set(totalForCurrent() - 1));
-    document.getElementById("g-bs-reroll").addEventListener("click", rerollEdges);
+      () => { if (!lockBusy) ctl.set(totalForCurrent() - 1); });
+    document.getElementById("g-bs-reroll").addEventListener("click",
+      () => { if (!lockBusy) rerollEdges(); });
     function reconfig() { CACHE_KEY_BS = ""; ctl.reconfigure(totalForCurrent()); }
     onResampleChanged.push(reconfig);
     onAssignChanged.push(reconfig);
@@ -1432,6 +1458,13 @@ window.MathJax = {
     }
     let lastStep = 0;
     let settleTimer = null;
+    let lockBusy = false;
+    let ctl = null;
+    function setLock(b) {
+      if (lockBusy === b) return;
+      lockBusy = b;
+      if (ctl) ctl.refreshButtons();
+    }
     function render(step) {
       const r = getRun();
       const total = totalForCurrent();
@@ -1485,7 +1518,7 @@ window.MathJax = {
           "Cut " + cuts + "; place " + places + ". var_mate " +
           op.varMateBefore + " &rarr; " + op.varMateAfter + ".";
       }
-      if (settleTimer) { settleTimer.cancel(); settleTimer = null; }
+      if (settleTimer) { settleTimer.cancel(); settleTimer = null; setLock(false); }
       const isForward = step === lastStep + 1;
       if (isForward && step > 0) {
         const op = r.mateOps[step - 1];
@@ -1505,7 +1538,8 @@ window.MathJax = {
           });
         });
         const beforeAll = intraEdgeViz.concat(beforeExt);
-        settleTimer = NETGEN.rewireSwapAnimate({
+        setLock(true);
+        settleTimer = NETGEN.rewireSpokeSwapAnimate({
           viz,
           before: beforeAll,
           after: allEdges,
@@ -1513,7 +1547,7 @@ window.MathJax = {
           places: op.places.map(p => [p[0] + 1, p[1] + 1]),
           four: [...four],
           edgeIdPrefix: "lfr-mr-swap-" + step,
-          settle: () => { settleTimer = null; },
+          settle: () => { settleTimer = null; setLock(false); },
         });
       } else {
         viz.setEdges(allEdges);
@@ -1527,7 +1561,7 @@ window.MathJax = {
       descEl.innerHTML = desc;
       lastStep = step;
     }
-    const ctl = NETGEN.stepController({
+    ctl = NETGEN.stepController({
       prevBtn: document.getElementById("g-mr-prev"),
       nextBtn: document.getElementById("g-mr-next"),
       resetBtn: document.getElementById("g-mr-reset"),
@@ -1535,10 +1569,12 @@ window.MathJax = {
       labelTotal: document.getElementById("g-mr-total"),
       total: totalForCurrent(),
       onRender: render,
+      getLocked: () => lockBusy,
     });
     document.getElementById("g-mr-end").addEventListener("click",
-      () => ctl.set(totalForCurrent() - 1));
-    document.getElementById("g-mr-reroll").addEventListener("click", rerollEdges);
+      () => { if (!lockBusy) ctl.set(totalForCurrent() - 1); });
+    document.getElementById("g-mr-reroll").addEventListener("click",
+      () => { if (!lockBusy) rerollEdges(); });
     function reconfig() { CACHE_KEY = ""; ctl.reconfigure(totalForCurrent()); }
     onResampleChanged.push(reconfig);
     onAssignChanged.push(reconfig);

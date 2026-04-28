@@ -1187,6 +1187,13 @@ window.MathJax = {
     NETGEN.makeTooltip(viz, document.getElementById("g-crewire"));
     let lastStep = 0;
     let settleTimer = null;
+    let lockBusy = false;
+    let ctl = null;
+    function setLock(b) {
+      if (lockBusy === b) return;
+      lockBusy = b;
+      if (ctl) ctl.refreshButtons();
+    }
     function render(step) {
       const R = getCurrentR();
       applyOutlierColors(viz, R);
@@ -1195,6 +1202,7 @@ window.MathJax = {
       document.getElementById("g-crewire-cur").textContent = String(step);
       const labelEl = document.getElementById("g-crewire-stage");
       const descEl = document.getElementById("g-crewire-desc");
+      clearDimPick(viz);
       function buildEdges(state, ghosts) {
         const out = [];
         let i = 0;
@@ -1234,10 +1242,11 @@ window.MathJax = {
       [op.p1, op.p2, op.newp1, op.newp2].forEach(p => {
         if (p) { four.add(p[0]); four.add(p[1]); }
       });
-      if (settleTimer) { settleTimer.cancel(); settleTimer = null; }
+      if (settleTimer) { settleTimer.cancel(); settleTimer = null; setLock(false); }
       const isForward = step === lastStep + 1;
       if (isForward && op.success) {
-        settleTimer = NETGEN.rewireSwapAnimate({
+        setLock(true);
+        settleTimer = NETGEN.rewireSpokeSwapAnimate({
           viz,
           before: buildEdges(stateBefore, null),
           after: buildEdges(stateAfter, null),
@@ -1245,7 +1254,7 @@ window.MathJax = {
           places: [op.newp1, op.newp2].filter(Boolean),
           four: [...four],
           edgeIdPrefix: "cr-swap-" + step,
-          settle: () => { settleTimer = null; },
+          settle: () => { settleTimer = null; setLock(false); },
         });
       } else {
         viz.setEdges(buildEdges(stateAfter, null));
@@ -1264,7 +1273,7 @@ window.MathJax = {
       lastStep = step;
     }
     function totalForCurrent() { return 1 + getCurrentR().clusterRewireOps.length; }
-    const ctl = NETGEN.stepController({
+    ctl = NETGEN.stepController({
       prevBtn: document.getElementById("g-crewire-prev"),
       nextBtn: document.getElementById("g-crewire-next"),
       resetBtn: document.getElementById("g-crewire-reset"),
@@ -1272,10 +1281,12 @@ window.MathJax = {
       labelTotal: document.getElementById("g-crewire-total"),
       total: totalForCurrent(),
       onRender: render,
+      getLocked: () => lockBusy,
     });
     document.getElementById("g-crewire-end").addEventListener("click",
-      () => ctl.set(totalForCurrent() - 1));
-    document.getElementById("g-crewire-reroll").addEventListener("click", rerollStub);
+      () => { if (!lockBusy) ctl.set(totalForCurrent() - 1); });
+    document.getElementById("g-crewire-reroll").addEventListener("click",
+      () => { if (!lockBusy) rerollStub(); });
     function reconfig() { ctl.reconfigure(totalForCurrent()); }
     onStubChanged.push(reconfig);
     document.getElementById("xi-slider").addEventListener("input", reconfig);
@@ -1360,6 +1371,13 @@ window.MathJax = {
     NETGEN.makeTooltip(viz, document.getElementById("g-bgrewire"));
     let lastStep = 0;
     let settleTimer = null;
+    let lockBusy = false;
+    let ctl = null;
+    function setLock(b) {
+      if (lockBusy === b) return;
+      lockBusy = b;
+      if (ctl) ctl.refreshButtons();
+    }
     function render(step) {
       const R = getCurrentR();
       applyOutlierColors(viz, R);
@@ -1368,6 +1386,7 @@ window.MathJax = {
       document.getElementById("g-bgrewire-cur").textContent = String(step);
       const labelEl = document.getElementById("g-bgrewire-stage");
       const descEl = document.getElementById("g-bgrewire-desc");
+      clearDimPick(viz);
       const backdrop = [];
       const stateC = clusterStateAfter(R, R.clusterRewireOps.length);
       let i = 0;
@@ -1416,13 +1435,14 @@ window.MathJax = {
       [op.p1, op.p2, op.newp1, op.newp2].forEach(p => {
         if (p) { four.add(p[0]); four.add(p[1]); }
       });
-      if (settleTimer) { settleTimer.cancel(); settleTimer = null; }
+      if (settleTimer) { settleTimer.cancel(); settleTimer = null; setLock(false); }
       const isForward = step === lastStep + 1;
       const places = [];
       if (op.placedNewp1 && op.newp1) places.push(op.newp1);
       if (op.placedNewp2 && op.newp2) places.push(op.newp2);
       if (isForward && op.success && places.length > 0) {
-        settleTimer = NETGEN.rewireSwapAnimate({
+        setLock(true);
+        settleTimer = NETGEN.rewireSpokeSwapAnimate({
           viz,
           before: buildEdges(stateBefore, null),
           after: buildEdges(stateAfter, null),
@@ -1430,7 +1450,7 @@ window.MathJax = {
           places,
           four: [...four],
           edgeIdPrefix: "br-swap-" + step,
-          settle: () => { settleTimer = null; },
+          settle: () => { settleTimer = null; setLock(false); },
         });
       } else {
         viz.setEdges(buildEdges(stateAfter, null));
@@ -1449,7 +1469,7 @@ window.MathJax = {
       lastStep = step;
     }
     function totalForCurrent() { return 1 + getCurrentR().globalRewireOps.length; }
-    const ctl = NETGEN.stepController({
+    ctl = NETGEN.stepController({
       prevBtn: document.getElementById("g-bgrewire-prev"),
       nextBtn: document.getElementById("g-bgrewire-next"),
       resetBtn: document.getElementById("g-bgrewire-reset"),
@@ -1457,10 +1477,12 @@ window.MathJax = {
       labelTotal: document.getElementById("g-bgrewire-total"),
       total: totalForCurrent(),
       onRender: render,
+      getLocked: () => lockBusy,
     });
     document.getElementById("g-bgrewire-end").addEventListener("click",
-      () => ctl.set(totalForCurrent() - 1));
-    document.getElementById("g-bgrewire-reroll").addEventListener("click", rerollStub);
+      () => { if (!lockBusy) ctl.set(totalForCurrent() - 1); });
+    document.getElementById("g-bgrewire-reroll").addEventListener("click",
+      () => { if (!lockBusy) rerollStub(); });
     function reconfig() { ctl.reconfigure(totalForCurrent()); }
     onStubChanged.push(reconfig);
     document.getElementById("xi-slider").addEventListener("input", reconfig);
