@@ -983,17 +983,21 @@ NETGEN.spokeLayer = (function () {
           });
         });
       } else {
+        // Snap-render: bad and non-bad both settle solid. Dashed is
+        // reserved for the dedup viz; collisions in the walker stay
+        // solid red so the dashed pattern does not collide with the
+        // "about to be removed" semantic.
         merged.each(function (d) {
           const sel = d3.select(this);
           if (d.isLoop) {
             const len = this.getTotalLength ? this.getTotalLength() : 100;
             sel.attr("opacity", 1)
-              .attr("stroke-dasharray", d.bad ? "4 4" : (len + " " + len))
+              .attr("stroke-dasharray", len + " " + len)
               .attr("stroke-dashoffset", 0)
               .attr("stroke-width", 1.6);
           } else {
             sel.attr("opacity", 1)
-              .attr("stroke-dasharray", d.bad ? "4 4" : null)
+              .attr("stroke-dasharray", null)
               .attr("stroke-width", 1.6);
           }
         });
