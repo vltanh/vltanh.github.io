@@ -916,42 +916,31 @@ function rewireSwapAnimate(opts) {
     pickEdges.forEach(e => viz.removeEdgeClass(e.id, "dim-strong"));
   }
 
-  // Phase 2: spoke decompose + reconnect. Each cut edge splits at its
-  // midpoint into two half-edges (one per endpoint). The free ends of
-  // those half-edges then migrate to the midpoints of the new place
-  // edges, dragging their stub stroke with them so the viewer sees
-  // the stubs swap partners. Final state: each pair of half-edges
-  // meets at a new midpoint, forming the placed edges.
+  // Phase 2: split into two sub-phases mirroring the spoke layer's
+  // back+next semantics.
   //
-  // Pairing: for each new place [u, v], the half-edge at u comes from
-  // whichever cut contained u, and the half-edge at v comes from
-  // whichever cut contained v. We tag each half-edge with the new
-  // midpoint it should migrate to so the d3 transition can animate
-  // the (x2, y2) attributes.
-  const pairing = [];
+  //   Phase 2a — "Back" (RETRACT, 550ms): each cut edge retracts in
+  //              from both endpoints. The bridge shrinks until what's
+  //              left is two short rest-spokes pointing toward the old
+  //              partner. Visually: two cut edges decompose into four
+  //              free stubs sitting at rest on the four endpoints.
+  //   Phase 2b — "Next" (GROW, 550ms): the four free stubs reorient +
+  //              extend simultaneously, two grow toward each other to
+  //              form the first new edge while the other two form the
+  //              second. The two new edges grow in lock-step.
+  //
+  // Pairing: for each new place [u, v] the stub at u is the leftover
+  // from whichever cut contained u; same for v. The pairing is built
+  // once below, then both phases reuse it.
+  const PHASE2A = 550;
+  const PHASE2B = 550;
+  const REST_LEN = 18;  // rest stub length in viewBox units
   function findCutFor(node) {
     for (let i = 0; i < cuts.length; i++) {
       if (cuts[i][0] === node || cuts[i][1] === node) return i;
     }
     return -1;
   }
-  cuts.forEach((c, k) => {
-    pairing.push({ side: "a", node: c[0], cutIdx: k, partner: c[1] });
-    pairing.push({ side: "b", node: c[1], cutIdx: k, partner: c[0] });
-  });
-  // For each place, route the half-edges from each endpoint's source
-  // cut to the new midpoint.
-  const halfMoves = [];
-  places.forEach(([u, v]) => {
-    const cu = findCutFor(u);
-    const cv = findCutFor(v);
-    if (cu < 0 || cv < 0) return;
-    halfMoves.push({ node: u, oldCut: cuts[cu], newPartner: v });
-    halfMoves.push({ node: v, oldCut: cuts[cv], newPartner: u });
-  });
-
-  let t1 = null, t2 = null, t3 = null;
-  let spokeG = null;
   function midpoint(a, b) {
     const na = viz.nodeById[String(a)];
     const nb = viz.nodeById[String(b)];
@@ -962,60 +951,124 @@ function rewireSwapAnimate(opts) {
     const n = viz.nodeById[String(id)];
     return n ? [n.x, n.y] : [0, 0];
   }
+  function restTip(node, towardX, towardY) {
+    const [nx, ny] = nodeXY(node);
+    const dx = towardX - nx, dy = towardY - ny;
+    const len = Math.hypot(dx, dy) || 1;
+    return [nx + (dx / len) * REST_LEN, ny + (dy / len) * REST_LEN];
+  }
+
+  // For each cut endpoint we'll create one <line> stub. After Phase 2a
+  // it sits at rest pointing toward the OLD partner. Phase 2b drives
+  // its tip toward the new midpoint of the place edge it joins.
+  // Pre-compute every stub's identity + its phase-2b destination.
+  const stubs = [];
+  cuts.forEach((c, k) => {
+    [c[0], c[1]].forEach((node) => {
+      stubs.push({ node, oldCut: c, newMidTarget: null });
+    });
+  });
+  places.forEach(([u, v]) => {
+    const [mx, my] = midpoint(u, v);
+    const su = stubs.find(s => s.newMidTarget === null && s.node === u);
+    const sv = stubs.find(s => s.newMidTarget === null && s.node === v);
+    if (su) su.newMidTarget = [mx, my];
+    if (sv) sv.newMidTarget = [mx, my];
+  });
+
+  let t1 = null, t2 = null, t3 = null;
+  let spokeG = null;
+  let lineEls = [];
 
   t1 = setTimeout(() => {
-    // Hide the cut edges entirely while spokes carry the visual; the
-    // place edges aren't drawn yet — half-edges grow into them.
+    // Hide the cut edges entirely; spokes carry the visual until the
+    // post-state edges land.
     viz.setEdges(beforeMinusCuts);
     if (viz.eachEdge) {
       viz.eachEdge(e => viz.addEdgeClass(e.id, "dim-strong"));
     }
-    // Build a fresh spoke layer above the edge layer.
     const svg = viz.svg;
     if (!svg) return;
-    // Insert before .viz-nodes so spokes paint behind nodes.
-    const nodesG = svg.select("g.viz-nodes");
     spokeG = svg.insert("g", "g.viz-nodes")
       .attr("class", "rewire-spoke-anim")
       .attr("pointer-events", "none");
-    halfMoves.forEach((hm, i) => {
-      const [nx, ny] = nodeXY(hm.node);
-      const [oldMx, oldMy] = midpoint(hm.oldCut[0], hm.oldCut[1]);
-      const [newMx, newMy] = midpoint(hm.node, hm.newPartner);
+
+    // Phase 2a starts: spawn each stub at the OLD midpoint (where the
+    // cut edge's tip used to be) and animate its free end inward to
+    // the rest position pointing at the old partner. Stroke stays
+    // mint-build through the retract.
+    stubs.forEach((s) => {
+      const [nx, ny] = nodeXY(s.node);
+      const [oldMx, oldMy] = midpoint(s.oldCut[0], s.oldCut[1]);
+      const partner = s.oldCut[0] === s.node ? s.oldCut[1] : s.oldCut[0];
+      const [pnx, pny] = nodeXY(partner);
+      const [restX, restY] = restTip(s.node, pnx, pny);
       const line = spokeG.append("line")
         .attr("x1", nx).attr("y1", ny)
         .attr("x2", oldMx).attr("y2", oldMy)
-        .attr("stroke", "#1a3478")
+        .attr("stroke", "#7e9b6d")
         .attr("stroke-width", 3.4)
+        .attr("stroke-dasharray", "5 4")
         .attr("stroke-linecap", "round")
-        .attr("opacity", 0.9);
-      // Phase 2a: brief boldface hold (160ms) so the decomposition
-      // reads as "edge cracked into two stubs" before stubs migrate.
-      line.transition()
-        .delay(160)
-        .duration(PHASE2 - 320)
-        .ease(d3.easeCubicInOut)
-        .attr("x2", newMx).attr("y2", newMy)
-        .attr("stroke", "#3559a0");
+        .attr("opacity", 1);
+      line.transition().duration(PHASE2A).ease(d3.easeCubicIn)
+        .attr("x2", restX).attr("y2", restY);
+      s._line = line;
+      s._restX = restX; s._restY = restY;
+      lineEls.push(line);
     });
-    // Also draw a faint cracked-line from the OLD midpoint splitting
-    // the boldface in two so the "decompose" beat is visible.
-    cuts.forEach((c, k) => {
+    // Mid-cut accent dot at each old midpoint: it pulses out as the
+    // stubs retract, marking where the edge cracked.
+    cuts.forEach((c) => {
       const [mx, my] = midpoint(c[0], c[1]);
       spokeG.append("circle")
         .attr("cx", mx).attr("cy", my)
-        .attr("r", 4)
+        .attr("r", 5)
         .attr("fill", "#7e9b6d")
-        .attr("opacity", 0.7)
-        .transition().duration(PHASE2 - 200)
-        .attr("r", 1.5).attr("opacity", 0);
+        .attr("opacity", 0.85)
+        .transition().duration(PHASE2A).ease(d3.easeCubicOut)
+        .attr("r", 1).attr("opacity", 0);
     });
   }, PHASE1);
 
-  // Phase 3: drop spoke layer, render the after-state with new edges
-  // placed (now visible since the spokes have already merged at the
-  // new midpoints). Un-dim every node + edge.
+  // Phase 2b: stubs reorient + grow toward new midpoints. All four
+  // stubs animate in lock-step so both new edges form simultaneously.
   t2 = setTimeout(() => {
+    if (!spokeG) return;
+    stubs.forEach((s) => {
+      if (!s._line || !s.newMidTarget) return;
+      const [tx, ty] = s.newMidTarget;
+      // Quick stroke flip from cut-mint to in-flight build colour at
+      // the start of grow so the user sees "stubs found new partner".
+      s._line.transition().duration(PHASE2B).ease(d3.easeCubicOut)
+        .attr("x2", tx).attr("y2", ty)
+        .attr("stroke", "#1a3478")
+        .attrTween("stroke-dasharray", function () {
+          // Dashes shrink toward solid as the stub completes.
+          return function (t) {
+            const dash = 5 - 3 * t;
+            const gap = 4 - 3 * t;
+            return dash.toFixed(1) + " " + gap.toFixed(1);
+          };
+        });
+    });
+    // Anchor dots at the NEW midpoints brighten as stubs converge.
+    places.forEach((p) => {
+      const [mx, my] = midpoint(p[0], p[1]);
+      spokeG.append("circle")
+        .attr("cx", mx).attr("cy", my)
+        .attr("r", 0.5)
+        .attr("fill", "#3559a0")
+        .attr("opacity", 0)
+        .transition().duration(PHASE2B).ease(d3.easeCubicOut)
+        .attr("r", 4).attr("opacity", 0.85);
+    });
+  }, PHASE1 + PHASE2A);
+
+  // Phase 3: settle. Drop spoke layer, render after-state edges
+  // (which now sit visually exactly where the stubs converged), and
+  // un-dim everything.
+  t3 = setTimeout(() => {
     viz.setEdges(after);
     if (viz.clearAllNodeClass) {
       viz.clearAllNodeClass("dim");
@@ -1027,7 +1080,7 @@ function rewireSwapAnimate(opts) {
         .on("end", function () { spokeG.remove(); spokeG = null; });
     }
     settle();
-  }, PHASE1 + PHASE2);
+  }, PHASE1 + PHASE2A + PHASE2B);
 
   return {
     cancel() {
