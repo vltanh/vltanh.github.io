@@ -728,17 +728,29 @@ window.MathJax = {
     const readout = document.getElementById("g2-cell");
 
     function clearAllHighlights() {
-      gm.querySelectorAll(".cell.on").forEach(c => c.classList.remove("on"));
+      gm.querySelectorAll(".cell.on, .cell.hi, .cell.dim").forEach(c => {
+        c.classList.remove("on"); c.classList.remove("hi"); c.classList.remove("dim");
+      });
       viz.clearAllEdgeClass("hi");
+      viz.clearAllEdgeClass("dim");
     }
-    function highlightCell(bu, bv) {
-      const c1 = gm.querySelector('[data-cell="' + bu + '-' + bv + '"]');
-      const c2 = gm.querySelector('[data-cell="' + bv + '-' + bu + '"]');
-      c1 && c1.classList.add("on");
-      c2 && c2.classList.add("on");
+    function focusOnPair(bu, bv) {
+      // Dim every non-matching edge + every non-matching cell, hi the
+      // (bu,bv) / (bv,bu) cells + every edge contributing to the cell.
+      const wantBu = bu, wantBv = bv;
+      gm.querySelectorAll(".cell").forEach(c => {
+        if (c.classList.contains("head")) return;
+        const [cu, cv] = c.dataset.cell.split("-").map(Number);
+        const match = (cu === wantBu && cv === wantBv) || (cu === wantBv && cv === wantBu);
+        c.classList.add(match ? "hi" : "dim");
+      });
+      EDGES.forEach(e => {
+        const ru = blockIdx(e.u), rv = blockIdx(e.v);
+        const match = (ru === wantBu && rv === wantBv) || (ru === wantBv && rv === wantBu);
+        viz.addEdgeClass("e2-" + e.u + "-" + e.v, match ? "hi" : "dim");
+      });
     }
     function edgesInPair(bu, bv) {
-      // {(u,v) : (blockIdx(u), blockIdx(v)) ∈ {(bu,bv),(bv,bu)}}
       return EDGES.filter(e => {
         const ru = blockIdx(e.u), rv = blockIdx(e.v);
         return (ru === bu && rv === bv) || (ru === bv && rv === bu);
@@ -748,14 +760,12 @@ window.MathJax = {
       readout.textContent = "cell: (none)";
     }
 
-    // Edge hover → highlight its cell.
     viz.onEdgeHoverEnter((d) => {
       const e = EDGES.find(x => "e2-" + x.u + "-" + x.v === d.id);
       if (!e) return;
       const bu = blockIdx(e.u), bv = blockIdx(e.v);
       clearAllHighlights();
-      highlightCell(bu, bv);
-      viz.addEdgeClass(d.id, "hi");
+      focusOnPair(bu, bv);
       readout.textContent = "cell: (" + BLOCK_NAMES[bu] + ", " + BLOCK_NAMES[bv] + ") · edge (" + e.u + ", " + e.v + ")";
     });
     viz.onEdgeHoverLeave(() => {
@@ -763,16 +773,14 @@ window.MathJax = {
       resetReadout();
     });
 
-    // Cell hover → highlight every edge contributing to it.
     gm.addEventListener("mouseover", (ev) => {
       const cell = ev.target.closest(".cell");
       if (!cell || cell.classList.contains("head")) return;
       const [bu, bv] = cell.dataset.cell.split("-").map(Number);
       clearAllHighlights();
-      highlightCell(bu, bv);
-      const matching = edgesInPair(bu, bv);
-      matching.forEach(e => viz.addEdgeClass("e2-" + e.u + "-" + e.v, "hi"));
+      focusOnPair(bu, bv);
       const cellVal = EDGE_COUNTS[bu][bv];
+      const matching = edgesInPair(bu, bv);
       readout.textContent = "cell: (" + BLOCK_NAMES[bu] + ", " + BLOCK_NAMES[bv]
         + ") · " + cellVal + " half-edges from " + matching.length + " edges";
     });

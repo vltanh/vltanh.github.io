@@ -2057,27 +2057,41 @@ function retypeset(target) {
 function bindRowNodeHover(gBars, viz, opts) {
   const sel = (opts && opts.rowSelector) || ".deg-bar-row";
   const attr = (opts && opts.idAttr) || "data-id";
-  // Highlight = dim-everything-else. Hovering a graph node or a bar row
-  // dims every other node, every non-incident edge, and every other
-  // row, leaving the focus + its incidents at full opacity.
+  // Highlight = dim-everything-else + thicken focus borders. Hovering a
+  // graph node or a bar row dims every other node, every non-incident
+  // edge, and every other row, while the focus node + its incident
+  // edges + the matching row pick up the .hi class for a thicker
+  // stroke (positive emphasis, paired with the negative dim).
   function focusOn(id) {
     const sid = String(id);
     viz.eachNode(function (n) {
-      if (String(n.id) !== sid) viz.addNodeClass(n.id, "dim");
+      if (String(n.id) === sid) viz.addNodeClass(n.id, "hi");
+      else viz.addNodeClass(n.id, "dim");
     });
     viz.eachEdge(function (e) {
       const su = String(e.source.id != null ? e.source.id : e.source);
       const sv = String(e.target.id != null ? e.target.id : e.target);
-      if (su !== sid && sv !== sid) viz.addEdgeClass(e.id, "dim");
+      if (su === sid || sv === sid) viz.addEdgeClass(e.id, "hi");
+      else viz.addEdgeClass(e.id, "dim");
     });
     gBars.selectAll(sel).each(function () {
-      if (this.getAttribute(attr) !== sid) this.classList.add("dim");
+      if (this.getAttribute(attr) === sid) this.classList.add("hi");
+      else this.classList.add("dim");
     });
   }
   function focusClear() {
-    viz.eachNode(function (n) { viz.removeNodeClass(n.id, "dim"); });
-    viz.eachEdge(function (e) { viz.removeEdgeClass(e.id, "dim"); });
-    gBars.selectAll(sel).each(function () { this.classList.remove("dim"); });
+    viz.eachNode(function (n) {
+      viz.removeNodeClass(n.id, "dim");
+      viz.removeNodeClass(n.id, "hi");
+    });
+    viz.eachEdge(function (e) {
+      viz.removeEdgeClass(e.id, "dim");
+      viz.removeEdgeClass(e.id, "hi");
+    });
+    gBars.selectAll(sel).each(function () {
+      this.classList.remove("dim");
+      this.classList.remove("hi");
+    });
   }
   gBars.on("mouseover", function (ev) {
     const el = ev.target.closest(sel);
@@ -2091,6 +2105,69 @@ function bindRowNodeHover(gBars, viz, opts) {
   viz.onNodeHoverLeave(function () { focusClear(); });
 }
 
+// Group-level variant of bindRowNodeHover: hovering a row tied to a
+// cluster (data-name="C1" / "S19" / ...) dims everything outside the
+// cluster's node set and lights everything inside it. Hovering a node
+// resolves its cluster via opts.nameOfNode(id) and reuses the same
+// focus. opts:
+//   gBars         d3 selection containing the rows
+//   viz           NETGEN.VIZ instance
+//   nodesByName   { <name>: [nodeId, ...] }
+//   nameOfNode    optional (id) => name; default reads from CLUSTER_OF
+//                 if you set opts.useClusterOf=true
+//   rowSelector   default ".cs-bar-row"
+//   idAttr        default "data-name"
+function bindClusterRowHover(gBars, viz, opts) {
+  const sel = (opts && opts.rowSelector) || ".cs-bar-row";
+  const attr = (opts && opts.idAttr) || "data-name";
+  const nodesByName = opts.nodesByName;
+  const nameOfNode = opts.nameOfNode;
+  function focusOn(name) {
+    const ids = (nodesByName && nodesByName[name]) || [];
+    const set = new Set(ids.map(String));
+    viz.eachNode(function (n) {
+      if (set.has(String(n.id))) viz.addNodeClass(n.id, "hi");
+      else viz.addNodeClass(n.id, "dim");
+    });
+    viz.eachEdge(function (e) {
+      const su = String(e.source.id != null ? e.source.id : e.source);
+      const sv = String(e.target.id != null ? e.target.id : e.target);
+      if (set.has(su) && set.has(sv)) viz.addEdgeClass(e.id, "hi");
+      else viz.addEdgeClass(e.id, "dim");
+    });
+    gBars.selectAll(sel).each(function () {
+      if (this.getAttribute(attr) === name) this.classList.add("hi");
+      else this.classList.add("dim");
+    });
+  }
+  function focusClear() {
+    viz.eachNode(function (n) {
+      viz.removeNodeClass(n.id, "dim");
+      viz.removeNodeClass(n.id, "hi");
+    });
+    viz.eachEdge(function (e) {
+      viz.removeEdgeClass(e.id, "dim");
+      viz.removeEdgeClass(e.id, "hi");
+    });
+    gBars.selectAll(sel).each(function () {
+      this.classList.remove("dim");
+      this.classList.remove("hi");
+    });
+  }
+  gBars.on("mouseover", function (ev) {
+    const el = ev.target.closest(sel);
+    if (el) focusOn(el.getAttribute(attr));
+  });
+  gBars.on("mouseout", function (ev) {
+    const el = ev.target.closest(sel);
+    if (el) focusClear();
+  });
+  if (nameOfNode) {
+    viz.onNodeHoverEnter(function (d) { focusOn(nameOfNode(parseInt(d.id, 10))); });
+    viz.onNodeHoverLeave(function () { focusClear(); });
+  }
+}
+
 // ── Export ────────────────────────────────────────────────────
 global.NETGEN = {
   POSITIONS, NODES, EDGES, CLUSTER_OF, DEGREES, DEGREES_EXCL, MINCUTS,
@@ -2102,7 +2179,7 @@ global.NETGEN = {
   linksRow, kinSection,
   fitViewBoxAttr,
   retypeset,
-  bindRowNodeHover,
+  bindRowNodeHover, bindClusterRowHover,
   rewireSwapAnimate,
   rewireSpokeSwapAnimate,
   runRewireOpStep,
