@@ -1458,16 +1458,28 @@ function rewireSpokeSwapAnimate(opts) {
       .remove();
   });
 
-  // Phase 6 (colorize): newly grown bridges crossfade to settled style.
+  // Phase 6 (colorize): newly grown bridges crossfade to settled style
+  // AND tween their endpoints from stub-tip (r0 + SPOKE_LEN) to node
+  // boundary (r0). The grow phase paints the bridge from stub-tip to
+  // stub-tip so the handoff from spoke to bridge has no seam, but that
+  // leaves a visible SPOKE_LEN gap between the bridge end and the node
+  // circle once the spokes have faded. Snapping endpoints down to the
+  // boundary here lands the overlay on the same coords viz.setEdges
+  // (or spokeLayer.placedPath) will paint at commit, so no jump.
   const tColor = tGrow + T.grow;
   later(tColor, function () {
     placePairs.forEach(function (pp) {
       const path = pp._path;
       if (!path) return;
+      const fromD = placeBridgeViaStubs(pp.s1, pp.s2);
+      const toD = (pp.p.u === pp.p.v)
+        ? selfLoopPath(pp.p.u).d
+        : straightBoundaryPath(pp.p.u, pp.p.v).d;
       path.transition("colorize").duration(T.colorize).ease(d3.easeCubicInOut)
         .attr("stroke", pp.p.bad ? BAD_COLOR : pp.p.color)
         .attr("stroke-width", 1.6)
-        .attr("stroke-dasharray", pp.p.bad ? "4 4" : null);
+        .attr("stroke-dasharray", pp.p.bad ? "4 4" : null)
+        .attrTween("d", function () { return d3.interpolateString(fromD, toD); });
     });
   });
 
