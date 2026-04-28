@@ -1261,7 +1261,12 @@ function rewireSpokeSwapAnimate(opts) {
     if (pid == null || pid === s_nullSentinel) return SPOKE_LEN;
     const partner = nodeXY(pid);
     const D = Math.hypot(partner.x - me.x, partner.y - me.y);
-    return Math.max(2, Math.min(SPOKE_LEN, (D - me.r - partner.r) / 2 - 1));
+    // Stub tip lands exactly at the midpoint between the two boundaries
+    // when partner is closer than 2 * SPOKE_LEN away, so a pair of
+    // stubs across that bridge meets cleanly at the centre. No -1
+    // safety: with the bridge anchored on the boundary the visual
+    // handoff from stub to bridge wants stub tip == bridge midpoint.
+    return Math.max(2, Math.min(SPOKE_LEN, (D - me.r - partner.r) / 2));
   }
   const s_nullSentinel = Symbol("noPartner");
   function spokeEffectiveLen(s) {
@@ -1475,9 +1480,13 @@ function rewireSpokeSwapAnimate(opts) {
         });
       pp._path = path;
     });
-    // Stubs fade out during the first half of grow (the bridge stub
-    // overtakes them visually).
-    stubSel.transition("stubOut").duration(T.spokeFade)
+    // Stubs fade out across the entire grow phase. With the bridge
+    // anchored on the node boundary the stub now sits on top of the
+    // growing bridge over its full length; matching their lifetimes
+    // avoids the snap that the old half-grow fade produced when the
+    // bridge raced past the still-visible stubs (most visible on
+    // close-by node pairs where the stubs already nearly meet).
+    stubSel.transition("stubOut").duration(T.grow).ease(d3.easeCubicInOut)
       .attr("opacity", 0)
       .remove();
   });
