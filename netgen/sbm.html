@@ -265,14 +265,16 @@
       <span class="right" id="g3-stats">&middot;</span>
     </div>
     <div class="graph-canvas" id="g3-cy"></div>
-    <div class="widget-row" style="padding:.9rem 0 0;border-top:1px dashed rgba(139,117,65,.45)">
-      <button class="btn" id="g3-prev" type="button">&larr; back</button>
-      <button class="btn primary" id="g3-next" type="button">next &rarr;</button>
-      <button class="btn" id="g3-reset" type="button">reset</button>
-      <button class="btn" id="g3-skip" type="button">skip to end</button>
-      <button class="btn" id="g3-random" type="button">random step</button>
-      <button class="btn" id="reroll-btn" type="button">random all</button>
+    <div class="widget-row tight" style="padding:.9rem 0 0;border-top:1px dashed rgba(139,117,65,.45)">
+      <button class="btn" id="g3-rand-step" type="button" title="random step: redraw the pair at the current step (and re-walk forward from there)">random step</button>
+      <button class="btn" id="g3-rand-all" type="button" title="random all: redraw every pair from step 1 up to and including the current step">random all</button>
       <span class="step-label" id="g3-step-label">step <b id="g3-cur">0</b> / <span id="g3-total">0</span></span>
+    </div>
+    <div class="widget-row tight">
+      <button class="btn" id="g3-start" type="button">to start</button>
+      <button class="btn" id="g3-prev" type="button">back</button>
+      <button class="btn primary" id="g3-next" type="button">next</button>
+      <button class="btn" id="g3-end" type="button">to end</button>
     </div>
   </div>
   <div class="callout">
@@ -824,7 +826,11 @@ window.MathJax = {
       nodeColor: n => COL[CLUSTER_OF[n]] || COL.OUT,
     });
     let lockOverride = false;
-    function setRandLock(locked) { lockOverride = locked; syncButtons(); }
+    let ctl = null;
+    function setRandLock(locked) {
+      lockOverride = locked;
+      if (ctl) ctl.refreshButtons();
+    }
     const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setRandLock });
 
     // Top-right collapsible budget matrix: each cell is the remaining
@@ -988,7 +994,6 @@ window.MathJax = {
       } else {
         spokes.syncState(stateObj);
       }
-      syncButtons();
       syncStats();
       renderBudget();
     }
@@ -1017,65 +1022,34 @@ window.MathJax = {
       if (totEl) totEl.textContent = String(totalPairs);
     }
 
-    function syncButtons() {
-      const prev = document.getElementById("g3-prev");
-      const next = document.getElementById("g3-next");
-      const reset = document.getElementById("g3-reset");
-      const skip = document.getElementById("g3-skip");
-      const rand = document.getElementById("g3-random");
-      const randAll = document.getElementById("reroll-btn");
-      const dis = lockOverride;
-      if (prev)  prev.disabled  = dis || (stepIdx <= 0);
-      if (reset) reset.disabled = dis || (stepIdx <= 0);
-      if (next)  next.disabled  = dis || (stepIdx >= totalPairs);
-      if (skip)  skip.disabled  = dis || (stepIdx >= totalPairs);
-      if (rand) {
-        rand.disabled = dis || (stepIdx <= 0);
-        rand.title = "random step: redraw the pair at the current step (and re-walk forward from there)";
-      }
-      if (randAll) {
-        randAll.disabled = dis || (stepIdx <= 0);
-        randAll.title = "random all: redraw every pair from step 1 up to and including the current step";
-      }
-    }
-
     freshTrace(currentSeed);
-    render();
-
-    document.getElementById("g3-prev").addEventListener("click", () => {
-      if (stepIdx > 0) { stepIdx--; render(); }
-    });
-    document.getElementById("g3-next").addEventListener("click", () => {
-      if (stepIdx < totalPairs) { stepIdx++; render(); }
-    });
-    document.getElementById("g3-reset").addEventListener("click", () => {
-      stepIdx = 0; render({ snap: true });
-    });
-    document.getElementById("g3-skip").addEventListener("click", () => {
-      stepIdx = totalPairs; render({ snap: true });
-    });
-    // random step: redraw the pair at the CURRENT step (and re-walk
-    // the tail with a fresh seed), keeping every step before it
-    // intact. Snap-render: running the full rewind+forward pipeline
-    // for a same-step reroll reads as "back then redo", especially
-    // jarring at step 1 where there are no placed edges to anchor
-    // the difference. Disabled at stepIdx 0 (no active pair).
-    document.getElementById("g3-random").addEventListener("click", () => {
-      if (stepIdx <= 0) return;
-      const savedStep = stepIdx;
-      reseedFrom(stepIdx - 1);
-      stepIdx = Math.min(savedStep, totalPairs);
-      render();
-    });
-    // random all: redraw every step from 0 up to and including the
-    // current step. Position stays fixed; snap-render: the whole
-    // walk swaps to the new seed in one frame.
-    document.getElementById("reroll-btn").addEventListener("click", () => {
-      const keep = stepIdx;
-      currentSeed += 1;
-      freshTrace(currentSeed);
-      stepIdx = Math.min(keep, totalPairs);
-      render({ snap: true });
+    let snapNext = false;
+    ctl = NETGEN.wireWalker({
+      prefix: "g3",
+      total: totalPairs + 1,
+      curId: "g3-cur", totId: "g3-total",
+      getLocked: () => lockOverride,
+      onRender: (idx) => {
+        stepIdx = idx;
+        render(snapNext ? { snap: true } : {});
+        snapNext = false;
+      },
+      onRandStep: (idx) => {
+        if (idx <= 0) return;
+        const saved = idx;
+        reseedFrom(idx - 1);
+        ctl.reconfigure(totalPairs + 1);
+        snapNext = false;
+        ctl.set(Math.min(saved, totalPairs));
+      },
+      onRandAll: (idx) => {
+        if (idx <= 0) return;
+        currentSeed += 1;
+        freshTrace(currentSeed);
+        ctl.reconfigure(totalPairs + 1);
+        snapNext = true;
+        ctl.set(Math.min(idx, totalPairs));
+      },
     });
   })();
 

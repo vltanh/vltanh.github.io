@@ -852,6 +852,7 @@ function stepController(opts) {
     getLocked,
   } = opts;
   const useKeys = opts.keyboard !== false;
+  const randAtStart = !!opts.randAtStart;
   let total = opts.total;
   let idx = 0;
   function isLocked() { return !!(getLocked && getLocked()); }
@@ -863,9 +864,10 @@ function stepController(opts) {
     if (nextBtn) nextBtn.disabled = locked || atEnd;
     if (resetBtn) resetBtn.disabled = locked || atStart;
     if (endBtn)   endBtn.disabled   = locked || atEnd;
-    // No active step at idx 0 → nothing to reroll.
-    if (randStepBtn) randStepBtn.disabled = locked || atStart;
-    if (randAllBtn)  randAllBtn.disabled  = locked || atStart;
+    // randAtStart: panels whose reroll touches the whole sample (not a
+    // per-step pick) keep random buttons live at idx 0.
+    if (randStepBtn) randStepBtn.disabled = locked || (atStart && !randAtStart);
+    if (randAllBtn)  randAllBtn.disabled  = locked || (atStart && !randAtStart);
   }
   function render() {
     if (labelCur) labelCur.textContent = idx;
@@ -912,6 +914,79 @@ function stepController(opts) {
     // reconstructing the controller.
     reconfigure: (newTotal) => { total = newTotal; idx = 0; render(); },
   };
+}
+
+// ── Walker markup + wiring ───────────────────────────────────
+// Standard 2-row block:
+//   row 1 (random):  random step | random all   <stepLabel>
+//   row 2 (nav):     to start | back | next | to end   <cursorLabel>
+// Button ids are derived from prefix:
+//   {prefix}-rand-step, {prefix}-rand-all,
+//   {prefix}-start, {prefix}-prev, {prefix}-next, {prefix}-end
+// Cursor output element id defaults to {prefix}-cur, total {prefix}-total.
+// opts:
+//   prefix       (required) id namespace
+//   stepLabel    optional inline caption next to random row
+//   cursor       cursor caption HTML (default: "step <output id> / <span id>")
+//   deterministic  if true, omit the random row entirely
+//   randStepText, randAllText, primary='next' override label/primary
+//   noRandStep   if true, drop just random-step button (e.g. shared-tau panel)
+function walkerRow(opts) {
+  const {
+    prefix,
+    stepLabel = "",
+    cursor,
+    deterministic = false,
+    randStepText = "random step",
+    randAllText = "random all",
+    noRandStep = false,
+  } = opts;
+  const cur = `<output id="${prefix}-cur">0</output>`;
+  const tot = `<span id="${prefix}-total">0</span>`;
+  const cursorHtml = cursor != null ? cursor : `step ${cur} / ${tot}`;
+  const randRow = deterministic
+    ? ""
+    : (
+      '<div class="widget-row tight">'
+      + (noRandStep ? "" : `<button class="btn" id="${prefix}-rand-step" type="button">${randStepText}</button>`)
+      + `<button class="btn" id="${prefix}-rand-all" type="button">${randAllText}</button>`
+      + (stepLabel ? `<span class="step-label">${stepLabel}</span>` : "")
+      + '</div>'
+    );
+  const navRow =
+    '<div class="widget-row tight">'
+    + `<button class="btn" id="${prefix}-start" type="button">to start</button>`
+    + `<button class="btn" id="${prefix}-prev" type="button">back</button>`
+    + `<button class="btn primary" id="${prefix}-next" type="button">next</button>`
+    + `<button class="btn" id="${prefix}-end" type="button">to end</button>`
+    + `<span class="step-label">${cursorHtml}</span>`
+    + '</div>';
+  return randRow + navRow;
+}
+
+// Resolve walker buttons by prefix and forward to stepController.
+// Returns whatever stepController returned (idx getter, set, reconfigure...).
+// Caller passes the same callbacks stepController accepts; ids are auto-
+// resolved off the prefix. Pass curId/totId to override (default
+// {prefix}-cur, {prefix}-total).
+function wireWalker(opts) {
+  const {
+    prefix,
+    total,
+    onRender, onRandStep, onRandAll, getLocked,
+    keyboard, randAtStart,
+    curId, totId,
+  } = opts;
+  const $ = (suffix) => document.getElementById(`${prefix}-${suffix}`);
+  return stepController({
+    total,
+    prevBtn: $("prev"), nextBtn: $("next"),
+    resetBtn: $("start"), endBtn: $("end"),
+    randStepBtn: $("rand-step"), randAllBtn: $("rand-all"),
+    labelCur: document.getElementById(curId || `${prefix}-cur`),
+    labelTotal: document.getElementById(totId || `${prefix}-total`),
+    onRender, onRandStep, onRandAll, getLocked, keyboard, randAtStart,
+  });
 }
 
 // ── Toggle widget ────────────────────────────────────────────
@@ -1792,7 +1867,7 @@ global.NETGEN = {
   C1, C2, C3, OUT, INTRA, INTER, OUT_EDGES,
   CORE_NODES, CORE_EDGES, topK, cliqueEdges,
   COLORS, CY, VIZ,
-  makeTooltip, scrubSlider, stepController, toggle,
+  makeTooltip, scrubSlider, stepController, walkerRow, wireWalker, toggle,
   linksRow, kinSection,
   fitViewBoxAttr,
   retypeset,
