@@ -934,6 +934,24 @@ function stepController(opts) {
   };
 }
 
+// Standard 5-cluster list for the singleton input opener: 3 real
+// clusters (C1, C2, C3) + one entry per node in OUT, each painted from
+// the shared outlier_palette. Every gen page can reuse this verbatim
+// for its g-shared-input opener; pages with custom singleton ids /
+// colours are free to build the list themselves.
+function defaultSingletonClusters() {
+  const pal = COLORS.outlier_palette;
+  const out = [
+    { id: "C1", nodes: C1, color: COLORS.C1, isOutlier: false },
+    { id: "C2", nodes: C2, color: COLORS.C2, isOutlier: false },
+    { id: "C3", nodes: C3, color: COLORS.C3, isOutlier: false },
+  ];
+  OUT.forEach((n, i) => {
+    out.push({ id: "S" + n, nodes: [n], color: pal[i % pal.length], isOutlier: true });
+  });
+  return out;
+}
+
 // Build the universal "outliers-as-singletons" input opener: 5 dashed
 // rings (3 real clusters + 2 singletons), neutral grey edges, per-
 // singleton colour from a shared palette. Used by every gen page that
@@ -973,7 +991,7 @@ function singletonOpener(opts) {
       .attr("opacity", 0.95)
       .style("font-family", "Caveat Brush, cursive")
       .style("font-size", "18px")
-      .text(cd.id + (cd.isOutlier ? " · singleton" : ""));
+      .text(cd.label != null ? cd.label : (cd.id + (cd.isOutlier ? " · singleton" : "")));
     return { cd, rect, label };
   });
   const edgesIn = opts.edges || EDGES.map(e => ({
@@ -2027,7 +2045,7 @@ global.NETGEN = {
   C1, C2, C3, OUT, INTRA, INTER, OUT_EDGES,
   CORE_NODES, CORE_EDGES, topK, cliqueEdges,
   COLORS, CY, VIZ,
-  makeTooltip, scrubSlider, stepController, walkerRow, wireWalker, snapOrSync, singletonOpener, walkerMarkPlaced, walkerMarkJust, toggle,
+  makeTooltip, scrubSlider, stepController, walkerRow, wireWalker, snapOrSync, singletonOpener, defaultSingletonClusters, walkerMarkPlaced, walkerMarkJust, toggle,
   linksRow, kinSection,
   fitViewBoxAttr,
   retypeset,
