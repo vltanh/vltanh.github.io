@@ -191,6 +191,9 @@ const CORE_EDGES = {
 const COLORS = {
   C1: "#7b9bd6", C2: "#e0a649", C3: "#8fbb70", OUT: "#9e7ec4",
   edge_intra: {C1:"#3559a0", C2:"#b4741d", C3:"#4e7a3a", OUT:"#7d5da2"},
+  // Distinct hues for size-1 singleton clusters under outlier_mode=
+  // singleton (npso, abcd, lfr). Index by appearance order.
+  outlier_palette: ["#9e7ec4", "#6fa6b0", "#c49a6c", "#78a06f"],
   edge_inter: "#3a3f4a",
   edge_stage2: "#567ad8",
   edge_stage3: "#7e468f",
@@ -929,6 +932,89 @@ function stepController(opts) {
       render();
     },
   };
+}
+
+// Build the universal "outliers-as-singletons" input opener: 5 dashed
+// rings (3 real clusters + 2 singletons), neutral grey edges, per-
+// singleton colour from a shared palette. Used by every gen page that
+// runs profile under outlier_mode=singleton (npso, abcd, lfr, ...).
+//
+// opts:
+//   hostId        DOM id of the .graph-canvas host
+//   tooltipHostId optional; defaults to hostId without the "-cy" suffix
+//   clusters      [{ id, nodes, color, isOutlier }, ...] — same shape
+//                 nPSO's CLUSTER_DEFS uses
+//   edges         optional array of {u,v} edges. Default: NETGEN.EDGES
+//                 in faint grey.
+//
+// Returns the viz instance.
+function singletonOpener(opts) {
+  const host = document.getElementById(opts.hostId);
+  if (!host) return null;
+  host.innerHTML = "";
+  const svg = d3.select(host).append("svg")
+    .attr("class", "viz-svg")
+    .attr("viewBox", fitViewBoxAttr())
+    .attr("preserveAspectRatio", "xMidYMid meet");
+  const colourOf = {};
+  opts.clusters.forEach(cd => cd.nodes.forEach(n => { colourOf[n] = cd.color; }));
+  const layer = svg.append("g").attr("class", "block-rects");
+  const rects = opts.clusters.map(cd => {
+    const rect = layer.append("rect")
+      .attr("rx", 10).attr("ry", 10)
+      .attr("fill", cd.color).attr("fill-opacity", 0.07)
+      .attr("stroke", cd.color).attr("stroke-width", 1.5)
+      .attr("stroke-dasharray", "7 5")
+      .attr("opacity", 0.92);
+    const label = layer.append("text")
+      .attr("class", "block-ring-label")
+      .attr("text-anchor", "start")
+      .attr("fill", cd.color)
+      .attr("opacity", 0.95)
+      .style("font-family", "Caveat Brush, cursive")
+      .style("font-size", "18px")
+      .text(cd.id + (cd.isOutlier ? " · singleton" : ""));
+    return { cd, rect, label };
+  });
+  const edgesIn = opts.edges || NODES.length === 0 ? [] : NETGEN_EDGES_FAINT();
+  const viz = VIZ.init(opts.hostId, {
+    svg, showLabels: true, includeOutliers: true,
+    edges: edgesIn,
+    nodeColor: (id) => colourOf[parseInt(id, 10)] || COLORS.paper_3,
+  });
+  const tipHost = document.getElementById(opts.tooltipHostId || opts.hostId.replace(/-cy$/, ""));
+  if (tipHost) makeTooltip(viz, tipHost);
+  function syncRects() {
+    const padX = 30, padY = 34;
+    rects.forEach(r => {
+      let mx = Infinity, MX = -Infinity, my = Infinity, MY = -Infinity;
+      r.cd.nodes.forEach(id => {
+        const n = viz.nodeById[String(id)];
+        if (!n) return;
+        if (n.x < mx) mx = n.x; if (n.x > MX) MX = n.x;
+        if (n.y < my) my = n.y; if (n.y > MY) MY = n.y;
+      });
+      if (!isFinite(mx)) return;
+      let x = mx - padX, y = my - padY;
+      let w = (MX - mx) + 2 * padX, h = (MY - my) + 2 * padY;
+      const labelW = r.label.node().getComputedTextLength
+        ? r.label.node().getComputedTextLength() : 0;
+      const wanted = labelW + 24;
+      if (w < wanted) {
+        const cx = (mx + MX) / 2;
+        w = wanted;
+        x = cx - w / 2;
+      }
+      r.rect.attr("x", x).attr("y", y).attr("width", w).attr("height", h);
+      r.label.attr("x", x + 12).attr("y", y + 20);
+    });
+  }
+  syncRects();
+  viz.sim.on("tick.blockRects", syncRects);
+  return viz;
+}
+function NETGEN_EDGES_FAINT() {
+  return EDGES.map(e => ({ u: e.u, v: e.v, color: COLORS.paper_3, w: 0.9 }));
 }
 
 // Spoke-layer snap-or-sync: the universal render router for any walker
@@ -1943,7 +2029,7 @@ global.NETGEN = {
   C1, C2, C3, OUT, INTRA, INTER, OUT_EDGES,
   CORE_NODES, CORE_EDGES, topK, cliqueEdges,
   COLORS, CY, VIZ,
-  makeTooltip, scrubSlider, stepController, walkerRow, wireWalker, snapOrSync, walkerMarkPlaced, walkerMarkJust, toggle,
+  makeTooltip, scrubSlider, stepController, walkerRow, wireWalker, snapOrSync, singletonOpener, walkerMarkPlaced, walkerMarkJust, toggle,
   linksRow, kinSection,
   fitViewBoxAttr,
   retypeset,

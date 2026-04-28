@@ -496,15 +496,16 @@ window.MathJax = {
   // and matching nPSO's neutral palette. Each singleton gets a distinct
   // hue rather than the site-wide outlier red.
   const OUTLIER_CLUSTER_PALETTE = ["#9e7ec4", "#6fa6b0", "#c49a6c", "#78a06f"];
-  const BLOCK_NAMES  = ["C1", "C2", "C3", "{19}", "{20}"];
-  const BLOCK_NODES  = { "C1": C1, "C2": C2, "C3": C3, "{19}": [19], "{20}": [20] };
+  const BLOCK_NAMES  = ["C1", "C2", "C3", "S19", "S20"];
+  const BLOCK_NODES  = { "C1": C1, "C2": C2, "C3": C3, "S19": [19], "S20": [20] };
   const BLOCK_COLOR  = {
     "C1": COL.C1, "C2": COL.C2, "C3": COL.C3,
-    "{19}": OUTLIER_CLUSTER_PALETTE[0],
-    "{20}": OUTLIER_CLUSTER_PALETTE[1],
+    "S19": OUTLIER_CLUSTER_PALETTE[0],
+    "S20": OUTLIER_CLUSTER_PALETTE[1],
   };
-  const BLOCK_SIZE   = { "C1": C1.length, "C2": C2.length, "C3": C3.length, "{19}": 1, "{20}": 1 };
-  const blockOfNode  = (n) => (n === 19 ? "{19}" : n === 20 ? "{20}" : CLUSTER_OF[n]);
+  const BLOCK_SIZE   = { "C1": C1.length, "C2": C2.length, "C3": C3.length, "S19": 1, "S20": 1 };
+  const BLOCK_IS_SINGLETON = { "C1": false, "C2": false, "C3": false, "S19": true, "S20": true };
+  const blockOfNode  = (n) => (n === 19 ? "S19" : n === 20 ? "S20" : CLUSTER_OF[n]);
 
   function pickInputColor(e) {
     if (CLUSTER_OF[e.u] === "OUT" || CLUSTER_OF[e.v] === "OUT") return COL.edge_inter;
@@ -530,9 +531,10 @@ window.MathJax = {
   const SYNTHETIC_XI = parseFloat(PROF_KERNEL_OUT.files["mixing_parameter.txt"]);
   const TOTAL_EDGES = EDGES.length;
 
-  // Shared input fixture: input graph + singleton-mode 5-cluster colour.
-  // Dashed block rings on every cluster (incl. each singleton) match
-  // the nPSO + SBM input opener style; ring colour follows BLOCK_COLOR.
+  // Shared input opener · same singleton view nPSO uses: 5 dashed rings
+  // (3 real + 2 singleton), neutral grey edges so the partition reads
+  // off the node colours alone, "S19 · singleton" / "S20 · singleton"
+  // labels matching nPSO's wording.
   (function () {
     const host = document.getElementById("g-shared-input-cy");
     if (!host) return;
@@ -542,7 +544,7 @@ window.MathJax = {
       .attr("preserveAspectRatio", "xMidYMid meet");
     const syncBlockRects = makeBlockRects(svg);
     const edges = EDGES.map(e => ({
-      u: e.u, v: e.v, color: pickInputColor(e), w: 1.4,
+      u: e.u, v: e.v, color: COL.paper_3, w: 0.9,
     }));
     const viz = NETGEN.VIZ.init("g-shared-input-cy", {
       svg, showLabels: true, edges,
@@ -609,7 +611,9 @@ window.MathJax = {
         .attr("text-anchor", "start")
         .attr("fill", color)
         .attr("opacity", 0.95)
-        .text(name);
+        .style("font-family", "Caveat Brush, cursive")
+        .style("font-size", "18px")
+        .text(name + (BLOCK_IS_SINGLETON[name] ? " · singleton" : ""));
       return { name, ids, rect, label };
     }).filter(Boolean);
     return function syncBlockRects(viz) {
