@@ -851,6 +851,33 @@ window.MathJax = {
     const bgPost = g.postEdges.map(([a, b]) => ({
       u: PAGE_NODE_BY_KIDX[a - 1], v: PAGE_NODE_BY_KIDX[b - 1],
     }));
+    // Per-op rewire trace for the cluster and background phases. Each
+    // op is one outer iteration of the recycle loop: cuts p1 + p2 and
+    // attempts to place newp1 + newp2. `success: false` means the op
+    // could not place anything legal and p1 went back to the queue.
+    function mapPair(p) {
+      if (!p) return null;
+      return [PAGE_NODE_BY_KIDX[p[0] - 1], PAGE_NODE_BY_KIDX[p[1] - 1]];
+    }
+    const clusterRewireOps = [];
+    cm.stages.perCluster.forEach(stage => {
+      const cname = NAMED_CLUSTER_OF_KERNEL[stage.cluster];
+      if (!cname || !stage.rewireOps) return;
+      stage.rewireOps.forEach(op => {
+        clusterRewireOps.push({
+          cluster: cname,
+          p1: mapPair(op.p1), p2: mapPair(op.p2),
+          newp1: mapPair(op.newp1), newp2: mapPair(op.newp2),
+          src: op.src, success: !!op.success,
+        });
+      });
+    });
+    const globalRewireOps = (g.rewireOps || []).map(op => ({
+      p1: mapPair(op.p1), p2: mapPair(op.p2),
+      newp1: mapPair(op.newp1), newp2: mapPair(op.newp2),
+      src: op.src, success: !!op.success,
+      placedNewp1: !!op.placedNewp1, placedNewp2: !!op.placedNewp2,
+    }));
     // Final edges direct from kernel (post-rewire + final-stage union).
     const clusterForbidden = new Set();
     clusterPost.forEach(e => clusterForbidden.add(keyOf(e.u, e.v)));
@@ -873,6 +900,7 @@ window.MathJax = {
     finalEdges.forEach(e => { outDeg[e.u]++; outDeg[e.v]++; });
     const RR = {
       split, clusterPre, clusterPost, bgPre, bgPost, finalEdges, outDeg,
+      clusterRewireOps, globalRewireOps,
       seed: stub_seed, residueCount: cm.residueAfter,
     };
     REAL_CACHE.set(key, RR);
@@ -1157,83 +1185,125 @@ window.MathJax = {
     document.getElementById("xi-slider").addEventListener("input", reTotal);
   })();
 
-  // Stage 2: cluster rewire (3 sub-steps: pre · cut · place)
+  // Stage 2: cluster rewire — per-op walker. Each step is one outer
+  // iteration of the recycle loop: cuts p1 + p2 (red-dashed flash), then
+  // places newp1 + newp2 (fresh stroke). Non-participating nodes dim.
+  // Step 0 = pre-rewire snapshot; step k = state after op (k - 1).
   (function () {
     const viz = NETGEN.VIZ.init("g-crewire-cy", { showLabels: true, edges: [] });
+    let lastStep = 0;
+    // Apply ops 0..k-1 to a working edge map (key -> {u,v,cluster}); ops
+    // mutate by removing p1/p2 keys and adding newp1/newp2 keys (when
+    // success). The clusterPre snapshot is the seed.
+    function stateAtStep(R, k) {
+      const map = new Map();
+      R.clusterPre.forEach(e => {
+        const k2 = keyOf(e.u, e.v);
+        // Pre-pairs include duplicates (self-loop + parallel candidates);
+        // collapse to a single edge per key but tag bad on first hit.
+        if (!map.has(k2)) {
+          map.set(k2, { u: e.u, v: e.v, cluster: e.cluster, bad: e.loop || e.multi });
+        }
+      });
+      for (let i = 0; i < k; i++) {
+        const op = R.clusterRewireOps[i];
+        if (!op) break;
+        const k1 = keyOf(op.p1[0], op.p1[1]);
+        map.delete(k1);
+        if (op.success) {
+          if (op.p2) {
+            const k2 = keyOf(op.p2[0], op.p2[1]);
+            map.delete(k2);
+          }
+          [op.newp1, op.newp2].forEach(np => {
+            if (!np) return;
+            const kn = keyOf(np[0], np[1]);
+            map.set(kn, { u: np[0], v: np[1], cluster: op.cluster, bad: false });
+          });
+        }
+      }
+      return map;
+    }
     function render(step) {
       const xi = parseFloat(document.getElementById("xi-slider").value);
       const R = buildRealization(U_SEED, STUB_SEED, xi);
-      const preKeys = new Set(R.clusterPre.map(e => keyOf(e.u, e.v)));
-      const postKeys = new Set(R.clusterPost.map(e => keyOf(e.u, e.v)));
-      const survivors = R.clusterPre.filter(e => postKeys.has(keyOf(e.u, e.v)));
-      const cuts = R.clusterPre.filter(e => !postKeys.has(keyOf(e.u, e.v)));
-      const news = R.clusterPost.filter(e => !preKeys.has(keyOf(e.u, e.v)));
-      const edges = [];
-      const fourNodes = new Set();
-      cuts.forEach(e => { fourNodes.add(e.u); fourNodes.add(e.v); });
-      news.forEach(e => { fourNodes.add(e.u); fourNodes.add(e.v); });
+      const total = 1 + R.clusterRewireOps.length;
+      document.getElementById("g-crewire-total").textContent = String(total - 1);
+      document.getElementById("g-crewire-cur").textContent = String(step);
+      const labelEl = document.getElementById("g-crewire-stage");
+      const descEl = document.getElementById("g-crewire-desc");
 
       if (step === 0) {
-        // pre: full pre-rewire snapshot, collisions flagged red-dashed.
+        // Pre-rewire snapshot. Collisions flagged red-dashed.
+        const edges = [];
         R.clusterPre.forEach((e, i) => {
-          const bad = (e.loop || e.multi);
+          const bad = e.loop || e.multi;
           edges.push({
             u: e.u, v: e.v,
             color: bad ? COL.edge_drop : (COL.edge_intra[e.cluster] || COL.edge_stage2),
             w: bad ? 1.6 : 1.5,
-            id: "cr-pre-" + i, classes: bad ? "pick" : "",
+            id: "cr-" + i, classes: bad ? "pick" : "",
           });
         });
-      } else if (step === 1) {
-        // cut: survivors in normal color, cut edges in ghost dashed.
-        survivors.forEach((e, i) => {
-          edges.push({
-            u: e.u, v: e.v,
-            color: COL.edge_intra[e.cluster] || COL.edge_stage2,
-            w: 1.5, id: "cr-keep-" + i, classes: "",
-          });
-        });
-        cuts.forEach((e, i) => {
-          edges.push({
-            u: e.u, v: e.v,
-            color: COL.edge_drop, w: 1.4,
-            id: "cr-cut-" + i, classes: "ghost",
-          });
-        });
-      } else {
-        // place: full post; new edges fresh.
-        R.clusterPost.forEach((e, i) => {
-          const isNew = !preKeys.has(keyOf(e.u, e.v));
-          edges.push({
-            u: e.u, v: e.v,
-            color: COL.edge_intra[e.cluster] || COL.edge_stage2,
-            w: 1.5, id: "cr-post-" + i,
-            classes: isNew ? "fresh" : "",
-          });
-        });
+        viz.setEdges(edges);
+        clearDimPick(viz);
+        labelEl.textContent = "pre-rewire";
+        descEl.innerHTML = '<span class="st">pre-rewire</span> &middot; ' +
+          R.clusterRewireOps.length + " collision op" +
+          (R.clusterRewireOps.length === 1 ? "" : "s") +
+          " ahead. Red-dashed = self-loop or parallel.";
+        lastStep = step;
+        return;
       }
+
+      const op = R.clusterRewireOps[step - 1];
+      const stateAfter = stateAtStep(R, step);
+      const four = new Set();
+      [op.p1, op.p2, op.newp1, op.newp2].forEach(p => {
+        if (p) { four.add(p[0]); four.add(p[1]); }
+      });
+
+      // Build edge list for the post-op state. Highlight newly-placed
+      // edges with a brief "fresh" class for the forward transition.
+      const isForward = step > lastStep;
+      const edges = [];
+      let i = 0;
+      stateAfter.forEach(e => {
+        const isNew = op.success && (
+          (op.newp1 && keyOf(op.newp1[0], op.newp1[1]) === keyOf(e.u, e.v)) ||
+          (op.newp2 && keyOf(op.newp2[0], op.newp2[1]) === keyOf(e.u, e.v))
+        );
+        const baseColor = COL.edge_intra[e.cluster] || COL.edge_stage2;
+        edges.push({
+          u: e.u, v: e.v,
+          color: e.bad ? COL.edge_drop : baseColor,
+          w: 1.5,
+          id: "cr-state-" + (i++),
+          classes: isNew && isForward ? "fresh" : (e.bad ? "pick" : ""),
+        });
+      });
       viz.setEdges(edges);
       clearDimPick(viz);
-      if (step === 1 || step === 2) {
-        // Highlight 4 nodes participating in the swap; dim others.
-        fourNodes.forEach(id => viz.addNodeClass(id, "pick"));
-        dimAllExcept(viz, [...fourNodes]);
-      }
-      document.getElementById("g-crewire-cur").textContent = String(step);
-      let label, desc;
-      if (step === 0) {
-        label = "pre-rewire";
-        desc = "Cluster pairings as drawn. Red-dashed = self-loops + parallels. Picked = the endpoints involved in the swap.";
-      } else if (step === 1) {
-        label = "cut";
-        desc = "Going-to-be-removed pre-rewire edges go ghosted; surviving edges stay coloured. Highlighted nodes = the 4 endpoints involved.";
-      } else {
-        label = "place";
-        desc = "Replacement edges committed (fresh). Cuts gone. " + cuts.length + " collision" + (cuts.length === 1 ? "" : "s") + " resolved.";
-      }
-      document.getElementById("g-crewire-stage").textContent = label;
-      const descEl = document.getElementById("g-crewire-desc");
-      descEl.innerHTML = '<span class="st">' + label + "</span> &middot; " + desc;
+      four.forEach(id => viz.addNodeClass(id, "pick"));
+      dimAllExcept(viz, [...four]);
+
+      const tag = op.success
+        ? (op.src === "valid" ? "swap with valid edge" : "swap with recycled pair")
+        : "no legal swap; p1 requeued";
+      labelEl.textContent = "op " + step + " · " + tag;
+      const desc = op.success
+        ? "Cut <code>" + op.p1.join("–") + "</code> + <code>" + (op.p2 ? op.p2.join("–") : "?") +
+          "</code>; place <code>" + op.newp1.join("–") + "</code> + <code>" + op.newp2.join("–") +
+          "</code>. Highlighted nodes = the 4 endpoints involved."
+        : "Outer iteration could not find a legal partner for <code>" + op.p1.join("–") +
+          "</code>; pushed back onto the recycle queue.";
+      descEl.innerHTML = '<span class="st">op ' + step + '</span> &middot; ' + desc;
+      lastStep = step;
+    }
+    function totalForCurrent() {
+      const xi = parseFloat(document.getElementById("xi-slider").value);
+      const R = buildRealization(U_SEED, STUB_SEED, xi);
+      return 1 + R.clusterRewireOps.length;
     }
     const ctl = NETGEN.stepController({
       prevBtn: document.getElementById("g-crewire-prev"),
@@ -1243,7 +1313,7 @@ window.MathJax = {
       randStepBtn: document.getElementById("g-crewire-rand-step"),
       randAllBtn: document.getElementById("g-crewire-rand-all"),
       labelCur: null, labelTotal: document.getElementById("g-crewire-total"),
-      total: 3,
+      total: totalForCurrent(),
       onRender: render,
       onRandStep: rerollStub,
       onRandAll: () => {
@@ -1252,9 +1322,10 @@ window.MathJax = {
         onStubChanged.forEach(fn => fn());
       },
     });
-    onStubChanged.push(() => ctl.rerender());
-    onUChanged.push(() => ctl.rerender());
-    document.getElementById("xi-slider").addEventListener("input", () => ctl.rerender());
+    function reconfig() { ctl.reconfigure(totalForCurrent()); }
+    onStubChanged.push(reconfig);
+    onUChanged.push(reconfig);
+    document.getElementById("xi-slider").addEventListener("input", reconfig);
   })();
 
   // Stage 3: background pairing (single-step-per-pair; ẑ_u spokes per
@@ -1412,82 +1483,123 @@ window.MathJax = {
     document.getElementById("xi-slider").addEventListener("input", reTotal);
   })();
 
-  // Stage 4: background rewire (pre · cut · place)
+  // Stage 4: background rewire — per-op walker. Mirrors g-crewire's
+  // shape on the global pool. Cluster post-rewire backdrop renders
+  // faint behind the bg state. Cross-cluster collisions (`crossDup`)
+  // surface as red-dashed in the seed snapshot.
   (function () {
     const viz = NETGEN.VIZ.init("g-bgrewire-cy", { showLabels: true, edges: [] });
+    let lastStep = 0;
+    function stateAtStep(R, k) {
+      const map = new Map();
+      R.bgPre.forEach(e => {
+        const k2 = keyOf(e.u, e.v);
+        if (!map.has(k2)) {
+          map.set(k2, { u: e.u, v: e.v, bad: e.loop || e.multi || e.crossDup });
+        }
+      });
+      for (let i = 0; i < k; i++) {
+        const op = R.globalRewireOps[i];
+        if (!op) break;
+        const k1 = keyOf(op.p1[0], op.p1[1]);
+        map.delete(k1);
+        if (op.p2) map.delete(keyOf(op.p2[0], op.p2[1]));
+        if (op.placedNewp1 && op.newp1) {
+          map.set(keyOf(op.newp1[0], op.newp1[1]),
+            { u: op.newp1[0], v: op.newp1[1], bad: false });
+        }
+        if (op.placedNewp2 && op.newp2) {
+          map.set(keyOf(op.newp2[0], op.newp2[1]),
+            { u: op.newp2[0], v: op.newp2[1], bad: false });
+        }
+      }
+      return map;
+    }
     function render(step) {
       const xi = parseFloat(document.getElementById("xi-slider").value);
       const R = buildRealization(U_SEED, STUB_SEED, xi);
-      const preKeys = new Set(R.bgPre.map(e => keyOf(e.u, e.v)));
-      const postKeys = new Set(R.bgPost.map(e => keyOf(e.u, e.v)));
-      const survivors = R.bgPre.filter(e => postKeys.has(keyOf(e.u, e.v)));
-      const cuts = R.bgPre.filter(e => !postKeys.has(keyOf(e.u, e.v)));
-      const news = R.bgPost.filter(e => !preKeys.has(keyOf(e.u, e.v)));
-      const fourNodes = new Set();
-      cuts.forEach(e => { fourNodes.add(e.u); fourNodes.add(e.v); });
-      news.forEach(e => { fourNodes.add(e.u); fourNodes.add(e.v); });
-      const edges = [];
-      // Backdrop: cluster post (faded).
-      R.clusterPost.forEach((e, i) => {
-        edges.push({
-          u: e.u, v: e.v,
-          color: COL.edge_intra[e.cluster] || COL.edge_stage2,
-          w: 1.2, id: "br-cluster-" + i, classes: "fade",
-        });
-      });
+      const total = 1 + R.globalRewireOps.length;
+      document.getElementById("g-bgrewire-total").textContent = String(total - 1);
+      document.getElementById("g-bgrewire-cur").textContent = String(step);
+      const labelEl = document.getElementById("g-bgrewire-stage");
+      const descEl = document.getElementById("g-bgrewire-desc");
+      // Cluster post backdrop renders behind the bg state on every step.
+      const backdrop = R.clusterPost.map((e, i) => ({
+        u: e.u, v: e.v,
+        color: COL.edge_intra[e.cluster] || COL.edge_stage2,
+        w: 1.2, id: "br-cluster-" + i, classes: "fade",
+      }));
+
       if (step === 0) {
+        const edges = backdrop.slice();
         R.bgPre.forEach((e, i) => {
-          const bad = (e.loop || e.multi || e.crossDup);
+          const bad = e.loop || e.multi || e.crossDup;
           edges.push({
             u: e.u, v: e.v,
             color: bad ? COL.edge_drop : COL.edge_inter,
             w: bad ? 1.6 : 1.5,
-            id: "br-pre-" + i, classes: bad ? "pick" : "",
+            id: "br-" + i, classes: bad ? "pick" : "",
           });
         });
-      } else if (step === 1) {
-        survivors.forEach((e, i) => {
-          edges.push({
-            u: e.u, v: e.v, color: COL.edge_inter, w: 1.5,
-            id: "br-keep-" + i, classes: "",
-          });
-        });
-        cuts.forEach((e, i) => {
-          edges.push({
-            u: e.u, v: e.v, color: COL.edge_drop, w: 1.4,
-            id: "br-cut-" + i, classes: "ghost",
-          });
-        });
-      } else {
-        R.bgPost.forEach((e, i) => {
-          const isNew = !preKeys.has(keyOf(e.u, e.v));
-          edges.push({
-            u: e.u, v: e.v, color: COL.edge_inter, w: 1.5,
-            id: "br-post-" + i, classes: isNew ? "fresh" : "",
-          });
-        });
+        viz.setEdges(edges);
+        clearDimPick(viz);
+        labelEl.textContent = "pre-rewire";
+        descEl.innerHTML = '<span class="st">pre-rewire</span> &middot; ' +
+          R.globalRewireOps.length + " bg-pool collision op" +
+          (R.globalRewireOps.length === 1 ? "" : "s") +
+          " ahead. Red-dashed = self-loop, parallel, or cluster duplicate.";
+        lastStep = step;
+        return;
       }
+
+      const op = R.globalRewireOps[step - 1];
+      const stateAfter = stateAtStep(R, step);
+      const four = new Set();
+      [op.p1, op.p2, op.newp1, op.newp2].forEach(p => {
+        if (p) { four.add(p[0]); four.add(p[1]); }
+      });
+
+      const isForward = step > lastStep;
+      const edges = backdrop.slice();
+      let i = 0;
+      stateAfter.forEach(e => {
+        const placedKey = keyOf(e.u, e.v);
+        const isNew = op.success && (
+          (op.placedNewp1 && op.newp1 && keyOf(op.newp1[0], op.newp1[1]) === placedKey) ||
+          (op.placedNewp2 && op.newp2 && keyOf(op.newp2[0], op.newp2[1]) === placedKey)
+        );
+        edges.push({
+          u: e.u, v: e.v,
+          color: e.bad ? COL.edge_drop : COL.edge_inter,
+          w: 1.5,
+          id: "br-state-" + (i++),
+          classes: isNew && isForward ? "fresh" : (e.bad ? "pick" : ""),
+        });
+      });
       viz.setEdges(edges);
       clearDimPick(viz);
-      if (step === 1 || step === 2) {
-        fourNodes.forEach(id => viz.addNodeClass(id, "pick"));
-        dimAllExcept(viz, [...fourNodes]);
-      }
-      document.getElementById("g-bgrewire-cur").textContent = String(step);
-      let label, desc;
-      if (step === 0) {
-        label = "pre-rewire";
-        desc = "Background pairings as drawn. Red-dashed = self-loops, parallels, cluster duplicates.";
-      } else if (step === 1) {
-        label = "cut";
-        desc = "Going-to-be-removed pre-rewire bg edges go ghosted. Highlighted nodes = endpoints touched by the swap.";
-      } else {
-        label = "place · final";
-        desc = "Replacement bg edges committed (fresh). Residue this seed: <b>" + R.residueCount + "</b> stubs.";
-      }
-      document.getElementById("g-bgrewire-stage").textContent = label;
-      const descEl = document.getElementById("g-bgrewire-desc");
-      descEl.innerHTML = '<span class="st">' + label + "</span> &middot; " + desc;
+      four.forEach(id => viz.addNodeClass(id, "pick"));
+      dimAllExcept(viz, [...four]);
+
+      const tag = op.success
+        ? (op.src === "valid" ? "swap with valid bg edge" : "swap with recycled pair")
+        : (op.reason === "no-valid-pool" ? "no valid pool to swap with" : "newp1/newp2 collide; partial");
+      labelEl.textContent = "op " + step + " · " + tag;
+      const placed = [];
+      if (op.placedNewp1 && op.newp1) placed.push(op.newp1.join("–"));
+      if (op.placedNewp2 && op.newp2) placed.push(op.newp2.join("–"));
+      const desc = op.success
+        ? "Cut <code>" + op.p1.join("–") + "</code> + <code>" + op.p2.join("–") +
+          "</code>; place <code>" + placed.join("</code> + <code>") + "</code>."
+        : "Outer iteration could not place a clean pair for <code>" + op.p1.join("–") +
+          "</code>; pushed back onto the recycle queue.";
+      descEl.innerHTML = '<span class="st">op ' + step + '</span> &middot; ' + desc;
+      lastStep = step;
+    }
+    function totalForCurrent() {
+      const xi = parseFloat(document.getElementById("xi-slider").value);
+      const R = buildRealization(U_SEED, STUB_SEED, xi);
+      return 1 + R.globalRewireOps.length;
     }
     const ctl = NETGEN.stepController({
       prevBtn: document.getElementById("g-bgrewire-prev"),
@@ -1497,7 +1609,7 @@ window.MathJax = {
       randStepBtn: document.getElementById("g-bgrewire-rand-step"),
       randAllBtn: document.getElementById("g-bgrewire-rand-all"),
       labelCur: null, labelTotal: document.getElementById("g-bgrewire-total"),
-      total: 3,
+      total: totalForCurrent(),
       onRender: render,
       onRandStep: rerollStub,
       onRandAll: () => {
@@ -1506,9 +1618,10 @@ window.MathJax = {
         onStubChanged.forEach(fn => fn());
       },
     });
-    onStubChanged.push(() => ctl.rerender());
-    onUChanged.push(() => ctl.rerender());
-    document.getElementById("xi-slider").addEventListener("input", () => ctl.rerender());
+    function reconfig() { ctl.reconfigure(totalForCurrent()); }
+    onStubChanged.push(reconfig);
+    onUChanged.push(reconfig);
+    document.getElementById("xi-slider").addEventListener("input", reconfig);
   })();
 
 

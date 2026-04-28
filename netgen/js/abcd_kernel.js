@@ -262,6 +262,7 @@
       }
       let lastRecycle = recycle.length;
       let recycleCounter = lastRecycle;
+      const rewireOps = stages ? [] : null;
       while (recycle.length > 0) {
         recycleCounter -= 1;
         if (recycleCounter < 0) {
@@ -273,6 +274,7 @@
         const p1 = recycle.shift();
         const fromRecycle = (2 * recycle.length) / Math.max(1, stubs.length);
         let success = false;
+        let chosenP2 = null, chosenSrc = null, chosenNewp1 = null, chosenNewp2 = null;
         if (!(recycle.length === 0 && localEdges.size === 0)) {
           const innerIters = Math.floor(stubs.length / 2);
           for (let inner = 0; inner < innerIters; inner++) {
@@ -309,12 +311,19 @@
                 localEdges.delete(ekey(p2[0], p2[1]));
               }
               success = true;
+              chosenP2 = p2; chosenSrc = usedRecycle ? "recycle" : "valid";
+              chosenNewp1 = newp1; chosenNewp2 = newp2;
               localEdges.add(ekey(newp1[0], newp1[1]));
               localEdges.add(ekey(newp2[0], newp2[1]));
               break;
             }
           }
         }
+        if (rewireOps) rewireOps.push({
+          p1: p1.slice(), p2: chosenP2 ? chosenP2.slice() : null,
+          newp1: chosenNewp1, newp2: chosenNewp2,
+          src: chosenSrc, success,
+        });
         if (!success) recycle.push(p1);
       }
       for (const k of localEdges) edges.add(k);
@@ -330,6 +339,7 @@
         wInternalPreForward: wInternalPreForwardSnap,
         stubsShuffled: stubsShuffledSnap,
         prePairs: prePairsSnap,
+        rewireOps,
         postEdges: Array.from(localEdges).map(k => k.split("-").map(Number)),
         residueForwarded,
       });
@@ -367,6 +377,7 @@
     }
     let lastRecycle = recycle.length;
     let recycleCounter = lastRecycle;
+    const globalRewireOps = stages ? [] : null;
     while (recycle.length > 0) {
       recycleCounter -= 1;
       if (recycleCounter < 0) {
@@ -378,18 +389,25 @@
       const p1 = recycle.pop();
       const fromRecycle = (2 * recycle.length) / Math.max(1, stubs.length);
       const coin1 = rng();
-      let p2;
+      let p2, chosenSrc;
       if (coin1 < fromRecycle) {
         const i = Math.floor(rng() * recycle.length);
         const tmp = recycle[i];
         recycle[i] = recycle[recycle.length - 1];
         recycle.pop();
-        p2 = tmp;
+        p2 = tmp; chosenSrc = "recycle";
       } else {
         const pick = sampleFromKeySet(globalEdges, rng);
-        if (!pick) { recycle.push(p1); continue; }
+        if (!pick) {
+          if (globalRewireOps) globalRewireOps.push({
+            p1: p1.slice(), p2: null, newp1: null, newp2: null,
+            src: null, success: false, reason: "no-valid-pool",
+          });
+          recycle.push(p1); continue;
+        }
         p2 = epair(pick[0], pick[1]);
         globalEdges.delete(ekey(p2[0], p2[1]));
+        chosenSrc = "valid";
       }
       const coin2 = rng();
       let newp1, newp2;
@@ -400,17 +418,24 @@
         newp1 = epair(p1[0], p2[1]);
         newp2 = epair(p1[1], p2[0]);
       }
+      let placedNewp1 = false, placedNewp2 = false;
       for (const np of [newp1, newp2]) {
         const k = ekey(np[0], np[1]);
         if (np[0] === np[1] || globalEdges.has(k) || edges.has(k)) recycle.push(np);
-        else globalEdges.add(k);
+        else { globalEdges.add(k); if (np === newp1) placedNewp1 = true; else placedNewp2 = true; }
       }
+      if (globalRewireOps) globalRewireOps.push({
+        p1: p1.slice(), p2: p2.slice(), newp1, newp2,
+        src: chosenSrc, success: placedNewp1 && placedNewp2,
+        placedNewp1, placedNewp2,
+      });
     }
     for (const k of globalEdges) edges.add(k);
     if (stages) {
       stages.global = {
         stubsShuffled: globalStubsSnap,
         prePairs: globalPrePairsSnap,
+        rewireOps: globalRewireOps,
         postEdges: Array.from(globalEdges).map(k => k.split("-").map(Number)),
         residueAfterRewire: recycle.length,
       };
