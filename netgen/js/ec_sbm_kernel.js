@@ -277,10 +277,11 @@
   // → list; the JS port uses a plain object keyed by `${a}|${b}`. Pop
   // semantics match canonical (swap-with-last).
   function rewireInvalidEdges(args) {
-    const { edges, blocks, rng, maxRetries = 10 } = args;
+    const { edges, blocks, rng, maxRetries = 10, traceOps = false } = args;
     const validPool = {};
     const validSet = new Set();
     const invalidEdges = [];
+    const ops = traceOps ? [] : null;
 
     function bp(u, v) {
       const a = blocks[u] <= blocks[v] ? blocks[u] : blocks[v];
@@ -348,8 +349,18 @@
         pool.pop();
         validSet.add(k1); validSet.add(k2);
         pool.push(new_e1); pool.push(new_e2);
+        if (ops) ops.push({
+          p1: [u, v], p2: [x, y],
+          newp1: new_e1.slice(), newp2: new_e2.slice(),
+          bp: k, success: true,
+        });
       } else {
         invalidEdges.push([u, v]);
+        if (ops) ops.push({
+          p1: [u, v], p2: [x, y],
+          newp1: new_e1.slice(), newp2: new_e2.slice(),
+          bp: k, success: false,
+        });
       }
       return false;
     }
@@ -378,7 +389,7 @@
     Object.keys(validPool).forEach(k => {
       validPool[k].forEach(e => kept.push(e.slice()));
     });
-    return { kept, dropped: invalidEdges.slice() };
+    return { kept, dropped: invalidEdges.slice(), ops: ops || [] };
   }
 
   window.ECSBMKernel = {

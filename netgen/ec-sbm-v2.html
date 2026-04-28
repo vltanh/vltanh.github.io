@@ -1104,7 +1104,7 @@ window.MathJax = {
     const rawIidEdges = sub.edges.slice();
     // run rewire on the multigraph.
     const rewired = ECSBMKernel.rewireInvalidEdges({
-      edges: rawIidEdges, blocks, rng, maxRetries: 10,
+      edges: rawIidEdges, blocks, rng, maxRetries: 10, traceOps: true,
     });
     function iidToPagePair([a, b]) {
       const u = parseInt(ALL_NODE_IDS[a], 10);
@@ -1121,10 +1121,19 @@ window.MathJax = {
       seenRaw.add(norm);
       rawClassified.push({ pair, isLoop, isDup });
     });
+    // Walker-friendly op trace: each op carries iid pairs + page-id pairs
+    // for direct viz consumption. Block labels round-trip from blocks[].
+    const opsPaged = (rewired.ops || []).map(op => ({
+      p1: iidToPagePair(op.p1), p2: op.p2 ? iidToPagePair(op.p2) : null,
+      newp1: op.newp1 ? iidToPagePair(op.newp1) : null,
+      newp2: op.newp2 ? iidToPagePair(op.newp2) : null,
+      success: op.success, bp: op.bp,
+    }));
     return {
       raw: rawClassified,
       keptPairs: rewired.kept.map(iidToPagePair),
       droppedPairs: rewired.dropped.map(iidToPagePair),
+      ops: opsPaged,
       seed,
     };
   }
@@ -1140,84 +1149,183 @@ window.MathJax = {
     });
     NETGEN.makeTooltip(viz, document.getElementById("g-rewire"));
 
-    function residualEdgesAt(step) {
-      const out = [];
-      // Steps 0-2 show raw multigraph (with duplicates + loops as dashed-red).
-      // Step 3 shows post-rewire kept set.
-      if (step <= 2) {
-        CURRENT_RES.raw.forEach((rc, i) => {
-          const [u, v] = rc.pair;
-          if (rc.isLoop) return;  // self-loops omitted in viz; canonical drops them anyway
-          if (rc.isDup) {
-            out.push({
-              u, v, color: COL.edge_drop, w: 2.4,
-              id: `res-dup-${i}`, classes: "dashed thick",
-            });
-          } else {
-            out.push({
-              u, v, color: COL.edge_stage3, w: 1.6,
-              id: `res-raw-${i}`,
-            });
+    // State after replaying rewire ops 0..k-1 on the raw multigraph.
+    // Returns a Map keyed by canonical "u|v" → { u, v, bad } so each
+    // surviving / placed edge has a stable identity. Bad = self-loop or
+    // duplicate that the rewire pass is still attempting to resolve.
+    function rewireStateAt(R, k) {
+      const map = new Map();
+      const key = (a, b) => a < b ? a + "|" + b : b + "|" + a;
+      // Seed with the raw multigraph (first occurrence per key valid;
+      // self-loops + duplicates marked bad).
+      const seen = new Set();
+      R.raw.forEach(rc => {
+        const [u, v] = rc.pair;
+        if (rc.isLoop) {
+          map.set(key(u, v) + "@loop-" + map.size, { u, v, bad: true, isLoop: true });
+          return;
+        }
+        if (rc.isDup) {
+          map.set(key(u, v) + "@dup-" + map.size, { u, v, bad: true, isLoop: false });
+          return;
+        }
+        seen.add(key(u, v));
+        map.set(key(u, v), { u, v, bad: false });
+      });
+      for (let i = 0; i < k; i++) {
+        const op = R.ops[i];
+        if (!op) break;
+        // Drop p1 (one bad copy or one loop) + p2 (a valid edge).
+        const k1 = key(op.p1[0], op.p1[1]);
+        // Find first matching bad/loop entry for p1.
+        let p1Removed = false;
+        for (const mk of map.keys()) {
+          const e = map.get(mk);
+          if (e.bad && key(e.u, e.v) === k1) {
+            map.delete(mk); p1Removed = true; break;
           }
-        });
-      } else {
-        CURRENT_RES.keptPairs.forEach(([u, v], i) => out.push({
-          u, v, color: COL.edge_stage3, w: 1.6, id: `res-kept-${i}`,
-        }));
+        }
+        if (op.p2) {
+          const k2 = key(op.p2[0], op.p2[1]);
+          if (map.has(k2)) map.delete(k2);
+        }
+        if (op.success) {
+          if (op.newp1) map.set(key(op.newp1[0], op.newp1[1]), { u: op.newp1[0], v: op.newp1[1], bad: false });
+          if (op.newp2) map.set(key(op.newp2[0], op.newp2[1]), { u: op.newp2[0], v: op.newp2[1], bad: false });
+        } else {
+          // Failure puts p1 back at the tail of the queue. Mark a bad
+          // entry so the viz still shows it; key suffix keeps it
+          // distinguishable from the just-removed copy.
+          map.set(k1 + "@req-" + i, { u: op.p1[0], v: op.p1[1], bad: true });
+        }
       }
+      return map;
+    }
+    function buildResidualEdges(map) {
+      const out = [];
+      let i = 0;
+      map.forEach(e => {
+        out.push({
+          u: e.u, v: e.v,
+          color: e.bad ? COL.edge_drop : COL.edge_stage3,
+          w: e.bad ? 1.8 : 1.6,
+          id: `res-state-${i++}`,
+          classes: e.bad ? "pick" : "",
+        });
+      });
       return out;
     }
 
+    let lastStep = 0;
+    let settleTimer = null;
+    let lockBusy = false;
+    let ctl = null;
+    function setLock(b) {
+      if (lockBusy === b) return;
+      lockBusy = b;
+      if (ctl) ctl.refreshButtons();
+    }
+
+    function totalForCurrent() { return 1 + CURRENT_RES.ops.length; }
+
     function render(step) {
-      viz.clearEdges();
-      viz.addEdges(stage2);
-      viz.addEdges(residualEdgesAt(step));
-      const dups = CURRENT_RES.raw.filter(r => r.isDup).length;
-      const loops = CURRENT_RES.raw.filter(r => r.isLoop).length;
-      const STEPS = [
-        {
-          label: "step 0 · residual SBM sampled",
-          desc: `Live SBMKernel.sampleMicroSBM on the v2 residual: ` +
-                `${CURRENT_RES.raw.length} stub-pair draws, ${dups} duplicate(s), ${loops} self-loop(s). ` +
-                `Red-dashed = duplicates the rewire pass needs to resolve.`,
-        },
-        {
-          label: "step 1 · group by block-pair",
-          desc: `The rewire kernel groups every valid edge by its (min_block, max_block) bucket; each duplicate is a candidate for swap with another valid edge in the same bucket.`,
-        },
-        {
-          label: "step 2 · 2-opt swap, block-preserving",
-          desc: `For each duplicate, pick a random partner in the same bucket; swap endpoints so each node stays in its home block. Coin-flip when both endpoints are in the same block (intra case).`,
-        },
-        {
-          label: "step 3 · post-rewire result",
-          desc: `Up to 10 retry passes; ${CURRENT_RES.droppedPairs.length} unresolved edge(s) dropped. Final kept set: ${CURRENT_RES.keptPairs.length} edges.`,
-        },
-      ];
+      const R = CURRENT_RES;
+      const total = totalForCurrent();
+      document.getElementById("g-rewire-total").textContent = String(total - 1);
+      document.getElementById("g-rewire-cur").textContent = String(step);
       const descEl = document.getElementById("g-rewire-desc");
       const stageEl = document.getElementById("g-rewire-stage");
       const realEl = document.getElementById("g-rewire-real");
-      const s = STEPS[step];
-      descEl.innerHTML = `<span class="st">${s.label}</span> &middot; ${s.desc}`;
-      stageEl.textContent = s.label;
-      realEl.textContent = `realization · seed ${CURRENT_RES.seed}`;
+      realEl.textContent = `realization · seed ${R.seed}`;
+
+      const stateMap = rewireStateAt(R, step);
+      const stateEdges = buildResidualEdges(stateMap);
+
+      if (step === 0) {
+        viz.clearEdges();
+        viz.addEdges(stage2);
+        viz.addEdges(stateEdges);
+        if (settleTimer) { settleTimer.cancel(); settleTimer = null; setLock(false); }
+        const dups = R.raw.filter(r => r.isDup).length;
+        const loops = R.raw.filter(r => r.isLoop).length;
+        stageEl.textContent = "step 0 · residual SBM sampled";
+        descEl.innerHTML = `<span class="st">step 0 · residual SBM sampled</span> &middot; ` +
+          `Live SBMKernel.sampleMicroSBM on the v2 residual: ` +
+          `${R.raw.length} stub-pair draws, ${dups} duplicate(s), ${loops} self-loop(s). ` +
+          `Red-dashed = duplicates / self-loops; ${R.ops.length} rewire op` +
+          (R.ops.length === 1 ? "" : "s") + ` ahead.`;
+        if (window.MathJax && window.MathJax.typesetPromise) {
+          window.MathJax.typesetPromise([descEl]).catch(() => {});
+        }
+        lastStep = step;
+        return;
+      }
+
+      const op = R.ops[step - 1];
+      const stateBefore = rewireStateAt(R, step - 1);
+      const beforeEdges = buildResidualEdges(stateBefore);
+      const four = new Set();
+      [op.p1, op.p2, op.newp1, op.newp2].forEach(p => {
+        if (p) { four.add(p[0]); four.add(p[1]); }
+      });
+      const isForward = step === lastStep + 1;
+      if (settleTimer) { settleTimer.cancel(); settleTimer = null; setLock(false); }
+      // Stage 2 edges always render under the rewire state.
+      viz.clearEdges();
+      viz.addEdges(stage2);
+      const places = [];
+      if (op.success) {
+        if (op.newp1) places.push(op.newp1);
+        if (op.newp2) places.push(op.newp2);
+      }
+      if (isForward && op.success && places.length > 0) {
+        viz.addEdges(beforeEdges);
+        setLock(true);
+        settleTimer = NETGEN.rewireSpokeSwapAnimate({
+          viz,
+          before: stage2.concat(beforeEdges),
+          after: stage2.concat(stateEdges),
+          cuts: [op.p1].concat(op.p2 ? [op.p2] : []),
+          places,
+          four: [...four],
+          edgeIdPrefix: "res-swap-" + step,
+          settle: () => { settleTimer = null; setLock(false); },
+        });
+      } else {
+        viz.addEdges(stateEdges);
+      }
+
+      const [A, B] = (op.bp || "0|0").split("|").map(Number);
+      const bpStr = A === B ? `intra-block (${A}, ${A})` : `inter-block (${A}, ${B})`;
+      stageEl.textContent = `op ${step} · ${op.success ? "swap" : "no swap"}`;
+      const desc = op.success
+        ? `Cut <code>${op.p1.join("&ndash;")}</code> + <code>${op.p2 ? op.p2.join("&ndash;") : "?"}</code>; ` +
+          `place <code>${op.newp1 ? op.newp1.join("&ndash;") : "?"}</code> + <code>${op.newp2 ? op.newp2.join("&ndash;") : "?"}</code>. ` +
+          `Bucket: ${bpStr}.`
+        : `2-opt attempt for <code>${op.p1.join("&ndash;")}</code> against <code>${op.p2 ? op.p2.join("&ndash;") : "?"}</code> ` +
+          `produced a self-loop or collision; pushed back onto the recycle queue.`;
+      descEl.innerHTML = `<span class="st">op ${step}</span> &middot; ${desc}`;
       if (window.MathJax && window.MathJax.typesetPromise) {
         window.MathJax.typesetPromise([descEl]).catch(() => {});
       }
+      lastStep = step;
     }
 
-    const controller = NETGEN.stepController({
+    ctl = NETGEN.stepController({
       prevBtn: document.getElementById("g-rewire-prev"),
       nextBtn: document.getElementById("g-rewire-next"),
       resetBtn: document.getElementById("g-rewire-reset"),
       labelCur: document.getElementById("g-rewire-cur"),
       labelTotal: document.getElementById("g-rewire-total"),
-      total: 4, onRender: render,
+      total: totalForCurrent(),
+      onRender: render,
+      getLocked: () => lockBusy,
     });
     document.getElementById("g-rewire-reroll").addEventListener("click", () => {
+      if (lockBusy) return;
       RES_SEED += 1;
       CURRENT_RES = buildResidualSample(RES_SEED);
-      render(controller.idx);
+      ctl.reconfigure(totalForCurrent());
     });
   })();
 
