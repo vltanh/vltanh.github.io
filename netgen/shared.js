@@ -1000,15 +1000,16 @@ function mountGxPanel(opts) {
       const hostW = host.clientWidth;
       const wrapW = wrap.offsetWidth;
       if (!hostW || !wrapW) return;
-      // Anchor the conversion to the un-padded viewBox so the ratio
-      // doesn't drift when setPadRight has already shifted things.
-      // hostW is the canvas px; wrap covers wrapW px of it. The graph
-      // wants padRight = (wrapW + buffer) * (naturalVb / canvasPx).
-      // canvasPx = naturalVb * (hostW / naturalVbCanvas), but the SVG
-      // is sized to fit the host so 1 px ~= naturalVb / hostW units.
+      // Solve for padRight (units) so that the panel's px footprint
+      // covers exactly padRight units of the final viewBox:
+      //   panelPx / hostW == padRight / (naturalVb + padRight)
+      //   => padRight = panelPx * naturalVb / (hostW - panelPx)
+      // Using just (naturalVb / hostW) underestimates because the
+      // viewBox grows once padRight is added.
       const baseW = (opts.viz.naturalVbWidth) || 1;
       const px = wrapW + 16;
-      const units = px * (baseW / hostW);
+      const denom = Math.max(1, hostW - px);
+      const units = px * baseW / denom;
       opts.viz.setPadRight(units);
     };
     requestAnimationFrame(sync);
