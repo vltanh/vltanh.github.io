@@ -886,7 +886,7 @@ function stepController(opts) {
   });
   randAllBtn && randAllBtn.addEventListener("click", () => {
     if (isLocked()) return;
-    if (onRandAll) onRandAll();
+    if (onRandAll) onRandAll(idx);
     render();
   });
   // keyboard: ←, →, space, home, end
