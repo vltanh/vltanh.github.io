@@ -884,33 +884,43 @@ function rewireSwapAnimate(opts) {
   const { viz, before, after, cuts, places, four, edgeIdPrefix } = opts;
   const settle = opts.settle || function () {};
   const ID = edgeIdPrefix || "swap";
-  // Aesthetic mirrors spoke_layer.js exactly:
-  //   - Cut edges shown red-dashed (bad style: stroke #c92a2a, "4 4"
-  //     dasharray). They are bad — that's why the rewire is happening.
-  //   - Build colour (paper-ink #1b2033) on growing place bridges.
-  //   - Colorize phase crossfades to the settled cluster colour at
-  //     stroke-width 1.6.
-  //   - Highlight = .dim on every other node + .dim-strong on every
-  //     other edge. NO border-recolour on the active 4 (matches
-  //     spoke_layer's applyActiveDimPick comment "dim alone is enough").
-  const PHASE1 = 500;        // hold + flag cut edges as bad
+  // Each cut bridge wears the EXACT style of its before-state edge
+  // (red-dashed if the edge was a self-loop / parallel / collision,
+  // settled colour solid if the edge was a sacrificed valid edge).
+  // Each place bridge wears the EXACT style of its after-state edge.
+  // No build / colorize crossfade: the cut retracts at canonical
+  // before-style, the place grows at canonical after-style.
+  const PHASE1 = 500;        // hold cut edges in their before-style
   const PHASE_RETRACT = 320; // T.rewindBridge equivalent
   const PHASE_GROW    = 320; // T.bridgeGrow equivalent
-  const PHASE_COLORIZE = 240;
   const PHASE3 = 160;        // settle
-  const BAD_STROKE = "#c92a2a";
-  const BUILD_STROKE = "#1b2033";
 
-  // Resolve settled stroke colour per place edge by keying into the
-  // after-state edge list. The colorize phase blends from build to
-  // these so the bridge lands seamlessly at the canonical edge colour.
+  // Look up before / after edge styles by canonical key. Each cut's
+  // bridge picks up the matching before-edge's color + classes; each
+  // place's bridge picks up the after-edge's. Class 'cm-bad' or 'pick'
+  // means the edge renders as red-dashed in the page edge layer, so
+  // the bridge mirrors that with stroke-dasharray "4 4". Width comes
+  // from the matched edge too so the visual is continuous when the
+  // viz edge layer hands off to the bridge layer.
   const cutKey = (a, b) => (a < b ? a + "|" + b : b + "|" + a);
+  const beforeByKey = {};
+  (before || []).forEach(e => { beforeByKey[cutKey(e.u, e.v)] = e; });
   const afterByKey = {};
   (after || []).forEach(e => { afterByKey[cutKey(e.u, e.v)] = e; });
-  const placeColors = (places || []).map(p => {
-    const matched = afterByKey[cutKey(p[0], p[1])];
-    return (matched && matched.color) || "#1a3478";
-  });
+  function isBadEdge(e) {
+    if (!e) return false;
+    const cls = e.classes || "";
+    return cls.indexOf("cm-bad") >= 0 || cls.indexOf("pick") >= 0;
+  }
+  function styleFor(e) {
+    return {
+      color: (e && e.color) || "#1a3478",
+      width: (e && e.w) || 1.5,
+      dashed: isBadEdge(e),
+    };
+  }
+  const cutStyles = (cuts || []).map(c => styleFor(beforeByKey[cutKey(c[0], c[1])]));
+  const placeStyles = (places || []).map(p => styleFor(afterByKey[cutKey(p[0], p[1])]));
 
   const cutKeys = new Set(cuts.map(c => cutKey(c[0], c[1])));
   const beforeMinusCuts = before.filter(e => !cutKeys.has(cutKey(e.u, e.v)));
@@ -965,108 +975,124 @@ function rewireSwapAnimate(opts) {
   let cutPaths = [];
   let placePaths = [];
 
-  // Spawn the overlay layer + cut bridges immediately so Phase 1 holds
-  // them visible (red-dashed, full stroke) before the retract starts.
+  // Spawn the overlay layer + cut bridges immediately. Phase 1 just
+  // holds them visible (each in its before-edge style) before retract.
   const svg = viz.svg;
   if (svg) {
     layer = svg.insert("g", "g.viz-nodes")
       .attr("class", "rewire-bridge-anim")
       .attr("pointer-events", "none");
     cuts.forEach((c, k) => {
+      const s = cutStyles[k];
       const path = layer.append("path")
         .attr("d", bridgePath(c[0], c[1]))
         .attr("fill", "none")
-        .attr("stroke", BAD_STROKE)
-        .attr("stroke-width", 2.6)
-        .attr("stroke-dasharray", "4 4")
+        .attr("stroke", s.color)
+        .attr("stroke-width", s.width)
+        .attr("stroke-dasharray", s.dashed ? "4 4" : null)
         .attr("stroke-linecap", "round")
         .attr("opacity", 1);
-      cutPaths.push(path);
+      cutPaths.push({ path, style: s });
     });
   }
 
-  // PHASE 2a (RETRACT) at PHASE1: cut bridges shrink via the same
-  // 4-value stroke-dasharray attrTween spoke_layer uses. Stroke stays
-  // red through the retract; the dasharray pattern overrides the
-  // initial "4 4" smoothly because both forms encode dashes.
+  // PHASE 2a (RETRACT): cut bridges shrink via the same 4-value
+  // stroke-dasharray attrTween spoke_layer uses on its rewind. For a
+  // dashed (bad) edge we use a dashoffset retract so the dashes stay
+  // visible; for a solid edge we use the stub-shrink dasharray. Both
+  // techniques mirror spoke_layer.js's two retract paths verbatim.
   t1 = setTimeout(() => {
-    cutPaths.forEach(path => {
+    cutPaths.forEach(({ path, style }) => {
       const node = path.node();
       const len = (node && node.getTotalLength) ? node.getTotalLength() : 100;
       const halfLen = len / 2;
-      path
-        .attr("stroke-dasharray", halfLen + " 0 " + halfLen + " 0")
-        .transition("rewindBridge").duration(PHASE_RETRACT).ease(d3.easeCubicIn)
-        .attrTween("stroke-dasharray", function () {
-          return function (k2) {
-            const stub = halfLen * (1 - k2);
-            const gap = len - 2 * stub;
-            return stub + " " + gap + " " + stub + " 0";
-          };
-        });
+      if (style.dashed) {
+        // Dashed retract: dashoffset slides full dash pattern off the
+        // path. Path length stays "0 → len" via dashoffset; the dashes
+        // wear the bad-red appearance throughout.
+        path
+          .attr("stroke-dasharray", len + " " + len)
+          .attr("stroke-dashoffset", 0)
+          .transition("rewindBridge").duration(PHASE_RETRACT).ease(d3.easeCubicIn)
+          .attr("stroke-dashoffset", len);
+      } else {
+        // Solid retract: 4-value stub-gap-stub-0 attrTween.
+        path
+          .attr("stroke-dashoffset", 0)
+          .attr("stroke-dasharray", halfLen + " 0 " + halfLen + " 0")
+          .transition("rewindBridge").duration(PHASE_RETRACT).ease(d3.easeCubicIn)
+          .attrTween("stroke-dasharray", function () {
+            return function (k2) {
+              const stub = halfLen * (1 - k2);
+              const gap = len - 2 * stub;
+              return stub + " " + gap + " " + stub + " 0";
+            };
+          });
+      }
     });
   }, PHASE1);
 
-  // PHASE 2b (GROW, simultaneous): place bridges grow via the inverse
-  // attrTween. Built-in build-paper colour while still dashed.
+  // PHASE 2b (GROW, simultaneous): place bridges grow via the inverse.
+  // Each bridge wears its after-edge's settled style throughout. No
+  // build colour, no colorize — same as the cut retract: the bridge
+  // already looks like the canonical edge. Grow technique matches
+  // spoke_layer's renderBridge animate path.
   t2 = setTimeout(() => {
     if (!layer) return;
-    cutPaths.forEach(p => p.remove());
+    cutPaths.forEach(({ path }) => path.remove());
     cutPaths = [];
     places.forEach((p, k) => {
+      const s = placeStyles[k];
       const path = layer.append("path")
         .attr("d", bridgePath(p[0], p[1]))
         .attr("fill", "none")
-        .attr("stroke", BUILD_STROKE)
-        .attr("stroke-width", 2.6)
-        .attr("stroke-dasharray", "0 9999 0 0")
+        .attr("stroke", s.color)
+        .attr("stroke-width", s.width)
         .attr("stroke-linecap", "round")
         .attr("opacity", 1);
       const node = path.node();
       const len = (node && node.getTotalLength) ? node.getTotalLength() : 100;
       const halfLen = len / 2;
-      path
-        .transition("bridgeGrow").duration(PHASE_GROW).ease(d3.easeCubicOut)
-        .attrTween("stroke-dasharray", function () {
-          return function (k2) {
-            const stub = halfLen * k2;
-            const gap = len - 2 * stub;
-            return stub + " " + gap + " " + stub + " 0";
-          };
-        });
+      if (s.dashed) {
+        // Dashed grow: dashoffset slides dash pattern back onto path.
+        path
+          .attr("stroke-dasharray", len + " " + len)
+          .attr("stroke-dashoffset", len)
+          .transition("bridgeGrow").duration(PHASE_GROW).ease(d3.easeCubicOut)
+          .attr("stroke-dashoffset", 0);
+      } else {
+        // Solid grow: stub grows 0 → halfLen.
+        path
+          .attr("stroke-dashoffset", 0)
+          .attr("stroke-dasharray", "0 " + len + " 0 0")
+          .transition("bridgeGrow").duration(PHASE_GROW).ease(d3.easeCubicOut)
+          .attrTween("stroke-dasharray", function () {
+            return function (k2) {
+              const stub = halfLen * k2;
+              const gap = len - 2 * stub;
+              return stub + " " + gap + " " + stub + " 0";
+            };
+          });
+      }
       placePaths.push(path);
     });
   }, PHASE1 + PHASE_RETRACT);
 
-  // PHASE 2c (COLORIZE): grown place bridges crossfade from build
-  // colour to the settled cluster / inter colour, thickness 2.6 → 1.6.
-  // Stroke colour transitions per-place via placeColors.
-  t3 = setTimeout(() => {
-    if (!layer) return;
-    placePaths.forEach((p, k) => {
-      p.transition("colorize").duration(PHASE_COLORIZE).ease(d3.easeCubicInOut)
-        .attr("stroke", placeColors[k] || BUILD_STROKE)
-        .attr("stroke-width", 1.6);
-    });
-  }, PHASE1 + PHASE_RETRACT + PHASE_GROW);
-
   // Phase 3: settle. Replace the bridge layer with the after-state
-  // edges (which now sit exactly where the grown bridges did) and
-  // un-dim. The bridge layer fades out to mask any pixel-level seam
-  // between the path-based bridge and the edge-layer's edge.
+  // edges (which sit at exactly the same coords as the grown bridges)
+  // and un-dim. The bridge layer fades out to mask any pixel seam.
   t4 = setTimeout(() => {
     viz.setEdges(after);
     if (viz.clearAllNodeClass) {
       viz.clearAllNodeClass("dim");
       viz.clearAllNodeClass("pick");
-      viz.clearAllNodeClass("swap-pick");
     }
     if (layer) {
       layer.transition().duration(PHASE3).attr("opacity", 0)
         .on("end", function () { layer.remove(); layer = null; });
     }
     settle();
-  }, PHASE1 + PHASE_RETRACT + PHASE_GROW + PHASE_COLORIZE);
+  }, PHASE1 + PHASE_RETRACT + PHASE_GROW);
 
   return {
     cancel() {
