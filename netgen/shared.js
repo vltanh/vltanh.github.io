@@ -27,26 +27,26 @@ const POSITIONS = {
   // (6,7) diagonal; 5 is top, 8 is bottom, 6 and 7 are the side
   // vertices the diagonal connects.
   1:  {x: -186, y: -148},
-  2:  {x: -123, y: -228},
-  3:  {x: -296, y: -162},
-  4:  {x: -150, y: -363},
+  2:  {x: -123, y: -229},
+  3:  {x: -299, y: -165},
+  4:  {x: -146, y: -364},
   5:  {x:   28, y: -205},
   6:  {x:  108, y: -262},
-  7:  {x:  -90, y: -157},
+  7:  {x:  -89, y: -160},
   8:  {x:   26, y: -329},
   // C2 (bottom-right, 6 nodes): K_4 on {9,10,11,12} as a square,
   // 13 hangs off (9,12), 14 off (10,11) on opposite diagonals.
-  9:  {x:  183, y:   48},
+  9:  {x:  183, y:   49},
   10: {x:  285, y:   78},
-  11: {x:  201, y:  188},
-  12: {x:  349, y:   36},
+  11: {x:  201, y:  184},
+  12: {x:  346, y:   38},
   13: {x:  306, y:  220},
-  14: {x:  190, y:  246},
+  14: {x:  202, y:  252},
   // C3 (bottom-left, 4 nodes): triangle {15,16,17}, leaf 18 off 16.
-  15: {x: -257, y:  134},
-  17: {x: -346, y:  169},
-  16: {x: -215, y:  205},
-  18: {x: -134, y:  256},
+  15: {x: -255, y:  135},
+  17: {x: -352, y:  171},
+  16: {x: -218, y:  205},
+  18: {x: -132, y:  260},
   // Outliers in the middle, pulled off the C2 axis so they don't
   // read as a continuation of the 9-12-13 line.
   19: {x: -117, y:   10},
