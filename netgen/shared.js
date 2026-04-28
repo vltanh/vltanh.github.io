@@ -1494,6 +1494,13 @@ function rewireSpokeSwapAnimate(opts) {
   };
 }
 
+// MathJax retypeset on a single element or list. No-op if MathJax not loaded.
+function retypeset(target) {
+  if (!(window.MathJax && window.MathJax.typesetPromise)) return;
+  const list = Array.isArray(target) ? target : [target];
+  window.MathJax.typesetPromise(list).catch(function () {});
+}
+
 // ── Export ────────────────────────────────────────────────────
 global.NETGEN = {
   POSITIONS, NODES, EDGES, CLUSTER_OF, DEGREES, DEGREES_EXCL, MINCUTS,
@@ -1504,6 +1511,7 @@ global.NETGEN = {
   makeTooltip, scrubSlider, stepController, toggle,
   linksRow, kinSection,
   fitViewBoxAttr,
+  retypeset,
   rewireSwapAnimate,
   rewireSpokeSwapAnimate,
 };
