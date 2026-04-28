@@ -947,7 +947,10 @@ NETGEN.spokeLayer = (function () {
       const nu = viz.nodeById[String(d.u)];
       const nv = viz.nodeById[String(d.v)];
       if (!nu || !nv) return "";
-      if (d.isLoop) return EP.makeSelfLoop(nu, nodeR(d.u));
+      // Self-loop bridge: bridgeL + bridgeR each carry one half so the
+      // two arcs grow inward from each tangent toward the apex (the
+      // SBM stub-matcher aesthetic — two halves meet at the top).
+      if (d.isLoop) return EP.makeSelfLoopHalf(nu, nodeR(d.u), d.side);
       const swap = String(d.u) > String(d.v);
       const a = swap ? nv : nu, b = swap ? nu : nv;
       const ra = swap ? nodeR(d.v) : nodeR(d.u), rb = swap ? nodeR(d.u) : nodeR(d.v);

@@ -1539,27 +1539,37 @@ function rewireSpokeSwapAnimate(opts) {
   // reverse (mirror of retract). Stubs fade out as the bridge stitches
   // them together — the spoke tip becomes the bridge endpoint.
   const tGrow = tRetract + (hasLoopPlace ? SPOKE_RETRACT_MS : 0);
+  function appendBridgePath(d) {
+    return placeLayer.append("path")
+      .attr("d", d)
+      .attr("fill", "none")
+      .attr("stroke", BUILD_COLOR)
+      .attr("stroke-width", 2.6)
+      .attr("stroke-linecap", "round");
+  }
+  function growLoopHalf(path) {
+    const len = (path.node().getTotalLength && path.node().getTotalLength()) || 100;
+    path.attr("stroke-dasharray", len + " " + len)
+      .attr("stroke-dashoffset", len)
+      .transition("grow").duration(T.grow).ease(d3.easeCubicOut)
+      .attr("stroke-dashoffset", 0);
+  }
   later(tGrow, function () {
     placePairs.forEach(function (pp) {
-      const meta = pp.p;
-      const path = placeLayer.append("path")
-        .attr("d", placeBridgeViaStubs(pp.s1, pp.s2))
-        .attr("fill", "none")
-        .attr("stroke", BUILD_COLOR)
-        .attr("stroke-width", 2.6)
-        .attr("stroke-linecap", "round");
-      const node = path.node();
-      const len = (node.getTotalLength && node.getTotalLength()) || 100;
       const isLoop = pp.s1.node === pp.s2.node;
       if (isLoop) {
-        // Self-loop teardrop: two-quadratic curve. Grow with a single
-        // dashoffset sweep (M start → apex → end) so the bridge draws
-        // continuously around the loop instead of from both ends.
-        path.attr("stroke-dasharray", len + " " + len)
-          .attr("stroke-dashoffset", len)
-          .transition("grow").duration(T.grow).ease(d3.easeCubicOut)
-          .attr("stroke-dashoffset", 0);
+        // Self-loop: paint two halves (left + right). Each grows
+        // inward toward the apex via dashoffset, mirroring SBM
+        // stub-matcher's bridgeL + bridgeR teardrop aesthetic.
+        const me = nodeXY(pp.s1.node);
+        const halfL = appendBridgePath(EdgePaths.makeSelfLoopHalf(me, me.r, -1));
+        const halfR = appendBridgePath(EdgePaths.makeSelfLoopHalf(me, me.r, +1));
+        growLoopHalf(halfL);
+        growLoopHalf(halfR);
+        pp._paths = [halfL, halfR];
       } else {
+        const path = appendBridgePath(placeBridgeViaStubs(pp.s1, pp.s2));
+        const len = (path.node().getTotalLength && path.node().getTotalLength()) || 100;
         const halfLen = len / 2;
         path.attr("stroke-dashoffset", 0)
           .attr("stroke-dasharray", "0 " + len + " 0 0")
@@ -1571,8 +1581,8 @@ function rewireSpokeSwapAnimate(opts) {
               return stub + " " + gap + " " + stub + " 0";
             };
           });
+        pp._paths = [path];
       }
-      pp._path = path;
     });
     // Stubs fade out across the entire grow phase. With the bridge
     // anchored on the node boundary the stub now sits on top of the
@@ -1598,17 +1608,24 @@ function rewireSpokeSwapAnimate(opts) {
   const tColor = tGrow + T.grow;
   later(tColor, function () {
     placePairs.forEach(function (pp) {
-      const path = pp._path;
-      if (!path) return;
-      const fromD = placeBridgeViaStubs(pp.s1, pp.s2);
-      const toD = (pp.p.u === pp.p.v)
-        ? selfLoopPath(pp.p.u)
-        : straightBoundaryPath(pp.p.u, pp.p.v);
-      path.transition("colorize").duration(T.colorize).ease(d3.easeCubicInOut)
-        .attr("stroke", pp.p.bad ? BAD_COLOR : pp.p.color)
-        .attr("stroke-width", 1.6)
-        .attr("stroke-dasharray", pp.p.bad ? "4 4" : null)
-        .attrTween("d", function () { return d3.interpolateString(fromD, toD); });
+      const paths = pp._paths || [];
+      if (!paths.length) return;
+      const isLoop = pp.p.u === pp.p.v;
+      // Self-loop bridges are already on their final boundary-anchored
+      // path coords (two halves built via makeSelfLoopHalf). Straight
+      // bridges still need to tween from stub-tip to node-boundary so
+      // the SPOKE_LEN gap closes before commit.
+      paths.forEach(function (path) {
+        const t = path.transition("colorize").duration(T.colorize).ease(d3.easeCubicInOut)
+          .attr("stroke", pp.p.bad ? BAD_COLOR : pp.p.color)
+          .attr("stroke-width", 1.6)
+          .attr("stroke-dasharray", pp.p.bad ? "4 4" : null);
+        if (!isLoop) {
+          const fromD = placeBridgeViaStubs(pp.s1, pp.s2);
+          const toD = straightBoundaryPath(pp.p.u, pp.p.v);
+          t.attrTween("d", function () { return d3.interpolateString(fromD, toD); });
+        }
+      });
     });
   });
 
