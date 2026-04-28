@@ -20,6 +20,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1c1c1d" media="(prefers-color-scheme: dark)">
+<meta name="format-detection" content="telephone=no">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <title>
   {% if site.title == 'blank' %}
     {% capture title %}{{ author_name }}{% endcapture %}
@@ -55,7 +60,7 @@
   <!-- OpenGraph -->
   <meta property="og:site_name" content="{{ title }}">
   <meta property="og:type" content="{% if is_blog_post %}article{% else %}website{% endif %}">
-  <meta property="og:title" content="{% if page.title %}{{ title }} | {{ page.title }}{% else %}{{ title }}{% endif %}">
+  <meta property="og:title" content="{% if page.title and page.url != '/' %}{{ page.title }} | {{ title }}{% else %}{{ title }}{% endif %}">
   <meta property="og:url" content="{{ page.url | prepend: site.baseurl | prepend: site.url | remove_first: 'index.html' }}">
   <meta property="og:description" content="{% if page.description %}{{ page.description }}{% else %}{{ site.description }}{% endif %}">
   {% assign resolved_og_image = page.og_image | default: page.thumbnail | default: page.img | default: site.og_image %}
@@ -68,6 +73,25 @@
     <meta property="og:image" content="{{ resolved_og_image_url }}">
   {% endif %}
   <meta property="og:locale" content="{{ site.lang }}">
+  {% if is_blog_post %}
+    {% if page.date %}
+      <meta property="article:published_time" content="{{ page.date | date_to_xmlschema }}">
+    {% endif %}
+    {% if page.last_modified_at %}
+      <meta property="article:modified_time" content="{{ page.last_modified_at | date_to_xmlschema }}">
+    {% endif %}
+    <meta property="article:author" content="{{ author_name }}">
+    {% if page.tags %}
+      {% for tag in page.tags %}
+        <meta property="article:tag" content="{{ tag }}">
+      {% endfor %}
+    {% endif %}
+    {% if page.categories %}
+      {% for cat in page.categories %}
+        <meta property="article:section" content="{{ cat }}">
+      {% endfor %}
+    {% endif %}
+  {% endif %}
 
   <!-- Twitter card -->
   <meta name="twitter:card" content="{% if resolved_og_image %}summary_large_image{% else %}summary{% endif %}">
@@ -234,20 +258,36 @@
 
   <script type="application/ld+json">
     {
-        "author":
-        {
-            "@type": "Person",
-            "name": "{{ author_name }}"
-        },
-        "url": "{{ page.url | prepend: site.baseurl | prepend: site.url }}",
+        "@context": "https://schema.org",
         "@type": "{% if is_blog_post %}BlogPosting{% else %}WebSite{% endif %}",
-        "description": "{% if page.description %}{{ page.description }}{% else if site.description %}{{ site.description }}{% endif %}",
+        "url": "{{ page.url | prepend: site.baseurl | prepend: site.url | remove_first: 'index.html' }}",
         "headline": "{% if page.title %}{{ page.title }}{% else %}{{ site.title }}{% endif %}",
-        {% if sameaslinks != blank %}
-        "sameAs": {{ sameaslinks | jsonify }},
+        "name": "{% if page.title %}{{ page.title }}{% else %}{{ site.title }}{% endif %}",
+        "description": "{% if page.description %}{{ page.description }}{% else if site.description %}{{ site.description }}{% endif %}",
+        "inLanguage": "{{ site.lang }}",
+        {% if resolved_og_image_url %}
+        "image": "{{ resolved_og_image_url }}",
         {% endif %}
-        "name": "{{ author_name }}",
-        "@context": "https://schema.org"
+        {% if is_blog_post %}
+        {% if page.date %}"datePublished": "{{ page.date | date_to_xmlschema }}",{% endif %}
+        {% if page.last_modified_at %}"dateModified": "{{ page.last_modified_at | date_to_xmlschema }}",{% else if page.date %}"dateModified": "{{ page.date | date_to_xmlschema }}",{% endif %}
+        "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "{{ page.url | prepend: site.baseurl | prepend: site.url }}"
+        },
+        "publisher": {
+            "@type": "Person",
+            "name": "{{ author_name }}",
+            "url": "{{ site.url }}"
+        },
+        {% endif %}
+        "author": {
+            "@type": "Person",
+            "name": "{{ author_name }}",
+            "url": "{{ site.url }}"{% if sameaslinks != blank %},
+            "sameAs": {{ sameaslinks | jsonify }}{% endif %}
+        }{% if sameaslinks != blank and is_blog_post == false %},
+        "sameAs": {{ sameaslinks | jsonify }}{% endif %}
     }
   </script>
 {% endif %}
