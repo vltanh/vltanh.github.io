@@ -989,11 +989,7 @@ window.MathJax = {
         };
       }
       const stateObj = { byNode: cfg, placed, just, justSeq: stepIdx, bridgeColor };
-      if (opts.snap && spokes.snapToState) {
-        spokes.snapToState(stateObj);
-      } else {
-        spokes.syncState(stateObj);
-      }
+      NETGEN.snapOrSync(spokes, stateObj, !!opts.snap);
       syncStats();
       renderBudget();
     }
@@ -1023,29 +1019,23 @@ window.MathJax = {
     }
 
     freshTrace(currentSeed);
-    let snapNext = false;
     ctl = NETGEN.wireWalker({
       prefix: "g3",
       total: totalPairs + 1,
       curId: "g3-cur", totId: "g3-total",
       getLocked: () => lockOverride,
-      onRender: (idx) => {
-        stepIdx = idx;
-        render(snapNext ? { snap: true } : {});
-        snapNext = false;
-      },
+      // snap is provided by stepController on rand-all + start/end nav.
+      onRender: (idx, snap) => { stepIdx = idx; render({ snap }); },
       onRandStep: (idx) => {
         if (idx <= 0) return;
         reseedFrom(idx - 1);
-        snapNext = false;
-        ctl.reconfigureKeep(totalPairs + 1, Math.min(idx, totalPairs));
+        ctl.reconfigureKeep(totalPairs + 1, idx);
       },
       onRandAll: (idx) => {
         if (idx <= 0) return;
         currentSeed += 1;
         freshTrace(currentSeed);
-        snapNext = true;
-        ctl.reconfigureKeep(totalPairs + 1, Math.min(idx, totalPairs));
+        ctl.reconfigureKeep(totalPairs + 1, idx);
       },
     });
   })();

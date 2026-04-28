@@ -566,6 +566,12 @@ window.MathJax = {
     STUB_SEED += 1;
     onStubChanged.forEach(fn => fn());
   }
+  // Full reroll: U + stubs together. Used by random-all on every walker.
+  function rerollAll() {
+    U_SEED += 1; STUB_SEED += 1;
+    onUChanged.forEach(fn => fn());
+    onStubChanged.forEach(fn => fn());
+  }
 
   function makeBlockRects(svg) {
     const layer = svg.append("g").attr("class", "block-rects");
@@ -1057,8 +1063,7 @@ window.MathJax = {
       });
     }
 
-    let snapNext = false;
-    function render(step) {
+    function render(step, snap) {
       const xi = parseFloat(document.getElementById("xi-slider").value);
       const R = buildRealization(U_SEED, STUB_SEED, xi);
       const total = 1 + R.clusterPre.length;
@@ -1100,13 +1105,7 @@ window.MathJax = {
           badColor: bad ? COL.edge_drop : null,
         };
       }
-      const stateObj = { byNode: cfg, placed, just, justSeq: step, bridgeColor };
-      if (snapNext && spokes.snapToState) {
-        spokes.snapToState(stateObj);
-        snapNext = false;
-      } else {
-        spokes.syncState(stateObj);
-      }
+      NETGEN.snapOrSync(spokes, { byNode: cfg, placed, just, justSeq: step, bridgeColor }, snap);
 
       const totEl = document.getElementById("g-cpair-total");
       const curEl = document.getElementById("g-cpair-cur");
@@ -1149,15 +1148,12 @@ window.MathJax = {
         rollPair(R, idx - 1);
       },
       // random all: reseed stubs so the cluster pairing redraws from
-      // scratch (new multiset, not just permuted positions). Snap so
-      // the whole walk swaps in one frame instead of animating each
-      // intermediate pair.
+      // scratch (new multiset, not just permuted positions). Snap is
+      // handled by stepController's withSnap on the rand-all click;
+      // every render fired during the listener cascade gets snap=true.
       onRandAll: idx => {
         if (idx <= 0) return;
-        snapNext = true;
-        U_SEED += 1; STUB_SEED += 1;
-        onUChanged.forEach(fn => fn());
-        onStubChanged.forEach(fn => fn());
+        rerollAll();
       },
     });
     function reTotal() {
@@ -1307,9 +1303,7 @@ window.MathJax = {
       getLocked: () => lockBusy,
       onRandStep: rerollStub,
       onRandAll: () => {
-        U_SEED += 1; STUB_SEED += 1;
-        onUChanged.forEach(fn => fn());
-        onStubChanged.forEach(fn => fn());
+        rerollAll();
       },
     });
     function reconfig() { ctl.reconfigureKeep(totalForCurrent(), ctl.idx); }
@@ -1359,8 +1353,7 @@ window.MathJax = {
       for (let i = 0; i <= kIncl; i++) bgOverride[i] = vals[i];
     }
 
-    let snapNextBg = false;
-    function render(step) {
+    function render(step, snap) {
       const xi = parseFloat(document.getElementById("xi-slider").value);
       const R = buildRealization(U_SEED, STUB_SEED, xi);
       const total = 1 + R.bgPre.length;
@@ -1407,13 +1400,7 @@ window.MathJax = {
           badColor: bad ? COL.edge_drop : null,
         };
       }
-      const stateObj = { byNode: cfg, placed, just, justSeq: step, bridgeColor };
-      if (snapNextBg && spokes.snapToState) {
-        spokes.snapToState(stateObj);
-        snapNextBg = false;
-      } else {
-        spokes.syncState(stateObj);
-      }
+      NETGEN.snapOrSync(spokes, { byNode: cfg, placed, just, justSeq: step, bridgeColor }, snap);
 
       const totEl = document.getElementById("g-bgpair-total");
       const curEl = document.getElementById("g-bgpair-cur");
@@ -1453,15 +1440,11 @@ window.MathJax = {
         const R = buildRealization(U_SEED, STUB_SEED, xi);
         rollBgPair(R, idx - 1);
       },
-      // random all: reseed stubs so the bg pairing redraws from scratch
-      // (new multiset, not just permuted positions). Snap so the whole
-      // walk swaps in one frame.
+      // random all: reseed stubs so the bg pairing redraws from
+      // scratch. Snap is handled by stepController's withSnap.
       onRandAll: idx => {
         if (idx <= 0) return;
-        snapNextBg = true;
-        U_SEED += 1; STUB_SEED += 1;
-        onUChanged.forEach(fn => fn());
-        onStubChanged.forEach(fn => fn());
+        rerollAll();
       },
     });
     function reTotal() {
@@ -1618,9 +1601,7 @@ window.MathJax = {
       getLocked: () => lockBusy,
       onRandStep: rerollStub,
       onRandAll: () => {
-        U_SEED += 1; STUB_SEED += 1;
-        onUChanged.forEach(fn => fn());
-        onStubChanged.forEach(fn => fn());
+        rerollAll();
       },
     });
     function reconfig() { ctl.reconfigureKeep(totalForCurrent(), ctl.idx); }

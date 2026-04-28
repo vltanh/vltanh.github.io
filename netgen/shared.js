@@ -855,6 +855,14 @@ function stepController(opts) {
   const randAtStart = !!opts.randAtStart;
   let total = opts.total;
   let idx = 0;
+  // snapDepth: handler-scoped snap-mode counter. When > 0, every render
+  // fired inside the handler passes snap=true to onRender, so walker
+  // render functions route through spokes.snapToState (or equivalent)
+  // instead of the animated path. The rand-all click and the to-start
+  // / to-end nav buttons wrap their work in withSnap; rand-step + prev
+  // + next leave it 0 (animated render).
+  let snapDepth = 0;
+  function withSnap(fn) { snapDepth++; try { fn(); } finally { snapDepth--; } }
   function isLocked() { return !!(getLocked && getLocked()); }
   function refreshButtons() {
     const locked = isLocked();
@@ -864,8 +872,6 @@ function stepController(opts) {
     if (nextBtn) nextBtn.disabled = locked || atEnd;
     if (resetBtn) resetBtn.disabled = locked || atStart;
     if (endBtn)   endBtn.disabled   = locked || atEnd;
-    // randAtStart: panels whose reroll touches the whole sample (not a
-    // per-step pick) keep random buttons live at idx 0.
     if (randStepBtn) randStepBtn.disabled = locked || (atStart && !randAtStart);
     if (randAllBtn)  randAllBtn.disabled  = locked || (atStart && !randAtStart);
   }
@@ -873,12 +879,12 @@ function stepController(opts) {
     if (labelCur) labelCur.textContent = idx;
     if (labelTotal) labelTotal.textContent = total - 1;
     refreshButtons();
-    if (onRender) onRender(idx);
+    if (onRender) onRender(idx, snapDepth > 0);
   }
   prevBtn && prevBtn.addEventListener("click", () => { if (!isLocked() && idx>0) { idx--; render(); } });
   nextBtn && nextBtn.addEventListener("click", () => { if (!isLocked() && idx<total-1) { idx++; render(); } });
-  resetBtn && resetBtn.addEventListener("click", () => { if (!isLocked()) { idx = 0; render(); } });
-  endBtn && endBtn.addEventListener("click", () => { if (!isLocked()) { idx = total-1; render(); } });
+  resetBtn && resetBtn.addEventListener("click", () => { if (!isLocked()) withSnap(() => { idx = 0; render(); }); });
+  endBtn && endBtn.addEventListener("click", () => { if (!isLocked()) withSnap(() => { idx = total-1; render(); }); });
   randStepBtn && randStepBtn.addEventListener("click", () => {
     if (isLocked()) return;
     if (onRandStep) onRandStep(idx);
@@ -886,8 +892,10 @@ function stepController(opts) {
   });
   randAllBtn && randAllBtn.addEventListener("click", () => {
     if (isLocked()) return;
-    if (onRandAll) onRandAll(idx);
-    render();
+    withSnap(() => {
+      if (onRandAll) onRandAll(idx);
+      render();
+    });
   });
   // keyboard: ←, →, space, home, end
   if (useKeys) {
@@ -921,6 +929,14 @@ function stepController(opts) {
       render();
     },
   };
+}
+
+// Spoke-layer snap-or-sync: the universal render router for any walker
+// whose match-edges are owned by NETGEN.spokeLayer. Pass the snap flag
+// from onRender(idx, snap) straight through.
+function snapOrSync(spokes, state, snap) {
+  if (snap && spokes && spokes.snapToState) spokes.snapToState(state);
+  else if (spokes && spokes.syncState) spokes.syncState(state);
 }
 
 // ── Walker markup + wiring ───────────────────────────────────
@@ -1874,7 +1890,7 @@ global.NETGEN = {
   C1, C2, C3, OUT, INTRA, INTER, OUT_EDGES,
   CORE_NODES, CORE_EDGES, topK, cliqueEdges,
   COLORS, CY, VIZ,
-  makeTooltip, scrubSlider, stepController, walkerRow, wireWalker, toggle,
+  makeTooltip, scrubSlider, stepController, walkerRow, wireWalker, snapOrSync, toggle,
   linksRow, kinSection,
   fitViewBoxAttr,
   retypeset,
