@@ -16,39 +16,6 @@
 
 {% capture author_name %}{{ site.first_name }}{% if site.middle_name %} {{ site.middle_name }}{% endif %} {{ site.last_name }}{% endcapture %}
 
-<!-- Standard metadata -->
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<meta http-equiv="X-UA-Compatible" content="IE=edge">
-<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
-<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#1c1c1d" media="(prefers-color-scheme: dark)">
-<meta name="format-detection" content="telephone=no">
-<meta name="referrer" content="strict-origin-when-cross-origin">
-<title>
-  {% if site.title == 'blank' %}
-    {% capture title %}{{ author_name }}{% endcapture %}
-  {% else %}
-    {% capture title %}{{ site.title }}{% endcapture %}
-  {% endif %}
-  {% if page.url == '/blog/index.html' %}
-    {{ page.title }} | {{ title }}
-  {% elsif page.title != 'blank' and page.url != '/' %}
-    {% if page.title == null or page.title == '' %}
-      {{ page.date | date: '%Y' }} | {{ title }}
-    {% else %}
-      {{ page.title }} | {{ title }}
-    {% endif %}
-  {% else %}
-    {{ title }}
-  {% endif %}
-</title>
-<meta name="author" content="{{ author_name }}">
-<meta name="description" content="{% if page.description %}{{ page.description }}{% else %}{{ site.description }}{% endif %}">
-{% if page.keywords or site.keywords %}
-  <meta name="keywords" content="{% if page.keywords %}{{ page.keywords }}{% else %}{{ site.keywords }}{% endif %}">
-{% endif %}
-
 {% assign is_blog_post = false %}
 {% if page.url != '/blog/index.html' and page.url contains '/blog/' %}
   {% unless page.url contains '/tag/' or page.url contains '/category/' %}
@@ -56,20 +23,54 @@
   {% endunless %}
 {% endif %}
 
+{% capture site_title %}{% if site.title == 'blank' %}{{ author_name }}{% else %}{{ site.title }}{% endif %}{% endcapture %}
+{% capture display_title %}{% if page.title and page.title != 'blank' and page.url != '/' %}{{ page.title }} | {{ site_title }}{% else %}{{ site_title }}{% endif %}{% endcapture %}
+{% capture page_title_only %}{% if page.title %}{{ page.title }}{% else %}{{ site_title }}{% endif %}{% endcapture %}
+{% capture meta_description %}{% if page.description %}{{ page.description }}{% else %}{{ site.description }}{% endif %}{% endcapture %}
+{% assign canonical_url = page.url | prepend: site.baseurl | prepend: site.url | remove_first: 'index.html' %}
+{% assign page_url_full = page.url | prepend: site.baseurl | prepend: site.url %}
+
+{% assign resolved_og_image = page.og_image | default: page.thumbnail | default: page.img | default: site.og_image %}
+{% if resolved_og_image %}
+  {% if resolved_og_image contains '://' %}
+    {% assign resolved_og_image_url = resolved_og_image %}
+  {% else %}
+    {% assign resolved_og_image_url = resolved_og_image | prepend: '/' | replace: '//', '/' | prepend: site.baseurl | prepend: site.url %}
+  {% endif %}
+{% endif %}
+
+<!-- Standard metadata -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+{% if site.enable_darkmode %}
+  <meta name="theme-color" content="#1c1c1d" media="(prefers-color-scheme: dark)">
+{% endif %}
+<meta name="format-detection" content="telephone=no">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>
+  {% if page.title == null or page.title == '' %}
+    {% if is_blog_post and page.date %}{{ page.date | date: '%Y' }} | {{ site_title }}{% else %}{{ site_title }}{% endif %}
+  {% else %}
+    {{ display_title }}
+  {% endif %}
+</title>
+<meta name="author" content="{{ author_name }}">
+<meta name="description" content="{{ meta_description }}">
+{% if page.keywords or site.keywords %}
+  <meta name="keywords" content="{% if page.keywords %}{{ page.keywords }}{% else %}{{ site.keywords }}{% endif %}">
+{% endif %}
+
 {% if site.serve_og_meta %}
   <!-- OpenGraph -->
-  <meta property="og:site_name" content="{{ title }}">
+  <meta property="og:site_name" content="{{ site_title }}">
   <meta property="og:type" content="{% if is_blog_post %}article{% else %}website{% endif %}">
-  <meta property="og:title" content="{% if page.title and page.url != '/' %}{{ page.title }} | {{ title }}{% else %}{{ title }}{% endif %}">
-  <meta property="og:url" content="{{ page.url | prepend: site.baseurl | prepend: site.url | remove_first: 'index.html' }}">
-  <meta property="og:description" content="{% if page.description %}{{ page.description }}{% else %}{{ site.description }}{% endif %}">
-  {% assign resolved_og_image = page.og_image | default: page.thumbnail | default: page.img | default: site.og_image %}
-  {% if resolved_og_image %}
-    {% if resolved_og_image contains '://' %}
-      {% assign resolved_og_image_url = resolved_og_image %}
-    {% else %}
-      {% assign resolved_og_image_url = resolved_og_image | prepend: '/' | replace: '//', '/' | prepend: site.baseurl | prepend: site.url %}
-    {% endif %}
+  <meta property="og:title" content="{{ display_title }}">
+  <meta property="og:url" content="{{ canonical_url }}">
+  <meta property="og:description" content="{{ meta_description }}">
+  {% if resolved_og_image_url %}
     <meta property="og:image" content="{{ resolved_og_image_url }}">
   {% endif %}
   <meta property="og:locale" content="{{ site.lang }}">
@@ -94,10 +95,10 @@
   {% endif %}
 
   <!-- Twitter card -->
-  <meta name="twitter:card" content="{% if resolved_og_image %}summary_large_image{% else %}summary{% endif %}">
-  <meta name="twitter:title" content="{% if page.title %}{{ page.title }}{% else %}{{ title }}{% endif %}">
-  <meta name="twitter:description" content="{% if page.description %}{{ page.description }}{% else %}{{ site.description }}{% endif %}">
-  {% if resolved_og_image %}
+  <meta name="twitter:card" content="{% if resolved_og_image_url %}summary_large_image{% else %}summary{% endif %}">
+  <meta name="twitter:title" content="{{ page_title_only }}">
+  <meta name="twitter:description" content="{{ meta_description }}">
+  {% if resolved_og_image_url %}
     <meta name="twitter:image" content="{{ resolved_og_image_url }}">
   {% endif %}
   {% if site.x_username %}
@@ -260,20 +261,20 @@
     {
         "@context": "https://schema.org",
         "@type": "{% if is_blog_post %}BlogPosting{% else %}WebSite{% endif %}",
-        "url": "{{ page.url | prepend: site.baseurl | prepend: site.url | remove_first: 'index.html' }}",
-        "headline": "{% if page.title %}{{ page.title }}{% else %}{{ site.title }}{% endif %}",
-        "name": "{% if page.title %}{{ page.title }}{% else %}{{ site.title }}{% endif %}",
-        "description": "{% if page.description %}{{ page.description }}{% else if site.description %}{{ site.description }}{% endif %}",
+        "url": "{{ canonical_url }}",
+        "headline": "{{ page_title_only }}",
+        "name": "{{ page_title_only }}",
+        "description": "{{ meta_description }}",
         "inLanguage": "{{ site.lang }}",
         {% if resolved_og_image_url %}
         "image": "{{ resolved_og_image_url }}",
         {% endif %}
         {% if is_blog_post %}
         {% if page.date %}"datePublished": "{{ page.date | date_to_xmlschema }}",{% endif %}
-        {% if page.last_modified_at %}"dateModified": "{{ page.last_modified_at | date_to_xmlschema }}",{% else if page.date %}"dateModified": "{{ page.date | date_to_xmlschema }}",{% endif %}
+        {% if page.last_modified_at %}"dateModified": "{{ page.last_modified_at | date_to_xmlschema }}",{% elsif page.date %}"dateModified": "{{ page.date | date_to_xmlschema }}",{% endif %}
         "mainEntityOfPage": {
             "@type": "WebPage",
-            "@id": "{{ page.url | prepend: site.baseurl | prepend: site.url }}"
+            "@id": "{{ page_url_full }}"
         },
         "publisher": {
             "@type": "Person",
@@ -286,8 +287,7 @@
             "name": "{{ author_name }}",
             "url": "{{ site.url }}"{% if sameaslinks != blank %},
             "sameAs": {{ sameaslinks | jsonify }}{% endif %}
-        }{% if sameaslinks != blank and is_blog_post == false %},
-        "sameAs": {{ sameaslinks | jsonify }}{% endif %}
+        }
     }
   </script>
 {% endif %}

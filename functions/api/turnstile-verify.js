@@ -1,28 +1,17 @@
 // Cloudflare Pages Function: POST /api/turnstile-verify
-// Verifies a Turnstile token via siteverify and returns the result.
-// Pair with the client widget rendered by _includes/turnstile.liquid.
-//
-// Required env var (set in Cloudflare Pages → Settings → Environment Variables):
-//   TURNSTILE_SECRET   — secret key paired with the public site key.
-//
-// Request:
-//   POST /api/turnstile-verify
-//   Content-Type: application/x-www-form-urlencoded  OR  application/json
-//   Body must include `cf-turnstile-response` (or `token`) from the widget.
-//
-// Response: 200 { success: true, hostname, action, challenge_ts }
-//           403 { success: false, "error-codes": [...] }
-//           400 { success: false, "error-codes": ["missing-input-response"] }
+// Requires env var TURNSTILE_SECRET (Cloudflare Pages → Settings → Variables and Secrets).
+// Body: cf-turnstile-response (or token) — json or form-urlencoded.
 
 const SITEVERIFY = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
-const json = (body, status = 200) =>
+const json = (body, status = 200, extraHeaders = {}) =>
   new Response(JSON.stringify(body), {
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
       "cache-control": "no-store",
       "x-content-type-options": "nosniff",
+      ...extraHeaders,
     },
   });
 
@@ -71,4 +60,4 @@ export const onRequestPost = async ({ request, env }) => {
 };
 
 export const onRequest = () =>
-  json({ success: false, "error-codes": ["bad-request"] }, 405);
+  json({ success: false, "error-codes": ["bad-request"] }, 405, { allow: "POST" });
