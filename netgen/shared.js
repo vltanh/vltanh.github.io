@@ -2057,25 +2057,38 @@ function retypeset(target) {
 function bindRowNodeHover(gBars, viz, opts) {
   const sel = (opts && opts.rowSelector) || ".deg-bar-row";
   const attr = (opts && opts.idAttr) || "data-id";
-  function setRowHot(id, on) {
-    gBars.select(sel + "[" + attr + '="' + id + '"]').classed("hot", on);
+  // Highlight = dim-everything-else. Hovering a graph node or a bar row
+  // dims every other node, every non-incident edge, and every other
+  // row, leaving the focus + its incidents at full opacity.
+  function focusOn(id) {
+    const sid = String(id);
+    viz.eachNode(function (n) {
+      if (String(n.id) !== sid) viz.addNodeClass(n.id, "dim");
+    });
+    viz.eachEdge(function (e) {
+      const su = String(e.source.id != null ? e.source.id : e.source);
+      const sv = String(e.target.id != null ? e.target.id : e.target);
+      if (su !== sid && sv !== sid) viz.addEdgeClass(e.id, "dim");
+    });
+    gBars.selectAll(sel).each(function () {
+      if (this.getAttribute(attr) !== sid) this.classList.add("dim");
+    });
+  }
+  function focusClear() {
+    viz.eachNode(function (n) { viz.removeNodeClass(n.id, "dim"); });
+    viz.eachEdge(function (e) { viz.removeEdgeClass(e.id, "dim"); });
+    gBars.selectAll(sel).each(function () { this.classList.remove("dim"); });
   }
   gBars.on("mouseover", function (ev) {
     const el = ev.target.closest(sel);
-    if (!el) return;
-    const id = el.getAttribute(attr);
-    setRowHot(id, true);
-    viz.addNodeClass(id, "ringed");
+    if (el) focusOn(el.getAttribute(attr));
   });
   gBars.on("mouseout", function (ev) {
     const el = ev.target.closest(sel);
-    if (!el) return;
-    const id = el.getAttribute(attr);
-    setRowHot(id, false);
-    viz.removeNodeClass(id, "ringed");
+    if (el) focusClear();
   });
-  viz.onNodeHoverEnter(function (d) { setRowHot(d.id, true); viz.addNodeClass(d.id, "ringed"); });
-  viz.onNodeHoverLeave(function (d) { setRowHot(d.id, false); viz.removeNodeClass(d.id, "ringed"); });
+  viz.onNodeHoverEnter(function (d) { focusOn(d.id); });
+  viz.onNodeHoverLeave(function () { focusClear(); });
 }
 
 // ── Export ────────────────────────────────────────────────────
