@@ -291,7 +291,7 @@
   <div class="stage-num">generation · the \(K_{k+1}\) core</div>
   <h2>Same \(K_{k+1}\) seed as v1. Nothing else samples here.</h2>
   <p>Stage 2 calls exactly the same <code>gen_kec_core.generate_cluster</code> as v1, with one change: v2 passes <code>--no-sbm-overlay</code>, so the constructive pass ends with the cores + attach-by-availability and nothing more. No <code>gt.generate_sbm</code> here, no overlay, no dedup. <code>probs</code> and <code>deg</code> carry exactly the budget the construction used.</p>
-  <p>The walker below is the same per-arrival walk used on the <a href="./ec-sbm-v1.html#g-core">v1 page</a>: cluster-major sort, phase-1 arrivals auto-attach, phase-2 arrivals greedy-pick \(k\) partners by residual <code>int_deg</code> desc. Realization 1 is byte-verified against the shipped Python at <code>PYTHONHASHSEED=0</code>; <code>random</code> re-samples partner picks at the current arrival and onward, leaving earlier scaffolding frozen.</p>
+  <p>The walker below is the same per-arrival walk used on the <a href="./ec-sbm-v1.html#g-core">v1 page</a>: cluster-major sort, phase-1 arrivals auto-attach, phase-2 arrivals greedy-pick \(k\) partners by residual <code>int_deg</code> desc. Realization 1 is byte-verified against the shipped Python at <code>PYTHONHASHSEED=0</code>. <code>random step</code> re-samples partner picks at the current arrival only, leaving every other arrival frozen; <code>random all</code> draws a fresh universe across every greedy arrival.</p>
   <div class="graph" id="g-core">
     <div class="graph-chrome">
       <span id="g-core-stage">step 0 &middot; stripped</span>
@@ -303,8 +303,9 @@
       <button class="btn primary" id="g-core-next">next →</button>
       <button class="btn" id="g-core-reset">reset</button>
       <button class="btn" id="g-core-end">skip to end</button>
-      <button class="btn" id="g-core-reroll" title="re-sample partner picks at the current arrival only">random</button>
-      <span class="step-label" id="g-core-real">initial realization &middot; random re-samples from current arrival forward</span>
+      <button class="btn" id="g-core-rand-step" title="re-sample partner picks at the current arrival only">random step</button>
+      <button class="btn" id="g-core-rand-all"  title="re-sample partner picks for every greedy arrival">random all</button>
+      <span class="step-label" id="g-core-real">initial realization &middot; random step re-rolls this arrival; random all re-rolls every greedy arrival</span>
     </div>
     <div class="step-desc" id="g-core-desc"></div>
   </div>
@@ -1001,6 +1002,16 @@ window.MathJax = {
 
     let controller = null;
 
+    let rollMode = null;
+    const randStepBtn = document.getElementById("g-core-rand-step");
+    const randAllBtn  = document.getElementById("g-core-rand-all");
+
+    function currentStepHasVariant(step) {
+      if (step < 1) return false;
+      const t = TRACE[step - 1];
+      return t.mode === "greedy" && ATTACH_VARIANTS[t.node] !== undefined;
+    }
+
     function render(step) {
       viz.setEdges(edgesAt(step));
       viz.clearAllNodeClass("dim");
@@ -1015,9 +1026,18 @@ window.MathJax = {
       const sd = describeStep(step);
       descEl.innerHTML = sd.html;
       stageEl.textContent = sd.stage;
-      realEl.textContent = rollCount === 0
-        ? "initial realization · random re-samples from current arrival forward"
-        : `reroll #${rollCount} · arrivals at or after current re-sampled; earlier frozen`;
+      let realText;
+      if (rollCount === 0) {
+        realText = "initial realization · random step re-rolls this arrival; random all re-rolls every greedy arrival";
+      } else if (rollMode === "all") {
+        realText = `reroll #${rollCount} · all greedy arrivals re-sampled`;
+      } else {
+        realText = `reroll #${rollCount} · current arrival re-sampled; others frozen`;
+      }
+      realEl.textContent = realText;
+      if (step >= 1 && !currentStepHasVariant(step)) {
+        randStepBtn.disabled = true;
+      }
       if (window.MathJax && window.MathJax.typesetPromise) {
         window.MathJax.typesetPromise([descEl]).catch(() => {});
       }
@@ -1027,27 +1047,29 @@ window.MathJax = {
       prevBtn:    document.getElementById("g-core-prev"),
       nextBtn:    document.getElementById("g-core-next"),
       resetBtn:   document.getElementById("g-core-reset"),
+      endBtn:     document.getElementById("g-core-end"),
+      randStepBtn,
+      randAllBtn,
       labelCur:   document.getElementById("g-core-cur"),
       labelTotal: document.getElementById("g-core-total"),
       total:      TOTAL_ARRIVALS + 1,
       onRender:   render,
-    });
-    document.getElementById("g-core-end").addEventListener("click", () => {
-      controller.set(TOTAL_ARRIVALS);
-    });
-    document.getElementById("g-core-reroll").addEventListener("click", () => {
-      // Re-sample only the node introduced at the current step. Earlier
-      // and later arrivals stay frozen.
-      const S = controller.idx;
-      if (S < 1) return;
-      Object.keys(ATTACH_VARIANTS).forEach(n => {
-        if (INTRO_ARRIVAL[n] === S) {
+      onRandStep: (S) => {
+        if (S < 1 || !currentStepHasVariant(S)) return;
+        const u = TRACE[S - 1].node;
+        ATTACH_IDX[u] = (ATTACH_IDX[u] + 1) % ATTACH_VARIANTS[u].length;
+        rollCount += 1;
+        rollMode = "step";
+        TRACE = buildTrace();
+      },
+      onRandAll: () => {
+        Object.keys(ATTACH_VARIANTS).forEach(n => {
           ATTACH_IDX[n] = (ATTACH_IDX[n] + 1) % ATTACH_VARIANTS[n].length;
-        }
-      });
-      rollCount += 1;
-      TRACE = buildTrace();
-      render(controller.idx);
+        });
+        rollCount += 1;
+        rollMode = "all";
+        TRACE = buildTrace();
+      },
     });
   })();
 
