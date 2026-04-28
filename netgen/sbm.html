@@ -484,27 +484,42 @@ window.MathJax = {
     return viz;
   }
 
-  // Hover focus shared by g-deg + g4: hovering a graph node or a bar
-  // row dims everything except the node, its incident edges, and its row.
+  // Hover focus shared by g-deg + g4. Hovering a graph node or a bar
+  // row dims everything that isn't the focus + its incidents, and adds
+  // .hi to the focus + its incidents + the matching row so the active
+  // side picks up a thicker stroke (matches every other gx-panel hover
+  // on the site).
   function bindFocusLink(viz, gBars) {
     function focusOn(id) {
       const sid = String(id);
       viz.eachNode(function (n) {
-        if (String(n.id) !== sid) viz.addNodeClass(n.id, "dim");
+        if (String(n.id) === sid) viz.addNodeClass(n.id, "hi");
+        else viz.addNodeClass(n.id, "dim");
       });
       viz.eachEdge(function (e) {
         const su = String(e.source.id || e.source);
         const sv = String(e.target.id || e.target);
-        if (su !== sid && sv !== sid) viz.addEdgeClass(e.id, "dim");
+        if (su === sid || sv === sid) viz.addEdgeClass(e.id, "hi");
+        else viz.addEdgeClass(e.id, "dim");
       });
       gBars.selectAll(".deg-bar-row").each(function () {
-        if (this.getAttribute("data-id") !== sid) this.classList.add("dim");
+        if (this.getAttribute("data-id") === sid) this.classList.add("hi");
+        else this.classList.add("dim");
       });
     }
     function focusClear() {
-      viz.eachNode(function (n) { viz.removeNodeClass(n.id, "dim"); });
-      viz.eachEdge(function (e) { viz.removeEdgeClass(e.id, "dim"); });
-      gBars.selectAll(".deg-bar-row").each(function () { this.classList.remove("dim"); });
+      viz.eachNode(function (n) {
+        viz.removeNodeClass(n.id, "dim");
+        viz.removeNodeClass(n.id, "hi");
+      });
+      viz.eachEdge(function (e) {
+        viz.removeEdgeClass(e.id, "dim");
+        viz.removeEdgeClass(e.id, "hi");
+      });
+      gBars.selectAll(".deg-bar-row").each(function () {
+        this.classList.remove("dim");
+        this.classList.remove("hi");
+      });
     }
     gBars.on("mouseover", function (ev) {
       const el = ev.target.closest(".deg-bar-row");
@@ -733,10 +748,14 @@ window.MathJax = {
       });
       viz.clearAllEdgeClass("hi");
       viz.clearAllEdgeClass("dim");
+      viz.clearAllNodeClass("hi");
+      viz.clearAllNodeClass("dim");
     }
     function focusOnPair(bu, bv) {
-      // Dim every non-matching edge + every non-matching cell, hi the
-      // (bu,bv) / (bv,bu) cells + every edge contributing to the cell.
+      // Dim everything that doesn't match; thicken the (bu,bv)/(bv,bu)
+      // cells, edges in those cells, and every node incident to a
+      // matching edge. Same dim-others + .hi pattern bindRowNodeHover
+      // uses on the bar panels.
       const wantBu = bu, wantBv = bv;
       gm.querySelectorAll(".cell").forEach(c => {
         if (c.classList.contains("head")) return;
@@ -744,10 +763,16 @@ window.MathJax = {
         const match = (cu === wantBu && cv === wantBv) || (cu === wantBv && cv === wantBu);
         c.classList.add(match ? "hi" : "dim");
       });
+      const liveNodes = new Set();
       EDGES.forEach(e => {
         const ru = blockIdx(e.u), rv = blockIdx(e.v);
         const match = (ru === wantBu && rv === wantBv) || (ru === wantBv && rv === wantBu);
         viz.addEdgeClass("e2-" + e.u + "-" + e.v, match ? "hi" : "dim");
+        if (match) { liveNodes.add(String(e.u)); liveNodes.add(String(e.v)); }
+      });
+      viz.eachNode(n => {
+        if (liveNodes.has(String(n.id))) viz.addNodeClass(n.id, "hi");
+        else viz.addNodeClass(n.id, "dim");
       });
     }
     function edgesInPair(bu, bv) {
