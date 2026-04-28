@@ -1228,24 +1228,25 @@ window.MathJax = {
         return;
       }
       const op = R.clusterRewireOps[step - 1];
+      const stateBefore = clusterStateAfter(R, step - 1);
       const stateAfter = clusterStateAfter(R, step);
       const four = new Set();
       [op.p1, op.p2, op.newp1, op.newp2].forEach(p => {
         if (p) { four.add(p[0]); four.add(p[1]); }
       });
-      if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
+      if (settleTimer) { settleTimer.cancel(); settleTimer = null; }
       const isForward = step === lastStep + 1;
       if (isForward && op.success) {
-        const ghosts = [op.p1];
-        if (op.p2) ghosts.push(op.p2);
-        viz.setEdges(buildEdges(stateAfter, ghosts));
-        clearDimPick(viz);
-        four.forEach(id => viz.addNodeClass(id, "pick"));
-        dimAllExcept(viz, [...four]);
-        settleTimer = setTimeout(() => {
-          viz.setEdges(buildEdges(stateAfter, null));
-          settleTimer = null;
-        }, 380);
+        settleTimer = NETGEN.rewireSwapAnimate({
+          viz,
+          before: buildEdges(stateBefore, null),
+          after: buildEdges(stateAfter, null),
+          cuts: [op.p1].concat(op.p2 ? [op.p2] : []),
+          places: [op.newp1, op.newp2].filter(Boolean),
+          four: [...four],
+          edgeIdPrefix: "cr-swap-" + step,
+          settle: () => { settleTimer = null; },
+        });
       } else {
         viz.setEdges(buildEdges(stateAfter, null));
         clearDimPick(viz);
@@ -1404,29 +1405,33 @@ window.MathJax = {
           R.globalRewireOps.length + " bg-pool collision op" +
           (R.globalRewireOps.length === 1 ? "" : "s") +
           " ahead. Red-dashed = self-loop, parallel, or cluster duplicate.";
-        if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
+        if (settleTimer) { settleTimer.cancel(); settleTimer = null; }
         lastStep = step;
         return;
       }
       const op = R.globalRewireOps[step - 1];
+      const stateBefore = bgStateAfter(R, step - 1);
       const stateAfter = bgStateAfter(R, step);
       const four = new Set();
       [op.p1, op.p2, op.newp1, op.newp2].forEach(p => {
         if (p) { four.add(p[0]); four.add(p[1]); }
       });
-      if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
+      if (settleTimer) { settleTimer.cancel(); settleTimer = null; }
       const isForward = step === lastStep + 1;
-      if (isForward && op.success) {
-        const ghosts = [op.p1];
-        if (op.p2) ghosts.push(op.p2);
-        viz.setEdges(buildEdges(stateAfter, ghosts));
-        clearDimPick(viz);
-        four.forEach(id => viz.addNodeClass(id, "pick"));
-        dimAllExcept(viz, [...four]);
-        settleTimer = setTimeout(() => {
-          viz.setEdges(buildEdges(stateAfter, null));
-          settleTimer = null;
-        }, 380);
+      const places = [];
+      if (op.placedNewp1 && op.newp1) places.push(op.newp1);
+      if (op.placedNewp2 && op.newp2) places.push(op.newp2);
+      if (isForward && op.success && places.length > 0) {
+        settleTimer = NETGEN.rewireSwapAnimate({
+          viz,
+          before: buildEdges(stateBefore, null),
+          after: buildEdges(stateAfter, null),
+          cuts: [op.p1].concat(op.p2 ? [op.p2] : []),
+          places,
+          four: [...four],
+          edgeIdPrefix: "br-swap-" + step,
+          settle: () => { settleTimer = null; },
+        });
       } else {
         viz.setEdges(buildEdges(stateAfter, null));
         clearDimPick(viz);

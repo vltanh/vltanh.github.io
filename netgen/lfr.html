@@ -917,26 +917,41 @@ window.MathJax = {
           });
         });
       }
-      if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
+      if (settleTimer) { settleTimer.cancel(); settleTimer = null; }
       const isForward = step === lastStep + 1;
       const cleanupOp = !inPair ? trace.rewireOps[step - total1 - 1] : null;
       const isSwap = cleanupOp && cleanupOp.success;
       if (isForward && isSwap) {
-        const ghosts = [cleanupOp.p1];
-        if (cleanupOp.p2) ghosts.push(cleanupOp.p2);
-        const ghostEdges = ghosts.map((g, k) => ({
-          u: g[0], v: g[1], color: COL.edge_drop, w: 1.4,
-          id: "lfr-cm-ghost-" + step + "-" + k, classes: "ghost",
-        }));
-        viz.setEdges(edges.concat(ghostEdges));
-        settleTimer = setTimeout(() => {
-          viz.setEdges(edges);
-          settleTimer = null;
-        }, 380);
+        // Build before-state by reverting this op on top of state.
+        const stateBeforeMap = stateAfter(trace, step - 1);
+        const beforeEdges = [];
+        let bi = 0;
+        stateBeforeMap.edges.forEach(e => {
+          beforeEdges.push({
+            u: e.u, v: e.v,
+            color: e.bad ? COL.edge_drop : COL.edge_inter,
+            w: 1.5,
+            id: "lfr-cm-pre-" + (bi++),
+          });
+        });
+        const fourSet = [];
+        [cleanupOp.p1, cleanupOp.p2, cleanupOp.newp1, cleanupOp.newp2].forEach(p => {
+          if (p) { fourSet.push(p[0]); fourSet.push(p[1]); }
+        });
+        settleTimer = NETGEN.rewireSwapAnimate({
+          viz,
+          before: beforeEdges,
+          after: edges,
+          cuts: [cleanupOp.p1].concat(cleanupOp.p2 ? [cleanupOp.p2] : []),
+          places: [cleanupOp.newp1, cleanupOp.newp2].filter(Boolean),
+          four: fourSet,
+          edgeIdPrefix: "lfr-cm-swap-" + step,
+          settle: () => { settleTimer = null; },
+        });
       } else {
         viz.setEdges(edges);
+        clearDimPick();
       }
-      clearDimPick();
       lastStep = step;
       let label, desc;
       if (inPair) {
@@ -1217,24 +1232,36 @@ window.MathJax = {
           "Cut " + cuts + "; place " + places + ". var_mate " +
           op.varMateBefore + " &rarr; " + op.varMateAfter + ".";
       }
-      if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
+      if (settleTimer) { settleTimer.cancel(); settleTimer = null; }
       const isForward = step === lastStep + 1;
       if (isForward && step > 0) {
         const op = r.mateOps[step - 1];
-        const ghosts = op.cuts.map((c, k) => ({
-          u: c[0] + 1, v: c[1] + 1, color: COL.edge_drop, w: 1.4,
-          id: "lfr-mr-ghost-" + step + "-" + k, classes: "ghost",
-        }));
-        viz.setEdges(allEdges.concat(ghosts));
-        clearDimPick();
-        if (four.size > 0) {
-          four.forEach(id => viz.addNodeClass(id, "pick"));
-          dimAllExcept([...four]);
-        }
-        settleTimer = setTimeout(() => {
-          viz.setEdges(allEdges);
-          settleTimer = null;
-        }, 380);
+        // Build before-state by reverting this op (drop op.places, restore op.cuts).
+        const stateBeforeMap = stateAfter(r, step - 1);
+        const beforeExt = [];
+        let bei = 0;
+        stateBeforeMap.forEach(([a, b]) => {
+          const u = a + 1, v = b + 1;
+          const sameCluster = LFRKernel.theyAreMate(a, b, r.memberList);
+          beforeExt.push({
+            u, v,
+            color: sameCluster ? COL.edge_drop : COL.edge_inter,
+            w: sameCluster ? 1.6 : 1.5,
+            id: "lfr-mr-pre-" + (bei++),
+            classes: sameCluster ? "pick" : "",
+          });
+        });
+        const beforeAll = intraEdgeViz.concat(beforeExt);
+        settleTimer = NETGEN.rewireSwapAnimate({
+          viz,
+          before: beforeAll,
+          after: allEdges,
+          cuts: op.cuts.map(c => [c[0] + 1, c[1] + 1]),
+          places: op.places.map(p => [p[0] + 1, p[1] + 1]),
+          four: [...four],
+          edgeIdPrefix: "lfr-mr-swap-" + step,
+          settle: () => { settleTimer = null; },
+        });
       } else {
         viz.setEdges(allEdges);
         clearDimPick();

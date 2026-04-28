@@ -399,7 +399,7 @@
   // (lines 858-939): rewire any multi-edges that emerge when merging
   // into E; drop after 2*|E[i]| stagnation.
   function buildSubgraph(args) {
-    const { nodes, degrees, rng, E } = args;
+    const { nodes, degrees, rng, E, traceTest } = args;
     const n = nodes.length;
     if (degrees.length < 3 || n < 3) {
       // canonical errors out: "communities should have only 2 nodes"
@@ -408,6 +408,8 @@
     // en[i] = local adjacency of cluster-internal index i (0..n-1)
     const en = [];
     for (let i = 0; i < n; i++) en.push(new Set());
+    const phase2Ops = traceTest ? [] : null;
+    const phase3Ops = traceTest ? [] : null;
 
     // ---- Phase 1: deterministic multimap seed ----
     // Canonical std::multimap<int,int> sorted by key asc. We model with
@@ -515,7 +517,30 @@
           en[nodeH].delete(randomMate);
           en[nodeH].add(oldNode);
           en[oldNode].add(nodeH);
+          if (phase2Ops) phase2Ops.push({
+            run, nodeA, randomMate, oldNode, nodeH,
+            cuts: [
+              [Math.min(nodes[nodeA], nodes[oldNode]), Math.max(nodes[nodeA], nodes[oldNode])],
+              [Math.min(nodes[randomMate], nodes[nodeH]), Math.max(nodes[randomMate], nodes[nodeH])],
+            ],
+            places: [
+              [Math.min(nodes[nodeA], nodes[randomMate]), Math.max(nodes[nodeA], nodes[randomMate])],
+              [Math.min(nodes[oldNode], nodes[nodeH]), Math.max(nodes[oldNode], nodes[nodeH])],
+            ],
+          });
         }
+      }
+    }
+
+    // Snapshot the local en at end of Phase 2 — walker uses this as
+    // the seed state for Phase 3's global-merge step.
+    let phase2FinalEn = null;
+    if (traceTest) {
+      phase2FinalEn = [];
+      for (let i = 0; i < n; i++) {
+        en[i].forEach(j => {
+          if (i < j) phase2FinalEn.push([nodes[i], nodes[j]]);
+        });
       }
     }
 
@@ -574,18 +599,35 @@
             E[nodeHGlobal].add(b);
             E[b].add(nodeHGlobal);
             E[a].add(randomMateGlobal);
+            if (phase3Ops) phase3Ops.push({
+              dupEdge: [Math.min(a, b), Math.max(a, b)],
+              cuts: [[Math.min(randomMateGlobal, nodeHGlobal), Math.max(randomMateGlobal, nodeHGlobal)]],
+              places: [
+                [Math.min(a, randomMateGlobal), Math.max(a, randomMateGlobal)],
+                [Math.min(b, nodeHGlobal), Math.max(b, nodeHGlobal)],
+              ],
+              success: true,
+            });
             multipleResolved += 1;
             break;
           }
         }
         if (stopperMl === stopperLimit) {
+          if (phase3Ops) phase3Ops.push({
+            dupEdge: [Math.min(a, b), Math.max(a, b)],
+            cuts: [], places: [],
+            success: false, reason: "stopper-exhausted",
+          });
           multipleDropped += 1;
           break;
         }
       }
     });
 
-    return { ok: true, multipleResolved, multipleDropped };
+    return {
+      ok: true, multipleResolved, multipleDropped,
+      phase2Ops, phase2FinalEn, phase3Ops,
+    };
   }
 
   // Faithful port of benchm.cpp's build_subgraphs (lines 954-1140):

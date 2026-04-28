@@ -1264,51 +1264,37 @@ window.MathJax = {
       [op.p1, op.p2, op.newp1, op.newp2].forEach(p => {
         if (p) { four.add(p[0]); four.add(p[1]); }
       });
-      // Forward + successful: 2-frame transition. Frame 1 keeps the cut
-      // pair rendered as a ghost-dashed pair while the new edges fade
-      // in with the .fresh class. Frame 2 settles to stateAfter without
-      // ghosts. Backward / random-jump skips straight to stateAfter so
-      // the user does not see a phantom flash.
-      if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
-      const isForward = step === lastStep + 1;
-      function buildEdges(state, ghosts) {
+      function buildEdges(state) {
         const out = [];
         let i = 0;
         state.forEach(e => {
-          const baseColor = COL.edge_intra[e.cluster] || COL.edge_stage2;
-          const isNew = op.success && (
-            (op.newp1 && keyOf(op.newp1[0], op.newp1[1]) === keyOf(e.u, e.v)) ||
-            (op.newp2 && keyOf(op.newp2[0], op.newp2[1]) === keyOf(e.u, e.v))
-          );
           out.push({
             u: e.u, v: e.v,
-            color: e.bad ? COL.edge_drop : baseColor,
+            color: e.bad ? COL.edge_drop : (COL.edge_intra[e.cluster] || COL.edge_stage2),
             w: 1.5,
             id: "cr-state-" + (i++),
-            classes: isNew ? "fresh" : (e.bad ? "pick" : ""),
-          });
-        });
-        (ghosts || []).forEach((g, k) => {
-          out.push({
-            u: g[0], v: g[1], color: COL.edge_drop, w: 1.4,
-            id: "cr-ghost-" + step + "-" + k, classes: "ghost",
+            classes: e.bad ? "pick" : "",
           });
         });
         return out;
       }
+      const isForward = step === lastStep + 1;
+      if (settleTimer) { settleTimer.cancel(); settleTimer = null; }
       if (isForward && op.success) {
-        const ghosts = [op.p1];
-        if (op.p2) ghosts.push(op.p2);
-        viz.setEdges(buildEdges(stateAfter, ghosts));
-        clearDimPick(viz);
-        four.forEach(id => viz.addNodeClass(id, "pick"));
-        dimAllExcept(viz, [...four]);
-        settleTimer = setTimeout(() => {
-          viz.setEdges(buildEdges(stateAfter, null));
-          settleTimer = null;
-        }, 380);
+        // 3-phase animation: dim everything but the 4 endpoints,
+        // boldface + cut the chosen edges, then place the new ones.
+        settleTimer = NETGEN.rewireSwapAnimate({
+          viz,
+          before: buildEdges(stateBefore),
+          after: buildEdges(stateAfter),
+          cuts: [op.p1].concat(op.p2 ? [op.p2] : []),
+          places: [op.newp1, op.newp2].filter(Boolean),
+          four: [...four],
+          edgeIdPrefix: "cr-swap-" + step,
+          settle: () => { settleTimer = null; },
+        });
       } else {
-        viz.setEdges(buildEdges(stateAfter, null));
+        viz.setEdges(buildEdges(stateAfter));
         clearDimPick(viz);
         four.forEach(id => viz.addNodeClass(id, "pick"));
         dimAllExcept(viz, [...four]);
@@ -1581,51 +1567,44 @@ window.MathJax = {
       }
 
       const op = R.globalRewireOps[step - 1];
+      const stateBefore = stateAtStep(R, step - 1);
       const stateAfter = stateAtStep(R, step);
       const four = new Set();
       [op.p1, op.p2, op.newp1, op.newp2].forEach(p => {
         if (p) { four.add(p[0]); four.add(p[1]); }
       });
-      if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
-      const isForward = step === lastStep + 1;
-      function buildEdges(state, ghosts) {
+      function buildEdges(state) {
         const out = backdrop.slice();
         let i = 0;
         state.forEach(e => {
-          const placedKey = keyOf(e.u, e.v);
-          const isNew = op.success && (
-            (op.placedNewp1 && op.newp1 && keyOf(op.newp1[0], op.newp1[1]) === placedKey) ||
-            (op.placedNewp2 && op.newp2 && keyOf(op.newp2[0], op.newp2[1]) === placedKey)
-          );
           out.push({
             u: e.u, v: e.v,
             color: e.bad ? COL.edge_drop : COL.edge_inter,
             w: 1.5,
             id: "br-state-" + (i++),
-            classes: isNew ? "fresh" : (e.bad ? "pick" : ""),
-          });
-        });
-        (ghosts || []).forEach((g, k) => {
-          out.push({
-            u: g[0], v: g[1], color: COL.edge_drop, w: 1.4,
-            id: "br-ghost-" + step + "-" + k, classes: "ghost",
+            classes: e.bad ? "pick" : "",
           });
         });
         return out;
       }
-      if (isForward && op.success) {
-        const ghosts = [op.p1];
-        if (op.p2) ghosts.push(op.p2);
-        viz.setEdges(buildEdges(stateAfter, ghosts));
-        clearDimPick(viz);
-        four.forEach(id => viz.addNodeClass(id, "pick"));
-        dimAllExcept(viz, [...four]);
-        settleTimer = setTimeout(() => {
-          viz.setEdges(buildEdges(stateAfter, null));
-          settleTimer = null;
-        }, 380);
+      const isForward = step === lastStep + 1;
+      if (settleTimer) { settleTimer.cancel(); settleTimer = null; }
+      const places = [];
+      if (op.placedNewp1 && op.newp1) places.push(op.newp1);
+      if (op.placedNewp2 && op.newp2) places.push(op.newp2);
+      if (isForward && op.success && places.length > 0) {
+        settleTimer = NETGEN.rewireSwapAnimate({
+          viz,
+          before: buildEdges(stateBefore),
+          after: buildEdges(stateAfter),
+          cuts: [op.p1].concat(op.p2 ? [op.p2] : []),
+          places,
+          four: [...four],
+          edgeIdPrefix: "br-swap-" + step,
+          settle: () => { settleTimer = null; },
+        });
       } else {
-        viz.setEdges(buildEdges(stateAfter, null));
+        viz.setEdges(buildEdges(stateAfter));
         clearDimPick(viz);
         four.forEach(id => viz.addNodeClass(id, "pick"));
         dimAllExcept(viz, [...four]);

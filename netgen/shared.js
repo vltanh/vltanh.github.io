@@ -866,6 +866,103 @@ function fitViewBoxAttr(opts) {
   return `${x} ${y} ${side} ${side}`;
 }
 
+// 3-phase rewire-swap animator shared by every walker that pairs the
+// edge-switch animation with a per-op trace. opts: { viz, before,
+// after, cuts, places, four, edgeIdPrefix, settle }.
+//   before / after: edge arrays (each entry { u, v, color, w, id, classes })
+//                   for the state before / after the swap. Caller
+//                   builds these from the kernel trace.
+//   cuts:           [[u,v], ...] edges being removed by this op.
+//   places:         [[u,v], ...] edges being added by this op.
+//   four:           array of node ids participating (2 or 4).
+//   edgeIdPrefix:   string used to prefix the swap-cut / swap-place
+//                   ids so they don't collide across panels.
+//   settle:         optional callback after the final settle frame.
+// Returns a cancel handle: { cancel() }. Calling cancel before the
+// animation finishes drops the timers and snaps to `after`.
+function rewireSwapAnimate(opts) {
+  const { viz, before, after, cuts, places, four, edgeIdPrefix } = opts;
+  const settle = opts.settle || function () {};
+  const ID = edgeIdPrefix || "swap";
+
+  // Phase 1 (200ms): dim everything except the 4 endpoints, render the
+  // before-state with the cut edges replaced by 'swap-pick' boldface
+  // versions so the user sees what's about to break.
+  const cutKey = (a, b) => (a < b ? a + "|" + b : b + "|" + a);
+  const cutKeys = new Set(cuts.map(c => cutKey(c[0], c[1])));
+  const beforeMinusCuts = before.filter(e => !cutKeys.has(cutKey(e.u, e.v)));
+  const pickEdges = cuts.map((c, k) => ({
+    u: c[0], v: c[1], color: "#7e9b6d",
+    w: 3.6, id: ID + "-pick-" + k, classes: "swap-pick",
+  }));
+  viz.setEdges(beforeMinusCuts.concat(pickEdges));
+  if (viz.clearAllNodeClass) {
+    viz.clearAllNodeClass("dim");
+    viz.clearAllNodeClass("pick");
+    viz.clearAllNodeClass("swap-pick");
+  }
+  const fourSet = new Set((four || []).map(x => String(x)));
+  if (viz.eachNode) {
+    viz.eachNode(n => {
+      if (fourSet.has(String(n.id))) {
+        viz.addNodeClass(n.id, "swap-pick");
+      } else {
+        viz.addNodeClass(n.id, "dim");
+      }
+    });
+  }
+  if (viz.eachEdge) {
+    viz.eachEdge(e => viz.addEdgeClass(e.id, "dim-strong"));
+    pickEdges.forEach(e => viz.removeEdgeClass(e.id, "dim-strong"));
+  }
+
+  // Phase 2 (400ms): swap animation. Cut edges run vizSwapCut; place
+  // edges run vizSwapPlace. Both are inserted into the edge list with
+  // the special classes so CSS keyframes pick them up on insertion.
+  const t1 = setTimeout(() => {
+    const cutAnim = cuts.map((c, k) => ({
+      u: c[0], v: c[1], color: "#7e9b6d",
+      w: 3.6, id: ID + "-cut-" + k, classes: "swap-cut",
+    }));
+    const placeAnim = places.map((p, k) => ({
+      u: p[0], v: p[1], color: "#3559a0",
+      w: 3.4, id: ID + "-place-" + k, classes: "swap-place",
+    }));
+    viz.setEdges(beforeMinusCuts.concat(cutAnim, placeAnim));
+    if (viz.eachEdge) {
+      viz.eachEdge(e => {
+        if (!String(e.id).startsWith(ID + "-cut-") &&
+            !String(e.id).startsWith(ID + "-place-")) {
+          viz.addEdgeClass(e.id, "dim-strong");
+        }
+      });
+    }
+  }, 220);
+
+  // Phase 3 (post-settle): drop the animation overlays + un-dim.
+  const t2 = setTimeout(() => {
+    viz.setEdges(after);
+    if (viz.clearAllNodeClass) {
+      viz.clearAllNodeClass("dim");
+      viz.clearAllNodeClass("pick");
+      viz.clearAllNodeClass("swap-pick");
+    }
+    settle();
+  }, 680);
+
+  return {
+    cancel() {
+      clearTimeout(t1); clearTimeout(t2);
+      viz.setEdges(after);
+      if (viz.clearAllNodeClass) {
+        viz.clearAllNodeClass("dim");
+        viz.clearAllNodeClass("pick");
+        viz.clearAllNodeClass("swap-pick");
+      }
+    },
+  };
+}
+
 // ── Export ────────────────────────────────────────────────────
 global.NETGEN = {
   POSITIONS, NODES, EDGES, CLUSTER_OF, DEGREES, DEGREES_EXCL, MINCUTS,
@@ -876,6 +973,7 @@ global.NETGEN = {
   makeTooltip, scrubSlider, stepController, toggle,
   linksRow, kinSection,
   fitViewBoxAttr,
+  rewireSwapAnimate,
 };
 
 })(window);
