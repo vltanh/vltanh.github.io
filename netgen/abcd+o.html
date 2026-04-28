@@ -605,7 +605,30 @@ window.MathJax = {
         });
       });
     });
+    function mapPair(p) {
+      if (!p) return null;
+      return [PAGE_NODE_BY_KIDX[p[0] - 1], PAGE_NODE_BY_KIDX[p[1] - 1]];
+    }
+    const clusterRewireOps = [];
+    cm.stages.perCluster.forEach(stage => {
+      const cname = NAMED_CLUSTER_OF_KERNEL[stage.cluster];
+      if (!cname || !stage.rewireOps) return;
+      stage.rewireOps.forEach(op => {
+        clusterRewireOps.push({
+          cluster: cname,
+          p1: mapPair(op.p1), p2: mapPair(op.p2),
+          newp1: mapPair(op.newp1), newp2: mapPair(op.newp2),
+          src: op.src, success: !!op.success,
+        });
+      });
+    });
     const g = cm.stages.global;
+    const globalRewireOps = (g.rewireOps || []).map(op => ({
+      p1: mapPair(op.p1), p2: mapPair(op.p2),
+      newp1: mapPair(op.newp1), newp2: mapPair(op.newp2),
+      src: op.src, success: !!op.success,
+      placedNewp1: !!op.placedNewp1, placedNewp2: !!op.placedNewp2,
+    }));
     const bgPre = g.prePairs.map(([a, b, loop, multi, crossDup]) => {
       const u = PAGE_NODE_BY_KIDX[a - 1], v = PAGE_NODE_BY_KIDX[b - 1];
       return {
@@ -641,6 +664,7 @@ window.MathJax = {
     const RR = {
       split, outliers, eligible, threshold,
       clusterPre, clusterPost, bgPre, bgPost, finalEdges, outDeg,
+      clusterRewireOps, globalRewireOps,
       residueCount: cm.residueAfter,
     };
     REAL_CACHE.set(key, RR);
@@ -950,8 +974,87 @@ window.MathJax = {
     update();
   })();
 
-  // ── Step-through ──
+  // ── Step-through: per-pair + per-op walker ──
+  // Combined trace: 1 init step, then one entry per cluster pre-pair,
+  // then per cluster rewire op, then per bg pre-pair, then per bg rewire
+  // op. Each step rebuilds the cumulative state. The 4 sub-phases keep
+  // their semantics from the old aggregate version but open up
+  // collision-by-collision walking. Highlight rules: pre-pair steps
+  // mark the 2 endpoints just paired; rewire-op steps mark the up to 4
+  // endpoints touched by the swap and dim the rest.
   let cmController = null;
+  function dimAllExcept(viz, keepIds) {
+    const keep = new Set((keepIds || []).map(Number));
+    viz.eachNode(n => {
+      const id = parseInt(n.id, 10);
+      if (keep.has(id)) viz.removeNodeClass(n.id, "dim");
+      else viz.addNodeClass(n.id, "dim");
+    });
+  }
+  function clearDimPick(viz) {
+    viz.clearAllNodeClass("dim");
+    viz.clearAllNodeClass("pick");
+  }
+  function buildTrace(R) {
+    const t = [{ kind: "init" }];
+    R.clusterPre.forEach((e, i) => t.push({ kind: "cpair", idx: i, pair: e }));
+    R.clusterRewireOps.forEach((op, i) => t.push({ kind: "crewire", idx: i, op }));
+    R.bgPre.forEach((e, i) => t.push({ kind: "bgpair", idx: i, pair: e }));
+    R.globalRewireOps.forEach((op, i) => t.push({ kind: "bgrewire", idx: i, op }));
+    return t;
+  }
+  function clusterStateAfter(R, k) {
+    const map = new Map();
+    R.clusterPre.forEach(e => {
+      const kk = keyOf(e.u, e.v);
+      if (!map.has(kk)) map.set(kk, { u: e.u, v: e.v, cluster: e.cluster, bad: e.loop || e.multi });
+    });
+    for (let i = 0; i < k; i++) {
+      const op = R.clusterRewireOps[i];
+      if (!op) break;
+      map.delete(keyOf(op.p1[0], op.p1[1]));
+      if (op.success) {
+        if (op.p2) map.delete(keyOf(op.p2[0], op.p2[1]));
+        [op.newp1, op.newp2].forEach(np => {
+          if (!np) return;
+          map.set(keyOf(np[0], np[1]),
+            { u: np[0], v: np[1], cluster: op.cluster, bad: false });
+        });
+      }
+    }
+    return map;
+  }
+  function bgStateAfter(R, k) {
+    const map = new Map();
+    R.bgPre.forEach(e => {
+      const kk = keyOf(e.u, e.v);
+      if (!map.has(kk)) map.set(kk, {
+        u: e.u, v: e.v, isOO: e.isOO, isCO: e.isCO,
+        bad: e.loop || e.multi || e.crossDup,
+      });
+    });
+    for (let i = 0; i < k; i++) {
+      const op = R.globalRewireOps[i];
+      if (!op) break;
+      map.delete(keyOf(op.p1[0], op.p1[1]));
+      if (op.p2) map.delete(keyOf(op.p2[0], op.p2[1]));
+      [
+        [op.newp1, op.placedNewp1],
+        [op.newp2, op.placedNewp2],
+      ].forEach(([np, placed]) => {
+        if (!np || !placed) return;
+        const u = np[0], v = np[1];
+        const isOO = R.outliers.has(u) && R.outliers.has(v);
+        const isCO = R.outliers.has(u) !== R.outliers.has(v);
+        map.set(keyOf(u, v), { u, v, isOO, isCO, bad: false });
+      });
+    }
+    return map;
+  }
+  function bgEdgeColor(e) {
+    if (e.bad) return COL.edge_drop;
+    return e.isOO ? COL.signal : (e.isCO ? COL.orchid : COL.edge_inter);
+  }
   (function () {
     const viz = NETGEN.VIZ.init("g-cm-cy", { showLabels: true, edges: [] });
     NETGEN.makeTooltip(viz, document.getElementById("g-cm"));
@@ -959,6 +1062,8 @@ window.MathJax = {
     function render(step) {
       const xi = parseFloat(document.getElementById("xi-slider").value);
       const R = buildRealization(OUTLIER_SEED, U_SEED, STUB_SEED, xi);
+      const trace = buildTrace(R);
+      // Update node coloring + outlier marks every render.
       viz.nodesData.forEach(n => {
         const nid = parseInt(n.id, 10);
         const isOut = R.outliers.has(nid);
@@ -966,68 +1071,140 @@ window.MathJax = {
         if (isOut) viz.addNodeClass(n.id, "outlier-mark");
         else viz.removeNodeClass(n.id, "outlier-mark");
       });
+      // How many cluster pre-pairs / rewire ops / bg pre-pairs lie
+      // before this step? Used to pick the right state slice.
+      const counts = {
+        cpair: R.clusterPre.length,
+        crewire: R.clusterRewireOps.length,
+        bgpair: R.bgPre.length,
+        bgrewire: R.globalRewireOps.length,
+      };
+      let cpairUpto = 0, crewireUpto = 0, bgpairUpto = 0, bgrewireUpto = 0;
+      for (let i = 1; i <= step && i < trace.length; i++) {
+        const k = trace[i].kind;
+        if (k === "cpair") cpairUpto++;
+        else if (k === "crewire") crewireUpto++;
+        else if (k === "bgpair") bgpairUpto++;
+        else if (k === "bgrewire") bgrewireUpto++;
+      }
+      // Cluster phase rendering: pre-pairs partial during cpair phase,
+      // mutated by ops once crewire begins.
       const edges = [];
-      if (step === 1) {
-        R.clusterPre.forEach((e, i) => {
-          const bad = (e.loop || e.multi);
+      const four = new Set();
+      const showCpairPartial = crewireUpto === 0;
+      if (showCpairPartial) {
+        for (let i = 0; i < cpairUpto; i++) {
+          const e = R.clusterPre[i];
+          const bad = e.loop || e.multi;
           edges.push({
             u: e.u, v: e.v,
             color: bad ? COL.edge_drop : (COL.edge_intra[e.cluster] || COL.edge_stage2),
             w: bad ? 1.6 : 1.5,
             id: "cg-pre-" + i, classes: bad ? "cm-bad" : "",
           });
-        });
-      } else if (step >= 2) {
-        R.clusterPost.forEach((e, i) => {
+        }
+      } else {
+        const stateC = clusterStateAfter(R, crewireUpto);
+        let i = 0;
+        stateC.forEach(e => {
           edges.push({
             u: e.u, v: e.v,
-            color: COL.edge_intra[e.cluster] || COL.edge_stage2,
-            w: 1.5, id: "cg-post-" + i,
+            color: e.bad ? COL.edge_drop : (COL.edge_intra[e.cluster] || COL.edge_stage2),
+            w: 1.5,
+            id: "cg-state-" + (i++),
+            classes: e.bad ? "cm-bad" : "",
           });
         });
       }
-      if (step === 2) {
-        R.bgPre.forEach((e, i) => {
-          const bad = (e.loop || e.multi || e.crossDup);
-          edges.push({
-            u: e.u, v: e.v,
-            color: bad ? COL.edge_drop
-                   : (e.isOO ? COL.signal : e.isCO ? COL.orchid : COL.edge_inter),
-            w: bad ? 1.6 : (e.isOO ? 1.8 : 1.5),
-            id: "bg-pre-" + i, classes: bad ? "cm-bad" : "",
+      // Background phase rendering: only after every cluster op done.
+      const bgPhaseActive = crewireUpto >= counts.crewire && (bgpairUpto + bgrewireUpto) > 0;
+      if (bgPhaseActive) {
+        const showBgPairPartial = bgrewireUpto === 0;
+        if (showBgPairPartial) {
+          for (let i = 0; i < bgpairUpto; i++) {
+            const e = R.bgPre[i];
+            const bad = e.loop || e.multi || e.crossDup;
+            edges.push({
+              u: e.u, v: e.v, color: bgEdgeColor({ ...e, bad }),
+              w: bad ? 1.6 : (e.isOO ? 1.8 : 1.5),
+              id: "bg-pre-" + i, classes: bad ? "cm-bad" : "",
+            });
+          }
+        } else {
+          const stateB = bgStateAfter(R, bgrewireUpto);
+          let i = 0;
+          stateB.forEach(e => {
+            edges.push({
+              u: e.u, v: e.v, color: bgEdgeColor(e),
+              w: e.isOO ? 1.8 : 1.5,
+              id: "bg-state-" + (i++),
+              classes: e.bad ? "cm-bad" : "",
+            });
           });
-        });
-      } else if (step === 3) {
-        R.bgPost.forEach((e, i) => {
-          edges.push({
-            u: e.u, v: e.v,
-            color: (e.isOO ? COL.signal : e.isCO ? COL.orchid : COL.edge_inter),
-            w: e.isOO ? 1.8 : 1.5,
-            id: "bg-post-" + i,
-          });
-        });
+        }
       }
       viz.setEdges(edges);
+      clearDimPick(viz);
 
-      const STEP_LABELS = [
-        "step 0 · stubs ready, no edges",
-        "step 1 · cluster graphs pre-rewire",
-        "step 2 · clusters rewired, background pre-rewire",
-        "step 3 · both post-rewire",
-      ];
-      document.getElementById("g-cm-stage").textContent = STEP_LABELS[step];
-      const outList = [...R.outliers].sort((a,b) => a-b).join(", ");
-      const STEP_DESCS = [
-        "Outliers this realisation: <b>{" + outList + "}</b>. They have \\(\\hat y = 0\\), \\(\\hat z = w\\); every stub funds the background. Mega-cluster has no cluster-graph edges.",
-        "Cluster graphs G_2..G_k run configuration models on \\(\\hat y\\) stubs. Self-loops + parallels flagged red-dashed; next step runs the rewire.",
-        "Cluster graphs resolved. Background graph pre-rewire: every \\(\\hat z\\) stub pooled, paired. Red edges are outlier-outlier (permitted). Plum are clustered-outlier. Cobalt are non-outlier inter. Red-dashed flags self-loops, parallels, and duplicates of cluster edges.",
-        "Background rewire resolves the flags. Residue this realisation: <b>" + R.residueCount + "</b> stubs.",
-      ];
+      const t = trace[step] || trace[trace.length - 1];
+      let label, desc;
+      if (t.kind === "init") {
+        const outList = [...R.outliers].sort((a,b) => a-b).join(", ");
+        label = "step 0 · stubs ready, no edges";
+        desc = "Outliers this realisation: <b>{" + outList + "}</b>. They have \\(\\hat y = 0\\), \\(\\hat z = w\\); every stub funds the background. Mega-cluster has no cluster-graph edges.";
+      } else if (t.kind === "cpair") {
+        four.add(t.pair.u); four.add(t.pair.v);
+        const tag = (t.pair.loop || t.pair.multi) ? " (collision)" : "";
+        label = "cluster pair " + (t.idx + 1) + " / " + counts.cpair + tag;
+        desc = "Pair " + t.pair.u + " &harr; " + t.pair.v + " inside <code>" + t.pair.cluster + "</code>.";
+      } else if (t.kind === "crewire") {
+        [t.op.p1, t.op.p2, t.op.newp1, t.op.newp2].forEach(p => {
+          if (p) { four.add(p[0]); four.add(p[1]); }
+        });
+        const placeStr = t.op.success
+          ? "place <code>" + t.op.newp1.join("&ndash;") + "</code> + <code>" + t.op.newp2.join("&ndash;") + "</code>"
+          : "no legal swap";
+        label = "cluster rewire op " + (t.idx + 1) + " / " + counts.crewire;
+        desc = "Cut <code>" + t.op.p1.join("&ndash;") + "</code>" +
+          (t.op.p2 ? " + <code>" + t.op.p2.join("&ndash;") + "</code>" : "") + "; " + placeStr +
+          ". Source: " + (t.op.src || "none") + ".";
+      } else if (t.kind === "bgpair") {
+        four.add(t.pair.u); four.add(t.pair.v);
+        const tag = (t.pair.loop || t.pair.multi || t.pair.crossDup) ? " (collision)" : "";
+        const cls = t.pair.isOO ? "outlier-outlier" : (t.pair.isCO ? "clustered-outlier" : "non-outlier inter");
+        label = "bg pair " + (t.idx + 1) + " / " + counts.bgpair + tag;
+        desc = "Pair " + t.pair.u + " &harr; " + t.pair.v + " in the background pool (" + cls + ").";
+      } else if (t.kind === "bgrewire") {
+        [t.op.p1, t.op.p2, t.op.newp1, t.op.newp2].forEach(p => {
+          if (p) { four.add(p[0]); four.add(p[1]); }
+        });
+        const placed = [];
+        if (t.op.placedNewp1 && t.op.newp1) placed.push("<code>" + t.op.newp1.join("&ndash;") + "</code>");
+        if (t.op.placedNewp2 && t.op.newp2) placed.push("<code>" + t.op.newp2.join("&ndash;") + "</code>");
+        label = "bg rewire op " + (t.idx + 1) + " / " + counts.bgrewire;
+        desc = t.op.success
+          ? "Cut <code>" + t.op.p1.join("&ndash;") + "</code> + <code>" + t.op.p2.join("&ndash;") + "</code>; place " + placed.join(" + ") + "."
+          : "Outer iteration could not find a legal partner for <code>" + t.op.p1.join("&ndash;") + "</code>.";
+      }
+      // Highlight + dim pattern for any non-init step.
+      if (four.size > 0) {
+        four.forEach(id => viz.addNodeClass(id, "pick"));
+        dimAllExcept(viz, [...four]);
+      }
+      document.getElementById("g-cm-stage").textContent = label;
+      document.getElementById("g-cm-cur").textContent = String(step);
+      document.getElementById("g-cm-total").textContent = String(trace.length - 1);
       const descEl = document.getElementById("g-cm-desc");
-      descEl.innerHTML = '<span class="st">' + STEP_LABELS[step] + "</span> &middot; " + STEP_DESCS[step];
+      descEl.innerHTML = '<span class="st">' + label + "</span> &middot; " + desc;
       if (window.MathJax && window.MathJax.typesetPromise) {
         window.MathJax.typesetPromise([descEl]).catch(() => {});
       }
+    }
+
+    function totalForCurrent() {
+      const xi = parseFloat(document.getElementById("xi-slider").value);
+      const R = buildRealization(OUTLIER_SEED, U_SEED, STUB_SEED, xi);
+      return buildTrace(R).length;
     }
 
     cmController = NETGEN.stepController({
@@ -1036,13 +1213,15 @@ window.MathJax = {
       resetBtn: document.getElementById("g-cm-reset"),
       labelCur: document.getElementById("g-cm-cur"),
       labelTotal: document.getElementById("g-cm-total"),
-      total: 4,
+      total: totalForCurrent(),
       onRender: render,
     });
     document.getElementById("g-cm-end").addEventListener("click",
-      () => cmController.set(3));
+      () => cmController.set(totalForCurrent() - 1));
     document.getElementById("g-cm-reroll").addEventListener("click", rerollStub);
-    onStubChanged.push(() => render(cmController.idx));
+    onStubChanged.push(() => cmController.reconfigure(totalForCurrent()));
+    document.getElementById("xi-slider").addEventListener("input",
+      () => cmController.reconfigure(totalForCurrent()));
   })();
 
   // ── Degree preservation ──
