@@ -766,7 +766,32 @@ window.MathJax = {
   KERNEL_CLUSTER_BY_NODE[19] = 4;
   KERNEL_CLUSTER_BY_NODE[20] = 5;
   const KERNEL_S = [C1.length, C2.length, C3.length, 1, 1];
+  // ABCD's outlier_mode=singleton turns each outlier into its own real
+  // cluster, exactly as nPSO does. Mirror nPSO's neutral-palette colour
+  // choice (a singleton is "just another colour", not the site-wide
+  // outlier red): each singleton gets a distinct hue, drawn from the
+  // shared OUTLIER_CLUSTER_PALETTE.
+  const OUTLIER_CLUSTER_PALETTE = ["#9e7ec4", "#6fa6b0", "#c49a6c", "#78a06f"];
+  const SINGLETON_KIDS = [4, 5];
+  const SINGLETON_NODE_BY_KID = { 4: 19, 5: 20 };
   const NAMED_CLUSTER_OF_KERNEL = { 1: "C1", 2: "C2", 3: "C3" };
+  SINGLETON_KIDS.forEach((kid) => {
+    NAMED_CLUSTER_OF_KERNEL[kid] = "S" + SINGLETON_NODE_BY_KID[kid];
+  });
+  const CLUSTER_COLOR_OF = {
+    C1: COL.edge_intra.C1, C2: COL.edge_intra.C2, C3: COL.edge_intra.C3,
+  };
+  SINGLETON_KIDS.forEach((kid, i) => {
+    CLUSTER_COLOR_OF["S" + SINGLETON_NODE_BY_KID[kid]] =
+      OUTLIER_CLUSTER_PALETTE[i % OUTLIER_CLUSTER_PALETTE.length];
+  });
+  // Per-node colour lookup that honours singleton-as-cluster colouring.
+  // Falls back to the shared CLUSTER_OF mapping for non-singletons.
+  function nodeColorOf(n) {
+    if (n === 19) return CLUSTER_COLOR_OF.S19;
+    if (n === 20) return CLUSTER_COLOR_OF.S20;
+    return COL[CLUSTER_OF[n]] || COL.paper_3;
+  }
   // Page treats vertex i (1-based) as NODES[i-1]; NODES is the canonical
   // 1..20 fixture so kernel-vertex == page-node id.
   const PAGE_NODE_BY_KIDX = NODES.slice();  // 0-based -> page id
@@ -820,7 +845,8 @@ window.MathJax = {
     const clusterPre = [];
     const clusterPost = [];
     cm.stages.perCluster.forEach(stage => {
-      const cname = NAMED_CLUSTER_OF_KERNEL[stage.cluster] || "OUT";
+      const cname = NAMED_CLUSTER_OF_KERNEL[stage.cluster];
+      if (!cname) return;
       stage.prePairs.forEach(([a, b, loop, multi]) => {
         clusterPre.push({
           u: PAGE_NODE_BY_KIDX[a - 1], v: PAGE_NODE_BY_KIDX[b - 1],
@@ -1003,7 +1029,10 @@ window.MathJax = {
 
   // Stage 1: cluster pairing (per-pair walker, single-step-per-pair)
   (function () {
-    const viz = NETGEN.VIZ.init("g-cpair-cy", { showLabels: true, edges: [], pinned: true });
+    const viz = NETGEN.VIZ.init("g-cpair-cy", {
+      showLabels: true, edges: [], pinned: true,
+      nodeColor: (id) => nodeColorOf(parseInt(id, 10)),
+    });
     let lockOverride = false;
     let ctl = null;
     function setRandLock(locked) {
@@ -1083,7 +1112,7 @@ window.MathJax = {
       });
       const cfg = {};
       NODES.forEach(n => {
-        cfg[n] = { count: yByNode[n], color: COL.edge_intra[CLUSTER_OF[n]] || COL.edge_stage2 };
+        cfg[n] = { count: yByNode[n], color: nodeColorOf(n) };
       });
       // Resolve effective pairs (kernel order + per-position overrides
       // from rollPair); shared helpers tag dup-vs-kept and the active
@@ -1092,7 +1121,7 @@ window.MathJax = {
       for (let i = 0; i < step; i++) effPairs.push(effectivePair(R, i));
       const placed = NETGEN.walkerMarkPlaced(effPairs.slice(0, step - 1), {
         idPrefix: "cp-",
-        goodColor: (e) => COL.edge_intra[e.cluster] || COL.edge_stage2,
+        goodColor: (e) => CLUSTER_COLOR_OF[e.cluster] || COL.edge_stage2,
         badColor: COL.edge_drop,
         keyOf,
       });
@@ -1100,7 +1129,7 @@ window.MathJax = {
       let bridgeColor = COL.mint || "#4e7a3a";
       const j = NETGEN.walkerMarkJust(effPairs, step, { keyOf });
       if (j) {
-        bridgeColor = COL.edge_intra[j.e.cluster] || COL.edge_stage2;
+        bridgeColor = CLUSTER_COLOR_OF[j.e.cluster] || COL.edge_stage2;
         just = {
           u: j.e.u, v: j.e.v, color: bridgeColor, bad: j.bad,
           badColor: j.bad ? COL.edge_drop : null,
@@ -1173,7 +1202,10 @@ window.MathJax = {
   // places newp1 + newp2 (fresh stroke). Non-participating nodes dim.
   // Step 0 = pre-rewire snapshot; step k = state after op (k - 1).
   (function () {
-    const viz = NETGEN.VIZ.init("g-crewire-cy", { showLabels: true, edges: [], pinned: true });
+    const viz = NETGEN.VIZ.init("g-crewire-cy", {
+      showLabels: true, edges: [], pinned: true,
+      nodeColor: (id) => nodeColorOf(parseInt(id, 10)),
+    });
     let lastStep = 0;
     let settleTimer = null;
     let lockBusy = false;
@@ -1316,7 +1348,10 @@ window.MathJax = {
   // Stage 3: background pairing (single-step-per-pair; ẑ_u spokes per
   // node; cluster post-rewire backdrop in faded grey).
   (function () {
-    const viz = NETGEN.VIZ.init("g-bgpair-cy", { showLabels: true, edges: [], pinned: true });
+    const viz = NETGEN.VIZ.init("g-bgpair-cy", {
+      showLabels: true, edges: [], pinned: true,
+      nodeColor: (id) => nodeColorOf(parseInt(id, 10)),
+    });
     let lockOverride = false;
     let ctl = null;
     function setRandLock(locked) {
@@ -1454,7 +1489,10 @@ window.MathJax = {
   // faint behind the bg state. Cross-cluster collisions (`crossDup`)
   // surface as red-dashed in the seed snapshot.
   (function () {
-    const viz = NETGEN.VIZ.init("g-bgrewire-cy", { showLabels: true, edges: [], pinned: true });
+    const viz = NETGEN.VIZ.init("g-bgrewire-cy", {
+      showLabels: true, edges: [], pinned: true,
+      nodeColor: (id) => nodeColorOf(parseInt(id, 10)),
+    });
     let lastStep = 0;
     let settleTimer = null;
     let lockBusy = false;
