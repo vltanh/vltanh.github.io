@@ -232,6 +232,25 @@
       <span class="item">within ±0.1 <b id="mu-close">&middot;</b></span>
     </div>
   </div>
+
+  <p>The mate-rewire phase is what turns LFR's μ from a target into the bell-shaped distribution above. After per-cluster internal edges are placed, the binary builds a global external-edge config model and runs a phase-3 loop: for any same-cluster external edge, pick a random outside node, do a 4-way swap that pulls one endpoint out of the cluster. The walker below steps op-by-op through that loop on the current sample. Per-cluster internal edges render as faded backdrop; mate edges still inside a cluster surface red-dashed; each step ghost-flashes the cuts before settling on the placements.</p>
+
+  <div class="graph" id="g-mr">
+    <div class="graph-chrome">
+      <span id="g-mr-stage">step 0 · mate-rewire init</span>
+      <span class="right step-label">step <b id="g-mr-cur">0</b> / <span id="g-mr-total">0</span></span>
+    </div>
+    <div class="graph-canvas" id="g-mr-cy"></div>
+    <div class="widget-row">
+      <button class="btn" id="g-mr-prev">← back</button>
+      <button class="btn primary" id="g-mr-next">next →</button>
+      <button class="btn" id="g-mr-reset">reset</button>
+      <button class="btn" id="g-mr-end" type="button">skip to end</button>
+      <button class="btn" id="g-mr-reroll" type="button">random all</button>
+      <span class="step-label">random all reseeds the full LFR pipeline</span>
+    </div>
+    <div class="step-desc" id="g-mr-desc"></div>
+  </div>
 </section>
 
 <!-- ─────────── Case study · dnc ─────────── -->
@@ -1073,6 +1092,178 @@ window.MathJax = {
     onAssignChanged.push(update);
     onEdgeChanged.push(update);
     update();
+  })();
+
+  // ── Generation · mate-rewire walker ──
+  // Calls runFullPipeline with traceTest:true to surface mateOps +
+  // initial/final external-edge sets from LFR's connectAllTheParts
+  // Phase 3. Each op is a 4-way swap that pulls a same-cluster
+  // external edge out: cuts (a,b) + (randomMate, nodeH); places
+  // (a, randomMate) + (b, nodeH). Step k = state after the kth op.
+  (function () {
+    const viz = NETGEN.VIZ.init("g-mr-cy", { showLabels: true, edges: [] });
+    function dimAllExcept(keepIds) {
+      const keep = new Set((keepIds || []).map(Number));
+      viz.eachNode(n => {
+        const id = parseInt(n.id, 10);
+        if (keep.has(id)) viz.removeNodeClass(n.id, "dim");
+        else viz.addNodeClass(n.id, "dim");
+      });
+    }
+    function clearDimPick() {
+      viz.clearAllNodeClass("dim");
+      viz.clearAllNodeClass("pick");
+    }
+    let CACHE_KEY = "", CACHE = null;
+    function getRun() {
+      const key = EDGE_SEED + "|" + RESAMPLE_SEED + "|" +
+        document.getElementById("mu-slider").value;
+      if (CACHE_KEY === key) return CACHE;
+      CACHE_KEY = key;
+      const mu = parseFloat(document.getElementById("mu-slider").value);
+      const rng = seededRng(EDGE_SEED * 53 + 9);
+      const r = LFRKernel.runFullPipeline({
+        N: N_, k_avg: K_MEAN, max_k: K_MAX, t1: T1,
+        c_min: C_MIN, c_max: C_MAX, t2: T2,
+        mu, rng, traceTest: true,
+      });
+      CACHE = r;
+      return r;
+    }
+    // Backdrop: per-cluster internal edges from the buildSubgraphs
+    // result. These don't change across mate-rewire ops.
+    function intraEdges(r) {
+      if (!r || !r.ok) return [];
+      const out = [];
+      for (let i = 0; i < r.E.length; i++) {
+        r.E[i].forEach(j => {
+          if (i < j && LFRKernel.theyAreMate(i, j, r.memberList)) {
+            out.push([i, j]);
+          }
+        });
+      }
+      return out;
+    }
+    function stateAfter(r, k) {
+      const map = new Map();
+      const key = (a, b) => (a < b ? a + "|" + b : b + "|" + a);
+      (r.mateInitialEn || []).forEach(([a, b]) => {
+        map.set(key(a, b), [a, b]);
+      });
+      for (let i = 0; i < k; i++) {
+        const op = r.mateOps[i];
+        if (!op) break;
+        op.cuts.forEach(c => map.delete(key(c[0], c[1])));
+        op.places.forEach(p => map.set(key(p[0], p[1]), p));
+      }
+      return map;
+    }
+    function totalForCurrent() {
+      const r = getRun();
+      return 1 + ((r && r.ok && r.mateOps) ? r.mateOps.length : 0);
+    }
+    let lastStep = 0;
+    let settleTimer = null;
+    function render(step) {
+      const r = getRun();
+      const total = totalForCurrent();
+      document.getElementById("g-mr-cur").textContent = String(step);
+      document.getElementById("g-mr-total").textContent = String(total - 1);
+      const labelEl = document.getElementById("g-mr-stage");
+      const descEl = document.getElementById("g-mr-desc");
+      if (!r || !r.ok || !r.mateOps) {
+        viz.setEdges([]);
+        clearDimPick();
+        labelEl.textContent = "pipeline gave up";
+        descEl.innerHTML = '<span class="st">no trace</span> &middot; runFullPipeline returned !ok at this μ; reroll or change the slider.';
+        return;
+      }
+      const intra = intraEdges(r);
+      const intraEdgeViz = intra.map(([a, b], i) => ({
+        u: a + 1, v: b + 1, color: COL.edge_intra ? COL.edge_intra.C1 : COL.edge_stage2,
+        w: 1.2, id: "lfr-mr-intra-" + i, classes: "fade",
+      }));
+      const stateMap = stateAfter(r, step);
+      const four = new Set();
+      const extEdges = [];
+      let i = 0;
+      stateMap.forEach(([a, b]) => {
+        const u = a + 1, v = b + 1;
+        const sameCluster = LFRKernel.theyAreMate(a, b, r.memberList);
+        extEdges.push({
+          u, v,
+          color: sameCluster ? COL.edge_drop : COL.edge_inter,
+          w: sameCluster ? 1.6 : 1.5,
+          id: "lfr-mr-ext-" + (i++),
+          classes: sameCluster ? "pick" : "",
+        });
+      });
+      const allEdges = intraEdgeViz.concat(extEdges);
+
+      let label, desc;
+      if (step === 0) {
+        label = "step 0 · mate-rewire init";
+        desc = '<span class="st">step 0 · mate-rewire init</span> &middot; ' +
+          (r.mateOps.length || 0) + " phase-3 swap op" +
+          (r.mateOps.length === 1 ? "" : "s") +
+          " ahead. Faint = intra-cluster (built earlier); coloured = external; red-dashed = same-cluster external (a mate edge that the rewire pass tries to break).";
+      } else {
+        const op = r.mateOps[step - 1];
+        [op.a, op.b, op.randomMate, op.nodeH].forEach(id => four.add(id + 1));
+        label = "mate-rewire op " + step + " / " + r.mateOps.length;
+        const cuts = op.cuts.map(c => "<code>" + (c[0] + 1) + "&ndash;" + (c[1] + 1) + "</code>").join(" + ");
+        const places = op.places.map(p => "<code>" + (p[0] + 1) + "&ndash;" + (p[1] + 1) + "</code>").join(" + ");
+        desc = '<span class="st">op ' + step + '</span> &middot; ' +
+          "Cut " + cuts + "; place " + places + ". var_mate " +
+          op.varMateBefore + " &rarr; " + op.varMateAfter + ".";
+      }
+      if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
+      const isForward = step === lastStep + 1;
+      if (isForward && step > 0) {
+        const op = r.mateOps[step - 1];
+        const ghosts = op.cuts.map((c, k) => ({
+          u: c[0] + 1, v: c[1] + 1, color: COL.edge_drop, w: 1.4,
+          id: "lfr-mr-ghost-" + step + "-" + k, classes: "ghost",
+        }));
+        viz.setEdges(allEdges.concat(ghosts));
+        clearDimPick();
+        if (four.size > 0) {
+          four.forEach(id => viz.addNodeClass(id, "pick"));
+          dimAllExcept([...four]);
+        }
+        settleTimer = setTimeout(() => {
+          viz.setEdges(allEdges);
+          settleTimer = null;
+        }, 380);
+      } else {
+        viz.setEdges(allEdges);
+        clearDimPick();
+        if (four.size > 0) {
+          four.forEach(id => viz.addNodeClass(id, "pick"));
+          dimAllExcept([...four]);
+        }
+      }
+      labelEl.textContent = label;
+      descEl.innerHTML = desc;
+      lastStep = step;
+    }
+    const ctl = NETGEN.stepController({
+      prevBtn: document.getElementById("g-mr-prev"),
+      nextBtn: document.getElementById("g-mr-next"),
+      resetBtn: document.getElementById("g-mr-reset"),
+      labelCur: document.getElementById("g-mr-cur"),
+      labelTotal: document.getElementById("g-mr-total"),
+      total: totalForCurrent(),
+      onRender: render,
+    });
+    document.getElementById("g-mr-end").addEventListener("click",
+      () => ctl.set(totalForCurrent() - 1));
+    document.getElementById("g-mr-reroll").addEventListener("click", rerollEdges);
+    function reconfig() { CACHE_KEY = ""; ctl.reconfigure(totalForCurrent()); }
+    onResampleChanged.push(reconfig);
+    onAssignChanged.push(reconfig);
+    onEdgeChanged.push(reconfig);
+    document.getElementById("mu-slider").addEventListener("input", reconfig);
   })();
 
 })();

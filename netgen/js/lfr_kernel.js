@@ -705,9 +705,10 @@
   // Mutates E in place (adds external links).
   // Returns { mateRemaining: int, swappedAway: int }.
   function connectAllTheParts(args) {
-    const { E, memberList, linkList, rng, mateTrooper = 10 } = args;
+    const { E, memberList, linkList, rng, mateTrooper = 10, traceTest } = args;
     const numNodes = linkList.length;
     const degrees = linkList.map(l => l[l.length - 1]);
+    const mateOps = traceTest ? [] : null;
 
     const en = [];
     for (let i = 0; i < numNodes; i++) en.push(new Set());
@@ -795,6 +796,16 @@
       }
     }
 
+    // Snapshot Phase-2 state for the walker: external-edge set right
+    // before the mate-rewire loop kicks in.
+    let initialEn = null;
+    if (traceTest) {
+      initialEn = [];
+      for (let i = 0; i < numNodes; i++) {
+        en[i].forEach(j => { if (i < j) initialEn.push([i, j]); });
+      }
+    }
+
     // Phase 3: mate-rewire loop (lines 1278-1390). Until var_mate is 0
     // or stagnated for `mateTrooper` rounds.
     function countMate() {
@@ -841,6 +852,17 @@
                 en[b].add(nodeH);
                 en[a].add(randomMate);
                 en[a].delete(b);
+                if (mateOps) mateOps.push({
+                  a, b, randomMate, nodeH,
+                  cuts: [[Math.min(a, b), Math.max(a, b)],
+                         [Math.min(randomMate, nodeH), Math.max(randomMate, nodeH)]],
+                  places: [[Math.min(a, randomMate), Math.max(a, randomMate)],
+                           [Math.min(b, nodeH), Math.max(b, nodeH)]],
+                  varMateBefore: varMate,
+                  varMateAfter: varMate
+                    - (!theyAreMate(b, nodeH, memberList) ? 2 : 0)
+                    - (theyAreMate(randomMate, nodeH, memberList) ? 2 : 0),
+                });
                 if (!theyAreMate(b, nodeH, memberList)) varMate -= 2;
                 if (theyAreMate(randomMate, nodeH, memberList)) varMate -= 2;
                 break;
@@ -868,7 +890,16 @@
         }
       });
     }
-    return { mateRemaining: varMate };
+    // Snapshot the final external-edge set so callers reproducing the
+    // walker can replay state op-by-op without re-running the kernel.
+    let finalEn = null;
+    if (traceTest) {
+      finalEn = [];
+      for (let i = 0; i < numNodes; i++) {
+        en[i].forEach(j => { if (i < j) finalEn.push([i, j]); });
+      }
+    }
+    return { mateRemaining: varMate, mateOps, initialEn, finalEn };
   }
 
   // Faithful port of benchm.cpp:1443-1537 erase_links.
@@ -989,7 +1020,7 @@
     });
     const connRes = connectAllTheParts({
       E: subRes.E, memberList: subRes.memberList, linkList: subRes.linkList,
-      rng,
+      rng, traceTest: args.traceTest,
     });
     const eraseRes = eraseLinks({
       E: subRes.E, memberList: subRes.memberList,
@@ -1008,6 +1039,9 @@
       E: subRes.E,
       perCluster: subRes.perCluster,
       mateRemaining: connRes.mateRemaining,
+      mateOps: connRes.mateOps,
+      mateInitialEn: connRes.initialEn,
+      mateFinalEn: connRes.finalEn,
       erasAddTimes: eraseRes.erasAddTimes,
       resized,
     };
