@@ -196,7 +196,24 @@
   <div class="stage-num">generation · configuration model + \(\mu\) rewire</div>
   <h2>Configuration model to seed, targeted rewire to match \(\mu_i\).</h2>
   <p>With assignment fixed, the binary runs a configuration model on the global degree sequence (ignoring clusters), then walks every node whose \(\mu_i\) deviates from the target \(\mu\) and swaps one of its edges with another edge whose swap helps both endpoints' ratios. The per-node rewire never changes node degrees (swap preserves them), only which endpoints are paired.</p>
-  <p>The distribution of \(\mu_i\) at the end is bell-shaped around \(\mu\), not a delta: small-degree nodes have few possible ratios (degree-1 only 0 or 1; degree-2 only 0, 0.5, 1) so they cluster at discrete points. The bars below plot the \(\mu_i\) distribution from a finalised sample; the slider moves the target \(\mu\), re-roll resamples the edge generation.</p>
+  <p>The walker below decomposes the seed phase: each step pairs two stubs uniformly at random; collisions (self-loops, parallels) flag red-dashed and feed a 2-opt cleanup pass that swaps endpoints with a random valid edge. Highlighted nodes mark the up to 4 endpoints touched by each swap; everything else dims. The distribution of \(\mu_i\) at the end is bell-shaped around \(\mu\), not a delta: small-degree nodes have few possible ratios (degree-1 only 0 or 1; degree-2 only 0, 0.5, 1) so they cluster at discrete points. The bars below the walker plot the \(\mu_i\) distribution from a finalised sample; the slider moves the target \(\mu\), re-roll resamples the edge generation.</p>
+
+  <div class="graph" id="g-cm">
+    <div class="graph-chrome">
+      <span id="g-cm-stage">step 0 · stubs ready, no edges</span>
+      <span class="right step-label">step <b id="g-cm-cur">0</b> / <span id="g-cm-total">0</span></span>
+    </div>
+    <div class="graph-canvas" id="g-cm-cy"></div>
+    <div class="widget-row">
+      <button class="btn" id="g-cm-prev">← back</button>
+      <button class="btn primary" id="g-cm-next">next →</button>
+      <button class="btn" id="g-cm-reset">reset</button>
+      <button class="btn" id="g-cm-end" type="button">skip to end</button>
+      <button class="btn" id="g-cm-reroll" type="button">random all</button>
+      <span class="step-label">random all reshuffles every config-model pairing</span>
+    </div>
+    <div class="step-desc" id="g-cm-desc"></div>
+  </div>
   <div class="disk-panel">
     <div class="widget-row tight">
       <div class="scrub">
@@ -737,6 +754,190 @@ window.MathJax = {
     document.getElementById("g-assign-reroll").addEventListener("click", rerollAssign);
     onResampleChanged.push(() => render(controller.idx));
     onAssignChanged.push(() => render(controller.idx));
+  })();
+
+  // ── Generation · per-pair config-model walker ──
+  // Walks LFR's seed phase (configuration-model stub pairing) and the
+  // multi-edge cleanup pass that follows. Step 0 = stubs ready; the
+  // first half of the trace is one entry per pre-pair, the second half
+  // is one entry per cleanup rewire op (cut p1 + p2, place newp1 +
+  // newp2 if legal). Each step highlights the active endpoints + dims
+  // the rest. The mu-targeted rewire pass is not in this trace; it
+  // reads as a continuation of the histogram below for now.
+  (function () {
+    const viz = NETGEN.VIZ.init("g-cm-cy", { showLabels: true, edges: [] });
+    function dimAllExcept(keepIds) {
+      const keep = new Set((keepIds || []).map(Number));
+      viz.eachNode(n => {
+        const id = parseInt(n.id, 10);
+        if (keep.has(id)) viz.removeNodeClass(n.id, "dim");
+        else viz.addNodeClass(n.id, "dim");
+      });
+    }
+    function clearDimPick() {
+      viz.clearAllNodeClass("dim");
+      viz.clearAllNodeClass("pick");
+    }
+    function buildCmTrace(seed) {
+      const degs = resampleDegrees(seed);
+      const stubs = [];
+      for (let i = 0; i < degs.length; i++) {
+        for (let k = 0; k < degs[i]; k++) stubs.push(i);
+      }
+      const rng = seededRng(seed * 211 + 53);
+      const out = LFRKernel.configModelPairStubs({ stubs, rng, traceTest: true });
+      const cleanup = LFRKernel.cleanupMultigraph({
+        edges: out.edges, rng, maxRetries: 10, traceTest: true,
+      });
+      return {
+        prePairs: (out.prePairs || []).map(p => ({
+          u: p.u + 1, v: p.v + 1, loop: p.loop, multi: p.multi,
+        })),
+        rewireOps: (cleanup.rewireOps || []).map(op => ({
+          p1: op.p1 ? [op.p1[0] + 1, op.p1[1] + 1] : null,
+          p2: op.p2 ? [op.p2[0] + 1, op.p2[1] + 1] : null,
+          newp1: op.newp1 ? [op.newp1[0] + 1, op.newp1[1] + 1] : null,
+          newp2: op.newp2 ? [op.newp2[0] + 1, op.newp2[1] + 1] : null,
+          success: !!op.success, reason: op.reason || null,
+        })),
+        kept: cleanup.kept.map(([a, b]) => [a + 1, b + 1]),
+      };
+    }
+    function stateAfter(trace, step) {
+      // Mirror the kernel's bookkeeping: validSet collects clean pairs
+      // from prePairs first, then rewire ops mutate it. Returns a Map
+      // keyed by canonical-order edge string.
+      const map = new Map();
+      const invalid = [];
+      const k = (u, v) => (u < v ? u + "|" + v : v + "|" + u);
+      let processed = 0;
+      const total1 = trace.prePairs.length;
+      for (let i = 0; i < trace.prePairs.length && processed < step; i++) {
+        const p = trace.prePairs[i];
+        const kk = k(p.u, p.v);
+        if (p.loop || map.has(kk)) {
+          invalid.push({ u: p.u, v: p.v, bad: true });
+        } else {
+          map.set(kk, { u: p.u, v: p.v, bad: false });
+        }
+        processed++;
+      }
+      // Drain remaining prePairs into invalid bucket if step is
+      // already inside the rewire phase. Mirrors kernel.
+      if (step > total1) {
+        for (let i = processed; i < trace.prePairs.length; i++) {
+          const p = trace.prePairs[i];
+          const kk = k(p.u, p.v);
+          if (p.loop || map.has(kk)) invalid.push({ u: p.u, v: p.v, bad: true });
+          else map.set(kk, { u: p.u, v: p.v, bad: false });
+        }
+      }
+      const opIdx = Math.max(0, step - total1);
+      for (let i = 0; i < opIdx && i < trace.rewireOps.length; i++) {
+        const op = trace.rewireOps[i];
+        if (!op.success) continue;
+        if (op.p1) map.delete(k(op.p1[0], op.p1[1]));
+        if (op.p2) map.delete(k(op.p2[0], op.p2[1]));
+        [op.newp1, op.newp2].forEach(np => {
+          if (!np) return;
+          map.set(k(np[0], np[1]), { u: np[0], v: np[1], bad: false });
+        });
+      }
+      return { edges: map, invalid };
+    }
+    let CACHE_KEY = "", CACHE = null;
+    function getTrace() {
+      const key = EDGE_SEED + "|" + RESAMPLE_SEED;
+      if (CACHE_KEY === key) return CACHE;
+      CACHE_KEY = key;
+      CACHE = buildCmTrace(EDGE_SEED ^ (RESAMPLE_SEED * 17 + 3));
+      return CACHE;
+    }
+    function totalForCurrent() { return 1 + getTrace().prePairs.length + getTrace().rewireOps.length; }
+    function render(step) {
+      const trace = getTrace();
+      document.getElementById("g-cm-cur").textContent = String(step);
+      document.getElementById("g-cm-total").textContent = String(totalForCurrent() - 1);
+      const labelEl = document.getElementById("g-cm-stage");
+      const descEl = document.getElementById("g-cm-desc");
+      if (step === 0) {
+        viz.setEdges([]);
+        clearDimPick();
+        labelEl.textContent = "stubs ready";
+        descEl.innerHTML = '<span class="st">stubs ready</span> &middot; ' +
+          trace.prePairs.length + " pre-pair step" +
+          (trace.prePairs.length === 1 ? "" : "s") + " then " +
+          trace.rewireOps.length + " cleanup op" +
+          (trace.rewireOps.length === 1 ? "" : "s") + " ahead.";
+        return;
+      }
+      const total1 = trace.prePairs.length;
+      const inPair = step <= total1;
+      const state = stateAfter(trace, step);
+      const four = new Set();
+      const edges = [];
+      let i = 0;
+      state.edges.forEach(e => {
+        edges.push({
+          u: e.u, v: e.v,
+          color: e.bad ? COL.edge_drop : COL.edge_inter,
+          w: 1.5,
+          id: "lfr-cm-" + (i++),
+        });
+      });
+      // Surface invalid pairs as red-dashed during pair phase so user
+      // sees collisions before the rewire fixes them.
+      if (inPair) {
+        state.invalid.forEach((e, k) => {
+          edges.push({
+            u: e.u, v: e.v,
+            color: COL.edge_drop, w: 1.6,
+            id: "lfr-cm-bad-" + k, classes: "pick",
+          });
+        });
+      }
+      viz.setEdges(edges);
+      clearDimPick();
+      let label, desc;
+      if (inPair) {
+        const p = trace.prePairs[step - 1];
+        four.add(p.u); four.add(p.v);
+        const tag = p.loop ? " (self-loop)" : (p.multi ? " (parallel)" : "");
+        label = "pair " + step + " / " + total1 + tag;
+        desc = "Stub-pair " + p.u + " &harr; " + p.v + ".";
+      } else {
+        const opIdx = step - total1 - 1;
+        const op = trace.rewireOps[opIdx];
+        [op.p1, op.p2, op.newp1, op.newp2].forEach(p => {
+          if (p) { four.add(p[0]); four.add(p[1]); }
+        });
+        label = "cleanup op " + (opIdx + 1) + " / " + trace.rewireOps.length;
+        desc = op.success
+          ? "Cut <code>" + op.p1.join("&ndash;") + "</code> + <code>" + op.p2.join("&ndash;") +
+            "</code>; place <code>" + op.newp1.join("&ndash;") + "</code> + <code>" + op.newp2.join("&ndash;") + "</code>."
+          : "Could not place a clean pair for <code>" + (op.p1 ? op.p1.join("&ndash;") : "?") + "</code>.";
+      }
+      if (four.size > 0) {
+        four.forEach(id => viz.addNodeClass(id, "pick"));
+        dimAllExcept([...four]);
+      }
+      labelEl.textContent = label;
+      descEl.innerHTML = '<span class="st">' + label + "</span> &middot; " + desc;
+    }
+    const ctl = NETGEN.stepController({
+      prevBtn: document.getElementById("g-cm-prev"),
+      nextBtn: document.getElementById("g-cm-next"),
+      resetBtn: document.getElementById("g-cm-reset"),
+      labelCur: document.getElementById("g-cm-cur"),
+      labelTotal: document.getElementById("g-cm-total"),
+      total: totalForCurrent(),
+      onRender: render,
+    });
+    document.getElementById("g-cm-end").addEventListener("click",
+      () => ctl.set(totalForCurrent() - 1));
+    document.getElementById("g-cm-reroll").addEventListener("click", rerollEdges);
+    onResampleChanged.push(() => { CACHE_KEY = ""; ctl.reconfigure(totalForCurrent()); });
+    onEdgeChanged.push(() => { CACHE_KEY = ""; ctl.reconfigure(totalForCurrent()); });
   })();
 
   // ── Generation · mu rewire histogram ──

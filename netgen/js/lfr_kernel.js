@@ -224,7 +224,7 @@
   // before dedup. Caller threads the result through cleanupMultigraph
   // for the rewire step.
   function configModelPairStubs(args) {
-    const { stubs, rng } = args;
+    const { stubs, rng, traceTest } = args;
     const work = stubs.slice();
     // Fisher-Yates shuffle, then walk pairs.
     for (let i = work.length - 1; i > 0; i--) {
@@ -235,6 +235,7 @@
     const edges = [];
     let loops = 0;
     const seen = new Map();
+    const prePairs = traceTest ? [] : null;
     for (let i = 0; i < work.length; i += 2) {
       const u = work[i], v = work[i + 1];
       edges.push([u, v]);
@@ -242,11 +243,15 @@
       const a = u <= v ? u : v;
       const b = u <= v ? v : u;
       const k = `${a},${b}`;
-      seen.set(k, (seen.get(k) || 0) + 1);
+      const prevCount = seen.get(k) || 0;
+      seen.set(k, prevCount + 1);
+      if (prePairs) prePairs.push({
+        u, v, loop: u === v, multi: u !== v && prevCount > 0,
+      });
     }
     let parallels = 0;
     seen.forEach(v => { if (v > 1) parallels += v - 1; });
-    return { edges, stats: { loops, parallels } };
+    return { edges, stats: { loops, parallels }, prePairs };
   }
 
   // Generic 2-opt cleanup of self-loops + parallel edges (no block-pair
@@ -254,10 +259,11 @@
   // multi-edge rewire pass in benchm.cpp's build_subgraph (lines 858-939).
   // edges: multigraph as [[u,v],...]. Returns kept simple edges + dropped.
   function cleanupMultigraph(args) {
-    const { edges, rng, maxRetries = 10 } = args;
+    const { edges, rng, maxRetries = 10, traceTest } = args;
     const validSet = new Set();
     const valid = [];
     const invalid = [];
+    const rewireOps = traceTest ? [] : null;
 
     edges.forEach(([u, v]) => {
       const a = u < v ? u : v;
@@ -275,6 +281,10 @@
       const [u, v] = badEdge;
       if (valid.length === 0) {
         invalid.push([u, v]);
+        if (rewireOps) rewireOps.push({
+          p1: [u, v], p2: null, newp1: null, newp2: null,
+          success: false, reason: "no-valid-pool",
+        });
         return;
       }
       const idx = Math.floor(rng() * valid.length);
@@ -299,8 +309,16 @@
         valid.pop();
         validSet.add(k1); validSet.add(k2);
         valid.push(new_e1); valid.push(new_e2);
+        if (rewireOps) rewireOps.push({
+          p1: [u, v], p2: [x, y], newp1: new_e1, newp2: new_e2,
+          success: true,
+        });
       } else {
         invalid.push([u, v]);
+        if (rewireOps) rewireOps.push({
+          p1: [u, v], p2: [x, y], newp1: new_e1, newp2: new_e2,
+          success: false, reason: "collision",
+        });
       }
     }
 
@@ -321,7 +339,7 @@
         tryRewire(invalid.shift());
       }
     }
-    return { kept: valid.slice(), dropped: invalid.slice() };
+    return { kept: valid.slice(), dropped: invalid.slice(), rewireOps };
   }
 
   // Top-level config-model pipeline used by the page: from per-node
