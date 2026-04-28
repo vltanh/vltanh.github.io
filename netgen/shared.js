@@ -416,6 +416,14 @@ const VIZ = {
     // via opts.svg (useful when a stage page pre-renders decorations
     // into the svg and wants VIZ to append its layers on top).
     let host = null, svg = null;
+    const fitOpts = {
+      positions: opts.positions || POSITIONS,
+      includeIds: opts.includeOutliers === false
+        ? NODES.filter(n => CLUSTER_OF[n] !== "OUT")
+        : NODES,
+      pad: opts.pad,
+      padRight: opts.padRight,
+    };
     if (opts.svg) {
       svg = opts.svg;
       host = svg.node().parentElement;
@@ -425,14 +433,7 @@ const VIZ = {
       host.innerHTML = "";
       svg = d3.select(host).append("svg")
         .attr("class", "viz-svg")
-        .attr("viewBox", fitViewBoxAttr({
-          positions: opts.positions || POSITIONS,
-          includeIds: opts.includeOutliers === false
-            ? NODES.filter(n => CLUSTER_OF[n] !== "OUT")
-            : NODES,
-          pad: opts.pad,
-          padRight: opts.padRight,
-        }))
+        .attr("viewBox", fitViewBoxAttr(fitOpts))
         .attr("preserveAspectRatio", "xMidYMid meet");
     }
     const includeOutliers = opts.includeOutliers !== false;
@@ -729,6 +730,14 @@ const VIZ = {
 
       fit()    {},
       resize() {},
+      // Recompute the viewBox with a new padRight (in viewBox units).
+      // mountGxPanel calls this after measuring its panel so the graph
+      // reserves exactly enough right slack for the current panel size.
+      setPadRight(padRightUnits) {
+        fitOpts.padRight = padRightUnits;
+        svg.attr("viewBox", fitViewBoxAttr(fitOpts));
+        sim.alpha(0.3).restart();
+      },
     };
 
     return handle;
@@ -956,6 +965,11 @@ function bindPanelToggle(prefix) {
 //   title        text on the toggle button
 //   bodyHTML     HTML inserted into the body div
 //   maxWidth     optional CSS for the wrapper
+//   viz          optional NETGEN.VIZ handle. When provided, the helper
+//                measures its own width post-mount and asks viz to
+//                reserve a matching padRight (viewBox units), so the
+//                graph never gets pushed under the panel regardless of
+//                panel size. Re-runs on window resize.
 // Returns the wrapper element.
 function mountGxPanel(opts) {
   const host = document.getElementById(opts.hostId);
@@ -971,6 +985,22 @@ function mountGxPanel(opts) {
     + '<div id="' + opts.prefix + '-body">' + (opts.bodyHTML || "") + '</div>';
   host.appendChild(wrap);
   bindPanelToggle(opts.prefix);
+  if (opts.viz && opts.viz.setPadRight) {
+    const sync = () => {
+      const hostW = host.clientWidth;
+      const wrapW = wrap.offsetWidth;
+      if (!hostW || !wrapW) return;
+      const vb = (opts.viz.svg.attr("viewBox") || "0 0 0 0").split(/\s+/).map(Number);
+      const vbW = vb[2];
+      // Convert px -> viewBox units. Add a small buffer + the
+      // panel's right inset (gx-panel: right .5rem ≈ 8px).
+      const px = wrapW + 16;
+      const units = px * (vbW / hostW);
+      opts.viz.setPadRight(units);
+    };
+    requestAnimationFrame(sync);
+    window.addEventListener("resize", sync);
+  }
   return wrap;
 }
 
