@@ -205,6 +205,102 @@ const COLORS = {
   hl_yellow:"#f6e15a",
 };
 
+// ── Edge path primitives ─────────────────────────────────────
+// Single source of truth for the SVG `d` strings that draw edges.
+// Every edge-drawing site (VIZ.edgePath, spoke_layer's placedPath +
+// fanPath, the rewire-spoke animator's straightBoundaryPath +
+// selfLoopPath + placeBridgeViaStubs) routes here so a self-loop
+// drawn during animation has the same shape as the one painted by
+// the static viz once the animation commits.
+//
+//   makeEdge(p1, p2, r1, r2)
+//     Straight boundary segment: M (p1 + r1*û) L (p2 - r2*û)
+//   makeParallelEdge(p1, p2, dupIdx, dupTotal, r1, r2)
+//     Quadratic Q-bezier through a perpendicular control. When dupTotal
+//     <= 1 collapses to the same chord as makeEdge.
+//   makeSelfLoop(p, r0, opts?)
+//     Two-quadratic teardrop: M start_left  Q ctrl_left  apex
+//                                            Q ctrl_right end_right
+//     Endpoints sit on the node boundary at the loop tangents; the apex
+//     sits directly above the node centre. opts.rOffset (default 8)
+//     scales the bulge; pages drawing parallel self-loops bump it per
+//     dupIdx so the loops don't stack.
+//   makeSelfLoopHalf(p, r0, side, opts?)
+//     Single half (side -1 = left, +1 = right) used by spoke_layer to
+//     paint each half independently.
+const EdgePaths = (function () {
+  const LOOP_OFFX = 1.1;
+  const LOOP_OFFY = 2.0;
+  const LOOP_TANGENT_START = Math.atan2(-LOOP_OFFY, -LOOP_OFFX);
+  const LOOP_TANGENT_END   = Math.atan2(-LOOP_OFFY,  LOOP_OFFX);
+  const LOOP_R_OFFSET = 8;
+  function loopApex(p, r0, rOffset) {
+    const r = r0 + (rOffset != null ? rOffset : LOOP_R_OFFSET);
+    return { x: p.x, y: p.y - r * LOOP_OFFY };
+  }
+  function makeSelfLoopHalf(p, r0, side, opts) {
+    opts = opts || {};
+    const rOffset = opts.rOffset != null ? opts.rOffset : LOOP_R_OFFSET;
+    const r = r0 + rOffset;
+    const apex = loopApex(p, r0, rOffset);
+    const cx = p.x + side * r * LOOP_OFFX;
+    const cy = p.y - r * LOOP_OFFY;
+    const tangent = side < 0 ? LOOP_TANGENT_START : LOOP_TANGENT_END;
+    const sx = p.x + Math.cos(tangent) * r0;
+    const sy = p.y + Math.sin(tangent) * r0;
+    return "M" + sx + "," + sy + " Q" + cx + "," + cy + " " + apex.x + "," + apex.y;
+  }
+  function makeSelfLoop(p, r0, opts) {
+    opts = opts || {};
+    const rOffset = opts.rOffset != null ? opts.rOffset : LOOP_R_OFFSET;
+    const r = r0 + rOffset;
+    const apex = loopApex(p, r0, rOffset);
+    const sx = p.x + Math.cos(LOOP_TANGENT_START) * r0;
+    const sy = p.y + Math.sin(LOOP_TANGENT_START) * r0;
+    const ex = p.x + Math.cos(LOOP_TANGENT_END) * r0;
+    const ey = p.y + Math.sin(LOOP_TANGENT_END) * r0;
+    const cxL = p.x - r * LOOP_OFFX, cyL = p.y - r * LOOP_OFFY;
+    const cxR = p.x + r * LOOP_OFFX, cyR = p.y - r * LOOP_OFFY;
+    return "M" + sx + "," + sy +
+           " Q" + cxL + "," + cyL + " " + apex.x + "," + apex.y +
+           " Q" + cxR + "," + cyR + " " + ex + "," + ey;
+  }
+  function makeEdge(p1, p2, r1, r2) {
+    const dx = p2.x - p1.x, dy = p2.y - p1.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len, uy = dy / len;
+    const sx = p1.x + ux * r1, sy = p1.y + uy * r1;
+    const ex = p2.x - ux * r2, ey = p2.y - uy * r2;
+    return "M" + sx + "," + sy + " L" + ex + "," + ey;
+  }
+  function makeParallelEdgeCentered(p1, p2, centered, r1, r2) {
+    const dx = p2.x - p1.x, dy = p2.y - p1.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = -dy / len, ny = dx / len;
+    const spread = Math.max(22, Math.min(42, len * 0.18));
+    const mx = (p1.x + p2.x) / 2 + nx * centered * spread * 2;
+    const my = (p1.y + p2.y) / 2 + ny * centered * spread * 2;
+    const dxs = mx - p1.x, dys = my - p1.y;
+    const ds = Math.hypot(dxs, dys) || 1;
+    const sx = p1.x + (dxs / ds) * (r1 || 0);
+    const sy = p1.y + (dys / ds) * (r1 || 0);
+    const dxe = mx - p2.x, dye = my - p2.y;
+    const de = Math.hypot(dxe, dye) || 1;
+    const ex = p2.x + (dxe / de) * (r2 || 0);
+    const ey = p2.y + (dye / de) * (r2 || 0);
+    return "M" + sx + "," + sy + " Q" + mx + "," + my + " " + ex + "," + ey;
+  }
+  function makeParallelEdge(p1, p2, dupIdx, dupTotal, r1, r2) {
+    const centered = dupTotal <= 1 ? 0 : (dupIdx - (dupTotal - 1) / 2);
+    return makeParallelEdgeCentered(p1, p2, centered, r1, r2);
+  }
+  return {
+    LOOP_OFFX, LOOP_OFFY, LOOP_TANGENT_START, LOOP_TANGENT_END, LOOP_R_OFFSET,
+    loopApex, makeSelfLoop, makeSelfLoopHalf,
+    makeEdge, makeParallelEdge, makeParallelEdgeCentered,
+  };
+})();
+
 // ── VIZ: d3-force graph helper ───────────────────────────────
 // Replaces the old Cytoscape-backed CY. Each stage graph mounts
 // an <svg> inside its .graph-canvas container, runs a force sim
@@ -432,55 +528,20 @@ const VIZ = {
       const r1 = (d.source && d.source.r) || nodeR;
       const r2 = (d.target && d.target.r) || nodeR;
       if (d.source === d.target) {
-        // Self-loop: anchor endpoints on the node boundary at the two
-        // loop tangents (matches spoke_layer's loopHalfPath /
-        // bridgePath loop branch). Apex height keeps the original
-        // rBase + step ramp for parallel loops on the same node.
-        const x = d.source.x, y = d.source.y;
-        const rBase = 18, step = 7;
-        const r = rBase + (d.dupIdx || 0) * step;
-        const LOOP_OFFX = 1.1, LOOP_OFFY = 2.0;
-        const tangentS = Math.atan2(-LOOP_OFFY, -LOOP_OFFX);
-        const tangentE = Math.atan2(-LOOP_OFFY,  LOOP_OFFX);
-        const sx = x + Math.cos(tangentS) * r1;
-        const sy = y + Math.sin(tangentS) * r1;
-        const ex = x + Math.cos(tangentE) * r1;
-        const ey = y + Math.sin(tangentE) * r1;
-        return "M" + sx + "," + sy + " C" + (x - r) + "," + (y - r * 2.2) + " " + (x + r) + "," + (y - r * 2.2) + " " + ex + "," + ey;
+        // rOffset bumped per dupIdx so parallel self-loops on the same
+        // node nest one above the next instead of stacking.
+        const rOffset = 8 + (d.dupIdx || 0) * 7;
+        return EdgePaths.makeSelfLoop(d.source, r1, { rOffset });
       }
-      const sx = d.source.x, sy = d.source.y, tx = d.target.x, ty = d.target.y;
       const total = d.dupTotal || 1;
-      if (total <= 1) {
-        // Straight edge: shift each endpoint along the centreline by
-        // the node radius so the visible stroke starts at the node
-        // boundary, not the centre.
-        const dx = tx - sx, dy = ty - sy;
-        const len = Math.hypot(dx, dy) || 1;
-        const ux = dx / len, uy = dy / len;
-        return "M" + (sx + ux * r1) + "," + (sy + uy * r1) +
-               "L" + (tx - ux * r2) + "," + (ty - uy * r2);
-      }
+      if (total <= 1) return EdgePaths.makeEdge(d.source, d.target, r1, r2);
       const lo = d.source.id < d.target.id ? d.source : d.target;
       const hi = d.source.id < d.target.id ? d.target : d.source;
-      const cdx = hi.x - lo.x, cdy = hi.y - lo.y;
-      const len = Math.sqrt(cdx * cdx + cdy * cdy) || 1;
-      const nx = -cdy / len, ny = cdx / len;
+      // dupIdx is canonical-orientation aware; centered offset uses lo→hi.
       const centered = (d.dupIdx || 0) - (total - 1) / 2;
-      const spread = Math.max(22, Math.min(42, len * 0.18));
-      const mx = (lo.x + hi.x) / 2 + nx * centered * spread * 2;
-      const my = (lo.y + hi.y) / 2 + ny * centered * spread * 2;
-      // Shift the source / target endpoints from node centre toward
-      // the Q control by their respective node radii — same boundary
-      // anchor convention as spoke_layer's fanPathCentered.
-      const dxs = mx - sx, dys = my - sy;
-      const ds = Math.hypot(dxs, dys) || 1;
-      const ssx = sx + (dxs / ds) * r1;
-      const ssy = sy + (dys / ds) * r1;
-      const dxe = mx - tx, dye = my - ty;
-      const de = Math.hypot(dxe, dye) || 1;
-      const eex = tx + (dxe / de) * r2;
-      const eey = ty + (dye / de) * r2;
-      return "M" + ssx + "," + ssy + " Q" + mx + "," + my + " " + eex + "," + eey;
+      const lor = lo === d.source ? r1 : r2;
+      const hir = hi === d.source ? r1 : r2;
+      return EdgePaths.makeParallelEdgeCentered(lo, hi, centered, lor, hir);
     }
     sim.on("tick", () => {
       gLinks.selectAll("path.viz-edge").attr("d", edgePath);
@@ -1199,8 +1260,8 @@ function rewireSpokeSwapAnimate(opts) {
   // are matched 1:1 with place endpoints (each place consumes 2 stubs:
   // one per endpoint). Greedy: walk places in order, take the first
   // unpaired stub at each endpoint.
-  const LOOP_TANGENT_START = Math.atan2(-2.0, -1.1);
-  const LOOP_TANGENT_END   = Math.atan2(-2.0,  1.1);
+  const LOOP_TANGENT_START = EdgePaths.LOOP_TANGENT_START;
+  const LOOP_TANGENT_END   = EdgePaths.LOOP_TANGENT_END;
   const stubs = [];
   cutMeta.forEach((c, ci) => {
     if (c.u === c.v) {
@@ -1239,10 +1300,19 @@ function rewireSpokeSwapAnimate(opts) {
     const s2 = takeStub(p.v) || { node: p.v, oldAngle: null, restAngle: null, _synth: true };
     s1.newPartner = p.v; s1.newEdge = p;
     s2.newPartner = p.u; s2.newEdge = p;
-    const me1 = nodeXY(s1.node), part1 = nodeXY(s1.newPartner);
-    const me2 = nodeXY(s2.node), part2 = nodeXY(s2.newPartner);
-    s1.newAngle = dirAngle(me1, part1);
-    s2.newAngle = dirAngle(me2, part2);
+    if (p.u === p.v) {
+      // Self-loop place: both stubs sit at the same node. Aim them
+      // along the loop tangents so the orbit ends with the two stubs
+      // hugging the node above-left + above-right, exactly where a
+      // selfLoopPath teardrop starts and ends.
+      s1.newAngle = LOOP_TANGENT_START;
+      s2.newAngle = LOOP_TANGENT_END;
+    } else {
+      const me1 = nodeXY(s1.node), part1 = nodeXY(s1.newPartner);
+      const me2 = nodeXY(s2.node), part2 = nodeXY(s2.newPartner);
+      s1.newAngle = dirAngle(me1, part1);
+      s2.newAngle = dirAngle(me2, part2);
+    }
     if (s1._synth) { s1.oldAngle = s1.newAngle; s1.restAngle = s1.newAngle + Math.PI / 2; }
     if (s2._synth) { s2.oldAngle = s2.newAngle; s2.restAngle = s2.newAngle + Math.PI / 2; }
     return { p, s1, s2 };
@@ -1296,36 +1366,24 @@ function rewireSpokeSwapAnimate(opts) {
 
   function straightBoundaryPath(uid, vid) {
     const a = nodeXY(uid), b = nodeXY(vid);
-    const dx = b.x - a.x, dy = b.y - a.y;
-    const len = Math.hypot(dx, dy) || 1;
-    const sx = a.x + (dx / len) * a.r, sy = a.y + (dy / len) * a.r;
-    const ex = b.x - (dx / len) * b.r, ey = b.y - (dy / len) * b.r;
-    return { d: "M" + sx + "," + sy + " L" + ex + "," + ey, len: len - a.r - b.r };
+    return EdgePaths.makeEdge(a, b, a.r, b.r);
   }
   function selfLoopPath(nid) {
     const me = nodeXY(nid);
-    const r = me.r + 8;
-    const sx = me.x + Math.cos(LOOP_TANGENT_START) * me.r;
-    const sy = me.y + Math.sin(LOOP_TANGENT_START) * me.r;
-    const ex = me.x + Math.cos(LOOP_TANGENT_END)   * me.r;
-    const ey = me.y + Math.sin(LOOP_TANGENT_END)   * me.r;
-    const cx1 = me.x - r * 1.1, cy1 = me.y - r * 2.0;
-    const cx2 = me.x + r * 1.1, cy2 = me.y - r * 2.0;
-    const d = "M" + sx + "," + sy + " C" + cx1 + "," + cy1 + " " + cx2 + "," + cy2 + " " + ex + "," + ey;
-    return { d, sx, sy, ex, ey };
+    return EdgePaths.makeSelfLoop(me, me.r);
   }
   function placeBridgeViaStubs(s1, s2) {
+    // Self-loop place: bridge is the same teardrop the static viz +
+    // spoke layer paint, so animation → settle has no shape change.
+    if (s1.node === s2.node) return EdgePaths.makeSelfLoop(nodeXY(s1.node), nodeXY(s1.node).r);
     // Bridge endpoints sit on the node boundary along the new-partner
-    // aim so the visible stroke ends at the node circle, not at the
-    // stub tip. Stubs still render on top from boundary out to
-    // (boundary + SPOKE_LEN); they fade out during the bridge grow,
-    // leaving the bridge already anchored on the node.
+    // aim. Stubs render on top from boundary outward; they fade during
+    // grow so the bridge is already anchored on the node when the
+    // stubs go away.
     const me1 = nodeXY(s1.node), me2 = nodeXY(s2.node);
-    const sx = me1.x + Math.cos(s1._currA) * me1.r;
-    const sy = me1.y + Math.sin(s1._currA) * me1.r;
-    const ex = me2.x + Math.cos(s2._currA) * me2.r;
-    const ey = me2.y + Math.sin(s2._currA) * me2.r;
-    return "M" + sx + "," + sy + " L" + ex + "," + ey;
+    const a = { x: me1.x + Math.cos(s1._currA) * me1.r, y: me1.y + Math.sin(s1._currA) * me1.r };
+    const b = { x: me2.x + Math.cos(s2._currA) * me2.r, y: me2.y + Math.sin(s2._currA) * me2.r };
+    return "M" + a.x + "," + a.y + " L" + b.x + "," + b.y;
   }
 
   // Hide cut edges from viz so the overlay's cut bridges are the only
@@ -1539,6 +1597,78 @@ function rewireSpokeSwapAnimate(opts) {
   };
 }
 
+// Static-state fallback for runRewireOpStep: replace the canvas edges
+// + dim every node except `four`. Pages pass their own clearDimPick /
+// dimAllExcept since those wrap viz-instance helpers per stage.
+function dimSettleFallback(viz, clearDimPick, dimAllExcept) {
+  return function (edges, four) {
+    viz.setEdges(edges);
+    clearDimPick(viz);
+    if (four && four.length) dimAllExcept(viz, four);
+  };
+}
+
+// Default fourFor: collect node ids from the standard four pair fields.
+function fourFromOp(op) {
+  const f = new Set();
+  [op && op.p1, op && op.p2, op && op.newp1, op && op.newp2].forEach(p => {
+    if (p) { f.add(p[0]); f.add(p[1]); }
+  });
+  return [...f];
+}
+
+// Per-op rewire walker driver. Forward (step === lastStep+1) plays the
+// 2-opt swap via rewireSpokeSwapAnimate; backward (step === lastStep-1)
+// plays the same animation with cuts + places swapped; everything else
+// settles to the static state via fallback().
+//
+// Pre-cancels any in-flight prevTimer so consecutive clicks don't stack
+// overlays. placesFor must already filter partial-success ops (e.g.
+// via op.placedNewp1) so the helper can rely on places.length > 0.
+//
+// Returns the new settle-timer handle (or null if no animation ran).
+// Caller stores it and passes it back as opts.prevTimer next time.
+function runRewireOpStep(opts) {
+  const {
+    viz, step, lastStep, ops, buildEdges, cutsFor, placesFor,
+    edgeIdPrefix, setLock, prevTimer,
+  } = opts;
+  const fourFor = opts.fourFor || fourFromOp;
+  const fallback = opts.fallback || function () {};
+  if (prevTimer) { prevTimer.cancel(); setLock(false); }
+  function play(beforeIdx, afterIdx, cuts, places, op, suffix) {
+    const four = fourFor(op);
+    setLock(true);
+    let timer = null;
+    timer = NETGEN.rewireSpokeSwapAnimate({
+      viz,
+      before: buildEdges(beforeIdx),
+      after: buildEdges(afterIdx),
+      cuts, places, four,
+      edgeIdPrefix: edgeIdPrefix + "-" + suffix + "-" + step,
+      settle: function () {
+        // The same closure-captured slot the caller's prevTimer points
+        // at clears here; setLock(false) un-locks the buttons.
+        timer = null;
+        setLock(false);
+      },
+    });
+    return timer;
+  }
+  const fwdOp = step > 0 ? ops[step - 1] : null;
+  const fwdPlaces = (step === lastStep + 1 && fwdOp && fwdOp.success) ? placesFor(fwdOp) : null;
+  if (fwdPlaces && fwdPlaces.length > 0) {
+    return play(step - 1, step, cutsFor(fwdOp), fwdPlaces, fwdOp, "fwd");
+  }
+  const undone = (step === lastStep - 1 && lastStep > 0) ? ops[lastStep - 1] : null;
+  const undonePlaces = (undone && undone.success) ? placesFor(undone) : null;
+  if (undonePlaces && undonePlaces.length > 0) {
+    return play(lastStep, step, undonePlaces, cutsFor(undone), undone, "rev");
+  }
+  fallback(buildEdges(step), fwdOp ? fourFor(fwdOp) : []);
+  return null;
+}
+
 // MathJax retypeset on a single element or list. No-op if MathJax not loaded.
 function retypeset(target) {
   if (!(window.MathJax && window.MathJax.typesetPromise)) return;
@@ -1587,6 +1717,10 @@ global.NETGEN = {
   bindRowNodeHover,
   rewireSwapAnimate,
   rewireSpokeSwapAnimate,
+  runRewireOpStep,
+  fourFromOp,
+  dimSettleFallback,
+  EdgePaths,
 };
 
 })(window);

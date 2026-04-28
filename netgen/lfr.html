@@ -941,42 +941,40 @@ window.MathJax = {
           });
         });
       }
-      if (settleTimer) { settleTimer.cancel(); settleTimer = null; setLock(false); }
-      const isForward = step === lastStep + 1;
-      const cleanupOp = !inPair ? trace.rewireOps[step - total1 - 1] : null;
-      const isSwap = cleanupOp && cleanupOp.success;
-      if (isForward && isSwap) {
-        // Build before-state by reverting this op on top of state.
-        const stateBeforeMap = stateAfter(trace, step - 1);
-        const beforeEdges = [];
-        let bi = 0;
-        stateBeforeMap.edges.forEach(e => {
-          beforeEdges.push({
+      function buildEdgesAt(s) {
+        const m = stateAfter(trace, s);
+        const out = [];
+        let j = 0;
+        m.edges.forEach(e => {
+          out.push({
             u: e.u, v: e.v,
             color: e.bad ? COL.edge_drop : COL.edge_inter,
             w: 1.5,
-            id: "lfr-cm-pre-" + (bi++),
+            id: "lfr-cm-pre-" + (j++),
           });
         });
-        const fourSet = [];
-        [cleanupOp.p1, cleanupOp.p2, cleanupOp.newp1, cleanupOp.newp2].forEach(p => {
-          if (p) { fourSet.push(p[0]); fourSet.push(p[1]); }
-        });
-        setLock(true);
-        settleTimer = NETGEN.rewireSpokeSwapAnimate({
-          viz,
-          before: beforeEdges,
-          after: edges,
-          cuts: [cleanupOp.p1].concat(cleanupOp.p2 ? [cleanupOp.p2] : []),
-          places: [cleanupOp.newp1, cleanupOp.newp2].filter(Boolean),
-          four: fourSet,
-          edgeIdPrefix: "lfr-cm-swap-" + step,
-          settle: () => { settleTimer = null; setLock(false); },
-        });
-      } else {
-        viz.setEdges(edges);
-        clearDimPick();
+        return out;
       }
+      // pair-phase steps hold a null entry; cleanup-phase steps hold
+      // the rewireOp. runRewireOpStep walks this so back-step on a
+      // cleanup op replays the swap in reverse.
+      const opsByStep = trace._opsByStep || (() => {
+        const out = [];
+        for (let i = 0; i < total1; i++) out.push(null);
+        trace.rewireOps.forEach(o => out.push(o));
+        trace._opsByStep = out;
+        return out;
+      })();
+      settleTimer = NETGEN.runRewireOpStep({
+        viz, step, lastStep,
+        ops: opsByStep,
+        buildEdges: buildEdgesAt,
+        cutsFor: (o) => [o.p1].concat(o.p2 ? [o.p2] : []),
+        placesFor: (o) => [o.newp1, o.newp2].filter(Boolean),
+        edgeIdPrefix: "lfr-cm-swap",
+        setLock, prevTimer: settleTimer,
+        fallback: () => { viz.setEdges(edges); clearDimPick(); },
+      });
       lastStep = step;
       let label, desc;
       if (inPair) {
@@ -1215,36 +1213,46 @@ window.MathJax = {
         }
       }
 
-      const isForward = step === lastStep + 1;
-      if (settleTimer) { settleTimer.cancel(); settleTimer = null; setLock(false); }
-      const opForAnim = trace[step - 1].op;
-      const cuts = (opForAnim.cuts || []).map(p => [p[0] + 1, p[1] + 1]);
-      const places = (opForAnim.places || []).map(p => [p[0] + 1, p[1] + 1]);
-      const isSwap = isForward && cuts.length > 0 && places.length > 0;
-      if (isSwap) {
-        const clusterSetsBefore = stateAtStep(r, trace, step - 1);
-        const beforeEdges = cumulativeEdges(clusterSetsBefore, r);
-        setLock(true);
-        settleTimer = NETGEN.rewireSpokeSwapAnimate({
-          viz,
-          before: beforeEdges,
-          after: afterEdges,
-          cuts, places,
-          four: [...four],
-          edgeIdPrefix: "lfr-bs-swap-" + step,
-          settle: () => { settleTimer = null; setLock(false); },
+      // Cache 1-based cuts+places on each trace entry so runRewireOpStep
+      // can drive forward + reverse without per-render re-mapping.
+      const opsByStep = trace._opsByStep || (() => {
+        const out = trace.map(t => {
+          const o = t.op;
+          return {
+            cuts1b: (o.cuts || []).map(p => [p[0] + 1, p[1] + 1]),
+            places1b: (o.places || []).map(p => [p[0] + 1, p[1] + 1]),
+            success: (o.cuts || []).length > 0 && (o.places || []).length > 0,
+            raw: o, traceEntry: t,
+          };
         });
-      } else {
-        viz.setEdges(afterEdges);
-        viz.clearAllNodeClass("dim");
-        viz.clearAllNodeClass("pick");
-        viz.clearAllNodeClass("swap-pick");
-        if (four.size > 0) {
-          viz.eachNode(n => {
-            if (!four.has(parseInt(n.id, 10))) viz.addNodeClass(n.id, "dim");
-          });
-        }
-      }
+        trace._opsByStep = out;
+        return out;
+      })();
+      settleTimer = NETGEN.runRewireOpStep({
+        viz, step, lastStep,
+        ops: opsByStep,
+        buildEdges: (s) => cumulativeEdges(stateAtStep(r, trace, s), r),
+        cutsFor: (o) => o.cuts1b,
+        placesFor: (o) => o.places1b,
+        fourFor: (o) => {
+          const f = new Set();
+          (o.cuts1b || []).concat(o.places1b || []).forEach(p => { f.add(p[0]); f.add(p[1]); });
+          return [...f];
+        },
+        edgeIdPrefix: "lfr-bs-swap",
+        setLock, prevTimer: settleTimer,
+        fallback: (edges) => {
+          viz.setEdges(edges);
+          viz.clearAllNodeClass("dim");
+          viz.clearAllNodeClass("pick");
+          viz.clearAllNodeClass("swap-pick");
+          if (four.size > 0) {
+            viz.eachNode(n => {
+              if (!four.has(parseInt(n.id, 10))) viz.addNodeClass(n.id, "dim");
+            });
+          }
+        },
+      });
       labelEl.textContent = label;
       descEl.innerHTML = desc;
       lastStep = step;
@@ -1514,18 +1522,14 @@ window.MathJax = {
           "Cut " + cuts + "; place " + places + ". var_mate " +
           op.varMateBefore + " &rarr; " + op.varMateAfter + ".";
       }
-      if (settleTimer) { settleTimer.cancel(); settleTimer = null; setLock(false); }
-      const isForward = step === lastStep + 1;
-      if (isForward && step > 0) {
-        const op = r.mateOps[step - 1];
-        // Build before-state by reverting this op (drop op.places, restore op.cuts).
-        const stateBeforeMap = stateAfter(r, step - 1);
-        const beforeExt = [];
+      function extEdgesAt(s) {
+        const m = stateAfter(r, s);
+        const out = [];
         let bei = 0;
-        stateBeforeMap.forEach(([a, b]) => {
+        m.forEach(([a, b]) => {
           const u = a + 1, v = b + 1;
           const sameCluster = LFRKernel.theyAreMate(a, b, r.memberList);
-          beforeExt.push({
+          out.push({
             u, v,
             color: sameCluster ? COL.edge_drop : COL.edge_inter,
             w: sameCluster ? 1.6 : 1.5,
@@ -1533,25 +1537,33 @@ window.MathJax = {
             classes: sameCluster ? "pick" : "",
           });
         });
-        const beforeAll = intraEdgeViz.concat(beforeExt);
-        setLock(true);
-        settleTimer = NETGEN.rewireSpokeSwapAnimate({
-          viz,
-          before: beforeAll,
-          after: allEdges,
-          cuts: op.cuts.map(c => [c[0] + 1, c[1] + 1]),
-          places: op.places.map(p => [p[0] + 1, p[1] + 1]),
-          four: [...four],
-          edgeIdPrefix: "lfr-mr-swap-" + step,
-          settle: () => { settleTimer = null; setLock(false); },
-        });
-      } else {
-        viz.setEdges(allEdges);
-        clearDimPick();
-        if (four.size > 0) {
-          dimAllExcept([...four]);
-        }
+        return intraEdgeViz.concat(out);
       }
+      const opsByStep = r._mateOpsByStep || (r._mateOpsByStep = (r.mateOps || []).map(o => ({
+        cuts1b: (o.cuts || []).map(c => [c[0] + 1, c[1] + 1]),
+        places1b: (o.places || []).map(p => [p[0] + 1, p[1] + 1]),
+        success: (o.cuts || []).length > 0 && (o.places || []).length > 0,
+        raw: o,
+      })));
+      settleTimer = NETGEN.runRewireOpStep({
+        viz, step, lastStep,
+        ops: opsByStep,
+        buildEdges: extEdgesAt,
+        cutsFor: (o) => o.cuts1b,
+        placesFor: (o) => o.places1b,
+        fourFor: (o) => {
+          const f = new Set();
+          [o.raw.a, o.raw.b, o.raw.randomMate, o.raw.nodeH].forEach(id => f.add(id + 1));
+          return [...f];
+        },
+        edgeIdPrefix: "lfr-mr-swap",
+        setLock, prevTimer: settleTimer,
+        fallback: (edges) => {
+          viz.setEdges(edges);
+          clearDimPick();
+          if (four.size > 0) dimAllExcept([...four]);
+        },
+      });
       labelEl.textContent = label;
       descEl.innerHTML = desc;
       lastStep = step;

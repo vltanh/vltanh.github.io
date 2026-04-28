@@ -1277,38 +1277,26 @@ window.MathJax = {
       }
 
       const op = R.ops[step - 1];
-      const stateBefore = rewireStateAt(R, step - 1);
-      const beforeEdges = buildResidualEdges(stateBefore);
-      const four = new Set();
-      [op.p1, op.p2, op.newp1, op.newp2].forEach(p => {
-        if (p) { four.add(p[0]); four.add(p[1]); }
-      });
-      const isForward = step === lastStep + 1;
-      if (settleTimer) { settleTimer.cancel(); settleTimer = null; setLock(false); }
       // Stage 2 edges always render under the rewire state.
       viz.clearEdges();
       viz.addEdges(stage2);
-      const places = [];
-      if (op.success) {
-        if (op.newp1) places.push(op.newp1);
-        if (op.newp2) places.push(op.newp2);
-      }
-      if (isForward && op.success && places.length > 0) {
-        viz.addEdges(beforeEdges);
-        setLock(true);
-        settleTimer = NETGEN.rewireSpokeSwapAnimate({
-          viz,
-          before: stage2.concat(beforeEdges),
-          after: stage2.concat(stateEdges),
-          cuts: [op.p1].concat(op.p2 ? [op.p2] : []),
-          places,
-          four: [...four],
-          edgeIdPrefix: "res-swap-" + step,
-          settle: () => { settleTimer = null; setLock(false); },
-        });
-      } else {
-        viz.addEdges(stateEdges);
-      }
+      settleTimer = NETGEN.runRewireOpStep({
+        viz, step, lastStep,
+        ops: R.ops,
+        buildEdges: (s) => stage2.concat(buildResidualEdges(rewireStateAt(R, s))),
+        cutsFor: (o) => [o.p1].concat(o.p2 ? [o.p2] : []),
+        placesFor: (o) => {
+          const ps = [];
+          if (o.success) {
+            if (o.newp1) ps.push(o.newp1);
+            if (o.newp2) ps.push(o.newp2);
+          }
+          return ps;
+        },
+        edgeIdPrefix: "res-swap",
+        setLock, prevTimer: settleTimer,
+        fallback: () => { viz.clearEdges(); viz.addEdges(stage2); viz.addEdges(stateEdges); },
+      });
 
       const [A, B] = (op.bp || "0|0").split("|").map(Number);
       const bpStr = A === B ? `intra-block (${A}, ${A})` : `inter-block (${A}, ${B})`;

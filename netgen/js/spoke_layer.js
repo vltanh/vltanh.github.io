@@ -357,15 +357,14 @@ NETGEN.spokeLayer = (function () {
       return partnerDir(nid, a.justPartner);
     }
 
-    // Self-loop tear-drop. Two quadratic halves from node to apex,
-    // each with a control at (±OFFX, -OFFY) relative to the node
-    // centre. apex y = -OFFY so both halves' tangents at the apex
-    // are horizontal — they meet without a kink. OFFX widens the
-    // bulge, OFFY raises the top.
-    const LOOP_OFFX = 1.1;
-    const LOOP_OFFY = 2.0;
-    const LOOP_TANGENT_START = Math.atan2(-LOOP_OFFY, -LOOP_OFFX);
-    const LOOP_TANGENT_END   = Math.atan2(-LOOP_OFFY,  LOOP_OFFX);
+    // Self-loop primitives live in NETGEN.EdgePaths; this layer paints
+    // each half of the teardrop independently so the placed-loop arc
+    // can grow out of one stub while the other half stays inert.
+    const EP = NETGEN.EdgePaths;
+    const LOOP_OFFX         = EP.LOOP_OFFX;
+    const LOOP_OFFY         = EP.LOOP_OFFY;
+    const LOOP_TANGENT_START = EP.LOOP_TANGENT_START;
+    const LOOP_TANGENT_END   = EP.LOOP_TANGENT_END;
 
     // Effective angle of a slot: rest if free, partner-direction if
     // consumed / active-just, loop-tangent if the active pair is a
@@ -834,32 +833,13 @@ NETGEN.spokeLayer = (function () {
     // the node boundary instead of the centre, keeping the inside
     // of the circle clean even when the node is dimmed.
     // dupTotal <= 1 ⇒ collinear straight, dupIdx ignored.
-    function fanPath(p1, p2, dupIdx, dupTotal, r1, r2) {
-      const centered = dupTotal <= 1 ? 0 : (dupIdx - (dupTotal - 1) / 2);
-      return fanPathCentered(p1, p2, centered, r1, r2);
-    }
+    const fanPath = EP.makeParallelEdge;
     // Same as fanPath but takes the perpendicular fan offset directly,
     // so callers can interpolate `centered` smoothly during the fan
     // animation (each tween-step recomputes endpoints from the current
     // Q-control direction → endpoints stay on the node boundary,
     // instead of cutting a chord through the node).
-    function fanPathCentered(p1, p2, centered, r1, r2) {
-      const dx = p2.x - p1.x, dy = p2.y - p1.y;
-      const len = Math.hypot(dx, dy) || 1;
-      const nx = -dy / len, ny = dx / len;
-      const spread = Math.max(22, Math.min(42, len * 0.18));
-      const mx = (p1.x + p2.x) / 2 + nx * centered * spread * 2;
-      const my = (p1.y + p2.y) / 2 + ny * centered * spread * 2;
-      const dxs = mx - p1.x, dys = my - p1.y;
-      const ds = Math.hypot(dxs, dys) || 1;
-      const sx = p1.x + (dxs / ds) * (r1 || 0);
-      const sy = p1.y + (dys / ds) * (r1 || 0);
-      const dxe = mx - p2.x, dye = my - p2.y;
-      const de = Math.hypot(dxe, dye) || 1;
-      const ex = p2.x + (dxe / de) * (r2 || 0);
-      const ey = p2.y + (dye / de) * (r2 || 0);
-      return "M" + sx + "," + sy + " Q" + mx + "," + my + " " + ex + "," + ey;
-    }
+    const fanPathCentered = EP.makeParallelEdgeCentered;
 
     function placedPath(d) {
       const nu = viz.nodeById[String(d.u)];
@@ -957,47 +937,17 @@ NETGEN.spokeLayer = (function () {
 
     function loopApex(d) {
       const nu = viz.nodeById[String(d.u)];
-      const r = nodeR(d.u) + 8;
-      // Apex sits at the same y as the two side controls. With this
-      // alignment, each half's tangent at the apex is horizontal, so
-      // the two halves meet without a kink.
-      return { x: nu.x, y: nu.y - r * LOOP_OFFY };
+      return EP.loopApex(nu, nodeR(d.u));
     }
     function loopHalfPath(d, side) {
       const nu = viz.nodeById[String(d.u)];
-      const r = nodeR(d.u) + 8;
-      const apex = loopApex(d);
-      const cx = nu.x + side * r * LOOP_OFFX;
-      const cy = nu.y - r * LOOP_OFFY;
-      // Path starts at the node BOUNDARY along this half's tangent
-      // (LOOP_TANGENT_START / END), not at the node centre, so the
-      // stroke never enters the node circle's interior in the first
-      // place. Avoids dashes / round line caps poking through the
-      // node fill when paint order can't reliably keep the loop
-      // behind the node.
-      const r0 = nodeR(d.u);
-      const tangent = side < 0 ? LOOP_TANGENT_START : LOOP_TANGENT_END;
-      const sx = nu.x + Math.cos(tangent) * r0;
-      const sy = nu.y + Math.sin(tangent) * r0;
-      return "M" + sx + "," + sy + " Q" + cx + "," + cy + " " + apex.x + "," + apex.y;
+      return EP.makeSelfLoopHalf(nu, nodeR(d.u), side);
     }
     function bridgePath(d) {
       const nu = viz.nodeById[String(d.u)];
       const nv = viz.nodeById[String(d.v)];
       if (!nu || !nv) return "";
-      if (d.isLoop) {
-        const r = nodeR(d.u) + 8;
-        const r0 = nodeR(d.u);
-        const x = nu.x, y = nu.y;
-        // Loop endpoints sit on the node boundary at the two loop
-        // tangents (start / end). Same rationale as loopHalfPath.
-        const sx = x + Math.cos(LOOP_TANGENT_START) * r0;
-        const sy = y + Math.sin(LOOP_TANGENT_START) * r0;
-        const ex = x + Math.cos(LOOP_TANGENT_END) * r0;
-        const ey = y + Math.sin(LOOP_TANGENT_END) * r0;
-        return "M" + sx + "," + sy + " C" + (x - r * LOOP_OFFX) + "," + (y - r * LOOP_OFFY)
-             + " " + (x + r * LOOP_OFFX) + "," + (y - r * LOOP_OFFY) + " " + ex + "," + ey;
-      }
+      if (d.isLoop) return EP.makeSelfLoop(nu, nodeR(d.u));
       const swap = String(d.u) > String(d.v);
       const a = swap ? nv : nu, b = swap ? nu : nv;
       const ra = swap ? nodeR(d.v) : nodeR(d.u), rb = swap ? nodeR(d.u) : nodeR(d.v);

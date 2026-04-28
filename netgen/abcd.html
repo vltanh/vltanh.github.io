@@ -1257,38 +1257,16 @@ window.MathJax = {
       }
 
       const op = R.clusterRewireOps[step - 1];
-      const stateBefore = stateAtStep(R, step - 1);
-      const stateAfter = stateAtStep(R, step);
-      const four = new Set();
-      [op.p1, op.p2, op.newp1, op.newp2].forEach(p => {
-        if (p) { four.add(p[0]); four.add(p[1]); }
+      settleTimer = NETGEN.runRewireOpStep({
+        viz, step, lastStep,
+        ops: R.clusterRewireOps,
+        buildEdges: (s) => buildEdges(stateAtStep(R, s)),
+        cutsFor: (o) => [o.p1].concat(o.p2 ? [o.p2] : []),
+        placesFor: (o) => [o.newp1, o.newp2].filter(Boolean),
+        edgeIdPrefix: "cr-swap",
+        setLock, prevTimer: settleTimer,
+        fallback: NETGEN.dimSettleFallback(viz, clearDimPick, dimAllExcept),
       });
-      const isForward = step === lastStep + 1;
-      if (settleTimer) { settleTimer.cancel(); settleTimer = null; setLock(false); }
-      if (isForward && op.success) {
-        // SBM stub-matcher animation: cut bridges decompose into the 4
-        // affected stubs, stubs orbit to rest, then orbit to their new
-        // partner aim, then new bridges grow from the stub tips.
-        setLock(true);
-        settleTimer = NETGEN.rewireSpokeSwapAnimate({
-          viz,
-          before: buildEdges(stateBefore),
-          after: buildEdges(stateAfter),
-          cuts: [op.p1].concat(op.p2 ? [op.p2] : []),
-          places: [op.newp1, op.newp2].filter(Boolean),
-          four: [...four],
-          edgeIdPrefix: "cr-swap-" + step,
-          settle: () => { settleTimer = null; setLock(false); },
-        });
-      } else {
-        // Jump / back / unsuccessful: settle directly with the four
-        // affected nodes picked + everything else dimmed, mirroring the
-        // bg-rewire fallback. SBM stub-matcher animation handles its
-        // own focus during the forward branch.
-        viz.setEdges(buildEdges(stateAfter));
-        clearDimPick(viz);
-        dimAllExcept(viz, [...four]);
-      }
 
       const tag = op.success
         ? (op.src === "valid" ? "swap with valid edge" : "swap with recycled pair")
@@ -1559,12 +1537,6 @@ window.MathJax = {
       }
 
       const op = R.globalRewireOps[step - 1];
-      const stateBefore = stateAtStep(R, step - 1);
-      const stateAfter = stateAtStep(R, step);
-      const four = new Set();
-      [op.p1, op.p2, op.newp1, op.newp2].forEach(p => {
-        if (p) { four.add(p[0]); four.add(p[1]); }
-      });
       function buildEdges(state) {
         const out = backdrop.slice();
         let i = 0;
@@ -1579,28 +1551,21 @@ window.MathJax = {
         });
         return out;
       }
-      const isForward = step === lastStep + 1;
-      if (settleTimer) { settleTimer.cancel(); settleTimer = null; setLock(false); }
-      const places = [];
-      if (op.placedNewp1 && op.newp1) places.push(op.newp1);
-      if (op.placedNewp2 && op.newp2) places.push(op.newp2);
-      if (isForward && op.success && places.length > 0) {
-        setLock(true);
-        settleTimer = NETGEN.rewireSpokeSwapAnimate({
-          viz,
-          before: buildEdges(stateBefore),
-          after: buildEdges(stateAfter),
-          cuts: [op.p1].concat(op.p2 ? [op.p2] : []),
-          places,
-          four: [...four],
-          edgeIdPrefix: "br-swap-" + step,
-          settle: () => { settleTimer = null; setLock(false); },
-        });
-      } else {
-        viz.setEdges(buildEdges(stateAfter));
-        clearDimPick(viz);
-        dimAllExcept(viz, [...four]);
-      }
+      settleTimer = NETGEN.runRewireOpStep({
+        viz, step, lastStep,
+        ops: R.globalRewireOps,
+        buildEdges: (s) => buildEdges(stateAtStep(R, s)),
+        cutsFor: (o) => [o.p1].concat(o.p2 ? [o.p2] : []),
+        placesFor: (o) => {
+          const ps = [];
+          if (o.placedNewp1 && o.newp1) ps.push(o.newp1);
+          if (o.placedNewp2 && o.newp2) ps.push(o.newp2);
+          return ps;
+        },
+        edgeIdPrefix: "br-swap",
+        setLock, prevTimer: settleTimer,
+        fallback: NETGEN.dimSettleFallback(viz, clearDimPick, dimAllExcept),
+      });
 
       const tag = op.success
         ? (op.src === "valid" ? "swap with valid bg edge" : "swap with recycled pair")
