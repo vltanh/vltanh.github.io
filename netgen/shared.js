@@ -887,10 +887,8 @@ function stepController(opts) {
   endBtn && endBtn.addEventListener("click", () => { if (!isLocked()) withSnap(() => { idx = total-1; render(); }); });
   randStepBtn && randStepBtn.addEventListener("click", () => {
     if (isLocked()) return;
-    withSnap(() => {
-      if (onRandStep) onRandStep(idx);
-      render();
-    });
+    if (onRandStep) onRandStep(idx);
+    render();
   });
   randAllBtn && randAllBtn.addEventListener("click", () => {
     if (isLocked()) return;
