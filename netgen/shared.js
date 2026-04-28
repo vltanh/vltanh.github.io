@@ -934,6 +934,46 @@ function stepController(opts) {
   };
 }
 
+// Click handler for floating .gx-panel overlays. Each panel ships
+//   <button id="<prefix>-toggle"> + <span id="<prefix>-arrow">
+//   <div   id="<prefix>-body">
+// so passing the prefix is enough to wire collapse / expand.
+function bindPanelToggle(prefix) {
+  const btn = document.getElementById(prefix + "-toggle");
+  if (!btn) return;
+  btn.addEventListener("click", function () {
+    const body = document.getElementById(prefix + "-body");
+    const arrow = document.getElementById(prefix + "-arrow");
+    const open = body.style.display !== "none";
+    body.style.display = open ? "none" : "block";
+    if (arrow) arrow.innerHTML = open ? "&#9656;" : "&#9662;";
+  });
+}
+
+// Mount a floating .gx-panel into a .graph-canvas. opts:
+//   hostId       (required) id of the .graph-canvas
+//   prefix       (required) id namespace for toggle / arrow / body
+//   title        text on the toggle button
+//   bodyHTML     HTML inserted into the body div
+//   maxWidth     optional CSS for the wrapper
+// Returns the wrapper element.
+function mountGxPanel(opts) {
+  const host = document.getElementById(opts.hostId);
+  if (!host) return null;
+  const wrap = document.createElement("div");
+  wrap.id = opts.prefix + "-panel";
+  wrap.className = "gx-panel";
+  if (opts.maxWidth) wrap.style.maxWidth = opts.maxWidth;
+  wrap.innerHTML =
+    '<button id="' + opts.prefix + '-toggle" class="gx-panel-toggle" type="button">'
+    + (opts.title || "")
+    + ' <span id="' + opts.prefix + '-arrow">&#9662;</span></button>'
+    + '<div id="' + opts.prefix + '-body">' + (opts.bodyHTML || "") + '</div>';
+  host.appendChild(wrap);
+  bindPanelToggle(opts.prefix);
+  return wrap;
+}
+
 // Standard 5-cluster list for the singleton input opener: 3 real
 // clusters (C1, C2, C3) + one entry per node in OUT, each painted from
 // the shared outlier_palette. Every gen page can reuse this verbatim
@@ -2045,7 +2085,7 @@ global.NETGEN = {
   C1, C2, C3, OUT, INTRA, INTER, OUT_EDGES,
   CORE_NODES, CORE_EDGES, topK, cliqueEdges,
   COLORS, CY, VIZ,
-  makeTooltip, scrubSlider, stepController, walkerRow, wireWalker, snapOrSync, singletonOpener, defaultSingletonClusters, walkerMarkPlaced, walkerMarkJust, toggle,
+  makeTooltip, scrubSlider, stepController, walkerRow, wireWalker, snapOrSync, singletonOpener, defaultSingletonClusters, bindPanelToggle, mountGxPanel, walkerMarkPlaced, walkerMarkJust, toggle,
   linksRow, kinSection,
   fitViewBoxAttr,
   retypeset,
