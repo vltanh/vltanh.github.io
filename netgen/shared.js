@@ -26,31 +26,31 @@ const POSITIONS = {
   // (4,8) leave K_4 cleanly. Diamond is the 4-cycle 5-6-8-7 plus the
   // (6,7) diagonal; 5 is top, 8 is bottom, 6 and 7 are the side
   // vertices the diagonal connects.
-  1:  {x: -126, y: -180},
-  2:  {x: -169, y: -242},
-  3:  {x: -234, y: -182},
-  4:  {x: -139, y: -294},
-  5:  {x:    3, y: -188},
-  6:  {x:   50, y: -223},
-  7:  {x:  -63, y: -200},
-  8:  {x:    3, y: -263},
+  1:  {x: -186, y: -305},
+  2:  {x: -142, y: -377},
+  3:  {x: -163, y:  -64},
+  4:  {x: -251, y: -293},
+  5:  {x:  122, y: -196},
+  6:  {x:  135, y: -302},
+  7:  {x:  -38, y: -273},
+  8:  {x:  -66, y: -392},
   // C2 (bottom-right, 6 nodes): K_4 on {9,10,11,12} as a square,
   // 13 hangs off (9,12), 14 off (10,11) on opposite diagonals.
-  9:  {x:  185, y:   80},
-  10: {x:  220, y:   55},
-  11: {x:  169, y:  153},
-  12: {x:  311, y:   94},
-  13: {x:  301, y:  161},
-  14: {x:  222, y:  186},
+  9:  {x:  249, y:   61},
+  10: {x:  355, y:   83},
+  11: {x:  206, y:  177},
+  12: {x:  325, y:  -39},
+  13: {x:  240, y:  295},
+  14: {x:  108, y:  206},
   // C3 (bottom-left, 4 nodes): triangle {15,16,17}, leaf 18 off 16.
-  15: {x: -214, y:   79},
-  17: {x: -280, y:  146},
-  16: {x: -192, y:  162},
-  18: {x: -104, y:  193},
+  15: {x: -343, y:   36},
+  17: {x: -203, y:  142},
+  16: {x: -284, y:  260},
+  18: {x: -167, y:  261},
   // Outliers in the middle, pulled off the C2 axis so they don't
   // read as a continuation of the 9-12-13 line.
-  19: {x:  -72, y:  -42},
-  20: {x:   50, y:  -82},
+  19: {x:  -52, y:   67},
+  20: {x:   50, y:  -60},
 };
 
 const C1 = [1,2,3,4,5,6,7,8];
