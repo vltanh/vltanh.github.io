@@ -639,6 +639,7 @@
   function buildSubgraphs(args) {
     const {
       memberMatrix, internalDegreeSeq, degreeSeq, rng, excess, defect,
+      traceTest,
     } = args;
     const numNodes = degreeSeq.length;
     const E = [];
@@ -732,9 +733,17 @@
       const sub = buildSubgraph({
         nodes: memberMatrix[k].slice(),
         degrees: internalDegreeI,
-        rng, E,
+        rng, E, traceTest,
       });
-      perCluster.push(sub);
+      perCluster.push({
+        cluster: k,
+        nodes: memberMatrix[k].slice(),
+        multipleResolved: sub.multipleResolved,
+        multipleDropped: sub.multipleDropped,
+        phase2Ops: sub.phase2Ops,
+        phase2FinalEn: sub.phase2FinalEn,
+        phase3Ops: sub.phase3Ops,
+      });
     }
 
     return { E, memberList, linkList, perCluster };
@@ -1058,7 +1067,7 @@
       memberMatrix: assignRes.memberMatrix,
       internalDegreeSeq: split.internal,
       degreeSeq: dseq.degrees,
-      rng, excess, defect,
+      rng, excess, defect, traceTest: args.traceTest,
     });
     const connRes = connectAllTheParts({
       E: subRes.E, memberList: subRes.memberList, linkList: subRes.linkList,

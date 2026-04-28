@@ -233,6 +233,25 @@
     </div>
   </div>
 
+  <p>Before the mate-rewire kicks in, each cluster runs its own configuration-model build via <code>buildSubgraph</code>: a deterministic multimap seed places intra-cluster edges first, then 10 randomization passes 4-way-swap the local adjacency, and finally a multi-edge rewire breaks any duplicates that surface when each cluster is merged into the global edge set. The walker below steps through every Phase-2 swap and every Phase-3 multi-edge rewire across all clusters in cluster order. Each step boldfaces the up to 4 endpoints touched, dims everything else, then animates the cut + place.</p>
+
+  <div class="graph" id="g-bs">
+    <div class="graph-chrome">
+      <span id="g-bs-stage">step 0 · per-cluster build init</span>
+      <span class="right step-label">step <b id="g-bs-cur">0</b> / <span id="g-bs-total">0</span></span>
+    </div>
+    <div class="graph-canvas" id="g-bs-cy"></div>
+    <div class="widget-row">
+      <button class="btn" id="g-bs-prev">← back</button>
+      <button class="btn primary" id="g-bs-next">next →</button>
+      <button class="btn" id="g-bs-reset">reset</button>
+      <button class="btn" id="g-bs-end" type="button">skip to end</button>
+      <button class="btn" id="g-bs-reroll" type="button">random all</button>
+      <span class="step-label">walks all clusters' Phase-2 swaps + Phase-3 multi-edge rewires</span>
+    </div>
+    <div class="step-desc" id="g-bs-desc"></div>
+  </div>
+
   <p>The mate-rewire phase is what turns LFR's μ from a target into the bell-shaped distribution above. After per-cluster internal edges are placed, the binary builds a global external-edge config model and runs a phase-3 loop: for any same-cluster external edge, pick a random outside node, do a 4-way swap that pulls one endpoint out of the cluster. The walker below steps op-by-op through that loop on the current sample. Per-cluster internal edges render as faded backdrop; mate edges still inside a cluster surface red-dashed; each step ghost-flashes the cuts before settling on the placements.</p>
 
   <div class="graph" id="g-mr">
@@ -993,6 +1012,240 @@ window.MathJax = {
     document.getElementById("g-cm-reroll").addEventListener("click", rerollEdges);
     onResampleChanged.push(() => { CACHE_KEY = ""; ctl.reconfigure(totalForCurrent()); });
     onEdgeChanged.push(() => { CACHE_KEY = ""; ctl.reconfigure(totalForCurrent()); });
+  })();
+
+  // ── Generation · per-cluster build-subgraph walker ──
+  // Walks every cluster's Phase 2 (10 randomization passes 4-way swap)
+  // and Phase 3 (multi-edge rewire when merging into global E) ops in
+  // cluster order. Step 0 = clusters seeded but no swaps yet. Each
+  // step replays the trace forward to compute the current edge set.
+  (function () {
+    const viz = NETGEN.VIZ.init("g-bs-cy", { showLabels: true, edges: [] });
+    let CACHE_KEY_BS = "", CACHE_BS = null;
+    function getRunBS() {
+      const key = EDGE_SEED + "|" + RESAMPLE_SEED + "|" +
+        document.getElementById("mu-slider").value;
+      if (CACHE_KEY_BS === key) return CACHE_BS;
+      CACHE_KEY_BS = key;
+      const mu = parseFloat(document.getElementById("mu-slider").value);
+      const rng = seededRng(EDGE_SEED * 53 + 9);
+      const r = LFRKernel.runFullPipeline({
+        N: N_, k_avg: K_MEAN, max_k: K_MAX, t1: T1,
+        c_min: C_MIN, c_max: C_MAX, t2: T2,
+        mu, rng, traceTest: true,
+      });
+      CACHE_BS = r;
+      return r;
+    }
+    // Trace = flat list of {cluster, kind: "p2"|"p3", op, clusterIdx}
+    function buildBsTrace(r) {
+      const t = [];
+      if (!r || !r.ok || !r.perCluster) return t;
+      for (let cIdx = 0; cIdx < r.perCluster.length; cIdx++) {
+        const c = r.perCluster[cIdx];
+        (c.phase2Ops || []).forEach((op, oi) => {
+          t.push({ cluster: cIdx, kind: "p2", opIdx: oi, op });
+        });
+        (c.phase3Ops || []).forEach((op, oi) => {
+          t.push({ cluster: cIdx, kind: "p3", opIdx: oi, op });
+        });
+      }
+      return t;
+    }
+    // Build the edge-set state at step k by replaying ops 0..k-1 on
+    // top of each cluster's Phase-1 seed (= phase2FinalEn rolled back
+    // through phase2Ops in reverse). Cleaner: derive Phase-1 seed by
+    // applying phase2 ops in REVERSE on phase2FinalEn; for the walker
+    // start at Phase-1 seed and apply forward.
+    function phase1SeedFor(c) {
+      // phase2FinalEn is the snapshot AFTER all phase2 ops.
+      // To get phase1 seed: invert each phase2 op (cuts <-> places).
+      const set = new Set();
+      const k = (a, b) => (a < b ? a + "|" + b : b + "|" + a);
+      (c.phase2FinalEn || []).forEach(([a, b]) => set.add(k(a, b)));
+      // Apply phase2 ops in REVERSE to invert.
+      const ops = (c.phase2Ops || []).slice().reverse();
+      ops.forEach(op => {
+        op.places.forEach(p => set.delete(k(p[0], p[1])));
+        op.cuts.forEach(p => set.add(k(p[0], p[1])));
+      });
+      return set;
+    }
+    function stateAtStep(r, trace, step) {
+      const k = (a, b) => (a < b ? a + "|" + b : b + "|" + a);
+      // Per-cluster current edge set.
+      const clusterSets = r.perCluster.map(c => phase1SeedFor(c));
+      // Replay ops 0..step-1.
+      for (let i = 0; i < step; i++) {
+        const t = trace[i];
+        const set = clusterSets[t.cluster];
+        if (t.kind === "p2") {
+          t.op.cuts.forEach(p => set.delete(k(p[0], p[1])));
+          t.op.places.forEach(p => set.add(k(p[0], p[1])));
+        } else {
+          // p3: multi-edge rewire op. Cuts a duplicate (after merging
+          // into global E) and one valid edge; places two replacements.
+          // For per-cluster view, keep showing cluster-local edges.
+          if (t.op.success) {
+            t.op.cuts.forEach(p => set.delete(k(p[0], p[1])));
+            t.op.places.forEach(p => {
+              // Phase 3 places might cross clusters; only re-add if
+              // both endpoints are in this cluster's node set.
+              const nodes = new Set(r.perCluster[t.cluster].nodes);
+              if (nodes.has(p[0]) && nodes.has(p[1])) set.add(k(p[0], p[1]));
+            });
+          }
+        }
+      }
+      return clusterSets;
+    }
+    let lastStep = 0;
+    let settleTimer = null;
+    function totalForCurrent() {
+      const r = getRunBS();
+      return 1 + buildBsTrace(r).length;
+    }
+    function cumulativeEdges(clusterSets, r, four) {
+      const out = [];
+      let i = 0;
+      const k = (a, b) => (a < b ? a + "|" + b : b + "|" + a);
+      const seen = new Set();
+      clusterSets.forEach((set, cIdx) => {
+        set.forEach(kk => {
+          if (seen.has(kk)) return;
+          seen.add(kk);
+          const [a, b] = kk.split("|").map(Number);
+          out.push({
+            u: a + 1, v: b + 1,
+            color: COL.edge_intra ? COL.edge_intra.C1 : COL.edge_stage2,
+            w: 1.5,
+            id: "lfr-bs-" + (i++),
+          });
+        });
+      });
+      return out;
+    }
+    function render(step) {
+      const r = getRunBS();
+      const trace = buildBsTrace(r);
+      const total = 1 + trace.length;
+      document.getElementById("g-bs-cur").textContent = String(step);
+      document.getElementById("g-bs-total").textContent = String(total - 1);
+      const labelEl = document.getElementById("g-bs-stage");
+      const descEl = document.getElementById("g-bs-desc");
+      if (!r || !r.ok || !r.perCluster) {
+        viz.setEdges([]);
+        labelEl.textContent = "pipeline gave up";
+        descEl.innerHTML = '<span class="st">no trace</span> &middot; runFullPipeline returned !ok at this μ; reroll or change the slider.';
+        return;
+      }
+      const clusterSetsAfter = stateAtStep(r, trace, step);
+      const afterEdges = cumulativeEdges(clusterSetsAfter, r);
+
+      let label, desc;
+      if (step === 0) {
+        viz.setEdges(afterEdges);
+        viz.clearAllNodeClass("dim");
+        viz.clearAllNodeClass("pick");
+        viz.clearAllNodeClass("swap-pick");
+        labelEl.textContent = "step 0 · all clusters seeded";
+        descEl.innerHTML = '<span class="st">step 0</span> &middot; ' + r.perCluster.length +
+          " cluster" + (r.perCluster.length === 1 ? "" : "s") + " seeded by Phase 1's deterministic multimap. " +
+          trace.length + " op" + (trace.length === 1 ? "" : "s") + " ahead (Phase 2 randomization swaps + Phase 3 multi-edge rewires).";
+        if (settleTimer) { settleTimer.cancel(); settleTimer = null; }
+        lastStep = step;
+        return;
+      }
+      const t = trace[step - 1];
+      const four = new Set();
+      if (t.kind === "p2") {
+        const op = t.op;
+        const c = r.perCluster[t.cluster];
+        // Phase-2 ops use 0-based local indices for nodeA/randomMate/oldNode/nodeH;
+        // ops.cuts/places already store node ids (page node id = id + 1).
+        op.cuts.concat(op.places).forEach(p => {
+          four.add(p[0] + 1); four.add(p[1] + 1);
+        });
+        label = "cluster " + t.cluster + " · phase 2 swap " + (t.opIdx + 1);
+        desc = '<span class="st">phase 2 swap</span> &middot; cluster ' + t.cluster +
+          " run " + op.run + ". Cut <code>" +
+          op.cuts.map(p => (p[0] + 1) + "&ndash;" + (p[1] + 1)).join("</code> + <code>") +
+          "</code>; place <code>" +
+          op.places.map(p => (p[0] + 1) + "&ndash;" + (p[1] + 1)).join("</code> + <code>") + "</code>.";
+      } else {
+        const op = t.op;
+        if (op.success) {
+          op.cuts.concat(op.places).forEach(p => {
+            four.add(p[0] + 1); four.add(p[1] + 1);
+          });
+          op.dupEdge.forEach(id => four.add(id + 1));
+        } else {
+          op.dupEdge.forEach(id => four.add(id + 1));
+        }
+        label = "cluster " + t.cluster + " · phase 3 multi-edge rewire " + (t.opIdx + 1);
+        if (op.success) {
+          desc = '<span class="st">phase 3 rewire</span> &middot; duplicate <code>' +
+            (op.dupEdge[0] + 1) + "&ndash;" + (op.dupEdge[1] + 1) + "</code> resolved. Cut <code>" +
+            op.cuts.map(p => (p[0] + 1) + "&ndash;" + (p[1] + 1)).join("</code> + <code>") +
+            "</code>; place <code>" +
+            op.places.map(p => (p[0] + 1) + "&ndash;" + (p[1] + 1)).join("</code> + <code>") + "</code>.";
+        } else {
+          desc = '<span class="st">phase 3 rewire</span> &middot; duplicate <code>' +
+            (op.dupEdge[0] + 1) + "&ndash;" + (op.dupEdge[1] + 1) + "</code> dropped (stopper exhausted).";
+        }
+      }
+
+      const isForward = step === lastStep + 1;
+      if (settleTimer) { settleTimer.cancel(); settleTimer = null; }
+      const opForAnim = trace[step - 1].op;
+      const cuts = (opForAnim.cuts || []).map(p => [p[0] + 1, p[1] + 1]);
+      const places = (opForAnim.places || []).map(p => [p[0] + 1, p[1] + 1]);
+      const isSwap = isForward && cuts.length > 0 && places.length > 0;
+      if (isSwap) {
+        const clusterSetsBefore = stateAtStep(r, trace, step - 1);
+        const beforeEdges = cumulativeEdges(clusterSetsBefore, r);
+        settleTimer = NETGEN.rewireSwapAnimate({
+          viz,
+          before: beforeEdges,
+          after: afterEdges,
+          cuts, places,
+          four: [...four],
+          edgeIdPrefix: "lfr-bs-swap-" + step,
+          settle: () => { settleTimer = null; },
+        });
+      } else {
+        viz.setEdges(afterEdges);
+        viz.clearAllNodeClass("dim");
+        viz.clearAllNodeClass("pick");
+        viz.clearAllNodeClass("swap-pick");
+        if (four.size > 0) {
+          viz.eachNode(n => {
+            if (four.has(parseInt(n.id, 10))) viz.addNodeClass(n.id, "pick");
+            else viz.addNodeClass(n.id, "dim");
+          });
+        }
+      }
+      labelEl.textContent = label;
+      descEl.innerHTML = desc;
+      lastStep = step;
+    }
+    const ctl = NETGEN.stepController({
+      prevBtn: document.getElementById("g-bs-prev"),
+      nextBtn: document.getElementById("g-bs-next"),
+      resetBtn: document.getElementById("g-bs-reset"),
+      labelCur: document.getElementById("g-bs-cur"),
+      labelTotal: document.getElementById("g-bs-total"),
+      total: totalForCurrent(),
+      onRender: render,
+    });
+    document.getElementById("g-bs-end").addEventListener("click",
+      () => ctl.set(totalForCurrent() - 1));
+    document.getElementById("g-bs-reroll").addEventListener("click", rerollEdges);
+    function reconfig() { CACHE_KEY_BS = ""; ctl.reconfigure(totalForCurrent()); }
+    onResampleChanged.push(reconfig);
+    onAssignChanged.push(reconfig);
+    onEdgeChanged.push(reconfig);
+    document.getElementById("mu-slider").addEventListener("input", reconfig);
   })();
 
   // ── Generation · mu rewire histogram ──
