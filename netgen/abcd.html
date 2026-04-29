@@ -1335,11 +1335,21 @@ window.MathJax = {
       for (let oi = 0; oi < opsToApply; oi++) {
         const op = ops[oi];
         if (!op || !op.success) continue;
-        const i1 = list.findIndex(e => sameXY(e, op.p1) && e.bad);
+        // p1 always picked from the recycle queue (bad). Prefer the
+        // bad copy in the displayed list so the cut animation targets
+        // the red-dashed parallel; fall back to any matching (u,v) if
+        // the bad flag was already cleared by an earlier op.
+        let i1 = list.findIndex(e => sameXY(e, op.p1) && e.bad);
+        if (i1 < 0) i1 = list.findIndex(e => sameXY(e, op.p1));
         if (i1 >= 0) list.splice(i1, 1);
         if (op.p2) {
-          const wantBad = op.src === "recycle";
-          const i2 = list.findIndex(e => sameXY(e, op.p2) && e.bad === wantBad);
+          // Same preference for p2: the kernel may remove either copy
+          // of a parallel (good for src=valid, bad for src=recycle),
+          // but visually the swap reads as "collision resolved" only
+          // when the bad parallel is the one that disappears. Both
+          // copies share (u,v) so it's a fungible pick for display.
+          let i2 = list.findIndex(e => sameXY(e, op.p2) && e.bad);
+          if (i2 < 0) i2 = list.findIndex(e => sameXY(e, op.p2));
           if (i2 >= 0) list.splice(i2, 1);
         }
         if (op.newp1) list.push({
