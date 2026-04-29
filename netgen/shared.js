@@ -642,7 +642,13 @@ const VIZ = {
       return EdgePaths.makeParallelEdgeCentered(lo, hi, centered, lor, hir);
     }
     sim.on("tick", () => {
-      gLinks.selectAll("path.viz-edge").attr("d", edgePath);
+      // Skip paths with an in-flight "fanTween" transition: callers
+      // (rewireSpokeSwapAnimate) tween d through the fan-in / fan-out
+      // phase, and tick's blanket .attr would clobber that.
+      gLinks.selectAll("path.viz-edge").each(function (d) {
+        if (d3.active(this, "fanTween")) return;
+        d3.select(this).attr("d", edgePath(d));
+      });
       gNodes.selectAll("g.viz-node-group > circle.viz-node").attr("cx", d => d.x).attr("cy", d => d.y);
       if (showLabels) gNodes.selectAll("g.viz-node-group > text.viz-label").attr("x", d => d.x).attr("y", d => d.y);
     });
@@ -1666,15 +1672,19 @@ function rewireSwapAnimate(opts) {
 function rewireSpokeSwapAnimate(opts) {
   const { viz, cuts, places, before, after } = opts;
   const settle = opts.settle || function () {};
-  // Phase durations. Match spoke_layer.js T defaults but trimmed so the
-  // full sequence reads as one continuous swap, not four chained pulses.
+  // Phase durations. Mirror spoke_layer.js: cut bridge un-fans before
+  // it retracts (fanIn), and the place bridges grow at collinear then
+  // fan into their slot (fanOut), so parallel layouts re-flow visibly
+  // instead of snapping through.
   const T = {
     uncolor:      220,
+    fanIn:        420,
     retract:      280,
     spokeFade:    160,
     orbitHold:    120,
     orbitFwd:     360,
     grow:         300,
+    fanOut:       420,
     colorize:     220,
     fade:         140,
   };
@@ -1837,40 +1847,121 @@ function rewireSpokeSwapAnimate(opts) {
     return "M" + a.x + "," + a.y + " L" + b.x + "," + b.y;
   }
 
-  // Hide cut edges from viz so the overlay's cut bridges are the only
-  // copy on screen; everything else stays painted by viz at full opacity
-  // (no whole-graph dim). Mirrors rewireSwapAnimate's beforeMinusCuts.
-  // Pages that own edges via a non-viz layer (e.g. spokeLayer in
-  // matcher.html) pass manageEdges: false and handle hide / show
-  // themselves via opts.onCutsHidden / opts.onPlacesShown hooks.
+  // Per-key fan info for parallels. beforeFan[key] lists all before-
+  // entries sharing this key (in canonical (u,v) order); cutChosen[key]
+  // is the subset selected as cut targets (bad edges preferred). Same
+  // bookkeeping powers the fan-in tween (survivors collapse from
+  // with-cut layout to without-cut) and the fan-out tween (places +
+  // surviving parallels at place-key spread to their settled slots).
+  const beforeFan = {};
+  (before || []).forEach(e => {
+    const k = cutKey(e.u, e.v);
+    (beforeFan[k] = beforeFan[k] || []).push(e);
+  });
+  const cutCountByKey = new Map();
+  (cuts || []).forEach(c => {
+    const k = cutKey(c[0], c[1]);
+    cutCountByKey.set(k, (cutCountByKey.get(k) || 0) + 1);
+  });
+  const cutMatchedIds = new Set();
+  Object.keys(beforeFan).forEach(k => {
+    const need = cutCountByKey.get(k) || 0;
+    if (!need) return;
+    const sorted = beforeFan[k].slice().sort((a, b) => {
+      const aBad = isBadEdge(a) ? 1 : 0;
+      const bBad = isBadEdge(b) ? 1 : 0;
+      return bBad - aBad;
+    });
+    for (let i = 0; i < Math.min(need, sorted.length); i++) {
+      if (sorted[i].id != null) cutMatchedIds.add(sorted[i].id);
+    }
+  });
+  // afterFan: same shape for the after edge list — used to compute
+  // each place's target slot post-commit + each surviving edge's
+  // place-key fan-out target.
+  const afterFan = {};
+  (after || []).forEach(e => {
+    const k = cutKey(e.u, e.v);
+    (afterFan[k] = afterFan[k] || []).push(e);
+  });
+  // Centered-offset helpers: from a (idx, total) pair → centered offset
+  // matching VIZ.computeDupIndices (idx - (total-1)/2; 0 when total ≤ 1).
+  function centeredOffset(idx, total) {
+    return total <= 1 ? 0 : (idx - (total - 1) / 2);
+  }
+  function fannedPath(u, v, idx, total) {
+    if (u === v) {
+      const me = nodeXY(u);
+      return EdgePaths.makeSelfLoop(me, me.r, { rOffset: 8 + idx * 7 });
+    }
+    const a = nodeXY(u), b = nodeXY(v);
+    const lo = String(u) < String(v) ? a : b;
+    const hi = String(u) < String(v) ? b : a;
+    const lor = lo === a ? a.r : b.r;
+    const hir = hi === a ? a.r : b.r;
+    return EdgePaths.makeParallelEdgeCentered(lo, hi, centeredOffset(idx, total), lor, hir);
+  }
+  function pathAtCenter(u, v, c) {
+    if (u === v) {
+      const me = nodeXY(u);
+      return EdgePaths.makeSelfLoop(me, me.r, { rOffset: 8 + Math.max(0, c) * 7 });
+    }
+    const a = nodeXY(u), b = nodeXY(v);
+    const lo = String(u) < String(v) ? a : b;
+    const hi = String(u) < String(v) ? b : a;
+    const lor = lo === a ? a.r : b.r;
+    const hir = hi === a ? a.r : b.r;
+    return EdgePaths.makeParallelEdgeCentered(lo, hi, c, lor, hir);
+  }
+  // Per-cut: its slot (idx, total) in the with-cut layout. Used to
+  // initialise the cut bridge at its fanned position so the un-fan
+  // tween starts where the actual edge sat in viz.
+  const cutSlots = (cuts || []).map(c => {
+    const k = cutKey(c[0], c[1]);
+    const list = beforeFan[k] || [];
+    let idx = 0;
+    for (let i = 0; i < list.length; i++) {
+      if (list[i].id != null && cutMatchedIds.has(list[i].id)) {
+        if (idx === 0 || i < idx) { idx = i; break; }
+      }
+    }
+    return { idx, total: list.length };
+  });
   const manageEdges = opts.manageEdges !== false;
+  // beforeMinusCuts (post-fanIn commit) + survivor fan info for the
+  // fan-in tween. Survivors per-cut-key keep their before-order; their
+  // newIdx is their position within the surviving subset.
+  const beforeMinusCuts = (manageEdges && before) ? before.filter(e => !cutMatchedIds.has(e.id)) : null;
+  const fanInSurvivors = [];
   if (manageEdges && before) {
-    // Multiset removal: hide exactly N edges per (u,v) key where N is
-    // the number of cuts on that key. A plain Set would hide every
-    // parallel sharing the cut's key (so cutting one of two parallels
-    // would erase both copies on screen until the new bridge fades in).
-    const cutCount = new Map();
-    (cuts || []).forEach(c => {
-      const k = cutKey(c[0], c[1]);
-      cutCount.set(k, (cutCount.get(k) || 0) + 1);
+    Object.keys(beforeFan).forEach(k => {
+      if (!cutCountByKey.get(k)) return;
+      const list = beforeFan[k];
+      const oldTotal = list.length;
+      const newTotal = oldTotal - (cutCountByKey.get(k) || 0);
+      let newIdx = 0;
+      list.forEach((e, oldIdx) => {
+        if (cutMatchedIds.has(e.id)) return;
+        fanInSurvivors.push({ id: e.id, u: e.u, v: e.v, oldIdx, oldTotal, newIdx, newTotal });
+        newIdx++;
+      });
     });
-    const beforeMinusCuts = [];
-    before.forEach(e => {
-      const k = cutKey(e.u, e.v);
-      const remaining = cutCount.get(k) || 0;
-      if (remaining > 0) cutCount.set(k, remaining - 1);
-      else beforeMinusCuts.push(e);
-    });
-    viz.setEdges(beforeMinusCuts);
+  }
+  // Hide cuts via opacity (not setEdges) so the with-cut layout stays
+  // stable while the survivors un-fan; commit setEdges at fanIn end.
+  if (manageEdges && before) {
+    viz.svg.select("g.viz-edges").selectAll("path.viz-edge")
+      .filter(function (d) { return cutMatchedIds.has(d.id); })
+      .attr("opacity", 0);
   }
   if (typeof opts.onCutsHidden === "function") opts.onCutsHidden();
 
-  // Initial appearance: cut bridges painted at their before-style
-  // (settled colour, dashed if bad). Stubs hidden until after retract.
+  // Initial cut bridges sit at the with-cut fanned slot so the un-fan
+  // tween starts coincident with the actual viz edge it replaces.
   const cutSel = cutLayer.selectAll("path").data(cutMeta).enter().append("path")
-    .attr("d", function (c) {
-      const me = nodeXY(c.u);
-      return c.u === c.v ? EdgePaths.makeSelfLoop(me, me.r) : straightBoundaryPath(c.u, c.v);
+    .attr("d", function (c, i) {
+      const slot = cutSlots[i] || { idx: 0, total: 1 };
+      return fannedPath(c.u, c.v, slot.idx, slot.total);
     })
     .attr("fill", "none")
     .attr("stroke", c => c.bad ? BAD_COLOR : c.color)
@@ -1906,11 +1997,40 @@ function rewireSpokeSwapAnimate(opts) {
     .attr("stroke-dasharray", null)
     .attr("stroke-width", 2.6);
 
+  // Phase 1.5 (fan-in): cut bridge un-fans from its slot to collinear,
+  // surviving parallels at the same key collapse from with-cut layout
+  // to without-cut layout. Mirror of spoke_layer.js runRewindFanIn.
+  later(T.uncolor, function () {
+    cutSel.transition("fanIn").duration(T.fanIn).ease(d3.easeCubicInOut)
+      .attrTween("d", function (c, i) {
+        const slot = cutSlots[i] || { idx: 0, total: 1 };
+        const fromC = centeredOffset(slot.idx, slot.total);
+        return function (k) { return pathAtCenter(c.u, c.v, fromC * (1 - k)); };
+      });
+    if (manageEdges && fanInSurvivors.length > 0) {
+      const byId = {};
+      fanInSurvivors.forEach(f => { byId[f.id] = f; });
+      viz.svg.select("g.viz-edges").selectAll("path.viz-edge")
+        .filter(function (d) { return byId[d.id] != null; })
+        .transition("fanTween").duration(T.fanIn).ease(d3.easeCubicInOut)
+        .attrTween("d", function (d) {
+          const f = byId[d.id];
+          const fromC = centeredOffset(f.oldIdx, f.oldTotal);
+          const toC = centeredOffset(f.newIdx, f.newTotal);
+          return function (k) { return pathAtCenter(f.u, f.v, fromC + (toC - fromC) * k); };
+        });
+    }
+  });
+
   // Phase 2 (retract): cut bridges shrink to their endpoints via the
   // 4-value stub-gap-stub dash pattern. Stubs fade in during the last
   // half of the retract so the visual handoff (bridge tip → spoke
-  // tip) has no gap.
-  later(T.uncolor, function () {
+  // tip) has no gap. setEdges commits beforeMinusCuts at the fan-in
+  // boundary so the surviving parallels stay at the layout we just
+  // tweened them to.
+  const tFanInEnd = T.uncolor + T.fanIn;
+  later(tFanInEnd, function () {
+    if (manageEdges && beforeMinusCuts) viz.setEdges(beforeMinusCuts);
     BridgeAnim.retract(cutSel, { duration: T.retract });
     stubSel.transition("stubFade").delay(T.retract * 0.5).duration(T.spokeFade)
       .attr("opacity", 1);
@@ -1919,7 +2039,7 @@ function rewireSpokeSwapAnimate(opts) {
   // Phase 3 (orbit hold): stubs sit at oldAngle for a brief beat so the
   // viewer can read the decomposed state before the partner swing
   // starts. No actual tween, just dwell.
-  later(T.uncolor + T.retract, function () {
+  later(tFanInEnd + T.retract, function () {
     cutSel.transition("cutFade").duration(80).attr("opacity", 0).remove();
   });
 
@@ -1928,7 +2048,7 @@ function rewireSpokeSwapAnimate(opts) {
   // synthetic "rest" mid-position landed stubs on arbitrary headings
   // that overlapped neighbouring nodes; a single fluid swing reads as
   // "stub keeps the same owner, partner changes" without that artifact.
-  const tForward = T.uncolor + T.retract + T.orbitHold;
+  const tForward = tFanInEnd + T.retract + T.orbitHold;
   later(tForward, function () {
     stubSel.transition("orbitFwd").duration(T.orbitFwd).ease(d3.easeCubicInOut)
       .attrTween("x1", function (s) {
@@ -2024,31 +2144,96 @@ function rewireSpokeSwapAnimate(opts) {
   });
 
   // Phase 6 (colorize): newly grown bridges crossfade to settled style
-  // AND tween their endpoints from stub-tip (r0 + SPOKE_LEN) to node
-  // boundary (r0). The grow phase paints the bridge from stub-tip to
-  // stub-tip so the handoff from spoke to bridge has no seam, but that
-  // leaves a visible SPOKE_LEN gap between the bridge end and the node
-  // circle once the spokes have faded. Snapping endpoints down to the
-  // boundary here lands the overlay on the same coords viz.setEdges
-  // (or spokeLayer.placedPath) will paint at commit, so no jump.
+  // AND tween endpoints from stub-tip → boundary. For non-loop places
+  // sharing a key with surviving parallels, also tween the d into the
+  // fanned slot the after-layout assigns it (fan-out).
   const tColor = tGrow + T.grow;
+  // Place fan info: each place's slot (idx, total) in the after layout,
+  // and the surviving parallels at place-keys whose dupIdx/dupTotal
+  // changes when the place lands.
+  const afterIndexById = {};
+  Object.keys(afterFan).forEach(k => {
+    afterFan[k].forEach((e, idx) => {
+      if (e.id != null) afterIndexById[e.id] = { idx, total: afterFan[k].length };
+    });
+  });
+  const placeSlots = placePairs.map(pp => {
+    const k = cutKey(pp.p.u, pp.p.v);
+    const list = afterFan[k] || [];
+    let idx = 0;
+    for (let i = 0; i < list.length; i++) {
+      const slot = list[i];
+      if (slot && slot.id != null && afterIndexById[slot.id]) {
+        // Match by id when caller supplies after-edge ids; otherwise
+        // fall back to position 0 (single place per key).
+      }
+    }
+    // Caller often doesn't tag places with ids matching afterFan; use
+    // total alone to compute the fanned slot for the LAST entry (the
+    // place we just grew). Survivors keep their entries before it.
+    const total = list.length || 1;
+    idx = Math.max(0, total - 1);
+    return { idx, total };
+  });
+  // Fan-out survivors: viz edges in beforeMinusCuts that appear in
+  // afterFan with a different (idx, total). beforeMinusCuts layout was
+  // committed at fanIn end; when the place lands, those parallels
+  // shift slot. Compute oldIdx/oldTotal from beforeMinusCuts fan +
+  // newIdx/newTotal from afterFan.
+  const beforeMinusCutsFan = {};
+  (beforeMinusCuts || []).forEach(e => {
+    const k = cutKey(e.u, e.v);
+    (beforeMinusCutsFan[k] = beforeMinusCutsFan[k] || []).push(e);
+  });
+  const fanOutSurvivors = [];
+  if (manageEdges) {
+    Object.keys(afterFan).forEach(k => {
+      const list = afterFan[k];
+      list.forEach((e, newIdx) => {
+        if (e.id == null) return;
+        const oldList = beforeMinusCutsFan[k] || [];
+        const oldIdx = oldList.findIndex(x => x.id === e.id);
+        if (oldIdx < 0) return; // not a survivor (it's a place)
+        if (oldIdx === newIdx && oldList.length === list.length) return; // no slot change
+        fanOutSurvivors.push({
+          id: e.id, u: e.u, v: e.v,
+          oldIdx, oldTotal: oldList.length,
+          newIdx, newTotal: list.length,
+        });
+      });
+    });
+  }
   later(tColor, function () {
-    placePairs.forEach(function (pp) {
+    placePairs.forEach(function (pp, ppi) {
       const paths = pp._paths || [];
       if (!paths.length) return;
       const isLoop = pp.p.u === pp.p.v;
       const finalColor = pp.p.bad ? BAD_COLOR : pp.p.color;
+      const slot = placeSlots[ppi] || { idx: 0, total: 1 };
       paths.forEach(function (path) {
         const t = BridgeAnim.colorize(path, {
           duration: T.colorize, color: finalColor, bad: pp.p.bad,
         });
         if (!isLoop) {
           const fromD = placeBridgeViaStubs(pp.s1, pp.s2);
-          const toD = straightBoundaryPath(pp.p.u, pp.p.v);
+          const toD = fannedPath(pp.p.u, pp.p.v, slot.idx, slot.total);
           t.attrTween("d", function () { return d3.interpolateString(fromD, toD); });
         }
       });
     });
+    if (manageEdges && fanOutSurvivors.length > 0) {
+      const byId = {};
+      fanOutSurvivors.forEach(f => { byId[f.id] = f; });
+      viz.svg.select("g.viz-edges").selectAll("path.viz-edge")
+        .filter(function (d) { return byId[d.id] != null; })
+        .transition("fanTween").duration(T.colorize).ease(d3.easeCubicInOut)
+        .attrTween("d", function (d) {
+          const f = byId[d.id];
+          const fromC = centeredOffset(f.oldIdx, f.oldTotal);
+          const toC = centeredOffset(f.newIdx, f.newTotal);
+          return function (k) { return pathAtCenter(f.u, f.v, fromC + (toC - fromC) * k); };
+        });
+    }
   });
 
   // Phase 7 (commit): viz takes ownership in the same frame the
