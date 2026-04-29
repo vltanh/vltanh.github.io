@@ -1437,13 +1437,66 @@ window.MathJax = {
       // Pair stage and other clusters stay untouched. Drop-stale step
       // (idx > opsCount) and failed-op steps have no swap to spin and
       // are gated via randStepDisabledAt below.
+      // Drives an animated swap: capture state at idx with the OLD
+      // ops, swap in the new ops, diff state at idx with the NEW ops,
+      // and play the (removes, adds) through spokeLayer so the screen
+      // shows the orbit → grow → fan → colorize sequence instead of
+      // a snap.
       onRandStep: idx => {
         if (idx <= 0) return;
+        const xi = SYNTHETIC_XI;
+        const R = buildRealization(U_SEED, STUB_SEED, xi);
+        const beforeList = stateAtStep(R, idx);
         rerollClusterRewireFromOp(idx - 1);
-        // Total may have shifted (cluster's new ops have different
-        // recycle-loop length); keep the cursor at the same step idx
-        // and let the controller's post-handler render do the rest.
-        ctl.reconfigureKeep(totalForCurrent(), idx);
+        const afterList = stateAtStep(R, idx);
+        ctl.setTotalIdxSilent(totalForCurrent(), idx);
+        // Update labels + desc through the standard render but with
+        // lastStep set to idx so the render's adjacency check falls
+        // into the snap branch (which is a no-op on the spoke layer
+        // because we're about to drive playMany). render() will redo
+        // the snap if we let it; instead we update labels manually.
+        const op = R.clusterRewireOps[idx - 1] && effectiveOps(R)[idx - 1];
+        const labelEl = document.getElementById("g-crewire-stage");
+        const descEl = document.getElementById("g-crewire-desc");
+        document.getElementById("g-crewire-cur").textContent = String(idx);
+        document.getElementById("g-crewire-total").textContent = String(totalForCurrent() - 1);
+        if (op) {
+          const tag = op.success
+            ? (op.src === "valid" ? "swap with valid edge" : "swap with recycled pair")
+            : "no legal swap; p1 requeued";
+          labelEl.textContent = "op " + idx + " · " + tag;
+          const desc = op.success
+            ? "Cut <code>" + op.p1.join("–") + "</code> + <code>" + (op.p2 ? op.p2.join("–") : "?") +
+              "</code>; place <code>" + op.newp1.join("–") + "</code> + <code>" + op.newp2.join("–") +
+              "</code>. Highlighted nodes = the 4 endpoints involved."
+            : "Outer iteration could not find a legal partner for <code>" + op.p1.join("–") +
+              "</code>; pushed back onto the recycle queue.";
+          descEl.innerHTML = '<span class="st">op ' + idx + '</span> &middot; ' + desc;
+        }
+        clearDimPick(viz);
+        // Diff by id AND (u,v): rand-step keeps op-indexed ids stable
+        // (cr-op<i>-1 / -2) but the underlying endpoints can change
+        // (e.g. coin2 flips orientation, so newp1/newp2 swap u,v).
+        // An id-only diff would emit empty removes/adds and the swap
+        // would land as an invisible no-op.
+        const beforeById = new Map(beforeList.map(e => [e.id, e]));
+        const afterById = new Map(afterList.map(e => [e.id, e]));
+        const removes = [], adds = [];
+        beforeById.forEach((be, id) => {
+          const ae = afterById.get(id);
+          if (!ae) {
+            removes.push(placedEntry(be));
+          } else if (ae.u !== be.u || ae.v !== be.v) {
+            removes.push(placedEntry(be));
+            adds.push(placedEntry(ae));
+          }
+        });
+        afterById.forEach((ae, id) => {
+          if (!beforeById.has(id)) adds.push(placedEntry(ae));
+        });
+        spokes.playMany(removes, adds, () => {});
+        lastStep = idx;
+        return "skip";
       },
       onRandAll: () => {
         opsOverride = null;

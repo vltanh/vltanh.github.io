@@ -915,12 +915,15 @@ function stepController(opts) {
   endBtn && endBtn.addEventListener("click", () => { if (!isLocked()) withSnap(() => { idx = total-1; render(); }); });
   randStepBtn && randStepBtn.addEventListener("click", () => {
     if (isLocked()) return;
-    // onRandStep may return truthy to request a snap-render (jump,
-    // no animation) — used when the reroll changes a placed entry
-    // whose identity-swap would read as a glitch under the animated
-    // rewind+forward path. Falsy keeps the default animated render.
-    const wantSnap = onRandStep ? onRandStep(idx) : false;
-    if (wantSnap) withSnap(render);
+    // onRandStep return values:
+    //   "skip"    — handler ran its own render (e.g. drove an
+    //               animated swap directly via spokes.playMany);
+    //               controller stays out of the render path.
+    //   truthy    — snap-render (jump, no animation).
+    //   falsy     — animated render (default).
+    const ret = onRandStep ? onRandStep(idx) : false;
+    if (ret === "skip") return;
+    if (ret) withSnap(render);
     else render();
   });
   randAllBtn && randAllBtn.addEventListener("click", () => {
@@ -960,6 +963,15 @@ function stepController(opts) {
       total = newTotal;
       idx = Math.max(0, Math.min(total - 1, newIdx));
       render();
+    },
+    // Silent total + idx update — no render, no label refresh.
+    // Caller wants to drive rendering itself (e.g. an animated
+    // rand-step that needs to call playMany directly). Refreshes
+    // button enable state since total/idx affect it.
+    setTotalIdxSilent: (newTotal, newIdx) => {
+      total = newTotal;
+      idx = Math.max(0, Math.min(total - 1, newIdx));
+      refreshButtons();
     },
   };
 }
