@@ -1508,26 +1508,47 @@ window.MathJax = {
         lastStep = idx;
         return "skip";
       },
-      // Random All re-spins every cluster's rewire pass from op 0
-      // with a fresh RNG, keeping cluster-pairing fixed (no U_SEED /
-      // STUB_SEED bump) and the cursor parked at its current step
-      // so the user sees the same step under a fresh prefix.
+      // Random All re-spins ops [0..idx] (the prefix the user has
+      // already walked through, including the current step) with a
+      // fresh RNG. Future ops [idx+1..end] are kept verbatim from the
+      // current trace so the suffix stays put. Cluster-pairing is
+      // untouched (no U_SEED / STUB_SEED bump). Cursor parks at idx.
       onRandAll: idx => {
+        if (idx <= 0) {
+          opsOverride = null;
+          ctl.reconfigureKeep(totalForCurrent(), 0);
+          return;
+        }
         const xi = SYNTHETIC_XI;
         const R = buildRealization(U_SEED, STUB_SEED, xi);
+        const baseOps = effectiveOps(R);
         rewireRerollNonce += 1;
-        const fresh = seededRng(STUB_SEED * 9173 + rewireRerollNonce * 31 + 7);
-        const seenClusters = new Set();
+        // Count each cluster's ops in the prefix [0..idx-1]; the
+        // walker step idx maps to global op index idx-1.
+        const cutoffByCluster = {};
+        const lastG = Math.min(idx - 1, baseOps.length - 1);
+        for (let g = 0; g <= lastG; g++) {
+          const c = baseOps[g].cluster;
+          cutoffByCluster[c] = (cutoffByCluster[c] || 0) + 1;
+        }
         const next = {};
-        R.clusterRewireOps.forEach(op => {
-          if (seenClusters.has(op.cluster)) return;
-          seenClusters.add(op.cluster);
-          const prePairs = clusterPrePairsByName(R, op.cluster);
-          const newOps = ABCDKernel.replayClusterRewireFromOps(prePairs, [], fresh);
-          newOps.forEach(o => { o.cluster = op.cluster; });
-          next[op.cluster] = newOps;
+        let clusterSeed = 0;
+        Object.keys(cutoffByCluster).forEach(cname => {
+          const cutoff = cutoffByCluster[cname];
+          const clusterOps = baseOps.filter(o => o.cluster === cname);
+          const prePairs = clusterPrePairsByName(R, cname);
+          const fresh = seededRng(
+            STUB_SEED * 9173 + rewireRerollNonce * 31 + (clusterSeed++) * 113
+          );
+          const allNewOps = ABCDKernel.replayClusterRewireFromOps(prePairs, [], fresh);
+          allNewOps.forEach(o => { o.cluster = cname; });
+          // Splice: re-randomized prefix of length `cutoff` + verbatim
+          // suffix from the cluster's existing op trace.
+          const newPrefix = allNewOps.slice(0, cutoff);
+          const oldSuffix = clusterOps.slice(cutoff);
+          next[cname] = newPrefix.concat(oldSuffix);
         });
-        opsOverride = next;
+        opsOverride = Object.keys(next).length ? next : null;
         ctl.reconfigureKeep(totalForCurrent(), idx);
       },
       randStepDisabledAt: (idx) => {
