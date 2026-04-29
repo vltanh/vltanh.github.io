@@ -876,7 +876,7 @@ function stepController(opts) {
     randStepBtn, randAllBtn,
     labelCur, labelTotal,
     onRender, onRandStep, onRandAll,
-    getLocked,
+    getLocked, randStepDisabledAt,
   } = opts;
   const useKeys = opts.keyboard !== false;
   const randAtStart = !!opts.randAtStart;
@@ -899,7 +899,8 @@ function stepController(opts) {
     if (nextBtn) nextBtn.disabled = locked || atEnd;
     if (resetBtn) resetBtn.disabled = locked || atStart;
     if (endBtn)   endBtn.disabled   = locked || atEnd;
-    if (randStepBtn) randStepBtn.disabled = locked || (atStart && !randAtStart);
+    const randStepBlocked = !!(randStepDisabledAt && randStepDisabledAt(idx));
+    if (randStepBtn) randStepBtn.disabled = locked || (atStart && !randAtStart) || randStepBlocked;
     if (randAllBtn)  randAllBtn.disabled  = locked || (atStart && !randAtStart);
   }
   function render() {

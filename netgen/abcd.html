@@ -1276,7 +1276,8 @@ window.MathJax = {
           id: "cr-pre-" + i,
         });
       });
-      for (let oi = 0; oi < k; oi++) {
+      const opsToApply = Math.min(k, R.clusterRewireOps.length);
+      for (let oi = 0; oi < opsToApply; oi++) {
         const op = R.clusterRewireOps[oi];
         if (!op || !op.success) continue;
         const i1 = list.findIndex(e => sameXY(e, op.p1) && e.bad);
@@ -1295,25 +1296,36 @@ window.MathJax = {
           bad: false, id: "cr-op" + oi + "-2",
         });
       }
+      // Final drop-stale step: any bad entry that survived all ops
+      // (no legal swap ever found) is removed here.
+      if (k > R.clusterRewireOps.length) {
+        return list.filter(e => !e.bad);
+      }
       return list;
     }
     function render(step) {
       const xi = SYNTHETIC_XI;
       const R = buildRealization(U_SEED, STUB_SEED, xi);
-      const total = 1 + R.clusterRewireOps.length;
+      const opsCount = R.clusterRewireOps.length;
+      const total = 2 + opsCount;
       document.getElementById("g-crewire-total").textContent = String(total - 1);
       document.getElementById("g-crewire-cur").textContent = String(step);
       const labelEl = document.getElementById("g-crewire-stage");
       const descEl = document.getElementById("g-crewire-desc");
       clearDimPick(viz);
 
-      const op = step > 0 ? R.clusterRewireOps[step - 1] : null;
+      const isDropStale = step > opsCount;
+      const op = (step > 0 && !isDropStale) ? R.clusterRewireOps[step - 1] : null;
       if (step === 0) {
         labelEl.textContent = "pre-rewire";
         descEl.innerHTML = '<span class="st">pre-rewire</span> &middot; ' +
-          R.clusterRewireOps.length + " collision op" +
-          (R.clusterRewireOps.length === 1 ? "" : "s") +
+          opsCount + " collision op" + (opsCount === 1 ? "" : "s") +
           " ahead. Red-dashed = self-loop or parallel.";
+      } else if (isDropStale) {
+        labelEl.textContent = "drop stale";
+        descEl.innerHTML = '<span class="st">drop stale</span> &middot; ' +
+          "Bad edges that survived every rewire attempt (no legal swap " +
+          "ever found) are dropped from the cluster output.";
       } else {
         const tag = op.success
           ? (op.src === "valid" ? "swap with valid edge" : "swap with recycled pair")
@@ -1330,9 +1342,6 @@ window.MathJax = {
 
       const beforeList = stateAtStep(R, step === 0 ? 0 : lastStep);
       const afterList  = stateAtStep(R, step);
-      // byNode covers both before and after — net cluster degrees are
-      // preserved across rewire ops, so a single byNode snapshot is
-      // valid for both sides of the transition.
       const byNode = byNodeFromList(afterList);
 
       if (step === 0 || (step !== lastStep + 1 && step !== lastStep - 1)) {
@@ -1355,7 +1364,7 @@ window.MathJax = {
     function totalForCurrent() {
       const xi = SYNTHETIC_XI;
       const R = buildRealization(U_SEED, STUB_SEED, xi);
-      return 1 + R.clusterRewireOps.length;
+      return 2 + R.clusterRewireOps.length;
     }
     ctl = NETGEN.stepController({
       prevBtn: document.getElementById("g-crewire-prev"),
@@ -1372,11 +1381,22 @@ window.MathJax = {
       onRandAll: () => {
         rerollAll();
       },
+      // Rand-step rerolls the whole stub pool, which only makes sense
+      // on a step where rerolling would change the visible swap. The
+      // drop-stale step has nothing to switch, and a failed op step
+      // (no legal swap; p1 requeued) likewise has no swap to spin.
+      randStepDisabledAt: (idx) => {
+        const xi = SYNTHETIC_XI;
+        const R = buildRealization(U_SEED, STUB_SEED, xi);
+        if (idx > R.clusterRewireOps.length) return true;
+        if (idx <= 0) return false;
+        const o = R.clusterRewireOps[idx - 1];
+        return !o || !o.success;
+      },
     });
-    function reconfigReset() { ctl.reconfigure(totalForCurrent()); }
     function reconfigKeep() { ctl.reconfigureKeep(totalForCurrent(), ctl.idx); }
-    onStubChanged.push(reconfigReset);
-    onUChanged.push(reconfigReset);
+    onStubChanged.push(reconfigKeep);
+    onUChanged.push(reconfigKeep);
     onClusterPreChanged.push(reconfigKeep);
   })();
 
