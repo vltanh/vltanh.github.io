@@ -950,7 +950,9 @@ NETGEN.spokeLayer = (function () {
       ent.merge(sel)
         .attr("stroke", function (d) { return d.color; })
         .attr("stroke-width", 1.6)
-        .attr("stroke-dasharray", function (d) { return d.bad ? "4 4" : null; })
+        // Bad placed edges paint solid red. Dashed-red is reserved for
+        // the dedup animation (see playDedup): solid → dashed → fade.
+        .attr("stroke-dasharray", null)
         .attr("opacity", dim ? 0.18 : 1)
         .attr("d", placedPath);
     }
@@ -1255,10 +1257,123 @@ NETGEN.spokeLayer = (function () {
       });
     }
 
+    // Dedup-style removal animation. Each entry in `removes`:
+    //   1. transitions stroke-dasharray solid → "4 4" (220ms),
+    //   2. fades opacity 1 → 0 (280ms, starts at end of dashify),
+    //   3. survivor parallels at the same (u, v) key fan in to fill
+    //      the slot (480ms tween from with-removes layout to without).
+    // Commits state.placed -= removes at the end; single onDone fires
+    // when the whole sequence settles. No forward grow phase.
+    function playDedup(removes, onDone) {
+      const myToken = ++token;
+      interruptAll();
+      clearPhaseTimers();
+      const removesList = (removes || []).slice();
+      removesList.forEach(function (r, i) {
+        if (r.id == null) r.id = "rmd" + i + "_" + r.u + "_" + r.v;
+      });
+      if (removesList.length === 0) {
+        if (onDone) onDone();
+        return;
+      }
+      const removeIds = new Set(removesList.map(function (r) { return r.id; }));
+      const currentPlaced = state.placed || [];
+      const survivingPlaced = currentPlaced.filter(function (p) { return !removeIds.has(p.id); });
+
+      const T = { dashify: 220, fade: 320, idle: 80 };
+      const total = T.dashify + T.fade + T.idle;
+      lockFor(total, removesList);
+
+      // Affected pair-keys (those losing >=1 entry) drive the survivor
+      // fan-in tween scope.
+      const affectedKeys = {};
+      removesList.forEach(function (r) {
+        const k = pairKey(r.u, r.v);
+        affectedKeys[k] = (affectedKeys[k] || 0) + 1;
+      });
+      // dupInfo currently reflects state.placed + state.justs (the
+      // "with-removes" layout). Snapshot it for the fan-in tween's
+      // "from" frame.
+      const dupInfoFrom = {};
+      Object.keys(dupInfo).forEach(function (k) {
+        dupInfoFrom[k] = { total: dupInfo[k].total };
+      });
+      // Compute the "to" layout: walk survivors in placed order,
+      // assigning each a post-removal _dupIdxAfter at its key.
+      const dupInfoTo = {};
+      survivingPlaced.forEach(function (p) {
+        const k = pairKey(p.u, p.v);
+        if (!dupInfoTo[k]) dupInfoTo[k] = { total: 0 };
+        p._dupIdxAfter = dupInfoTo[k].total;
+        dupInfoTo[k].total += 1;
+      });
+      const survivorIds = new Set(survivingPlaced.map(function (p) { return p.id; }));
+
+      // Phase 1: dashify the removes (solid → 4 4 dasharray). Stroke
+      // colour stays — bad-flagged removes are already red, non-bad
+      // get the same dashed cue for visual consistency with the dedup
+      // primitive.
+      const removeSel = placedLayer.selectAll("path.sp-placed-edge").filter(function (d) {
+        return removeIds.has(d.id);
+      });
+      removeSel.transition("dedupDash").duration(T.dashify).ease(d3.easeCubicInOut)
+        .attr("stroke-dasharray", "4 4");
+
+      // Phase 2 (starts at end of dashify): fade removes; fan-in
+      // survivors at affected keys in parallel.
+      schedulePhase(T.dashify, function () {
+        if (myToken !== token) return;
+        removeSel.transition("dedupFade").duration(T.fade).ease(d3.easeCubicInOut)
+          .attr("opacity", 0);
+        placedLayer.selectAll("path.sp-placed-edge")
+          .filter(function (d) {
+            const k = pairKey(d.u, d.v);
+            return survivorIds.has(d.id) && affectedKeys[k];
+          })
+          .transition("dedupFanIn").duration(T.fade).ease(d3.easeCubicInOut)
+          .attrTween("d", function (d) {
+            if (d.u === d.v) {
+              const fixed = placedPath(d);
+              return function () { return fixed; };
+            }
+            const nu = viz.nodeById[String(d.u)];
+            const nv = viz.nodeById[String(d.v)];
+            if (!nu || !nv) return function () { return ""; };
+            const swap = String(d.u) > String(d.v);
+            const a = swap ? nv : nu, b = swap ? nu : nv;
+            const ra = swap ? nodeR(d.v) : nodeR(d.u), rb = swap ? nodeR(d.u) : nodeR(d.v);
+            const k = pairKey(d.u, d.v);
+            const grpFrom = dupInfoFrom[k] || { total: 1 };
+            const grpTo = dupInfoTo[k] || { total: 1 };
+            const idxFrom = d._dupIdx != null ? d._dupIdx : 0;
+            const idxTo = d._dupIdxAfter != null ? d._dupIdxAfter : 0;
+            const cFrom = grpFrom.total <= 1 ? 0 : (idxFrom - (grpFrom.total - 1) / 2);
+            const cTo   = grpTo.total   <= 1 ? 0 : (idxTo   - (grpTo.total   - 1) / 2);
+            const ax = a.x, ay = a.y, bx = b.x, by = b.y;
+            return function (kk) {
+              const c = cFrom + (cTo - cFrom) * kk;
+              return fanPathCentered({ x: ax, y: ay }, { x: bx, y: by }, c, ra, rb);
+            };
+          });
+      });
+
+      // Phase 3 (commit): drop removes from state, recompute, snap-
+      // render so the placed layout matches the post-fan-in state.
+      schedulePhase(T.dashify + T.fade, function () {
+        if (myToken !== token) return;
+        state = Object.assign({}, state, { placed: survivingPlaced, justs: [] });
+        lastKey = ""; lastSeq = state.justSeq;
+        recompute();
+        render(false);
+        if (onDone) onDone();
+      });
+    }
+
     return {
       syncState: syncState,
       snapToState: snapToState,
       playMany: playMany,
+      playDedup: playDedup,
       markReroll: function () { pendingReroll = true; },
       rerender: function () { recompute(); render(false); },
       isAnimating: function () { return animating; },

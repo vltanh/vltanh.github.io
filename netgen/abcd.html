@@ -1416,7 +1416,17 @@ window.MathJax = {
       const removes = beforeList.filter(e => !afterIds.has(e.id)).map(placedEntry);
       const adds    = afterList.filter(e => !beforeIds.has(e.id)).map(placedEntry);
 
-      spokes.playMany(removes, adds, () => {});
+      // Dedup the removed cuts (solid red → dashed → fade, surviving
+      // parallels fan in) and then grow the new places. Forward-only
+      // playMany (removes=[]) drives the standard orbit → grow → fan →
+      // colorize sequence on the adds.
+      if (removes.length > 0) {
+        spokes.playDedup(removes, () => {
+          if (adds.length > 0) spokes.playMany([], adds, () => {});
+        });
+      } else if (adds.length > 0) {
+        spokes.playMany([], adds, () => {});
+      }
       lastStep = step;
     }
     function totalForCurrent() {
@@ -1496,7 +1506,13 @@ window.MathJax = {
         afterById.forEach((ae, id) => {
           if (!beforeById.has(id)) adds.push(placedEntry(ae));
         });
-        spokes.playMany(removes, adds, () => {});
+        if (removes.length > 0) {
+          spokes.playDedup(removes, () => {
+            if (adds.length > 0) spokes.playMany([], adds, () => {});
+          });
+        } else if (adds.length > 0) {
+          spokes.playMany([], adds, () => {});
+        }
         lastStep = idx;
         return "skip";
       },
