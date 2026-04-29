@@ -1440,8 +1440,20 @@ function rewireSwapAnimate(opts) {
   const cutStyles = (cuts || []).map(c => styleFor(beforeByKey[cutKey(c[0], c[1])]));
   const placeStyles = (places || []).map(p => styleFor(afterByKey[cutKey(p[0], p[1])]));
 
-  const cutKeys = new Set(cuts.map(c => cutKey(c[0], c[1])));
-  const beforeMinusCuts = before.filter(e => !cutKeys.has(cutKey(e.u, e.v)));
+  // Multiset removal so parallels sharing a key keep their other
+  // copies visible while one is cut.
+  const cutCount = new Map();
+  cuts.forEach(c => {
+    const k = cutKey(c[0], c[1]);
+    cutCount.set(k, (cutCount.get(k) || 0) + 1);
+  });
+  const beforeMinusCuts = [];
+  before.forEach(e => {
+    const k = cutKey(e.u, e.v);
+    const remaining = cutCount.get(k) || 0;
+    if (remaining > 0) cutCount.set(k, remaining - 1);
+    else beforeMinusCuts.push(e);
+  });
 
   // Phase 1: hide cut edges in viz. Dim everything except the active
   // 4 (no border outline, just the lack of dim). Cut edges get
@@ -1827,8 +1839,22 @@ function rewireSpokeSwapAnimate(opts) {
   // themselves via opts.onCutsHidden / opts.onPlacesShown hooks.
   const manageEdges = opts.manageEdges !== false;
   if (manageEdges && before) {
-    const cutKeys = new Set((cuts || []).map(c => cutKey(c[0], c[1])));
-    const beforeMinusCuts = before.filter(e => !cutKeys.has(cutKey(e.u, e.v)));
+    // Multiset removal: hide exactly N edges per (u,v) key where N is
+    // the number of cuts on that key. A plain Set would hide every
+    // parallel sharing the cut's key (so cutting one of two parallels
+    // would erase both copies on screen until the new bridge fades in).
+    const cutCount = new Map();
+    (cuts || []).forEach(c => {
+      const k = cutKey(c[0], c[1]);
+      cutCount.set(k, (cutCount.get(k) || 0) + 1);
+    });
+    const beforeMinusCuts = [];
+    before.forEach(e => {
+      const k = cutKey(e.u, e.v);
+      const remaining = cutCount.get(k) || 0;
+      if (remaining > 0) cutCount.set(k, remaining - 1);
+      else beforeMinusCuts.push(e);
+    });
     viz.setEdges(beforeMinusCuts);
   }
   if (typeof opts.onCutsHidden === "function") opts.onCutsHidden();
