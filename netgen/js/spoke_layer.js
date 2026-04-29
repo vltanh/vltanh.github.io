@@ -101,10 +101,10 @@ NETGEN.spokeLayer = (function () {
       let maxOrbit = 0;
       Object.keys(assigned).forEach(function (nid) {
         const a = assigned[nid];
-        if (!a || !a.justIdx) return;
-        a.justIdx.forEach(function (slot) {
-          const restA = a.angles[slot];
-          const liveA = effectiveAngle(nid, slot);
+        if (!a || !a.justSlots) return;
+        a.justSlots.forEach(function (jsEntry) {
+          const restA = a.angles[jsEntry.slot];
+          const liveA = effectiveAngle(nid, jsEntry.slot);
           if (liveA == null) return;
           const delta = shortDelta(restA, liveA);
           if (Math.abs(delta) < 1e-3) return;
@@ -114,7 +114,15 @@ NETGEN.spokeLayer = (function () {
       });
       return (maxOrbit > 0 ? maxOrbit : T.orbit) + ORBIT_BRIDGE_BUFFER;
     }
-    function isSelfLoopJust() { return !!(state.just && state.just.u === state.just.v); }
+    // All-loops only: the spoke-retract phase (between orbit and grow)
+    // is exclusive to self-loops and has no fan phase. With multiple
+    // justs in flight (e.g. rewire's 2 places), we go through the
+    // non-loop sequence (orbit → grow → fan → colorize) unless EVERY
+    // just is a self-loop.
+    function isSelfLoopJust() {
+      const js = justList();
+      return js.length > 0 && js.every(function (j) { return j.u === j.v; });
+    }
     function t_bridgeStart() { return bridgeStartMs; }
     // For self-loops the four phases are: orbit → spoke retract →
     // bridge grow → colorize. Non-loop has no spoke retract and adds
@@ -136,27 +144,29 @@ NETGEN.spokeLayer = (function () {
     // baseline its onSettle callback applies (matcher's deficit-driven
     // dim, etc.). Pages with no baseline pass no onSettle and end up
     // with everything undimmed.
-    function applyActiveDimPick(just) {
+    function applyActiveDimPick(justs) {
       viz.clearAllNodeClass("dim");
-      if (!just) return;
-      // Dim every node except the active pair. The dim alone is
-      // enough; no pick outline is added.
+      const list = Array.isArray(justs) ? justs : (justs ? [justs] : []);
+      if (!list.length) return;
+      const active = new Set();
+      list.forEach(function (j) { active.add(String(j.u)); active.add(String(j.v)); });
+      // Dim every node except active endpoints. Dim alone; no pick
+      // outline is added.
       viz.eachNode(function (n) {
-        if (String(n.id) !== String(just.u) && String(n.id) !== String(just.v)) {
-          viz.addNodeClass(n.id, "dim");
-        }
+        if (!active.has(String(n.id))) viz.addNodeClass(n.id, "dim");
       });
     }
     function clearActiveDimPick() {
       viz.clearAllNodeClass("dim");
     }
-    function lockFor(ms) {
+    function lockFor(ms, dimOverride) {
       const wasAnimating = animating;
       animating = true;
       onLockChange(true);
       if (!wasAnimating) {
-        applyActiveDimPick(state.just);
-        onActiveChange(true, state.just);
+        const dimList = dimOverride !== undefined ? dimOverride : state.justs;
+        applyActiveDimPick(dimList);
+        onActiveChange(true, firstJust());
       }
       if (lockTimer) clearTimeout(lockTimer);
       lockTimer = setTimeout(function () {
@@ -197,7 +207,10 @@ NETGEN.spokeLayer = (function () {
     }
     ensureLayerOrder();
 
-    let state = { byNode: {}, placed: [], just: null, justSeq: null, bridgeColor: null };
+    let state = { byNode: {}, placed: [], justs: [], justSeq: null, bridgeColor: null };
+    function justList() { return state.justs || []; }
+    function firstJust() { const js = justList(); return js.length ? js[0] : null; }
+    function hasJust() { return justList().length > 0; }
     let lastKey = "";
     let lastSeq = -1;
     let token = 0;
@@ -206,7 +219,12 @@ NETGEN.spokeLayer = (function () {
     // on any reroll that re-derives the same (u, v) — common for self-
     // loops where (a, a) is order-symmetric).
     let pendingReroll = false;
-    let assigned = {};   // nid -> { count, color, angles[], free[], partnerOf[], justIdx?[], justPartner? }
+    let assigned = {};   // nid -> { count, color, angles[], free[], partnerOf[], justSlots: [{slot, partner, isLoop, loopSide?, edgeId}] }
+    function slotAvailable(a, slot) {
+      if (!a || !a.free[slot]) return false;
+      if (a.justSlots && a.justSlots.some(function (js) { return js.slot === slot; })) return false;
+      return true;
+    }
     let dupInfo = {};    // pairKey -> { total, idx[] } for fanning parallel placed edges
     function pairKey(u, v) { return String(u) < String(v) ? u + "|" + v : v + "|" + u; }
 
@@ -227,7 +245,11 @@ NETGEN.spokeLayer = (function () {
       const a = assigned[nid];
       if (!a) return [];
       const out = [];
-      for (let i = 0; i < a.count; i++) if (a.free[i]) out.push(i);
+      for (let i = 0; i < a.count; i++) {
+        if (!a.free[i]) continue;
+        if (a.justSlots && a.justSlots.some(function (js) { return js.slot === i; })) continue;
+        out.push(i);
+      }
       return out;
     }
 
@@ -252,7 +274,7 @@ NETGEN.spokeLayer = (function () {
       dupInfo = {};
       dupInfoNoJust = {};
       const placed = state.placed || [];
-      const justKey = state.just ? pairKey(state.just.u, state.just.v) : null;
+      const justs = justList();
       placed.forEach(function (p) {
         const k = pairKey(p.u, p.v);
         if (!dupInfo[k]) dupInfo[k] = { total: 0 };
@@ -260,17 +282,18 @@ NETGEN.spokeLayer = (function () {
         dupInfo[k].total += 1;
       });
       // Snapshot the no-just fan layout: same indices, count without
-      // the active just. Used while the animation is running so the
+      // the active justs. Used while the animation is running so the
       // existing parallels do not jump aside before the new bridge
       // settles.
       Object.keys(dupInfo).forEach(function (k) {
         dupInfoNoJust[k] = { total: dupInfo[k].total };
       });
-      if (justKey) {
-        if (!dupInfo[justKey]) dupInfo[justKey] = { total: 0 };
-        state.just._dupIdx = dupInfo[justKey].total;
-        dupInfo[justKey].total += 1;
-      }
+      justs.forEach(function (j) {
+        const k = pairKey(j.u, j.v);
+        if (!dupInfo[k]) dupInfo[k] = { total: 0 };
+        j._dupIdx = dupInfo[k].total;
+        dupInfo[k].total += 1;
+      });
       const byN = state.byNode || {};
       Object.keys(byN).forEach(function (nid) {
         const cfg = byN[nid];
@@ -282,22 +305,24 @@ NETGEN.spokeLayer = (function () {
           angles: evenAngles(count),
           free: new Array(count).fill(true),
           partnerOf: new Array(count).fill(null),
+          justSlots: [],
         };
       });
       // Greedy chronological assignment of placed pairs.
       (state.placed || []).forEach(function (p) { assignPair(p, false); });
-      if (state.just) assignPair(state.just, true);
+      justs.forEach(function (j) { assignPair(j, true); });
     }
 
     function assignPair(p, isJust) {
       // Slot overrides: caller may pin slotU / slotV (e.g. SBM picks
       // exact stub indices via kernel trace). When set, skip greedy
       // partner-aim and consume that exact slot.
+      const edgeId = p.id || (p.u + ":" + p.v);
       if (p.u === p.v) {
         const a = assigned[p.u];
         if (!a) return;
-        let i1 = (p.slotU != null && a.free[p.slotU]) ? p.slotU : null;
-        let i2 = (p.slotV != null && a.free[p.slotV]) ? p.slotV : null;
+        let i1 = (p.slotU != null && slotAvailable(a, p.slotU)) ? p.slotU : null;
+        let i2 = (p.slotV != null && slotAvailable(a, p.slotV)) ? p.slotV : null;
         if (i1 == null || i2 == null) {
           const free = freeSlots(p.u);
           if (free.length < 2) return;
@@ -322,7 +347,8 @@ NETGEN.spokeLayer = (function () {
           if (i1 === i2) return;
         }
         if (isJust) {
-          a.justIdx = [i1, i2]; a.justPartner = p.u;
+          a.justSlots.push({ slot: i1, partner: p.u, isLoop: true, loopSide: 0, edgeId: edgeId });
+          a.justSlots.push({ slot: i2, partner: p.u, isLoop: true, loopSide: 1, edgeId: edgeId });
         } else {
           a.free[i1] = false; a.free[i2] = false;
           a.partnerOf[i1] = p.v; a.partnerOf[i2] = p.u;
@@ -335,8 +361,8 @@ NETGEN.spokeLayer = (function () {
       }
       const au = assigned[p.u], av = assigned[p.v];
       if (!au || !av) return;
-      let iu = (p.slotU != null && au.free[p.slotU]) ? p.slotU : null;
-      let iv = (p.slotV != null && av.free[p.slotV]) ? p.slotV : null;
+      let iu = (p.slotU != null && slotAvailable(au, p.slotU)) ? p.slotU : null;
+      let iv = (p.slotV != null && slotAvailable(av, p.slotV)) ? p.slotV : null;
       if (iu == null || iv == null) {
         const fu = freeSlots(p.u), fv = freeSlots(p.v);
         if (fu.length === 0 || fv.length === 0) return;
@@ -346,8 +372,8 @@ NETGEN.spokeLayer = (function () {
         if (iv == null) iv = fv[pickClosestIdx(fv.map(function (i) { return av.angles[i]; }), dirV)];
       }
       if (isJust) {
-        au.justIdx = [iu]; av.justIdx = [iv];
-        au.justPartner = p.v; av.justPartner = p.u;
+        au.justSlots.push({ slot: iu, partner: p.v, isLoop: false, edgeId: edgeId });
+        av.justSlots.push({ slot: iv, partner: p.u, isLoop: false, edgeId: edgeId });
       } else {
         au.free[iu] = false; av.free[iv] = false;
         au.partnerOf[iu] = p.v; av.partnerOf[iv] = p.u;
@@ -357,9 +383,10 @@ NETGEN.spokeLayer = (function () {
 
     function liveAngleForJust(nid) {
       const a = assigned[nid];
-      if (!a || !a.justIdx || a.justIdx.length === 0) return null;
-      if (state.just && state.just.u === state.just.v) return null;
-      return partnerDir(nid, a.justPartner);
+      if (!a || !a.justSlots || a.justSlots.length === 0) return null;
+      const js0 = a.justSlots[0];
+      if (js0.isLoop) return null;
+      return partnerDir(nid, js0.partner);
     }
 
     // Self-loop primitives live in NETGEN.EdgePaths; this layer paints
@@ -379,13 +406,12 @@ NETGEN.spokeLayer = (function () {
       const a = assigned[nid];
       if (!a) return 0;
       const restA = a.angles[slotIdx];
-      const isJust = a.justIdx && a.justIdx.indexOf(slotIdx) >= 0;
-      if (isJust) {
-        if (state.just && state.just.u === state.just.v) {
-          const which = a.justIdx.indexOf(slotIdx);
-          return which === 0 ? LOOP_TANGENT_START : LOOP_TANGENT_END;
+      const jsEntry = a.justSlots && a.justSlots.find(function (js) { return js.slot === slotIdx; });
+      if (jsEntry) {
+        if (jsEntry.isLoop) {
+          return jsEntry.loopSide === 0 ? LOOP_TANGENT_START : LOOP_TANGENT_END;
         }
-        return partnerDir(nid, a.justPartner);
+        return partnerDir(nid, jsEntry.partner);
       }
       const partner = a.partnerOf[slotIdx];
       if (partner != null && String(partner) !== String(nid)) {
@@ -406,8 +432,10 @@ NETGEN.spokeLayer = (function () {
     const SELF_LOOP_SPOKE_LEN = 5;
     function spokeOuterFor(nid, slotIdx) {
       const a = assigned[nid];
-      const isJust = a && a.justIdx && a.justIdx.indexOf(slotIdx) >= 0;
-      if (isJust && state.just && state.just.u === state.just.v) return SELF_LOOP_SPOKE_LEN;
+      if (a && a.justSlots) {
+        const js = a.justSlots.find(function (e) { return e.slot === slotIdx; });
+        if (js && js.isLoop) return SELF_LOOP_SPOKE_LEN;
+      }
       return spokeOuter;
     }
     function spokeTip(nid, slotIdx, opt) {
@@ -427,6 +455,24 @@ NETGEN.spokeLayer = (function () {
       };
     }
 
+    function normalizeJusts(s) {
+      // Accept either s.justs (array, multi-just) or s.just (singular,
+      // back-compat for cluster-pairing / SBM / matcher). Returns a
+      // fresh array; assigns synthetic ids when caller didn't provide
+      // one (multi-just renderBridge keys by edgeId).
+      let list;
+      if (s.justs) list = s.justs.slice();
+      else if (s.just) list = [s.just];
+      else list = [];
+      list.forEach(function (j, i) {
+        if (j.id == null) j.id = "j" + i + "_" + j.u + "_" + j.v;
+      });
+      return list;
+    }
+    function justsKey(list, justSeq) {
+      if (!list.length) return "";
+      return list.map(function (j) { return j.u + "/" + j.v; }).join("|") + "@" + (justSeq || "");
+    }
     function syncState(s) {
       const myToken = ++token;
       spokeLayer.selectAll("line.sp-spoke").interrupt();
@@ -439,7 +485,8 @@ NETGEN.spokeLayer = (function () {
       bridgeLayer.selectAll("path.sp-bridge").interrupt("rewindBridge");
       bridgeLayer.selectAll("path.sp-bridge").interrupt("colorize");
       placedLayer.selectAll("path.sp-placed-edge").interrupt("fan");
-      const newKey = s.just ? (s.just.u + "/" + s.just.v + "@" + (s.justSeq || "")) : "";
+      const justsIn = normalizeJusts(s);
+      const newKey = justsKey(justsIn, s.justSeq);
       const sameStep = (s.justSeq != null && s.justSeq === lastSeq);
       const forceReroll = pendingReroll;
       pendingReroll = false;
@@ -448,6 +495,7 @@ NETGEN.spokeLayer = (function () {
       const wasJump = Math.abs(stepDelta) > 1;
       const isStepBack = (stepDelta === -1) && lastKey !== "";
       const shouldRewind = isReroll || isStepBack;
+      const sNorm = Object.assign({}, s, { justs: justsIn });
 
       if (shouldRewind) {
         const willOrbit = newKey !== "" && !wasJump && !isStepBack;
@@ -455,12 +503,12 @@ NETGEN.spokeLayer = (function () {
         lockFor(rewindTotal + (willOrbit ? t_total() : 0));
         runRewind(function () {
           if (myToken !== token) return;
-          state = s; lastKey = newKey; lastSeq = s.justSeq;
+          state = sNorm; lastKey = newKey; lastSeq = s.justSeq;
           recompute(); render(willOrbit);
         });
         return;
       }
-      state = s;
+      state = sNorm;
       const fresh = newKey !== "" && newKey !== lastKey && !wasJump;
       lastKey = newKey; lastSeq = s.justSeq;
       recompute();
@@ -589,9 +637,8 @@ NETGEN.spokeLayer = (function () {
         });
         function clearJust(info) {
           const a = info.a;
-          if (!a.justIdx) return;
-          a.justIdx = a.justIdx.filter(function (i) { return i !== info.d.slot; });
-          if (a.justIdx.length === 0) { a.justIdx = null; a.justPartner = null; }
+          if (!a.justSlots) return;
+          a.justSlots = a.justSlots.filter(function (e) { return e.slot !== info.d.slot; });
         }
         orbits.forEach(function (info) {
           const { el, d, a, restA, fromA } = info;
@@ -623,7 +670,7 @@ NETGEN.spokeLayer = (function () {
       // collinear → solidify → bridge fans into its slot. Phase
       // durations live in the T constant. Non-animate path: jump
       // straight to the with-just layout, no transitions.
-      const isSelfLoop = state.just && state.just.u === state.just.v;
+      const isSelfLoop = isSelfLoopJust();
       if (animate) {
         placedFanCollapsed = true;
         bridgeCollinear = true;
@@ -691,12 +738,17 @@ NETGEN.spokeLayer = (function () {
         // Runs before the lockTimer fires (so before the un-dim) by
         // virtue of t_total() = t_colorize() + T.colorize.
         schedulePhase(t_colorize(), function () {
-          const j = state.just;
-          if (!j) return;
-          const finalColor = (j.bad && j.badColor) ? j.badColor
-                            : (state.bridgeColor || j.color);
-          NETGEN.BridgeAnim.colorize(bridgeLayer.selectAll("path.sp-bridge"), {
-            duration: T.colorize, color: finalColor, bad: j.bad,
+          if (!hasJust()) return;
+          // Per-bridge colorize: each bridge data row carries its own
+          // finalColor + bad flag, so multi-just renders settle each
+          // bridge independently (e.g. one cluster-blue + one bad-red
+          // when a rewire produces a parallel collision).
+          bridgeLayer.selectAll("path.sp-bridge").each(function (d) {
+            NETGEN.BridgeAnim.colorize(d3.select(this), {
+              duration: T.colorize,
+              color: d.finalColor || d.color,
+              bad: !!d.bad,
+            });
           });
         });
       } else {
@@ -721,7 +773,7 @@ NETGEN.spokeLayer = (function () {
         const a = assigned[nid];
         if (!a) return;
         for (let i = 0; i < a.count; i++) {
-          const isJust = !!(a.justIdx && a.justIdx.indexOf(i) >= 0);
+          const isJust = !!(a.justSlots && a.justSlots.some(function (js) { return js.slot === i; }));
           const isConsumed = !a.free[i] && !isJust;
           if (isConsumed) continue;
           data.push({
@@ -738,7 +790,8 @@ NETGEN.spokeLayer = (function () {
       // Just-spokes wear the build colour during animate=true (they
       // belong to the bridge that's being built / un-built). On a
       // jump render they're hidden anyway, so colour doesn't matter.
-      const justStroke = animate ? buildColor : (state.bridgeColor || (state.just && state.just.color) || buildColor);
+      const j0 = firstJust();
+      const justStroke = animate ? buildColor : (state.bridgeColor || (j0 && j0.color) || buildColor);
       const merged = ent.merge(sel)
         .attr("class", function (d) {
           return "sp-spoke" + (d.isJust ? " just" : "") + (d.consumed ? " consumed" : "");
@@ -791,10 +844,7 @@ NETGEN.spokeLayer = (function () {
         });
       } else {
         justSel.each(function (d) {
-          const a = assigned[d.nid];
-          let angle = a.angles[d.slot];
-          const liveA = liveAngleForJust(d.nid);
-          if (liveA != null) angle = liveA;
+          const angle = effectiveAngle(d.nid, d.slot);
           const t = spokeTip(d.nid, d.slot, { angle: angle });
           d3.select(this).attr("x1", t.x1).attr("y1", t.y1).attr("x2", t.x2).attr("y2", t.y2);
         });
@@ -879,7 +929,7 @@ NETGEN.spokeLayer = (function () {
       const ra = swap ? nodeR(d.v) : nodeR(d.u), rb = swap ? nodeR(d.u) : nodeR(d.v);
       const k = pairKey(d.u, d.v);
       const grp = dupInfo[k] || { total: 1 };
-      const targetIdx = state.just && state.just._dupIdx != null ? state.just._dupIdx : (grp.total - 1);
+      const targetIdx = d._dupIdx != null ? d._dupIdx : (grp.total - 1);
       // From: collinear (centered=0). To: target slot in the with-just
       // fan (centered = idx - (total-1)/2).
       const cTo = grp.total <= 1 ? 0 : (targetIdx - (grp.total - 1) / 2);
@@ -894,7 +944,7 @@ NETGEN.spokeLayer = (function () {
       // During the active animation, every placed edge dims so the
       // new bridge stands alone. After the animation settles, all
       // restore to full opacity.
-      const dim = animating && !!state.just;
+      const dim = animating && hasJust();
       const sel = placedLayer.selectAll("path.sp-placed-edge").data(state.placed, function (d) { return d.id || (d.u + "-" + d.v); });
       sel.exit().remove();
       const ent = sel.enter().append("path")
@@ -902,7 +952,8 @@ NETGEN.spokeLayer = (function () {
         .attr("stroke-linecap", "round").attr("stroke-width", 1.6);
       ent.merge(sel)
         .attr("stroke", function (d) { return d.color; })
-        .attr("stroke-dasharray", null)
+        .attr("stroke-width", function (d) { return d.bad ? 1.6 : 1.6; })
+        .attr("stroke-dasharray", function (d) { return d.bad ? "4 4" : null; })
         .attr("opacity", dim ? 0.18 : 1)
         .attr("d", placedPath);
     }
@@ -941,14 +992,13 @@ NETGEN.spokeLayer = (function () {
       }
       const k = pairKey(d.u, d.v);
       const grp = dupInfo[k] || { total: 1 };
-      const idx = state.just && state.just._dupIdx != null ? state.just._dupIdx : (grp.total - 1);
+      const idx = d._dupIdx != null ? d._dupIdx : (grp.total - 1);
       return fanPath({ x: a.x, y: a.y }, { x: b.x, y: b.y }, idx, grp.total, ra, rb);
     }
 
     function renderBridge(animate) {
       const data = [];
-      if (state.just) {
-        const j = state.just;
+      justList().forEach(function (j) {
         const isLoop = j.u === j.v;
         const settledColor = state.bridgeColor || j.color || "#4e7a3a";
         const settledBad = !!j.bad;
@@ -958,14 +1008,22 @@ NETGEN.spokeLayer = (function () {
         // settled colour (cluster solid for non-bad, bad-red dashed
         // for collisions). For animate=false (jump-render), skip the
         // build phase and paint the settled appearance directly.
-        const baseRow = { color: buildStroke, finalColor: (settledBad && j.badColor) ? j.badColor : settledColor, bad: settledBad, u: j.u, v: j.v, _dupIdx: j._dupIdx || 0 };
+        const edgeId = j.id;
+        const baseRow = {
+          color: buildStroke,
+          finalColor: (settledBad && j.badColor) ? j.badColor : settledColor,
+          bad: settledBad, badColor: j.badColor,
+          u: j.u, v: j.v,
+          _dupIdx: j._dupIdx || 0,
+          edgeId: edgeId,
+        };
         if (isLoop) {
-          data.push(Object.assign({ id: "bridgeL", isLoop: true, side: -1 }, baseRow));
-          data.push(Object.assign({ id: "bridgeR", isLoop: true, side: +1 }, baseRow));
+          data.push(Object.assign({ id: "bridgeL_" + edgeId, isLoop: true, side: -1 }, baseRow));
+          data.push(Object.assign({ id: "bridgeR_" + edgeId, isLoop: true, side: +1 }, baseRow));
         } else {
-          data.push(Object.assign({ id: "bridge", isLoop: false }, baseRow));
+          data.push(Object.assign({ id: "bridge_" + edgeId, isLoop: false }, baseRow));
         }
-      }
+      });
       const sel = bridgeLayer.selectAll("path.sp-bridge").data(data, function (d) { return d.id; });
       sel.exit().interrupt("bridge").remove();
       const ent = sel.enter().append("path")
@@ -1022,7 +1080,7 @@ NETGEN.spokeLayer = (function () {
         if (!a) return;
         let consumed = 0;
         for (let i = 0; i < a.count; i++) {
-          const isJust = a.justIdx && a.justIdx.indexOf(i) >= 0;
+          const isJust = a.justSlots && a.justSlots.some(function (js) { return js.slot === i; });
           if (!a.free[i] && !isJust) consumed++;
         }
         data.push({ id: nid, consumed: consumed, total: a.count, color: a.color });
@@ -1099,8 +1157,9 @@ NETGEN.spokeLayer = (function () {
       onLockChange(false);
       clearActiveDimPick();
       onActiveChange(false, null);
-      state = s;
-      lastKey = s.just ? (s.just.u + "/" + s.just.v + "@" + (s.justSeq || "")) : "";
+      const justsIn = normalizeJusts(s);
+      state = Object.assign({}, s, { justs: justsIn });
+      lastKey = justsKey(justsIn, s.justSeq);
       lastSeq = s.justSeq;
       pendingReroll = false;
       recompute();
@@ -1110,9 +1169,125 @@ NETGEN.spokeLayer = (function () {
       // late-firing rewind callback from a prior run no-ops.
       void myToken;
     }
+    // Run a multi-edge swap as a single rewind+forward sequence:
+    //   removes: placed edges that should dissolve (rewind animation,
+    //            played in parallel across all entries).
+    //   adds:    new edges that grow forward (parallel grow + fan +
+    //            colorize, also in parallel).
+    // Caller's state.placed must already contain `removes` at call
+    // time. After settle, state.placed has removes stripped and adds
+    // appended, and state.justs is empty. Single onDone fires once
+    // the whole sequence settles. Either side can be empty:
+    //   removes=[], adds=[A,B] → forward-only (orbit→grow→fan→colorize).
+    //   removes=[A,B], adds=[] → rewind-only (colour-back→fan-in→retract→orbit).
+    function playMany(removes, adds, onDone) {
+      const myToken = ++token;
+      spokeLayer.selectAll("line.sp-spoke").interrupt();
+      spokeLayer.selectAll("line.sp-spoke").interrupt("orbit");
+      spokeLayer.selectAll("line.sp-spoke").interrupt("rewindFade");
+      spokeLayer.selectAll("line.sp-spoke").interrupt("justFade");
+      bridgeLayer.selectAll("path.sp-bridge").interrupt();
+      bridgeLayer.selectAll("path.sp-bridge").interrupt("bridge");
+      bridgeLayer.selectAll("path.sp-bridge").interrupt("bridgeFan");
+      bridgeLayer.selectAll("path.sp-bridge").interrupt("rewindBridge");
+      bridgeLayer.selectAll("path.sp-bridge").interrupt("colorize");
+      placedLayer.selectAll("path.sp-placed-edge").interrupt("fan");
+      clearPhaseTimers();
+
+      const removesList = (removes || []).slice();
+      const addsList = (adds || []).slice();
+      removesList.forEach(function (r, i) {
+        if (r.id == null) r.id = "rm" + i + "_" + r.u + "_" + r.v;
+      });
+      addsList.forEach(function (a, i) {
+        if (a.id == null) a.id = "ad" + i + "_" + a.u + "_" + a.v;
+      });
+      const removeIds = new Set(removesList.map(function (e) { return e.id; }));
+      const currentPlaced = (state.placed || []).slice();
+      const placedSansRemoves = currentPlaced.filter(function (p) {
+        return !removeIds.has(p.id);
+      });
+
+      const willRewind = removesList.length > 0;
+      const willForward = addsList.length > 0;
+      const dimUnion = removesList.concat(addsList);
+
+      // No-op if both sides empty: just fire onDone.
+      if (!willRewind && !willForward) {
+        if (onDone) onDone();
+        return;
+      }
+
+      // Forward-only: skip rewind. Promote adds to justs, run forward.
+      if (!willRewind) {
+        state = Object.assign({}, state, { placed: placedSansRemoves, justs: addsList });
+        recompute();
+        bridgeStartMs = computeBridgeStartMs();
+        lockFor(t_total(), dimUnion);
+        render(true);
+        setTimeout(function () {
+          if (myToken !== token) return;
+          const finalPlaced = placedSansRemoves.concat(addsList);
+          state = Object.assign({}, state, { placed: finalPlaced, justs: [] });
+          lastKey = ""; lastSeq = state.justSeq;
+          recompute();
+          render(false);
+          if (onDone) onDone();
+        }, t_total());
+        return;
+      }
+
+      // With-rewind path: snap to "removes are the active justs that
+      // just finished settling" — bridges painted in their final
+      // colour at thin width, just-spokes hidden — then runRewind
+      // animates them out.
+      state = Object.assign({}, state, { placed: placedSansRemoves, justs: removesList });
+      recompute();
+      const rewindTotal = T.rewindUncolor + T.rewindFanIn + T.rewindBridge + T.rewindOrbit + T.rewindIdle;
+      lockFor(rewindTotal + (willForward ? t_total() : 0), dimUnion);
+      // Snap-render with-just layout so renderBridge creates the
+      // bridge DOM elements at the with-removes layout.
+      render(false);
+      // Repaint bridges as post-colorize (settled): full opacity, thin
+      // stroke, final colour. runRewind uncolor phase will animate
+      // back to buildColor from here.
+      bridgeLayer.selectAll("path.sp-bridge").each(function (d) {
+        const sel = d3.select(this);
+        const stroke = d.bad && d.badColor ? d.badColor : (d.finalColor || d.color);
+        sel.attr("opacity", 1).attr("stroke-width", 1.6).attr("stroke", stroke);
+        if (d.bad) sel.attr("stroke-dasharray", "4 4");
+      });
+      runRewind(function () {
+        if (myToken !== token) return;
+        if (!willForward) {
+          state = Object.assign({}, state, { placed: placedSansRemoves, justs: [] });
+          lastKey = ""; lastSeq = state.justSeq;
+          recompute();
+          render(false);
+          if (onDone) onDone();
+          return;
+        }
+        // Forward phase: swap removes → adds as the active justs.
+        state = Object.assign({}, state, { placed: placedSansRemoves, justs: addsList });
+        recompute();
+        bridgeStartMs = computeBridgeStartMs();
+        render(true);
+        setTimeout(function () {
+          if (myToken !== token) return;
+          const finalPlaced = placedSansRemoves.concat(addsList);
+          state = Object.assign({}, state, { placed: finalPlaced, justs: [] });
+          lastKey = ""; lastSeq = state.justSeq;
+          recompute();
+          render(false);
+          if (onDone) onDone();
+        }, t_total());
+      });
+    }
+
     return {
       syncState: syncState,
       snapToState: snapToState,
+      playMany: playMany,
       markReroll: function () { pendingReroll = true; },
       rerender: function () { recompute(); render(false); },
       isAnimating: function () { return animating; },

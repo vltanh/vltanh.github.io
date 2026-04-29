@@ -1235,13 +1235,39 @@ window.MathJax = {
       nodeColor: (id) => nodeColorOf(parseInt(id, 10)),
     });
     let lastStep = 0;
-    let settleTimer = null;
     let lockBusy = false;
     let ctl = null;
     function setLock(b) {
       if (lockBusy === b) return;
       lockBusy = b;
       if (ctl) ctl.refreshButtons();
+    }
+    const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setLock });
+    function byNodeFromList(list) {
+      const counts = {};
+      list.forEach(e => {
+        counts[e.u] = (counts[e.u] || 0) + 1;
+        counts[e.v] = (counts[e.v] || 0) + 1;
+      });
+      const out = {};
+      viz.eachNode(n => {
+        out[n.id] = { count: counts[n.id] || 0, color: nodeColorOf(parseInt(n.id, 10)) };
+      });
+      return out;
+    }
+    function placedEntry(e) {
+      return {
+        u: e.u, v: e.v, id: e.id, bad: !!e.bad,
+        color: e.bad ? COL.edge_drop : (CLUSTER_COLOR_OF[e.cluster] || COL.edge_stage2),
+        badColor: COL.edge_drop,
+      };
+    }
+    function fourEndpoints(op) {
+      const f = new Set();
+      [op && op.p1, op && op.p2, op && op.newp1, op && op.newp2].forEach(p => {
+        if (p) { f.add(p[0]); f.add(p[1]); }
+      });
+      return [...f];
     }
     // Apply ops 0..k-1 to a working edge map (key -> {u,v,cluster}); ops
     // mutate by removing p1/p2 keys and adding newp1/newp2 keys (when
@@ -1297,53 +1323,55 @@ window.MathJax = {
       document.getElementById("g-crewire-cur").textContent = String(step);
       const labelEl = document.getElementById("g-crewire-stage");
       const descEl = document.getElementById("g-crewire-desc");
-      // Clear any pick/dim left over from the previous step so the next
-      // render starts from a neutral baseline.
       clearDimPick(viz);
 
-      function buildEdges(list) {
-        return list.map(e => ({
-          u: e.u, v: e.v,
-          color: e.bad ? COL.edge_drop : (CLUSTER_COLOR_OF[e.cluster] || COL.edge_stage2),
-          w: e.bad ? 1.6 : 1.5,
-          id: e.id,
-          classes: e.bad ? "cm-bad" : "",
-        }));
-      }
-
+      const op = step > 0 ? R.clusterRewireOps[step - 1] : null;
       if (step === 0) {
-        viz.setEdges(buildEdges(stateAtStep(R, 0)));
         labelEl.textContent = "pre-rewire";
         descEl.innerHTML = '<span class="st">pre-rewire</span> &middot; ' +
           R.clusterRewireOps.length + " collision op" +
           (R.clusterRewireOps.length === 1 ? "" : "s") +
           " ahead. Red-dashed = self-loop or parallel.";
+      } else {
+        const tag = op.success
+          ? (op.src === "valid" ? "swap with valid edge" : "swap with recycled pair")
+          : "no legal swap; p1 requeued";
+        labelEl.textContent = "op " + step + " · " + tag;
+        const desc = op.success
+          ? "Cut <code>" + op.p1.join("–") + "</code> + <code>" + (op.p2 ? op.p2.join("–") : "?") +
+            "</code>; place <code>" + op.newp1.join("–") + "</code> + <code>" + op.newp2.join("–") +
+            "</code>. Highlighted nodes = the 4 endpoints involved."
+          : "Outer iteration could not find a legal partner for <code>" + op.p1.join("–") +
+            "</code>; pushed back onto the recycle queue.";
+        descEl.innerHTML = '<span class="st">op ' + step + '</span> &middot; ' + desc;
+      }
+
+      const beforeList = stateAtStep(R, step === 0 ? 0 : lastStep);
+      const afterList  = stateAtStep(R, step);
+      // byNode covers both before and after — net cluster degrees are
+      // preserved across rewire ops, so a single byNode snapshot is
+      // valid for both sides of the transition.
+      const byNode = byNodeFromList(afterList);
+
+      if (step === 0 || (step !== lastStep + 1 && step !== lastStep - 1)) {
+        spokes.snapToState({
+          byNode, placed: afterList.map(placedEntry),
+          just: null, justSeq: step,
+        });
+        if (step !== 0 && op) dimAllExcept(viz, fourEndpoints(op));
         lastStep = step;
         return;
       }
 
-      const op = R.clusterRewireOps[step - 1];
-      settleTimer = NETGEN.runRewireOpStep({
-        viz, step, lastStep,
-        ops: R.clusterRewireOps,
-        buildEdges: (s) => buildEdges(stateAtStep(R, s)),
-        cutsFor: (o) => [o.p1].concat(o.p2 ? [o.p2] : []),
-        placesFor: (o) => [o.newp1, o.newp2].filter(Boolean),
-        setLock, prevTimer: settleTimer,
-        fallback: NETGEN.dimSettleFallback(viz, clearDimPick, dimAllExcept),
-      });
+      const beforeIds = new Set(beforeList.map(e => e.id));
+      const afterIds  = new Set(afterList.map(e => e.id));
+      const removes = beforeList.filter(e => !afterIds.has(e.id)).map(placedEntry);
+      const adds    = afterList.filter(e => !beforeIds.has(e.id)).map(placedEntry);
 
-      const tag = op.success
-        ? (op.src === "valid" ? "swap with valid edge" : "swap with recycled pair")
-        : "no legal swap; p1 requeued";
-      labelEl.textContent = "op " + step + " · " + tag;
-      const desc = op.success
-        ? "Cut <code>" + op.p1.join("–") + "</code> + <code>" + (op.p2 ? op.p2.join("–") : "?") +
-          "</code>; place <code>" + op.newp1.join("–") + "</code> + <code>" + op.newp2.join("–") +
-          "</code>. Highlighted nodes = the 4 endpoints involved."
-        : "Outer iteration could not find a legal partner for <code>" + op.p1.join("–") +
-          "</code>; pushed back onto the recycle queue.";
-      descEl.innerHTML = '<span class="st">op ' + step + '</span> &middot; ' + desc;
+      const focusOp = step > lastStep ? op : R.clusterRewireOps[lastStep - 1];
+      spokes.playMany(removes, adds, () => {
+        if (focusOp) dimAllExcept(viz, fourEndpoints(focusOp));
+      });
       lastStep = step;
     }
     function totalForCurrent() {
@@ -1531,7 +1559,6 @@ window.MathJax = {
       nodeColor: (id) => nodeColorOf(parseInt(id, 10)),
     });
     let lastStep = 0;
-    let settleTimer = null;
     let lockBusy = false;
     let ctl = null;
     function setLock(b) {
@@ -1539,6 +1566,7 @@ window.MathJax = {
       lockBusy = b;
       if (ctl) ctl.refreshButtons();
     }
+    const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setLock });
     function stateAtStep(R, k) {
       const map = new Map();
       R.bgPre.forEach(e => {
@@ -1564,6 +1592,36 @@ window.MathJax = {
       }
       return map;
     }
+    function placedFromMap(map) {
+      const out = [];
+      map.forEach((e, key) => {
+        out.push({
+          u: e.u, v: e.v, id: "br-state-" + key, bad: !!e.bad,
+          color: e.bad ? COL.edge_drop : COL.edge_inter,
+          badColor: COL.edge_drop,
+        });
+      });
+      return out;
+    }
+    function byNodeFromMap(map) {
+      const counts = {};
+      map.forEach(e => {
+        counts[e.u] = (counts[e.u] || 0) + 1;
+        counts[e.v] = (counts[e.v] || 0) + 1;
+      });
+      const out = {};
+      viz.eachNode(n => {
+        out[n.id] = { count: counts[n.id] || 0, color: nodeColorOf(parseInt(n.id, 10)) };
+      });
+      return out;
+    }
+    function fourEndpoints(op) {
+      const f = new Set();
+      [op && op.p1, op && op.p2, op && op.newp1, op && op.newp2].forEach(p => {
+        if (p) { f.add(p[0]); f.add(p[1]); }
+      });
+      return [...f];
+    }
     function render(step) {
       const xi = SYNTHETIC_XI;
       const R = buildRealization(U_SEED, STUB_SEED, xi);
@@ -1573,80 +1631,85 @@ window.MathJax = {
       const labelEl = document.getElementById("g-bgrewire-stage");
       const descEl = document.getElementById("g-bgrewire-desc");
       clearDimPick(viz);
-      // Cluster post backdrop renders behind the bg state on every step.
+      // Cluster post-rewire edges paint as a backdrop via viz.setEdges
+      // (faint, never animated). Spoke layer owns the bg-pool state on
+      // top of that.
       const backdrop = R.clusterPost.map((e, i) => ({
         u: e.u, v: e.v,
         color: CLUSTER_COLOR_OF[e.cluster] || COL.edge_stage2,
         w: 1.2, id: "br-cluster-" + i, classes: "fade",
       }));
+      viz.setEdges(backdrop);
 
+      const op = step > 0 ? R.globalRewireOps[step - 1] : null;
       if (step === 0) {
-        const edges = backdrop.slice();
-        R.bgPre.forEach((e, i) => {
-          const bad = e.loop || e.multi || e.crossDup;
-          edges.push({
-            u: e.u, v: e.v,
-            color: bad ? COL.edge_drop : COL.edge_inter,
-            w: bad ? 1.6 : 1.5,
-            id: "br-" + i, classes: bad ? "pick" : "",
-          });
-        });
-        viz.setEdges(edges);
-        clearDimPick(viz);
         labelEl.textContent = "pre-rewire";
         descEl.innerHTML = '<span class="st">pre-rewire</span> &middot; ' +
           R.globalRewireOps.length + " bg-pool collision op" +
           (R.globalRewireOps.length === 1 ? "" : "s") +
           " ahead. Red-dashed = self-loop, parallel, or cluster duplicate.";
+      } else {
+        const tag = op.success
+          ? (op.src === "valid" ? "swap with valid bg edge" : "swap with recycled pair")
+          : (op.reason === "no-valid-pool" ? "no valid pool to swap with" : "newp1/newp2 collide; partial");
+        labelEl.textContent = "op " + step + " · " + tag;
+        const placedNames = [];
+        if (op.placedNewp1 && op.newp1) placedNames.push(op.newp1.join("–"));
+        if (op.placedNewp2 && op.newp2) placedNames.push(op.newp2.join("–"));
+        const desc = op.success
+          ? "Cut <code>" + op.p1.join("–") + "</code> + <code>" + op.p2.join("–") +
+            "</code>; place <code>" + placedNames.join("</code> + <code>") + "</code>."
+          : "Outer iteration could not place a clean pair for <code>" + op.p1.join("–") +
+            "</code>; pushed back onto the recycle queue.";
+        descEl.innerHTML = '<span class="st">op ' + step + '</span> &middot; ' + desc;
+      }
+
+      const beforeMap = stateAtStep(R, step === 0 ? 0 : lastStep);
+      const afterMap  = stateAtStep(R, step);
+      // Pool-degree counts can change across rewire ops (partial-success
+      // ops drop without re-placing). Use the after map's degrees so
+      // settled state has matching node-rim spoke counts; transient
+      // mid-animation a node may have one extra slot reserved by
+      // justSlots — that's already handled by spoke_layer.
+      const byNode = byNodeFromMap(afterMap);
+
+      if (step === 0 || (step !== lastStep + 1 && step !== lastStep - 1)) {
+        spokes.snapToState({
+          byNode, placed: placedFromMap(afterMap),
+          just: null, justSeq: step,
+        });
+        if (step !== 0 && op) dimAllExcept(viz, fourEndpoints(op));
         lastStep = step;
         return;
       }
 
-      const op = R.globalRewireOps[step - 1];
-      function buildEdges(state) {
-        const out = backdrop.slice();
-        // Key id by the canonical map key so an unchanged edge keeps
-        // the same DOM element across before/after — no exit + enter
-        // flash on the surrounding edges when the swap commits.
-        state.forEach((e, key) => {
-          out.push({
-            u: e.u, v: e.v,
+      const beforeKeys = new Set(beforeMap.keys());
+      const afterKeys = new Set(afterMap.keys());
+      const removes = [];
+      beforeMap.forEach((e, key) => {
+        if (!afterKeys.has(key)) {
+          removes.push({
+            u: e.u, v: e.v, id: "br-state-" + key, bad: !!e.bad,
             color: e.bad ? COL.edge_drop : COL.edge_inter,
-            w: 1.5,
-            id: "br-state-" + key,
-            classes: e.bad ? "cm-bad" : "",
+            badColor: COL.edge_drop,
           });
-        });
-        return out;
-      }
-      settleTimer = NETGEN.runRewireOpStep({
-        viz, step, lastStep,
-        ops: R.globalRewireOps,
-        buildEdges: (s) => buildEdges(stateAtStep(R, s)),
-        cutsFor: (o) => [o.p1].concat(o.p2 ? [o.p2] : []),
-        placesFor: (o) => {
-          const ps = [];
-          if (o.placedNewp1 && o.newp1) ps.push(o.newp1);
-          if (o.placedNewp2 && o.newp2) ps.push(o.newp2);
-          return ps;
-        },
-        setLock, prevTimer: settleTimer,
-        fallback: NETGEN.dimSettleFallback(viz, clearDimPick, dimAllExcept),
+        }
+      });
+      const adds = [];
+      afterMap.forEach((e, key) => {
+        if (!beforeKeys.has(key)) {
+          adds.push({
+            u: e.u, v: e.v, id: "br-state-" + key, bad: !!e.bad,
+            color: e.bad ? COL.edge_drop : COL.edge_inter,
+            badColor: COL.edge_drop,
+          });
+        }
       });
 
-      const tag = op.success
-        ? (op.src === "valid" ? "swap with valid bg edge" : "swap with recycled pair")
-        : (op.reason === "no-valid-pool" ? "no valid pool to swap with" : "newp1/newp2 collide; partial");
-      labelEl.textContent = "op " + step + " · " + tag;
-      const placed = [];
-      if (op.placedNewp1 && op.newp1) placed.push(op.newp1.join("–"));
-      if (op.placedNewp2 && op.newp2) placed.push(op.newp2.join("–"));
-      const desc = op.success
-        ? "Cut <code>" + op.p1.join("–") + "</code> + <code>" + op.p2.join("–") +
-          "</code>; place <code>" + placed.join("</code> + <code>") + "</code>."
-        : "Outer iteration could not place a clean pair for <code>" + op.p1.join("–") +
-          "</code>; pushed back onto the recycle queue.";
-      descEl.innerHTML = '<span class="st">op ' + step + '</span> &middot; ' + desc;
+      const focusOp = step > lastStep ? op : R.globalRewireOps[lastStep - 1];
+      spokes.playMany(removes, adds, () => {
+        if (focusOp) dimAllExcept(viz, fourEndpoints(focusOp));
+      });
       lastStep = step;
     }
     function totalForCurrent() {

@@ -425,6 +425,7 @@ window.MathJax = {
 </script>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 <script src="./shared.js"></script>
+<script src="./js/spoke_layer.js"></script>
 <script src="./js/profile_kernel.js"></script>
 <script src="./js/abcd_kernel.js"></script>
 <script>
@@ -1232,13 +1233,44 @@ window.MathJax = {
     const viz = NETGEN.VIZ.init("g-crewire-cy", { showLabels: true, edges: [], pinned: true });
     NETGEN.makeTooltip(viz, document.getElementById("g-crewire"));
     let lastStep = 0;
-    let settleTimer = null;
     let lockBusy = false;
     let ctl = null;
     function setLock(b) {
       if (lockBusy === b) return;
       lockBusy = b;
       if (ctl) ctl.refreshButtons();
+    }
+    const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setLock });
+    function placedFromCMap(map) {
+      const out = [];
+      map.forEach((e, key) => {
+        out.push({
+          u: e.u, v: e.v, id: "cr-state-" + key, bad: !!e.bad,
+          color: e.bad ? COL.edge_drop : (COL.edge_intra[e.cluster] || COL.edge_stage2),
+          badColor: COL.edge_drop,
+          cluster: e.cluster,
+        });
+      });
+      return out;
+    }
+    function byNodeFromMap(map) {
+      const counts = {};
+      map.forEach(e => {
+        counts[e.u] = (counts[e.u] || 0) + 1;
+        counts[e.v] = (counts[e.v] || 0) + 1;
+      });
+      const out = {};
+      viz.eachNode(n => {
+        out[n.id] = { count: counts[n.id] || 0, color: n.color };
+      });
+      return out;
+    }
+    function fourEndpoints(op) {
+      const f = new Set();
+      [op && op.p1, op && op.p2, op && op.newp1, op && op.newp2].forEach(p => {
+        if (p) { f.add(p[0]); f.add(p[1]); }
+      });
+      return [...f];
     }
     function render(step) {
       const R = getCurrentR();
@@ -1249,56 +1281,66 @@ window.MathJax = {
       const labelEl = document.getElementById("g-crewire-stage");
       const descEl = document.getElementById("g-crewire-desc");
       clearDimPick(viz);
-      function buildEdges(state, ghosts) {
-        const out = [];
-        let i = 0;
-        state.forEach(e => {
-          out.push({
-            u: e.u, v: e.v,
-            color: e.bad ? COL.edge_drop : (COL.edge_intra[e.cluster] || COL.edge_stage2),
-            w: 1.5,
-            id: "cr-state-" + (i++),
-            classes: e.bad ? "cm-bad" : "",
-          });
-        });
-        (ghosts || []).forEach((g, k) => {
-          out.push({
-            u: g[0], v: g[1], color: COL.edge_drop, w: 1.4,
-            id: "cr-ghost-" + step + "-" + k, classes: "ghost",
-          });
-        });
-        return out;
-      }
+
+      const op = step > 0 ? R.clusterRewireOps[step - 1] : null;
       if (step === 0) {
-        viz.setEdges(buildEdges(clusterStateAfter(R, 0), null));
-        clearDimPick(viz);
         labelEl.textContent = "pre-rewire";
         descEl.innerHTML = '<span class="st">pre-rewire</span> &middot; ' +
           R.clusterRewireOps.length + " collision op" +
           (R.clusterRewireOps.length === 1 ? "" : "s") +
           " ahead. Red-dashed = self-loop or parallel.";
-        if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
+      } else {
+        const placeStr = op.success
+          ? "place <code>" + op.newp1.join("&ndash;") + "</code> + <code>" + op.newp2.join("&ndash;") + "</code>"
+          : "no legal swap";
+        labelEl.textContent = "cluster rewire op " + step + " / " + R.clusterRewireOps.length;
+        descEl.innerHTML = '<span class="st">op ' + step + '</span> &middot; Cut <code>' +
+          op.p1.join("&ndash;") + "</code>" +
+          (op.p2 ? " + <code>" + op.p2.join("&ndash;") + "</code>" : "") +
+          "; " + placeStr + ". Source: " + (op.src || "none") + ".";
+      }
+
+      const beforeMap = clusterStateAfter(R, step === 0 ? 0 : lastStep);
+      const afterMap  = clusterStateAfter(R, step);
+      const byNode = byNodeFromMap(afterMap);
+
+      if (step === 0 || (step !== lastStep + 1 && step !== lastStep - 1)) {
+        spokes.snapToState({
+          byNode, placed: placedFromCMap(afterMap),
+          just: null, justSeq: step,
+        });
+        if (step !== 0 && op) dimAllExcept(viz, fourEndpoints(op));
         lastStep = step;
         return;
       }
-      const op = R.clusterRewireOps[step - 1];
-      settleTimer = NETGEN.runRewireOpStep({
-        viz, step, lastStep,
-        ops: R.clusterRewireOps,
-        buildEdges: (s) => buildEdges(clusterStateAfter(R, s), null),
-        cutsFor: (o) => [o.p1].concat(o.p2 ? [o.p2] : []),
-        placesFor: (o) => [o.newp1, o.newp2].filter(Boolean),
-        setLock, prevTimer: settleTimer,
-        fallback: NETGEN.dimSettleFallback(viz, clearDimPick, dimAllExcept),
+
+      const beforeKeys = new Set(beforeMap.keys());
+      const afterKeys = new Set(afterMap.keys());
+      const removes = [];
+      beforeMap.forEach((e, key) => {
+        if (!afterKeys.has(key)) {
+          removes.push({
+            u: e.u, v: e.v, id: "cr-state-" + key, bad: !!e.bad,
+            color: e.bad ? COL.edge_drop : (COL.edge_intra[e.cluster] || COL.edge_stage2),
+            badColor: COL.edge_drop, cluster: e.cluster,
+          });
+        }
       });
-      const placeStr = op.success
-        ? "place <code>" + op.newp1.join("&ndash;") + "</code> + <code>" + op.newp2.join("&ndash;") + "</code>"
-        : "no legal swap";
-      labelEl.textContent = "cluster rewire op " + step + " / " + R.clusterRewireOps.length;
-      descEl.innerHTML = '<span class="st">op ' + step + '</span> &middot; Cut <code>' +
-        op.p1.join("&ndash;") + "</code>" +
-        (op.p2 ? " + <code>" + op.p2.join("&ndash;") + "</code>" : "") +
-        "; " + placeStr + ". Source: " + (op.src || "none") + ".";
+      const adds = [];
+      afterMap.forEach((e, key) => {
+        if (!beforeKeys.has(key)) {
+          adds.push({
+            u: e.u, v: e.v, id: "cr-state-" + key, bad: !!e.bad,
+            color: e.bad ? COL.edge_drop : (COL.edge_intra[e.cluster] || COL.edge_stage2),
+            badColor: COL.edge_drop, cluster: e.cluster,
+          });
+        }
+      });
+
+      const focusOp = step > lastStep ? op : R.clusterRewireOps[lastStep - 1];
+      spokes.playMany(removes, adds, () => {
+        if (focusOp) dimAllExcept(viz, fourEndpoints(focusOp));
+      });
       lastStep = step;
     }
     function totalForCurrent() { return 1 + getCurrentR().clusterRewireOps.length; }
@@ -1424,13 +1466,38 @@ window.MathJax = {
     const viz = NETGEN.VIZ.init("g-bgrewire-cy", { showLabels: true, edges: [], pinned: true });
     NETGEN.makeTooltip(viz, document.getElementById("g-bgrewire"));
     let lastStep = 0;
-    let settleTimer = null;
     let lockBusy = false;
     let ctl = null;
     function setLock(b) {
       if (lockBusy === b) return;
       lockBusy = b;
       if (ctl) ctl.refreshButtons();
+    }
+    const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setLock });
+    function bgPlacedEntry(e, key) {
+      return {
+        u: e.u, v: e.v, id: "br-state-" + key, bad: !!e.bad,
+        color: bgEdgeColor(e), badColor: COL.edge_drop,
+      };
+    }
+    function bgByNode(map) {
+      const counts = {};
+      map.forEach(e => {
+        counts[e.u] = (counts[e.u] || 0) + 1;
+        counts[e.v] = (counts[e.v] || 0) + 1;
+      });
+      const out = {};
+      viz.eachNode(n => {
+        out[n.id] = { count: counts[n.id] || 0, color: n.color };
+      });
+      return out;
+    }
+    function bgFour(op) {
+      const f = new Set();
+      [op && op.p1, op && op.p2, op && op.newp1, op && op.newp2].forEach(p => {
+        if (p) { f.add(p[0]); f.add(p[1]); }
+      });
+      return [...f];
     }
     function render(step) {
       const R = getCurrentR();
@@ -1451,61 +1518,54 @@ window.MathJax = {
           w: 1.2, id: "br-cluster-" + (i++), classes: "fade",
         });
       });
-      function buildEdges(state, ghosts) {
-        const out = backdrop.slice();
-        // Key id by canonical map key so unchanged edges keep the same
-        // DOM element across before/after (no blink on swap commit).
-        state.forEach((e, key) => {
-          out.push({
-            u: e.u, v: e.v, color: bgEdgeColor(e),
-            w: e.isOO ? 1.8 : 1.5,
-            id: "br-state-" + key,
-            classes: e.bad ? "cm-bad" : "",
-          });
-        });
-        (ghosts || []).forEach((g, k) => {
-          out.push({
-            u: g[0], v: g[1], color: COL.edge_drop, w: 1.4,
-            id: "br-ghost-" + step + "-" + k, classes: "ghost",
-          });
-        });
-        return out;
-      }
+      viz.setEdges(backdrop);
+
+      const op = step > 0 ? R.globalRewireOps[step - 1] : null;
       if (step === 0) {
-        viz.setEdges(buildEdges(bgStateAfter(R, 0), null));
-        clearDimPick(viz);
         labelEl.textContent = "pre-rewire";
         descEl.innerHTML = '<span class="st">pre-rewire</span> &middot; ' +
           R.globalRewireOps.length + " bg-pool collision op" +
           (R.globalRewireOps.length === 1 ? "" : "s") +
           " ahead. Red-dashed = self-loop, parallel, or cluster duplicate.";
-        if (settleTimer) { settleTimer.cancel(); settleTimer = null; }
+      } else {
+        const placedNames = [];
+        if (op.placedNewp1 && op.newp1) placedNames.push("<code>" + op.newp1.join("&ndash;") + "</code>");
+        if (op.placedNewp2 && op.newp2) placedNames.push("<code>" + op.newp2.join("&ndash;") + "</code>");
+        labelEl.textContent = "bg rewire op " + step + " / " + R.globalRewireOps.length;
+        descEl.innerHTML = '<span class="st">op ' + step + '</span> &middot; ' +
+          (op.success
+            ? "Cut <code>" + op.p1.join("&ndash;") + "</code> + <code>" + op.p2.join("&ndash;") + "</code>; place " + placedNames.join(" + ") + "."
+            : "Outer iteration could not find a legal partner for <code>" + op.p1.join("&ndash;") + "</code>.");
+      }
+
+      const beforeMap = bgStateAfter(R, step === 0 ? 0 : lastStep);
+      const afterMap  = bgStateAfter(R, step);
+      const byNode = bgByNode(afterMap);
+
+      if (step === 0 || (step !== lastStep + 1 && step !== lastStep - 1)) {
+        const placed = [];
+        afterMap.forEach((e, key) => placed.push(bgPlacedEntry(e, key)));
+        spokes.snapToState({ byNode, placed, just: null, justSeq: step });
+        if (step !== 0 && op) dimAllExcept(viz, bgFour(op));
         lastStep = step;
         return;
       }
-      const op = R.globalRewireOps[step - 1];
-      settleTimer = NETGEN.runRewireOpStep({
-        viz, step, lastStep,
-        ops: R.globalRewireOps,
-        buildEdges: (s) => buildEdges(bgStateAfter(R, s), null),
-        cutsFor: (o) => [o.p1].concat(o.p2 ? [o.p2] : []),
-        placesFor: (o) => {
-          const ps = [];
-          if (o.placedNewp1 && o.newp1) ps.push(o.newp1);
-          if (o.placedNewp2 && o.newp2) ps.push(o.newp2);
-          return ps;
-        },
-        setLock, prevTimer: settleTimer,
-        fallback: NETGEN.dimSettleFallback(viz, clearDimPick, dimAllExcept),
+
+      const beforeKeys = new Set(beforeMap.keys());
+      const afterKeys = new Set(afterMap.keys());
+      const removes = [];
+      beforeMap.forEach((e, key) => {
+        if (!afterKeys.has(key)) removes.push(bgPlacedEntry(e, key));
       });
-      const placed = [];
-      if (op.placedNewp1 && op.newp1) placed.push("<code>" + op.newp1.join("&ndash;") + "</code>");
-      if (op.placedNewp2 && op.newp2) placed.push("<code>" + op.newp2.join("&ndash;") + "</code>");
-      labelEl.textContent = "bg rewire op " + step + " / " + R.globalRewireOps.length;
-      descEl.innerHTML = '<span class="st">op ' + step + '</span> &middot; ' +
-        (op.success
-          ? "Cut <code>" + op.p1.join("&ndash;") + "</code> + <code>" + op.p2.join("&ndash;") + "</code>; place " + placed.join(" + ") + "."
-          : "Outer iteration could not find a legal partner for <code>" + op.p1.join("&ndash;") + "</code>.");
+      const adds = [];
+      afterMap.forEach((e, key) => {
+        if (!beforeKeys.has(key)) adds.push(bgPlacedEntry(e, key));
+      });
+
+      const focusOp = step > lastStep ? op : R.globalRewireOps[lastStep - 1];
+      spokes.playMany(removes, adds, () => {
+        if (focusOp) dimAllExcept(viz, bgFour(focusOp));
+      });
       lastStep = step;
     }
     function totalForCurrent() { return 1 + getCurrentR().globalRewireOps.length; }

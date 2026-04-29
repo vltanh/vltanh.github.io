@@ -945,8 +945,8 @@ window.MathJax = {
           spokes.syncState({ byNode: cfg, placed, just: null, justSeq: stepIdx, bridgeColor: phase1Color });
         } else if (isForwardSwap) {
           // Snap to the pre-swap state without e2 (e1 was never placed),
-          // then play the overlay swap animation, then commit to the
-          // post-swap state.
+          // then drive the parallel cut + parallel place animation via
+          // spokeLayer.playMany, then commit to the post-swap state.
           const e1 = [s.u, s.v];
           const e2 = [s.x, s.y];
           const newE1 = s.edges[s.edges.length - 2];
@@ -958,32 +958,38 @@ window.MathJax = {
             byNode: cfg, placed: prePlaced, just: null,
             justSeq: stepIdx * 100, bridgeColor: phase1Color,
           });
-          const before = [
-            { u: e1[0], v: e1[1], color: COL.edge_drop, classes: "pick" },
-            { u: e2[0], v: e2[1], color: phase1Color },
+          const e2Entry = placed.find(isE2);
+          const e2Id = (e2Entry && e2Entry.id) || `m-${prefix}-e2`;
+          const removes = [
+            // e1 is the failed pair currently surfaced in red; it was
+            // never placed so playMany treats it as a phantom remove
+            // and animates only its dissolution into stubs.
+            { u: e1[0], v: e1[1], id: `m-${prefix}-e1`, bad: true,
+              color: COL.edge_drop, badColor: COL.edge_drop },
+            { u: e2[0], v: e2[1], id: e2Id, bad: false,
+              color: phase1Color },
           ];
-          const after = [
-            { u: newE1[0], v: newE1[1], color: phase1Color },
-            { u: newE2[0], v: newE2[1], color: phase1Color },
+          const adds = [
+            { u: newE1[0], v: newE1[1], id: `m-${prefix}-${s.edges.length - 2}`,
+              color: phase1Color },
+            { u: newE2[0], v: newE2[1], id: `m-${prefix}-${s.edges.length - 1}`,
+              color: phase1Color },
           ];
-          swapAnim = NETGEN.rewireSpokeSwapAnimate({
-            viz, before, after,
-            cuts: [e1, e2], places: [newE1, newE2],
-            four: [e1[0], e1[1], e2[0], e2[1]],
-            manageEdges: false,
-            settle: () => {
-              swapAnim = null;
-              const finalPlaced = [];
-              for (let i = 0; i < s.edges.length; i++) {
-                const [u, v] = s.edges[i];
-                finalPlaced.push({ u, v, color: phase1Color, id: `m-${prefix}-${i}` });
-              }
-              spokes.syncState({
-                byNode: cfg, placed: finalPlaced, just: null,
-                justSeq: stepIdx * 100 + 1, bridgeColor: phase1Color,
-              });
-              refreshButtons();
-            },
+          swapAnim = { cancel: () => {} };
+          spokes.playMany(removes, adds, () => {
+            swapAnim = null;
+            // Re-sync to the canonical post-swap placed list so ids
+            // stay stable for any subsequent step.
+            const finalPlaced = [];
+            for (let i = 0; i < s.edges.length; i++) {
+              const [u, v] = s.edges[i];
+              finalPlaced.push({ u, v, color: phase1Color, id: `m-${prefix}-${i}` });
+            }
+            spokes.syncState({
+              byNode: cfg, placed: finalPlaced, just: null,
+              justSeq: stepIdx * 100 + 1, bridgeColor: phase1Color,
+            });
+            refreshButtons();
           });
           refreshButtons();
         } else {
