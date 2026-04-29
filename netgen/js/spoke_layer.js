@@ -211,6 +211,25 @@ NETGEN.spokeLayer = (function () {
     function justList() { return state.justs || []; }
     function firstJust() { const js = justList(); return js.length ? js[0] : null; }
     function hasJust() { return justList().length > 0; }
+    // Interrupt every named transition that may be in flight on the
+    // spoke / bridge / placed selections. Called at the top of any
+    // entry point that mutates state (syncState / snapToState /
+    // playMany) so a half-finished animation never leaks attribute
+    // setters into the new render.
+    function interruptAll() {
+      const sp = spokeLayer.selectAll("line.sp-spoke");
+      sp.interrupt();
+      sp.interrupt("orbit");
+      sp.interrupt("rewindFade");
+      sp.interrupt("justFade");
+      const br = bridgeLayer.selectAll("path.sp-bridge");
+      br.interrupt();
+      br.interrupt("bridge");
+      br.interrupt("bridgeFan");
+      br.interrupt("rewindBridge");
+      br.interrupt("colorize");
+      placedLayer.selectAll("path.sp-placed-edge").interrupt("fan");
+    }
     let lastKey = "";
     let lastSeq = -1;
     let token = 0;
@@ -275,18 +294,15 @@ NETGEN.spokeLayer = (function () {
       dupInfoNoJust = {};
       const placed = state.placed || [];
       const justs = justList();
+      // dupInfoNoJust = the fan layout without active justs (existing
+      // parallels stay collinear while the bridge animates); dupInfo
+      // includes the justs and is the layout the bridge fans into.
       placed.forEach(function (p) {
         const k = pairKey(p.u, p.v);
-        if (!dupInfo[k]) dupInfo[k] = { total: 0 };
+        if (!dupInfo[k]) { dupInfo[k] = { total: 0 }; dupInfoNoJust[k] = { total: 0 }; }
         p._dupIdx = dupInfo[k].total;
         dupInfo[k].total += 1;
-      });
-      // Snapshot the no-just fan layout: same indices, count without
-      // the active justs. Used while the animation is running so the
-      // existing parallels do not jump aside before the new bridge
-      // settles.
-      Object.keys(dupInfo).forEach(function (k) {
-        dupInfoNoJust[k] = { total: dupInfo[k].total };
+        dupInfoNoJust[k].total += 1;
       });
       justs.forEach(function (j) {
         const k = pairKey(j.u, j.v);
@@ -381,20 +397,10 @@ NETGEN.spokeLayer = (function () {
       }
     }
 
-    function liveAngleForJust(nid) {
-      const a = assigned[nid];
-      if (!a || !a.justSlots || a.justSlots.length === 0) return null;
-      const js0 = a.justSlots[0];
-      if (js0.isLoop) return null;
-      return partnerDir(nid, js0.partner);
-    }
-
     // Self-loop primitives live in NETGEN.EdgePaths; this layer paints
     // each half of the teardrop independently so the placed-loop arc
     // can grow out of one stub while the other half stays inert.
     const EP = NETGEN.EdgePaths;
-    const LOOP_OFFX         = EP.LOOP_OFFX;
-    const LOOP_OFFY         = EP.LOOP_OFFY;
     const LOOP_TANGENT_START = EP.LOOP_TANGENT_START;
     const LOOP_TANGENT_END   = EP.LOOP_TANGENT_END;
 
@@ -475,16 +481,7 @@ NETGEN.spokeLayer = (function () {
     }
     function syncState(s) {
       const myToken = ++token;
-      spokeLayer.selectAll("line.sp-spoke").interrupt();
-      spokeLayer.selectAll("line.sp-spoke").interrupt("orbit");
-      spokeLayer.selectAll("line.sp-spoke").interrupt("rewindFade");
-      spokeLayer.selectAll("line.sp-spoke").interrupt("justFade");
-      bridgeLayer.selectAll("path.sp-bridge").interrupt();
-      bridgeLayer.selectAll("path.sp-bridge").interrupt("bridge");
-      bridgeLayer.selectAll("path.sp-bridge").interrupt("bridgeFan");
-      bridgeLayer.selectAll("path.sp-bridge").interrupt("rewindBridge");
-      bridgeLayer.selectAll("path.sp-bridge").interrupt("colorize");
-      placedLayer.selectAll("path.sp-placed-edge").interrupt("fan");
+      interruptAll();
       const justsIn = normalizeJusts(s);
       const newKey = justsKey(justsIn, s.justSeq);
       const sameStep = (s.justSeq != null && s.justSeq === lastSeq);
@@ -577,7 +574,7 @@ NETGEN.spokeLayer = (function () {
           return function (k) { return f(1 - k); };
         })
         .on("end.fanFlag", function () { placedFanCollapsed = true; });
-      const isSelfLoop = state.just && state.just.u === state.just.v;
+      const isSelfLoop = isSelfLoopJust();
       if (!isSelfLoop) {
         bridgeLayer.selectAll("path.sp-bridge")
           .transition("bridgeFan").duration(T.rewindFanIn).ease(d3.easeCubicInOut)
@@ -615,14 +612,14 @@ NETGEN.spokeLayer = (function () {
       // angle. Visibility was restored at the top of runRewind.
       setTimeout(function () {
         // First pass: capture (restA, fromA) for every just-spoke. We
-        // defer clearing justIdx until each spoke's orbit transition
-        // ends (.on("end")) — clearing it pre-orbit risks a one-frame
-        // gap between the synchronous clear and the transition's first
-        // rAF in which tick.spokeLayer reads effectiveAngle as restA
-        // (slot looks free), snaps the spoke to rest, then the
-        // transition starts from fromA again, snapping it back. The
-        // visible artifact is a quick rest → partner-aim → orbit to
-        // rest stutter at orbit-start.
+        // defer clearing each justSlots entry until that spoke's orbit
+        // transition ends (.on("end")) — clearing it pre-orbit risks a
+        // one-frame gap between the synchronous clear and the
+        // transition's first rAF in which tick.spokeLayer reads
+        // effectiveAngle as restA (slot looks free), snaps the spoke
+        // to rest, then the transition starts from fromA again,
+        // snapping it back. The visible artifact is a quick
+        // rest → partner-aim → orbit to rest stutter at orbit-start.
         const orbits = [];
         spokeLayer.selectAll("line.sp-spoke.just").each(function (d) {
           const a = assigned[d.nid];
@@ -952,20 +949,12 @@ NETGEN.spokeLayer = (function () {
         .attr("stroke-linecap", "round").attr("stroke-width", 1.6);
       ent.merge(sel)
         .attr("stroke", function (d) { return d.color; })
-        .attr("stroke-width", function (d) { return d.bad ? 1.6 : 1.6; })
+        .attr("stroke-width", 1.6)
         .attr("stroke-dasharray", function (d) { return d.bad ? "4 4" : null; })
         .attr("opacity", dim ? 0.18 : 1)
         .attr("d", placedPath);
     }
 
-    function bridgeEndpoint(nid, slotIdx) {
-      return spokeTip(nid, slotIdx, { angle: effectiveAngle(nid, slotIdx) });
-    }
-
-    function loopApex(d) {
-      const nu = viz.nodeById[String(d.u)];
-      return EP.loopApex(nu, nodeR(d.u));
-    }
     function loopROffset(d) {
       // Stack parallel self-loops outward by dupIdx so a 2nd or 3rd
       // self-loop on the same node doesn't paint over the 1st.
@@ -1141,16 +1130,11 @@ NETGEN.spokeLayer = (function () {
     // of the dice. Caller is responsible for passing the new state
     // object exactly as syncState expects.
     function snapToState(s) {
-      const myToken = ++token;
-      spokeLayer.selectAll("line.sp-spoke").interrupt();
-      spokeLayer.selectAll("line.sp-spoke").interrupt("orbit");
-      spokeLayer.selectAll("line.sp-spoke").interrupt("justFade");
-      bridgeLayer.selectAll("path.sp-bridge").interrupt();
-      bridgeLayer.selectAll("path.sp-bridge").interrupt("bridge");
-      bridgeLayer.selectAll("path.sp-bridge").interrupt("bridgeFan");
-      bridgeLayer.selectAll("path.sp-bridge").interrupt("rewindBridge");
-      bridgeLayer.selectAll("path.sp-bridge").interrupt("colorize");
-      placedLayer.selectAll("path.sp-placed-edge").interrupt("fan");
+      // Bumping `token` invalidates any late-firing rewind callback
+      // queued by a previous syncState / playMany call; without this,
+      // a stale callback could overwrite the snap state mid-render.
+      ++token;
+      interruptAll();
       clearPhaseTimers();
       if (lockTimer) { clearTimeout(lockTimer); lockTimer = null; }
       animating = false;
@@ -1164,10 +1148,6 @@ NETGEN.spokeLayer = (function () {
       pendingReroll = false;
       recompute();
       render(false);
-      // myToken used to keep interface symmetric with syncState; no
-      // pending callbacks reference it, but bumping ensures any
-      // late-firing rewind callback from a prior run no-ops.
-      void myToken;
     }
     // Run a multi-edge swap as a single rewind+forward sequence:
     //   removes: placed edges that should dissolve (rewind animation,
@@ -1182,16 +1162,7 @@ NETGEN.spokeLayer = (function () {
     //   removes=[A,B], adds=[] → rewind-only (colour-back→fan-in→retract→orbit).
     function playMany(removes, adds, onDone) {
       const myToken = ++token;
-      spokeLayer.selectAll("line.sp-spoke").interrupt();
-      spokeLayer.selectAll("line.sp-spoke").interrupt("orbit");
-      spokeLayer.selectAll("line.sp-spoke").interrupt("rewindFade");
-      spokeLayer.selectAll("line.sp-spoke").interrupt("justFade");
-      bridgeLayer.selectAll("path.sp-bridge").interrupt();
-      bridgeLayer.selectAll("path.sp-bridge").interrupt("bridge");
-      bridgeLayer.selectAll("path.sp-bridge").interrupt("bridgeFan");
-      bridgeLayer.selectAll("path.sp-bridge").interrupt("rewindBridge");
-      bridgeLayer.selectAll("path.sp-bridge").interrupt("colorize");
-      placedLayer.selectAll("path.sp-placed-edge").interrupt("fan");
+      interruptAll();
       clearPhaseTimers();
 
       const removesList = (removes || []).slice();
@@ -1203,7 +1174,7 @@ NETGEN.spokeLayer = (function () {
         if (a.id == null) a.id = "ad" + i + "_" + a.u + "_" + a.v;
       });
       const removeIds = new Set(removesList.map(function (e) { return e.id; }));
-      const currentPlaced = (state.placed || []).slice();
+      const currentPlaced = state.placed || [];
       const placedSansRemoves = currentPlaced.filter(function (p) {
         return !removeIds.has(p.id);
       });
