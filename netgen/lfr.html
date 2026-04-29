@@ -338,6 +338,7 @@ window.MathJax = {
 </script>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 <script src="./shared.js"></script>
+<script src="./js/spoke_layer.js"></script>
 <script src="./js/profile_kernel.js"></script>
 <script src="./js/lfr_kernel.js"></script>
 <script>
@@ -909,7 +910,6 @@ window.MathJax = {
     }
     let CACHE_KEY = "", CACHE = null;
     let lastStep = 0;
-    let settleTimer = null;
     let lockBusy = false;
     let ctl = null;
     function setLock(b) {
@@ -917,6 +917,7 @@ window.MathJax = {
       lockBusy = b;
       if (ctl) ctl.refreshButtons();
     }
+    const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setLock });
     function getTrace() {
       const key = EDGE_SEED + "|" + RESAMPLE_SEED;
       if (CACHE_KEY === key) return CACHE;
@@ -925,6 +926,36 @@ window.MathJax = {
       return CACHE;
     }
     function totalForCurrent() { return 1 + getTrace().prePairs.length + getTrace().rewireOps.length; }
+    function byNodeFromTrace(trace) {
+      const counts = {};
+      trace.prePairs.forEach(p => {
+        counts[p.u] = (counts[p.u] || 0) + 1;
+        counts[p.v] = (counts[p.v] || 0) + 1;
+      });
+      const out = {};
+      viz.eachNode(n => {
+        out[n.id] = { count: counts[n.id] || 0, color: COL.edge_inter };
+      });
+      return out;
+    }
+    function placedFromState(state, includeInvalid) {
+      const out = [];
+      state.edges.forEach((e, key) => {
+        out.push({
+          u: e.u, v: e.v, id: "lfr-cm-edge-" + key, bad: !!e.bad,
+          color: e.bad ? COL.edge_drop : COL.edge_inter, badColor: COL.edge_drop,
+        });
+      });
+      if (includeInvalid) {
+        state.invalid.forEach((e, k) => {
+          out.push({
+            u: e.u, v: e.v, id: "lfr-cm-bad-" + k, bad: true,
+            color: COL.edge_drop, badColor: COL.edge_drop,
+          });
+        });
+      }
+      return out;
+    }
     function render(step) {
       const trace = getTrace();
       document.getElementById("g-cm-cur").textContent = String(step);
@@ -932,75 +963,24 @@ window.MathJax = {
       const labelEl = document.getElementById("g-cm-stage");
       const descEl = document.getElementById("g-cm-desc");
       clearDimPick();
+
+      const total1 = trace.prePairs.length;
+      const byNode = byNodeFromTrace(trace);
+
       if (step === 0) {
-        viz.setEdges([]);
+        spokes.snapToState({ byNode, placed: [], just: null, justSeq: 0 });
         labelEl.textContent = "stubs ready";
         descEl.innerHTML = '<span class="st">stubs ready</span> &middot; ' +
           trace.prePairs.length + " pre-pair step" +
           (trace.prePairs.length === 1 ? "" : "s") + " then " +
           trace.rewireOps.length + " cleanup op" +
           (trace.rewireOps.length === 1 ? "" : "s") + " ahead.";
+        lastStep = step;
         return;
       }
-      const total1 = trace.prePairs.length;
+
       const inPair = step <= total1;
-      const state = stateAfter(trace, step);
       const four = new Set();
-      const edges = [];
-      let i = 0;
-      state.edges.forEach(e => {
-        edges.push({
-          u: e.u, v: e.v,
-          color: e.bad ? COL.edge_drop : COL.edge_inter,
-          w: 1.5,
-          id: "lfr-cm-" + (i++),
-        });
-      });
-      // Surface invalid pairs as red-dashed during pair phase so user
-      // sees collisions before the rewire fixes them.
-      if (inPair) {
-        state.invalid.forEach((e, k) => {
-          edges.push({
-            u: e.u, v: e.v,
-            color: COL.edge_drop, w: 1.6,
-            id: "lfr-cm-bad-" + k, classes: "pick",
-          });
-        });
-      }
-      function buildEdgesAt(s) {
-        const m = stateAfter(trace, s);
-        const out = [];
-        let j = 0;
-        m.edges.forEach(e => {
-          out.push({
-            u: e.u, v: e.v,
-            color: e.bad ? COL.edge_drop : COL.edge_inter,
-            w: 1.5,
-            id: "lfr-cm-pre-" + (j++),
-          });
-        });
-        return out;
-      }
-      // pair-phase steps hold a null entry; cleanup-phase steps hold
-      // the rewireOp. runRewireOpStep walks this so back-step on a
-      // cleanup op replays the swap in reverse.
-      const opsByStep = trace._opsByStep || (() => {
-        const out = [];
-        for (let i = 0; i < total1; i++) out.push(null);
-        trace.rewireOps.forEach(o => out.push(o));
-        trace._opsByStep = out;
-        return out;
-      })();
-      settleTimer = NETGEN.runRewireOpStep({
-        viz, step, lastStep,
-        ops: opsByStep,
-        buildEdges: buildEdgesAt,
-        cutsFor: (o) => [o.p1].concat(o.p2 ? [o.p2] : []),
-        placesFor: (o) => [o.newp1, o.newp2].filter(Boolean),
-        setLock, prevTimer: settleTimer,
-        fallback: () => { viz.setEdges(edges); clearDimPick(); },
-      });
-      lastStep = step;
       let label, desc;
       if (inPair) {
         const p = effectivePair(trace, step - 1);
@@ -1020,11 +1000,49 @@ window.MathJax = {
             "</code>; place <code>" + op.newp1.join("&ndash;") + "</code> + <code>" + op.newp2.join("&ndash;") + "</code>."
           : "Could not place a clean pair for <code>" + (op.p1 ? op.p1.join("&ndash;") : "?") + "</code>.";
       }
-      if (four.size > 0) {
-        dimAllExcept([...four]);
-      }
       labelEl.textContent = label;
       descEl.innerHTML = '<span class="st">' + label + "</span> &middot; " + desc;
+
+      const state = stateAfter(trace, step);
+      const isAdjCleanup = !inPair && (step === lastStep + 1 || step === lastStep - 1) && lastStep > total1;
+
+      // Pair phase + non-adjacent cleanup steps snap directly. Adjacent
+      // cleanup steps animate via playMany.
+      if (!isAdjCleanup) {
+        spokes.snapToState({
+          byNode, placed: placedFromState(state, inPair),
+          just: null, justSeq: step,
+        });
+        if (four.size > 0) dimAllExcept([...four]);
+        lastStep = step;
+        return;
+      }
+
+      const before = stateAfter(trace, lastStep);
+      const beforeKeys = new Set(before.edges.keys());
+      const afterKeys = new Set(state.edges.keys());
+      const removes = [];
+      before.edges.forEach((e, key) => {
+        if (!afterKeys.has(key)) {
+          removes.push({
+            u: e.u, v: e.v, id: "lfr-cm-edge-" + key, bad: !!e.bad,
+            color: e.bad ? COL.edge_drop : COL.edge_inter, badColor: COL.edge_drop,
+          });
+        }
+      });
+      const adds = [];
+      state.edges.forEach((e, key) => {
+        if (!beforeKeys.has(key)) {
+          adds.push({
+            u: e.u, v: e.v, id: "lfr-cm-edge-" + key, bad: !!e.bad,
+            color: e.bad ? COL.edge_drop : COL.edge_inter, badColor: COL.edge_drop,
+          });
+        }
+      });
+      spokes.playMany(removes, adds, () => {
+        if (four.size > 0) dimAllExcept([...four]);
+      });
+      lastStep = step;
     }
     // Random step: SBM-style suffix reseed in the pair phase only —
     // keep prefix [0..idx-1] of prePairs verbatim, re-shuffle remaining
@@ -1164,7 +1182,6 @@ window.MathJax = {
       return clusterSets;
     }
     let lastStep = 0;
-    let settleTimer = null;
     let lockBusy = false;
     let ctl = null;
     function setLock(b) {
@@ -1172,29 +1189,53 @@ window.MathJax = {
       lockBusy = b;
       if (ctl) ctl.refreshButtons();
     }
+    const spokesBs = NETGEN.spokeLayer.attach(viz, { onLockChange: setLock });
     function totalForCurrent() {
       const r = getRunBS();
       return 1 + buildBsTrace(r).length;
     }
-    function cumulativeEdges(clusterSets, r, four) {
+    // Edge entries from per-cluster sets, dedup-by-key in encounter
+    // order. Each entry's id is the canonical key string so cross-step
+    // diffs in playMany match by edge identity.
+    function placedFromClusterSets(clusterSets) {
       const out = [];
-      let i = 0;
-      const k = (a, b) => (a < b ? a + "|" + b : b + "|" + a);
       const seen = new Set();
-      clusterSets.forEach((set, cIdx) => {
+      clusterSets.forEach(set => {
         set.forEach(kk => {
           if (seen.has(kk)) return;
           seen.add(kk);
           const [a, b] = kk.split("|").map(Number);
           out.push({
-            u: a + 1, v: b + 1,
+            u: a + 1, v: b + 1, id: "lfr-bs-" + kk, bad: false,
             color: COL.edge_intra ? COL.edge_intra.C1 : COL.edge_stage2,
-            w: 1.5,
-            id: "lfr-bs-" + (i++),
           });
         });
       });
       return out;
+    }
+    function bsByNode(clusterSets) {
+      const counts = {};
+      const seen = new Set();
+      clusterSets.forEach(set => {
+        set.forEach(kk => {
+          if (seen.has(kk)) return;
+          seen.add(kk);
+          const [a, b] = kk.split("|").map(Number);
+          const u = a + 1, v = b + 1;
+          counts[u] = (counts[u] || 0) + 1;
+          counts[v] = (counts[v] || 0) + 1;
+        });
+      });
+      const out = {};
+      viz.eachNode(n => {
+        out[n.id] = { count: counts[n.id] || 0, color: COL.edge_intra ? COL.edge_intra.C1 : COL.edge_stage2 };
+      });
+      return out;
+    }
+    function clusterSetsKeys(clusterSets) {
+      const set = new Set();
+      clusterSets.forEach(s => s.forEach(k => set.add(k)));
+      return set;
     }
     function render(step) {
       const r = getRunBS();
@@ -1212,11 +1253,12 @@ window.MathJax = {
         return;
       }
       const clusterSetsAfter = stateAtStep(r, trace, step);
-      const afterEdges = cumulativeEdges(clusterSetsAfter, r);
+      const byNode = bsByNode(clusterSetsAfter);
+      const placedAfter = placedFromClusterSets(clusterSetsAfter);
 
       let label, desc;
       if (step === 0) {
-        viz.setEdges(afterEdges);
+        spokesBs.snapToState({ byNode, placed: placedAfter, just: null, justSeq: 0 });
         viz.clearAllNodeClass("dim");
         viz.clearAllNodeClass("pick");
         viz.clearAllNodeClass("swap-pick");
@@ -1224,7 +1266,6 @@ window.MathJax = {
         descEl.innerHTML = '<span class="st">step 0</span> &middot; ' + r.perCluster.length +
           " cluster" + (r.perCluster.length === 1 ? "" : "s") + " seeded by Phase 1's deterministic multimap. " +
           trace.length + " op" + (trace.length === 1 ? "" : "s") + " ahead (Phase 2 randomization swaps + Phase 3 multi-edge rewires).";
-        if (settleTimer) { settleTimer.cancel(); settleTimer = null; setLock(false); }
         lastStep = step;
         return;
       }
@@ -1267,47 +1308,46 @@ window.MathJax = {
         }
       }
 
-      // Cache 1-based cuts+places on each trace entry so runRewireOpStep
-      // can drive forward + reverse without per-render re-mapping.
-      const opsByStep = trace._opsByStep || (() => {
-        const out = trace.map(t => {
-          const o = t.op;
-          return {
-            cuts1b: (o.cuts || []).map(p => [p[0] + 1, p[1] + 1]),
-            places1b: (o.places || []).map(p => [p[0] + 1, p[1] + 1]),
-            success: (o.cuts || []).length > 0 && (o.places || []).length > 0,
-            raw: o, traceEntry: t,
-          };
-        });
-        trace._opsByStep = out;
-        return out;
-      })();
-      settleTimer = NETGEN.runRewireOpStep({
-        viz, step, lastStep,
-        ops: opsByStep,
-        buildEdges: (s) => cumulativeEdges(stateAtStep(r, trace, s), r),
-        cutsFor: (o) => o.cuts1b,
-        placesFor: (o) => o.places1b,
-        fourFor: (o) => {
-          const f = new Set();
-          (o.cuts1b || []).concat(o.places1b || []).forEach(p => { f.add(p[0]); f.add(p[1]); });
-          return [...f];
-        },
-        setLock, prevTimer: settleTimer,
-        fallback: (edges) => {
-          viz.setEdges(edges);
-          viz.clearAllNodeClass("dim");
-          viz.clearAllNodeClass("pick");
-          viz.clearAllNodeClass("swap-pick");
-          if (four.size > 0) {
-            viz.eachNode(n => {
-              if (!four.has(parseInt(n.id, 10))) viz.addNodeClass(n.id, "dim");
-            });
-          }
-        },
-      });
       labelEl.textContent = label;
       descEl.innerHTML = desc;
+      function applyDim() {
+        viz.clearAllNodeClass("dim");
+        viz.clearAllNodeClass("pick");
+        viz.clearAllNodeClass("swap-pick");
+        if (four.size > 0) {
+          viz.eachNode(n => {
+            if (!four.has(parseInt(n.id, 10))) viz.addNodeClass(n.id, "dim");
+          });
+        }
+      }
+      const isAdj = step === lastStep + 1 || step === lastStep - 1;
+      if (!isAdj) {
+        spokesBs.snapToState({ byNode, placed: placedAfter, just: null, justSeq: step });
+        applyDim();
+        lastStep = step;
+        return;
+      }
+      const beforeSets = stateAtStep(r, trace, lastStep);
+      const beforeKeys = clusterSetsKeys(beforeSets);
+      const afterKeys = clusterSetsKeys(clusterSetsAfter);
+      const removes = [], adds = [];
+      beforeKeys.forEach(kk => {
+        if (afterKeys.has(kk)) return;
+        const [a, b] = kk.split("|").map(Number);
+        removes.push({
+          u: a + 1, v: b + 1, id: "lfr-bs-" + kk, bad: false,
+          color: COL.edge_intra ? COL.edge_intra.C1 : COL.edge_stage2,
+        });
+      });
+      afterKeys.forEach(kk => {
+        if (beforeKeys.has(kk)) return;
+        const [a, b] = kk.split("|").map(Number);
+        adds.push({
+          u: a + 1, v: b + 1, id: "lfr-bs-" + kk, bad: false,
+          color: COL.edge_intra ? COL.edge_intra.C1 : COL.edge_stage2,
+        });
+      });
+      spokesBs.playMany(removes, adds, applyDim);
       lastStep = step;
     }
     ctl = NETGEN.wireWalker({
@@ -1508,13 +1548,39 @@ window.MathJax = {
       return 1 + ((r && r.ok && r.mateOps) ? r.mateOps.length : 0);
     }
     let lastStep = 0;
-    let settleTimer = null;
     let lockBusy = false;
     let ctl = null;
     function setLock(b) {
       if (lockBusy === b) return;
       lockBusy = b;
       if (ctl) ctl.refreshButtons();
+    }
+    const spokesMr = NETGEN.spokeLayer.attach(viz, { onLockChange: setLock });
+    function mateExtPlaced(stateMap, r) {
+      const out = [];
+      stateMap.forEach(([a, b], key) => {
+        const u = a + 1, v = b + 1;
+        const sameCluster = LFRKernel.theyAreMate(a, b, r.memberList);
+        out.push({
+          u, v, id: "lfr-mr-ext-" + key, bad: !!sameCluster,
+          color: sameCluster ? COL.edge_drop : COL.edge_inter,
+          badColor: COL.edge_drop,
+        });
+      });
+      return out;
+    }
+    function mateByNode(stateMap) {
+      const counts = {};
+      stateMap.forEach(([a, b]) => {
+        const u = a + 1, v = b + 1;
+        counts[u] = (counts[u] || 0) + 1;
+        counts[v] = (counts[v] || 0) + 1;
+      });
+      const out = {};
+      viz.eachNode(n => {
+        out[n.id] = { count: counts[n.id] || 0, color: COL.edge_inter };
+      });
+      return out;
     }
     function render(step) {
       const r = getRun();
@@ -1525,6 +1591,7 @@ window.MathJax = {
       const descEl = document.getElementById("g-mr-desc");
       if (!r || !r.ok || !r.mateOps) {
         viz.setEdges([]);
+        spokesMr.snapToState({ byNode: {}, placed: [], just: null, justSeq: 0 });
         clearDimPick();
         labelEl.textContent = "pipeline gave up";
         descEl.innerHTML = '<span class="st">no trace</span> &middot; runFullPipeline returned !ok at this μ; reroll or change the slider.';
@@ -1535,23 +1602,16 @@ window.MathJax = {
         u: a + 1, v: b + 1, color: COL.edge_intra ? COL.edge_intra.C1 : COL.edge_stage2,
         w: 1.2, id: "lfr-mr-intra-" + i, classes: "fade",
       }));
-      const stateMap = stateAfter(r, step);
-      const four = new Set();
-      const extEdges = [];
-      let i = 0;
-      stateMap.forEach(([a, b]) => {
-        const u = a + 1, v = b + 1;
-        const sameCluster = LFRKernel.theyAreMate(a, b, r.memberList);
-        extEdges.push({
-          u, v,
-          color: sameCluster ? COL.edge_drop : COL.edge_inter,
-          w: sameCluster ? 1.6 : 1.5,
-          id: "lfr-mr-ext-" + (i++),
-          classes: sameCluster ? "pick" : "",
-        });
-      });
-      const allEdges = intraEdgeViz.concat(extEdges);
+      // Intra-cluster edges paint as a backdrop via viz.setEdges (faint,
+      // never animated). Spoke layer carries the external-edge state on
+      // top with degree-spokes around each external-incident node.
+      viz.setEdges(intraEdgeViz);
 
+      const stateMap = stateAfter(r, step);
+      const byNode = mateByNode(stateMap);
+      const placedAfter = mateExtPlaced(stateMap, r);
+
+      const four = new Set();
       let label, desc;
       if (step === 0) {
         label = "step 0 · mate-rewire init";
@@ -1569,49 +1629,44 @@ window.MathJax = {
           "Cut " + cuts + "; place " + places + ". var_mate " +
           op.varMateBefore + " &rarr; " + op.varMateAfter + ".";
       }
-      function extEdgesAt(s) {
-        const m = stateAfter(r, s);
-        const out = [];
-        let bei = 0;
-        m.forEach(([a, b]) => {
-          const u = a + 1, v = b + 1;
-          const sameCluster = LFRKernel.theyAreMate(a, b, r.memberList);
-          out.push({
-            u, v,
-            color: sameCluster ? COL.edge_drop : COL.edge_inter,
-            w: sameCluster ? 1.6 : 1.5,
-            id: "lfr-mr-pre-" + (bei++),
-            classes: sameCluster ? "pick" : "",
-          });
-        });
-        return intraEdgeViz.concat(out);
-      }
-      const opsByStep = r._mateOpsByStep || (r._mateOpsByStep = (r.mateOps || []).map(o => ({
-        cuts1b: (o.cuts || []).map(c => [c[0] + 1, c[1] + 1]),
-        places1b: (o.places || []).map(p => [p[0] + 1, p[1] + 1]),
-        success: (o.cuts || []).length > 0 && (o.places || []).length > 0,
-        raw: o,
-      })));
-      settleTimer = NETGEN.runRewireOpStep({
-        viz, step, lastStep,
-        ops: opsByStep,
-        buildEdges: extEdgesAt,
-        cutsFor: (o) => o.cuts1b,
-        placesFor: (o) => o.places1b,
-        fourFor: (o) => {
-          const f = new Set();
-          [o.raw.a, o.raw.b, o.raw.randomMate, o.raw.nodeH].forEach(id => f.add(id + 1));
-          return [...f];
-        },
-        setLock, prevTimer: settleTimer,
-        fallback: (edges) => {
-          viz.setEdges(edges);
-          clearDimPick();
-          if (four.size > 0) dimAllExcept([...four]);
-        },
-      });
       labelEl.textContent = label;
       descEl.innerHTML = desc;
+      function applyDim() {
+        clearDimPick();
+        if (four.size > 0) dimAllExcept([...four]);
+      }
+      const isAdj = step !== 0 && (step === lastStep + 1 || step === lastStep - 1);
+      if (!isAdj) {
+        spokesMr.snapToState({ byNode, placed: placedAfter, just: null, justSeq: step });
+        applyDim();
+        lastStep = step;
+        return;
+      }
+      const before = stateAfter(r, lastStep);
+      const beforeKeys = new Set(before.keys());
+      const afterKeys = new Set(stateMap.keys());
+      const removes = [], adds = [];
+      before.forEach(([a, b], key) => {
+        if (afterKeys.has(key)) return;
+        const u = a + 1, v = b + 1;
+        const sameCluster = LFRKernel.theyAreMate(a, b, r.memberList);
+        removes.push({
+          u, v, id: "lfr-mr-ext-" + key, bad: !!sameCluster,
+          color: sameCluster ? COL.edge_drop : COL.edge_inter,
+          badColor: COL.edge_drop,
+        });
+      });
+      stateMap.forEach(([a, b], key) => {
+        if (beforeKeys.has(key)) return;
+        const u = a + 1, v = b + 1;
+        const sameCluster = LFRKernel.theyAreMate(a, b, r.memberList);
+        adds.push({
+          u, v, id: "lfr-mr-ext-" + key, bad: !!sameCluster,
+          color: sameCluster ? COL.edge_drop : COL.edge_inter,
+          badColor: COL.edge_drop,
+        });
+      });
+      spokesMr.playMany(removes, adds, applyDim);
       lastStep = step;
     }
     ctl = NETGEN.wireWalker({

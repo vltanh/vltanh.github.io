@@ -473,6 +473,7 @@ window.MathJax = {
 </script>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 <script src="./shared.js"></script>
+<script src="./js/spoke_layer.js"></script>
 <script src="./js/profile_kernel.js"></script>
 <script src="./js/sbm_kernel.js"></script>
 <script src="./js/match_degree_kernel.js"></script>
@@ -1153,6 +1154,38 @@ window.MathJax = {
       showLabels: true, edges: stage2, pinned: true,
     });
     NETGEN.makeTooltip(viz, document.getElementById("g-rewire"));
+    function setLockProxy(b) { setLock(b); }
+    const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setLockProxy });
+    function residualByNode(map) {
+      const counts = {};
+      map.forEach(e => {
+        counts[e.u] = (counts[e.u] || 0) + 1;
+        counts[e.v] = (counts[e.v] || 0) + 1;
+      });
+      const out = {};
+      viz.eachNode(n => {
+        out[n.id] = { count: counts[n.id] || 0, color: COL.edge_stage3 };
+      });
+      return out;
+    }
+    function residualPlaced(map) {
+      const out = [];
+      map.forEach((e, key) => {
+        out.push({
+          u: e.u, v: e.v, id: "res-state-" + key, bad: !!e.bad,
+          color: e.bad ? COL.edge_drop : COL.edge_stage3,
+          badColor: COL.edge_drop,
+        });
+      });
+      return out;
+    }
+    function fourFromOp(op) {
+      const f = new Set();
+      [op && op.p1, op && op.p2, op && op.newp1, op && op.newp2].forEach(p => {
+        if (p) { f.add(String(p[0])); f.add(String(p[1])); }
+      });
+      return [...f];
+    }
 
     // State after replaying rewire ops 0..k-1 on the raw multigraph.
     // Returns a Map keyed by canonical "u|v" → { u, v, bad } so each
@@ -1223,7 +1256,6 @@ window.MathJax = {
     }
 
     let lastStep = 0;
-    let settleTimer = null;
     let lockBusy = false;
     let ctl = null;
     function setLock(b) {
@@ -1244,14 +1276,16 @@ window.MathJax = {
       const realEl = document.getElementById("g-rewire-real");
       realEl.textContent = `realization · seed ${R.seed}`;
 
+      // Backdrop: stage-2 EC-SBM core/attach edges paint via viz.setEdges
+      // so they never animate or claim spoke slots.
+      viz.setEdges(stage2);
+
       const stateMap = rewireStateAt(R, step);
-      const stateEdges = buildResidualEdges(stateMap);
+      const byNode = residualByNode(stateMap);
+      const placedAfter = residualPlaced(stateMap);
 
       if (step === 0) {
-        viz.clearEdges();
-        viz.addEdges(stage2);
-        viz.addEdges(stateEdges);
-        if (settleTimer) { settleTimer.cancel(); settleTimer = null; setLock(false); }
+        spokes.snapToState({ byNode, placed: placedAfter, just: null, justSeq: 0 });
         const dups = R.raw.filter(r => r.isDup).length;
         const loops = R.raw.filter(r => r.isLoop).length;
         stageEl.textContent = "step 0 · residual SBM sampled";
@@ -1266,26 +1300,6 @@ window.MathJax = {
       }
 
       const op = R.ops[step - 1];
-      // Helper sets viz.setEdges(before) at animation start; page must
-      // not pre-clear viz here or every surviving edge would exit +
-      // re-enter (visible blink).
-      settleTimer = NETGEN.runRewireOpStep({
-        viz, step, lastStep,
-        ops: R.ops,
-        buildEdges: (s) => stage2.concat(buildResidualEdges(rewireStateAt(R, s))),
-        cutsFor: (o) => [o.p1].concat(o.p2 ? [o.p2] : []),
-        placesFor: (o) => {
-          const ps = [];
-          if (o.success) {
-            if (o.newp1) ps.push(o.newp1);
-            if (o.newp2) ps.push(o.newp2);
-          }
-          return ps;
-        },
-        setLock, prevTimer: settleTimer,
-        fallback: () => { viz.clearEdges(); viz.addEdges(stage2); viz.addEdges(stateEdges); },
-      });
-
       const [A, B] = (op.bp || "0|0").split("|").map(Number);
       const bpStr = A === B ? `intra-block (${A}, ${A})` : `inter-block (${A}, ${B})`;
       stageEl.textContent = `op ${step} · ${op.success ? "swap" : "no swap"}`;
@@ -1297,6 +1311,33 @@ window.MathJax = {
           `produced a self-loop or collision; pushed back onto the recycle queue.`;
       descEl.innerHTML = `<span class="st">op ${step}</span> &middot; ${desc}`;
       NETGEN.retypeset(descEl);
+
+      const isAdj = step === lastStep + 1 || step === lastStep - 1;
+      if (!isAdj) {
+        spokes.snapToState({ byNode, placed: placedAfter, just: null, justSeq: step });
+        lastStep = step;
+        return;
+      }
+      const before = rewireStateAt(R, lastStep);
+      const beforeKeys = new Set(before.keys());
+      const afterKeys = new Set(stateMap.keys());
+      const removes = [];
+      before.forEach((e, key) => {
+        if (afterKeys.has(key)) return;
+        removes.push({
+          u: e.u, v: e.v, id: "res-state-" + key, bad: !!e.bad,
+          color: e.bad ? COL.edge_drop : COL.edge_stage3, badColor: COL.edge_drop,
+        });
+      });
+      const adds = [];
+      stateMap.forEach((e, key) => {
+        if (beforeKeys.has(key)) return;
+        adds.push({
+          u: e.u, v: e.v, id: "res-state-" + key, bad: !!e.bad,
+          color: e.bad ? COL.edge_drop : COL.edge_stage3, badColor: COL.edge_drop,
+        });
+      });
+      spokes.playMany(removes, adds, () => {});
       lastStep = step;
     }
 
