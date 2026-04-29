@@ -909,8 +909,13 @@ function stepController(opts) {
   endBtn && endBtn.addEventListener("click", () => { if (!isLocked()) withSnap(() => { idx = total-1; render(); }); });
   randStepBtn && randStepBtn.addEventListener("click", () => {
     if (isLocked()) return;
-    if (onRandStep) onRandStep(idx);
-    render();
+    // onRandStep may return truthy to request a snap-render (jump,
+    // no animation) — used when the reroll changes a placed entry
+    // whose identity-swap would read as a glitch under the animated
+    // rewind+forward path. Falsy keeps the default animated render.
+    const wantSnap = onRandStep ? onRandStep(idx) : false;
+    if (wantSnap) withSnap(render);
+    else render();
   });
   randAllBtn && randAllBtn.addEventListener("click", () => {
     if (isLocked()) return;
@@ -2224,6 +2229,71 @@ function bindClusterRowHover(gBars, viz, opts) {
   }
 }
 
+// Canonical unordered-pair key: min|max of the two endpoints. Used by
+// every walker that detects parallels / cross-stage dups via a Set.
+function keyOf(a, b) { return a < b ? a + "|" + b : b + "|" + a; }
+
+// Generic walker suffix-reseed primitive. SBM's urn+budget reseedFrom
+// is the reference shape; ABCD / ABCD+o / LFR stub-pool walkers and
+// matcher's algo-replay walkers all reduce to the same three-step
+// pattern: fresh state -> replay kept prefix -> sample fresh tail.
+function reseedSuffix(spec) {
+  const state = spec.makeFreshState();
+  spec.replayPrefix(state, spec.prefix);
+  return spec.sampleTail(state, spec.rng || Math.random);
+}
+
+// Config-model stub-pool specialisation of reseedSuffix. Every stub-
+// pool caller (ABCD cluster + bg, ABCD+o cluster + bg, LFR config-
+// model) shares the same state shape: a remaining-stub Map keyed by
+// member + a localEdges Set of accepted-good keys. Caller supplies
+// only the per-pair classify() — the part that actually varies.
+//
+// spec:
+//   layout    { members[], wIn[], numPairs }
+//   prefix    kept pair entries (each with u, v, and optional
+//             loop / multi / crossDup flags consumed by replay)
+//   classify  (a, b, ctx) -> new pair entry; ctx exposes
+//             { localEdges: Set, add: key => void } so the caller
+//             can detect parallels and accept good edges
+//   rng       optional
+//
+// Returns the new tail (array of classify() outputs).
+function stubPoolReseed(spec) {
+  const lay = spec.layout;
+  return reseedSuffix({
+    prefix: spec.prefix,
+    rng: spec.rng,
+    makeFreshState: () => {
+      const remaining = new Map();
+      lay.members.forEach((v, i) => remaining.set(v, lay.wIn[i]));
+      return { remaining, localEdges: new Set() };
+    },
+    replayPrefix: (s, prefix) => prefix.forEach(p => {
+      s.remaining.set(p.u, (s.remaining.get(p.u) || 0) - 1);
+      s.remaining.set(p.v, (s.remaining.get(p.v) || 0) - 1);
+      if (!p.loop && !p.multi && !p.crossDup) s.localEdges.add(keyOf(p.u, p.v));
+    }),
+    sampleTail: (s, rng) => {
+      const tail = [];
+      lay.members.forEach(v => {
+        const cnt = s.remaining.get(v) || 0;
+        for (let k = 0; k < cnt; k++) tail.push(v);
+      });
+      for (let i = tail.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        [tail[i], tail[j]] = [tail[j], tail[i]];
+      }
+      const ctx = { localEdges: s.localEdges, add: k => s.localEdges.add(k) };
+      const out = [];
+      for (let i = 0; i + 1 < tail.length; i += 2) {
+        out.push(spec.classify(tail[i], tail[i + 1], ctx));
+      }
+      return out;
+    },
+  });
+}
+
 // ── Export ────────────────────────────────────────────────────
 global.NETGEN = {
   POSITIONS, NODES, EDGES, CLUSTER_OF, DEGREES, DEGREES_EXCL, MINCUTS,
@@ -2231,7 +2301,7 @@ global.NETGEN = {
   C1, C2, C3, OUT, INTRA, INTER, OUT_EDGES,
   CORE_NODES, CORE_EDGES, topK, cliqueEdges,
   COLORS, CY, VIZ,
-  makeTooltip, scrubSlider, stepController, walkerRow, wireWalker, snapOrSync, singletonOpener, defaultSingletonClusters, bindPanelToggle, mountGxPanel, walkerMarkPlaced, walkerMarkJust, toggle,
+  makeTooltip, scrubSlider, stepController, walkerRow, wireWalker, snapOrSync, singletonOpener, defaultSingletonClusters, bindPanelToggle, mountGxPanel, walkerMarkPlaced, walkerMarkJust, reseedSuffix, stubPoolReseed, keyOf, toggle,
   linksRow, kinSection,
   fitViewBoxAttr,
   retypeset,

@@ -179,7 +179,14 @@
   // final snapshots for page step-walkers. Trace recording does NOT consume
   // any rng draws so logic stays byte-equal with the untraced path.
   function configModel(args) {
-    const { clusters, w: wIn, s, hasOutliers, xi, rng, traceStages } = args;
+    const { clusters, w: wIn, s, hasOutliers, xi, rng, traceStages, overrides } = args;
+    // overrides.clusterStubsByCluster: { kernelClusterId(1-based) -> stubArray }
+    // When given for a cluster, the kernel uses that stub array verbatim
+    // instead of building+shuffling its own. Multiset must match wInternal
+    // exactly. Downstream stages (recycle, residue, global) keep using the
+    // rng — so re-rolling cluster prePairs cascades into different clusterPost
+    // and bgPre.
+    const stubOverrides = (overrides && overrides.clusterStubsByCluster) || null;
     const w = wIn.slice();
     const numClusters = s.length;
     const clusterWeight = new Array(numClusters).fill(0);
@@ -238,7 +245,12 @@
       for (const v of cluster) {
         for (let k = 0; k < wInternal[v - 1]; k++) stubs.push(v);
       }
-      shuffleInPlace(stubs, rng);
+      const stubOverride = stubOverrides && stubOverrides[cidx0 + 1];
+      if (stubOverride) {
+        for (let i = 0; i < stubs.length; i++) stubs[i] = stubOverride[i];
+      } else {
+        shuffleInPlace(stubs, rng);
+      }
       const stubsShuffledSnap = stubs.slice();
       // Snapshot wInternal[v] for cluster members BEFORE residue forwarding
       // (mutations below decrement wInternal for any forwarded residue stub).

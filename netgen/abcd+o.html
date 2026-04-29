@@ -582,7 +582,7 @@ window.MathJax = {
   }
 
   function seededRng(seed) { return d3.randomLcg(seed); }
-  function keyOf(a, b) { return a < b ? a + "|" + b : b + "|" + a; }
+  const keyOf = NETGEN.keyOf;
 
   // Eligibility for outlier pick: mirrors graph_sampler.jl::populate_clusters
   // hasoutliers branch. Threshold = L + n_out - L*n_out/n - 1, where L is
@@ -652,9 +652,11 @@ window.MathJax = {
       split[n] = { w, y, z: w - y };
     });
     const clusterPre = [], clusterPost = [];
+    const clusterStubLayouts = [];
     cm.stages.perCluster.forEach(stage => {
       const cname = NAMED_CLUSTER_OF_KERNEL[stage.cluster];
       if (!cname) return;
+      const startInClusterPre = clusterPre.length;
       stage.prePairs.forEach(([a, b, loop, multi]) => {
         clusterPre.push({
           u: PAGE_NODE_BY_KIDX[a - 1], v: PAGE_NODE_BY_KIDX[b - 1],
@@ -666,6 +668,13 @@ window.MathJax = {
           u: PAGE_NODE_BY_KIDX[a - 1], v: PAGE_NODE_BY_KIDX[b - 1],
           cluster: cname,
         });
+      });
+      clusterStubLayouts.push({
+        cname,
+        startInClusterPre,
+        members: stage.members.map(v => PAGE_NODE_BY_KIDX[v - 1]),
+        wIn: stage.wInternalPreForward.slice(),
+        numPairs: stage.prePairs.length,
       });
     });
     function mapPair(p) {
@@ -700,6 +709,13 @@ window.MathJax = {
         isCO: outliers.has(u) !== outliers.has(v),
       };
     });
+    const bgWIn = NODES.map(() => 0);
+    g.stubsShuffled.forEach(v => {
+      const pageNode = PAGE_NODE_BY_KIDX[v - 1];
+      const i = NODES.indexOf(pageNode);
+      if (i >= 0) bgWIn[i] += 1;
+    });
+    const bgStubLayout = { members: NODES.slice(), wIn: bgWIn, numPairs: bgPre.length };
     const bgPost = g.postEdges.map(([a, b]) => {
       const u = PAGE_NODE_BY_KIDX[a - 1], v = PAGE_NODE_BY_KIDX[b - 1];
       return {
@@ -728,6 +744,7 @@ window.MathJax = {
       split, outliers, eligible, threshold,
       clusterPre, clusterPost, bgPre, bgPost, finalEdges, outDeg,
       clusterRewireOps, globalRewireOps,
+      clusterStubLayouts, bgStubLayout,
       residueCount: cm.residueAfter,
     };
     REAL_CACHE.set(key, RR);
@@ -1127,15 +1144,43 @@ window.MathJax = {
   (function () {
     const viz = NETGEN.VIZ.init("g-cpair-cy", { showLabels: true, edges: [], pinned: true });
     NETGEN.makeTooltip(viz, document.getElementById("g-cpair"));
+    let pairOverride = {};
+    function effectivePair(R, i) { return pairOverride[i] || R.clusterPre[i]; }
+    function effPairs(R) {
+      return R.clusterPre.map((_, i) => effectivePair(R, i));
+    }
+    function rollPair(R, idx) {
+      let lay = null, l = 0;
+      for (const c of R.clusterStubLayouts) {
+        if (idx >= c.startInClusterPre && idx < c.startInClusterPre + c.numPairs) {
+          lay = c; l = idx - c.startInClusterPre; break;
+        }
+      }
+      if (!lay) return;
+      const prefix = [];
+      for (let i = 0; i < l; i++) prefix.push(effectivePair(R, lay.startInClusterPre + i));
+      const newTail = NETGEN.stubPoolReseed({
+        layout: lay, prefix,
+        classify: (a, b, ctx) => {
+          const loop = (a === b);
+          const k = keyOf(a, b);
+          const multi = !loop && ctx.localEdges.has(k);
+          if (!loop && !multi) ctx.add(k);
+          return { u: a, v: b, cluster: lay.cname, loop, multi };
+        },
+      });
+      newTail.forEach((np, i) => { pairOverride[lay.startInClusterPre + l + i] = np; });
+    }
     function render(step) {
       const R = getCurrentR();
       applyOutlierColors(viz, R);
-      const total = 1 + R.clusterPre.length;
+      const ePairs = effPairs(R);
+      const total = 1 + ePairs.length;
       document.getElementById("g-cpair-total").textContent = String(total - 1);
       document.getElementById("g-cpair-cur").textContent = String(step);
       const labelEl = document.getElementById("g-cpair-stage");
       const descEl = document.getElementById("g-cpair-desc");
-      const placed = NETGEN.walkerMarkPlaced(R.clusterPre.slice(0, step), {
+      const placed = NETGEN.walkerMarkPlaced(ePairs.slice(0, step), {
         idPrefix: "cg-pre-",
         goodColor: (e) => COL.edge_intra[e.cluster] || COL.edge_stage2,
         badColor: COL.edge_drop,
@@ -1151,14 +1196,14 @@ window.MathJax = {
       if (step === 0) {
         labelEl.textContent = "stubs ready";
         descEl.innerHTML = '<span class="st">stubs ready</span> &middot; ' +
-          R.clusterPre.length + " cluster pre-pair step" +
-          (R.clusterPre.length === 1 ? "" : "s") + " ahead.";
+          ePairs.length + " cluster pre-pair step" +
+          (ePairs.length === 1 ? "" : "s") + " ahead.";
         return;
       }
-      const j = NETGEN.walkerMarkJust(R.clusterPre, step, { keyOf });
+      const j = NETGEN.walkerMarkJust(ePairs, step, { keyOf });
       const e = j.e;
       const tag = (e.loop || j.bad) ? " (collision)" : "";
-      labelEl.textContent = "cluster pair " + step + " / " + R.clusterPre.length + tag;
+      labelEl.textContent = "cluster pair " + step + " / " + ePairs.length + tag;
       descEl.innerHTML = '<span class="st">cluster pair</span> &middot; pair ' +
         e.u + " &harr; " + e.v + " inside <code>" + e.cluster + "</code>.";
       dimAllExcept(viz, [e.u, e.v]);
@@ -1168,10 +1213,16 @@ window.MathJax = {
       prefix: "g-cpair",
       total: totalForCurrent(),
       onRender: render,
-      onRandStep: rerollStub,
+      onRandStep: idx => {
+        if (idx <= 0) return;
+        rollPair(getCurrentR(), idx - 1);
+      },
       onRandAll: () => { rerollAll(); },
     });
-    function reconfig() { ctl.reconfigureKeep(totalForCurrent(), ctl.idx); }
+    function reconfig() {
+      pairOverride = {};
+      ctl.reconfigureKeep(totalForCurrent(), ctl.idx);
+    }
     onStubChanged.push(reconfig);
     document.getElementById("xi-slider").addEventListener("input", reconfig);
   })();
@@ -1269,10 +1320,37 @@ window.MathJax = {
   (function () {
     const viz = NETGEN.VIZ.init("g-bgpair-cy", { showLabels: true, edges: [], pinned: true });
     NETGEN.makeTooltip(viz, document.getElementById("g-bgpair"));
+    let bgOverride = {};
+    function effectiveBg(R, i) { return bgOverride[i] || R.bgPre[i]; }
+    function effPairs(R) { return R.bgPre.map((_, i) => effectiveBg(R, i)); }
+    function rollBgPair(R, idx) {
+      const lay = R.bgStubLayout;
+      if (idx >= lay.numPairs) return;
+      const prefix = [];
+      for (let i = 0; i < idx; i++) prefix.push(effectiveBg(R, i));
+      const clusterEdgeKeys = new Set(R.clusterPost.map(e => keyOf(e.u, e.v)));
+      const newTail = NETGEN.stubPoolReseed({
+        layout: lay, prefix,
+        classify: (a, b, ctx) => {
+          const loop = (a === b);
+          const k = keyOf(a, b);
+          const multi = !loop && ctx.localEdges.has(k);
+          const crossDup = !loop && !multi && clusterEdgeKeys.has(k);
+          if (!loop && !multi && !crossDup) ctx.add(k);
+          return {
+            u: a, v: b, loop, multi, crossDup,
+            isOO: R.outliers.has(a) && R.outliers.has(b),
+            isCO: R.outliers.has(a) !== R.outliers.has(b),
+          };
+        },
+      });
+      newTail.forEach((np, i) => { bgOverride[idx + i] = np; });
+    }
     function render(step) {
       const R = getCurrentR();
       applyOutlierColors(viz, R);
-      const total = 1 + R.bgPre.length;
+      const ePairs = effPairs(R);
+      const total = 1 + ePairs.length;
       document.getElementById("g-bgpair-total").textContent = String(total - 1);
       document.getElementById("g-bgpair-cur").textContent = String(step);
       const labelEl = document.getElementById("g-bgpair-stage");
@@ -1289,7 +1367,7 @@ window.MathJax = {
         });
       });
       const isExtraBad = (e) => !!e.crossDup;
-      const placed = NETGEN.walkerMarkPlaced(R.bgPre.slice(0, step), {
+      const placed = NETGEN.walkerMarkPlaced(ePairs.slice(0, step), {
         idPrefix: "bp-pre-",
         goodColor: (e) => bgEdgeColor({ ...e, bad: false }),
         badColor: bgEdgeColor({ bad: true }),
@@ -1297,7 +1375,7 @@ window.MathJax = {
       });
       // Width policy: bad → 1.6, OO non-bad → 1.8, default → 1.5.
       const edges = backdrop.concat(placed.map((p, k) => {
-        const src = R.bgPre[k];
+        const src = ePairs[k];
         return {
           u: p.u, v: p.v, color: p.color,
           w: p.bad ? 1.6 : (src.isOO ? 1.8 : 1.5),
@@ -1309,15 +1387,15 @@ window.MathJax = {
       if (step === 0) {
         labelEl.textContent = "stubs ready";
         descEl.innerHTML = '<span class="st">stubs ready</span> &middot; cluster post-rewire backdrop in faint colour; ' +
-          R.bgPre.length + " bg pre-pair step" +
-          (R.bgPre.length === 1 ? "" : "s") + " ahead.";
+          ePairs.length + " bg pre-pair step" +
+          (ePairs.length === 1 ? "" : "s") + " ahead.";
         return;
       }
-      const jm = NETGEN.walkerMarkJust(R.bgPre, step, { keyOf, isExtraBad });
+      const jm = NETGEN.walkerMarkJust(ePairs, step, { keyOf, isExtraBad });
       const e = jm.e;
       const tag = (e.loop || jm.bad) ? " (collision)" : "";
       const cls = e.isOO ? "outlier-outlier" : (e.isCO ? "clustered-outlier" : "non-outlier inter");
-      labelEl.textContent = "bg pair " + step + " / " + R.bgPre.length + tag;
+      labelEl.textContent = "bg pair " + step + " / " + ePairs.length + tag;
       descEl.innerHTML = '<span class="st">bg pair</span> &middot; pair ' +
         e.u + " &harr; " + e.v + " in the background pool (" + cls + ").";
       dimAllExcept(viz, [e.u, e.v]);
@@ -1327,10 +1405,16 @@ window.MathJax = {
       prefix: "g-bgpair",
       total: totalForCurrent(),
       onRender: render,
-      onRandStep: rerollStub,
+      onRandStep: idx => {
+        if (idx <= 0) return;
+        rollBgPair(getCurrentR(), idx - 1);
+      },
       onRandAll: () => { rerollAll(); },
     });
-    function reconfig() { ctl.reconfigureKeep(totalForCurrent(), ctl.idx); }
+    function reconfig() {
+      bgOverride = {};
+      ctl.reconfigureKeep(totalForCurrent(), ctl.idx);
+    }
     onStubChanged.push(reconfig);
     document.getElementById("xi-slider").addEventListener("input", reconfig);
   })();

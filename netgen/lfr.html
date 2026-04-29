@@ -833,6 +833,16 @@ window.MathJax = {
       const cleanup = LFRKernel.cleanupMultigraph({
         edges: out.edges, rng, maxRetries: 10, traceTest: true,
       });
+      // stubLayout drives the pair-phase suffix-reseed. members = 1-based
+      // node ids (page convention), wIn[i] = degs[i] = number of stub
+      // copies of that node going into the shuffle. numPairs = total
+      // stubs / 2 = pair-phase walker length.
+      const members = [];
+      const wIn = [];
+      for (let i = 0; i < degs.length; i++) {
+        members.push(i + 1);
+        wIn.push(degs[i]);
+      }
       return {
         prePairs: (out.prePairs || []).map(p => ({
           u: p.u + 1, v: p.v + 1, loop: p.loop, multi: p.multi,
@@ -845,19 +855,27 @@ window.MathJax = {
           success: !!op.success, reason: op.reason || null,
         })),
         kept: cleanup.kept.map(([a, b]) => [a + 1, b + 1]),
+        stubLayout: {
+          members, wIn,
+          numPairs: (out.prePairs || []).length,
+        },
       };
     }
+    let pairOverride = {};
+    function effectivePair(trace, i) { return pairOverride[i] || trace.prePairs[i]; }
     function stateAfter(trace, step) {
       // Mirror the kernel's bookkeeping: validSet collects clean pairs
       // from prePairs first, then rewire ops mutate it. Returns a Map
-      // keyed by canonical-order edge string.
+      // keyed by canonical-order edge string. Reads through
+      // effectivePair so pair-phase suffix-reseed overrides take
+      // effect; rewire ops keep referencing the original kernel trace.
       const map = new Map();
       const invalid = [];
-      const k = (u, v) => (u < v ? u + "|" + v : v + "|" + u);
+      const k = NETGEN.keyOf;
       let processed = 0;
       const total1 = trace.prePairs.length;
       for (let i = 0; i < trace.prePairs.length && processed < step; i++) {
-        const p = trace.prePairs[i];
+        const p = effectivePair(trace, i);
         const kk = k(p.u, p.v);
         if (p.loop || map.has(kk)) {
           invalid.push({ u: p.u, v: p.v, bad: true });
@@ -870,7 +888,7 @@ window.MathJax = {
       // already inside the rewire phase. Mirrors kernel.
       if (step > total1) {
         for (let i = processed; i < trace.prePairs.length; i++) {
-          const p = trace.prePairs[i];
+          const p = effectivePair(trace, i);
           const kk = k(p.u, p.v);
           if (p.loop || map.has(kk)) invalid.push({ u: p.u, v: p.v, bad: true });
           else map.set(kk, { u: p.u, v: p.v, bad: false });
@@ -985,7 +1003,7 @@ window.MathJax = {
       lastStep = step;
       let label, desc;
       if (inPair) {
-        const p = trace.prePairs[step - 1];
+        const p = effectivePair(trace, step - 1);
         four.add(p.u); four.add(p.v);
         const tag = p.loop ? " (self-loop)" : (p.multi ? " (parallel)" : "");
         label = "pair " + step + " / " + total1 + tag;
@@ -1008,16 +1026,51 @@ window.MathJax = {
       labelEl.textContent = label;
       descEl.innerHTML = '<span class="st">' + label + "</span> &middot; " + desc;
     }
+    // Random step: SBM-style suffix reseed in the pair phase only —
+    // keep prefix [0..idx-1] of prePairs verbatim, re-shuffle remaining
+    // stubs, re-pair the tail. Loop / multi flags recomputed against
+    // the kept-prefix set. In the rewire phase no override applies;
+    // suffix-reseed of individual rewire ops doesn't have a clean
+    // semantic, so we leave those steps unchanged (deterministic
+    // walker — random step is a no-op once past pair phase).
+    function rollPair(trace, idx) {
+      const lay = trace.stubLayout;
+      if (idx >= lay.numPairs) return;
+      const prefix = [];
+      for (let i = 0; i < idx; i++) prefix.push(effectivePair(trace, i));
+      const newTail = NETGEN.stubPoolReseed({
+        layout: lay, prefix,
+        classify: (a, b, ctx) => {
+          const loop = (a === b);
+          const kk = NETGEN.keyOf(a, b);
+          const multi = !loop && ctx.localEdges.has(kk);
+          if (!loop && !multi) ctx.add(kk);
+          return { u: a, v: b, loop, multi };
+        },
+      });
+      newTail.forEach((np, i) => { pairOverride[idx + i] = np; });
+    }
     ctl = NETGEN.wireWalker({
       prefix: "g-cm",
       total: totalForCurrent(),
       onRender: render,
       getLocked: () => lockBusy,
-      onRandStep: () => { if (!lockBusy) rerollEdges(); },
+      onRandStep: (S) => {
+        if (lockBusy || S <= 0) return;
+        const trace = getTrace();
+        const total1 = trace.prePairs.length;
+        if (S <= total1) rollPair(trace, S - 1);
+      },
       onRandAll: () => { if (!lockBusy) rerollResample(); },
     });
-    onResampleChanged.push(() => { CACHE_KEY = ""; ctl.reconfigureKeep(totalForCurrent(), ctl.idx); });
-    onEdgeChanged.push(() => { CACHE_KEY = ""; ctl.reconfigureKeep(totalForCurrent(), ctl.idx); });
+    onResampleChanged.push(() => {
+      CACHE_KEY = ""; pairOverride = {};
+      ctl.reconfigureKeep(totalForCurrent(), ctl.idx);
+    });
+    onEdgeChanged.push(() => {
+      CACHE_KEY = ""; pairOverride = {};
+      ctl.reconfigureKeep(totalForCurrent(), ctl.idx);
+    });
   })();
 
   // ── Generation · per-cluster build-subgraph walker ──

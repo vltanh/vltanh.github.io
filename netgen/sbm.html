@@ -894,13 +894,20 @@ window.MathJax = {
         stepIdx = 0;
         return;
       }
-      const urns = buildFreshUrns();
-      const budget = buildPairBudget();
-      const seen = new Map();
-      SBMKernel.replayTrace(urns, budget, seen, trace.slice(0, k));
-      const tail = SBMKernel.buildTraceFrom(urns, budget, blockPairs, seen, d3.randomLcg(currentSeed));
+      const tail = NETGEN.reseedSuffix({
+        prefix: trace.slice(0, k),
+        makeFreshState: () => ({
+          urns: buildFreshUrns(),
+          budget: buildPairBudget(),
+          seen: new Map(),
+        }),
+        replayPrefix: (s, prefix) => SBMKernel.replayTrace(s.urns, s.budget, s.seen, prefix),
+        sampleTail: (s, rng) => SBMKernel.buildTraceFrom(s.urns, s.budget, blockPairs, s.seen, rng),
+        rng: d3.randomLcg(currentSeed),
+      });
       trace = trace.slice(0, k).concat(tail);
       totalPairs = trace.length;
+      spokes.markReroll();
       publishSample();
     }
 

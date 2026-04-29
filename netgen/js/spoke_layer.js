@@ -201,6 +201,11 @@ NETGEN.spokeLayer = (function () {
     let lastKey = "";
     let lastSeq = -1;
     let token = 0;
+    // markReroll() sets this; the next syncState consumes it and forces
+    // the rewind+forward path even if newKey === lastKey (which happens
+    // on any reroll that re-derives the same (u, v) — common for self-
+    // loops where (a, a) is order-symmetric).
+    let pendingReroll = false;
     let assigned = {};   // nid -> { count, color, angles[], free[], partnerOf[], justIdx?[], justPartner? }
     let dupInfo = {};    // pairKey -> { total, idx[] } for fanning parallel placed edges
     function pairKey(u, v) { return String(u) < String(v) ? u + "|" + v : v + "|" + u; }
@@ -436,7 +441,9 @@ NETGEN.spokeLayer = (function () {
       placedLayer.selectAll("path.sp-placed-edge").interrupt("fan");
       const newKey = s.just ? (s.just.u + "/" + s.just.v + "@" + (s.justSeq || "")) : "";
       const sameStep = (s.justSeq != null && s.justSeq === lastSeq);
-      const isReroll = sameStep && lastKey !== "" && lastKey !== newKey;
+      const forceReroll = pendingReroll;
+      pendingReroll = false;
+      const isReroll = forceReroll || (sameStep && lastKey !== "" && lastKey !== newKey);
       const stepDelta = (s.justSeq != null && lastSeq >= 0) ? (s.justSeq - lastSeq) : 1;
       const wasJump = Math.abs(stepDelta) > 1;
       const isStepBack = (stepDelta === -1) && lastKey !== "";
@@ -1095,6 +1102,7 @@ NETGEN.spokeLayer = (function () {
       state = s;
       lastKey = s.just ? (s.just.u + "/" + s.just.v + "@" + (s.justSeq || "")) : "";
       lastSeq = s.justSeq;
+      pendingReroll = false;
       recompute();
       render(false);
       // myToken used to keep interface symmetric with syncState; no
@@ -1105,6 +1113,7 @@ NETGEN.spokeLayer = (function () {
     return {
       syncState: syncState,
       snapToState: snapToState,
+      markReroll: function () { pendingReroll = true; },
       rerender: function () { recompute(); render(false); },
       isAnimating: function () { return animating; },
     };
