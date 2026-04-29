@@ -210,12 +210,6 @@
   <p>\(y_u\) funds the cluster graph \(G_{c(u)}\); \(z_u\) funds the background graph \(G_0\). For the exact-degree variant (our default), the cluster's non-leader members are rounded stochastically so \(\mathbb{E}[\hat y_u] = y_u\): \(\hat y_u = \lfloor y_u \rfloor + \mathbb{1}\{U_u < y_u - \lfloor y_u \rfloor\}\) with \(U_u \sim \text{Uniform}(0, 1)\). The leader (largest-weight member) takes the deterministic floor \(\lfloor y_\ell \rfloor\) and adds 0 or 1 by parity: the bump fires when the sum of non-leader \(\hat y_u\) is odd and the floor is even, or vice versa, so the cluster's total internal stub count ends up even. \(\hat z_u = w_u - \hat y_u\).</p>
   <div class="disk-panel">
     <div class="widget-row tight">
-      <div class="scrub">
-        <label>ξ</label>
-        <input type="range" id="xi-slider" min="0" max="1" step="0.005" value="0.295">
-        <output id="xi-val">0.30</output>
-      </div>
-      <button class="btn" id="xi-snap">snap to profile \(\xi\)</button>
       <button class="btn primary" id="u-reroll">re-roll U</button>
       <span class="step-label">profile is fixed at \(\xi = \) <span id="xi-prof">&middot;</span>; <em>re-roll U</em> resamples the stochastic rounding.</span>
     </div>
@@ -1030,17 +1024,13 @@ window.MathJax = {
       .attr("font-family", "Special Elite, Courier New, monospace")
       .attr("font-size", "9.5px").attr("fill", "#2f3a54");
 
-    const slider = document.getElementById("xi-slider");
-    const lbl = document.getElementById("xi-val");
     const sumExt = document.getElementById("ext-tot");
     const sumDeg = document.getElementById("deg-tot");
     const xiTgt  = document.getElementById("xi-tgt");
     const xiReal = document.getElementById("xi-real");
-    const snapBtn = document.getElementById("xi-snap");
 
-    function update(xi) {
-      lbl.textContent = xi.toFixed(2);
-      const R = buildRealization(U_SEED, STUB_SEED, xi);
+    function update() {
+      const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
       let totZ = 0, totW = 0;
       bars.each(function (nid) {
         const s = R.split[nid];
@@ -1058,24 +1048,12 @@ window.MathJax = {
       });
       sumExt.textContent = totZ;
       sumDeg.textContent = totW;
-      xiTgt.textContent = xi.toFixed(3);
+      xiTgt.textContent = SYNTHETIC_XI.toFixed(3);
       xiReal.textContent = (totZ / totW).toFixed(3);
     }
-    slider.addEventListener("input", () => update(parseFloat(slider.value)));
-    snapBtn.addEventListener("click", () => {
-      slider.value = SYNTHETIC_XI.toFixed(3);
-      // dispatch input so every other listener (walkers, deg-cmp,
-      // anything else hooked on "input") cascades alongside the
-      // weight-split bar update.
-      slider.dispatchEvent(new Event("input"));
-    });
     document.getElementById("u-reroll").addEventListener("click", rerollU);
-    onUChanged.push(() => update(parseFloat(slider.value)));
-    // Initial position snaps to the profile's ξ instead of the HTML's
-    // hard-coded 0.295 default — keeps the walkers in lock-step with
-    // the profile-fixed value on first load.
-    slider.value = SYNTHETIC_XI.toFixed(3);
-    update(parseFloat(slider.value));
+    onUChanged.push(update);
+    update();
   })();
 
   // ── Generation · 4 stage walkers, one viz panel each ──
@@ -1144,7 +1122,7 @@ window.MathJax = {
     }
 
     function render(step, snap) {
-      const xi = parseFloat(document.getElementById("xi-slider").value);
+      const xi = SYNTHETIC_XI;
       const R = buildRealization(U_SEED, STUB_SEED, xi);
       const total = 1 + R.clusterPre.length;
       if (step >= total) step = total - 1;
@@ -1205,7 +1183,7 @@ window.MathJax = {
       NETGEN.retypeset(descEl);
     }
 
-    const xi0 = parseFloat(document.getElementById("xi-slider").value);
+    const xi0 = SYNTHETIC_XI;
     const R0 = buildRealization(U_SEED, STUB_SEED, xi0);
     ctl = NETGEN.stepController({
       prevBtn: document.getElementById("g-cpair-prev"),
@@ -1224,7 +1202,7 @@ window.MathJax = {
       // a jump instead of an animated rewind+forward.
       onRandStep: idx => {
         if (idx <= 0) return false;
-        const xi = parseFloat(document.getElementById("xi-slider").value);
+        const xi = SYNTHETIC_XI;
         const R = buildRealization(U_SEED, STUB_SEED, xi);
         return rollPair(R, idx - 1).snap;
       },
@@ -1237,16 +1215,14 @@ window.MathJax = {
         rerollAll();
       },
     });
-    function reTotal() {
+    function reTotalReset() {
       pairOverride = {};
       overrideEpoch++;
-      const xi = parseFloat(document.getElementById("xi-slider").value);
-      const R = buildRealization(U_SEED, STUB_SEED, xi);
-      ctl.reconfigureKeep(totalFromR(R), ctl.idx);
+      const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
+      ctl.reconfigure(totalFromR(R));
     }
-    onStubChanged.push(reTotal);
-    onUChanged.push(reTotal);
-    document.getElementById("xi-slider").addEventListener("input", reTotal);
+    onStubChanged.push(reTotalReset);
+    onUChanged.push(reTotalReset);
   })();
 
   // Stage 2: cluster rewire — per-op walker. Each step is one outer
@@ -1314,7 +1290,7 @@ window.MathJax = {
       return list;
     }
     function render(step) {
-      const xi = parseFloat(document.getElementById("xi-slider").value);
+      const xi = SYNTHETIC_XI;
       const R = buildRealization(U_SEED, STUB_SEED, xi);
       const total = 1 + R.clusterRewireOps.length;
       document.getElementById("g-crewire-total").textContent = String(total - 1);
@@ -1371,7 +1347,7 @@ window.MathJax = {
       lastStep = step;
     }
     function totalForCurrent() {
-      const xi = parseFloat(document.getElementById("xi-slider").value);
+      const xi = SYNTHETIC_XI;
       const R = buildRealization(U_SEED, STUB_SEED, xi);
       return 1 + R.clusterRewireOps.length;
     }
@@ -1391,11 +1367,11 @@ window.MathJax = {
         rerollAll();
       },
     });
-    function reconfig() { ctl.reconfigureKeep(totalForCurrent(), ctl.idx); }
-    onStubChanged.push(reconfig);
-    onUChanged.push(reconfig);
-    onClusterPreChanged.push(reconfig);
-    document.getElementById("xi-slider").addEventListener("input", reconfig);
+    function reconfigReset() { ctl.reconfigure(totalForCurrent()); }
+    function reconfigKeep() { ctl.reconfigureKeep(totalForCurrent(), ctl.idx); }
+    onStubChanged.push(reconfigReset);
+    onUChanged.push(reconfigReset);
+    onClusterPreChanged.push(reconfigKeep);
   })();
 
   // Stage 3: background pairing (single-step-per-pair; ẑ_u spokes per
@@ -1447,7 +1423,7 @@ window.MathJax = {
     }
 
     function render(step, snap) {
-      const xi = parseFloat(document.getElementById("xi-slider").value);
+      const xi = SYNTHETIC_XI;
       const R = buildRealization(U_SEED, STUB_SEED, xi);
       const total = 1 + R.bgPre.length;
       if (step >= total) step = total - 1;
@@ -1505,7 +1481,7 @@ window.MathJax = {
       NETGEN.retypeset(descEl);
     }
 
-    const xi0 = parseFloat(document.getElementById("xi-slider").value);
+    const xi0 = SYNTHETIC_XI;
     const R0 = buildRealization(U_SEED, STUB_SEED, xi0);
     ctl = NETGEN.stepController({
       prevBtn: document.getElementById("g-bgpair-prev"),
@@ -1519,7 +1495,7 @@ window.MathJax = {
       onRender: render,
       onRandStep: idx => {
         if (idx <= 0) return false;
-        const xi = parseFloat(document.getElementById("xi-slider").value);
+        const xi = SYNTHETIC_XI;
         const R = buildRealization(U_SEED, STUB_SEED, xi);
         return rollBgPair(R, idx - 1).snap;
       },
@@ -1530,16 +1506,19 @@ window.MathJax = {
         rerollAll();
       },
     });
-    function reTotal() {
+    function reTotalReset() {
       bgOverride = {};
-      const xi = parseFloat(document.getElementById("xi-slider").value);
-      const R = buildRealization(U_SEED, STUB_SEED, xi);
+      const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
+      ctl.reconfigure(totalFromR(R));
+    }
+    function reTotalKeep() {
+      bgOverride = {};
+      const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
       ctl.reconfigureKeep(totalFromR(R), ctl.idx);
     }
-    onStubChanged.push(reTotal);
-    onUChanged.push(reTotal);
-    onClusterPreChanged.push(reTotal);
-    document.getElementById("xi-slider").addEventListener("input", reTotal);
+    onStubChanged.push(reTotalReset);
+    onUChanged.push(reTotalReset);
+    onClusterPreChanged.push(reTotalKeep);
   })();
 
   // Stage 4: background rewire — per-op walker. Mirrors g-crewire's
@@ -1586,7 +1565,7 @@ window.MathJax = {
       return map;
     }
     function render(step) {
-      const xi = parseFloat(document.getElementById("xi-slider").value);
+      const xi = SYNTHETIC_XI;
       const R = buildRealization(U_SEED, STUB_SEED, xi);
       const total = 1 + R.globalRewireOps.length;
       document.getElementById("g-bgrewire-total").textContent = String(total - 1);
@@ -1671,7 +1650,7 @@ window.MathJax = {
       lastStep = step;
     }
     function totalForCurrent() {
-      const xi = parseFloat(document.getElementById("xi-slider").value);
+      const xi = SYNTHETIC_XI;
       const R = buildRealization(U_SEED, STUB_SEED, xi);
       return 1 + R.globalRewireOps.length;
     }
@@ -1691,11 +1670,11 @@ window.MathJax = {
         rerollAll();
       },
     });
-    function reconfig() { ctl.reconfigureKeep(totalForCurrent(), ctl.idx); }
-    onStubChanged.push(reconfig);
-    onUChanged.push(reconfig);
-    onClusterPreChanged.push(reconfig);
-    document.getElementById("xi-slider").addEventListener("input", reconfig);
+    function reconfigReset() { ctl.reconfigure(totalForCurrent()); }
+    function reconfigKeep() { ctl.reconfigureKeep(totalForCurrent(), ctl.idx); }
+    onStubChanged.push(reconfigReset);
+    onUChanged.push(reconfigReset);
+    onClusterPreChanged.push(reconfigKeep);
   })();
 
 
@@ -1754,7 +1733,7 @@ window.MathJax = {
       .attr("fill", COL.mint).attr("opacity", 0.9);
 
     function render() {
-      const xi = parseFloat(document.getElementById("xi-slider").value);
+      const xi = SYNTHETIC_XI;
       const R = buildRealization(U_SEED, STUB_SEED, xi);
       let diff = 0, match = 0;
       rows.each(function (nid) {
@@ -1775,7 +1754,6 @@ window.MathJax = {
     onStubChanged.push(render);
     onUChanged.push(render);
     onClusterPreChanged.push(render);
-    document.getElementById("xi-slider").addEventListener("input", render);
     render();
   })();
 
