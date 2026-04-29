@@ -1416,16 +1416,14 @@ window.MathJax = {
       const removes = beforeList.filter(e => !afterIds.has(e.id)).map(placedEntry);
       const adds    = afterList.filter(e => !beforeIds.has(e.id)).map(placedEntry);
 
-      // Dedup the removed cuts (solid red → dashed → fade, surviving
-      // parallels fan in) and then grow the new places. Forward-only
-      // playMany (removes=[]) drives the standard orbit → grow → fan →
-      // colorize sequence on the adds.
-      if (removes.length > 0) {
-        spokes.playDedup(removes, () => {
-          if (adds.length > 0) spokes.playMany([], adds, () => {});
-        });
-      } else if (adds.length > 0) {
-        spokes.playMany([], adds, () => {});
+      // Drop-stale step: only removes, no adds — play the dedup
+      // animation (solid → dashed → fade w/ survivor fan-in). Swap
+      // ops (cuts + places): the standard rewind + forward sequence
+      // through playMany so the cuts and places run in parallel.
+      if (removes.length > 0 && adds.length === 0) {
+        spokes.playDedup(removes, () => {});
+      } else {
+        spokes.playMany(removes, adds, () => {});
       }
       lastStep = step;
     }
@@ -1506,13 +1504,7 @@ window.MathJax = {
         afterById.forEach((ae, id) => {
           if (!beforeById.has(id)) adds.push(placedEntry(ae));
         });
-        if (removes.length > 0) {
-          spokes.playDedup(removes, () => {
-            if (adds.length > 0) spokes.playMany([], adds, () => {});
-          });
-        } else if (adds.length > 0) {
-          spokes.playMany([], adds, () => {});
-        }
+        spokes.playMany(removes, adds, () => {});
         lastStep = idx;
         return "skip";
       },

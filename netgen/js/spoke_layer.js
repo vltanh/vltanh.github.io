@@ -885,56 +885,61 @@ NETGEN.spokeLayer = (function () {
       return fanPath({ x: a.x, y: a.y }, { x: b.x, y: b.y }, idx, grp.total, ra, rb);
     }
 
-    // For a non-loop placed edge: returns a function (fanT) → path d
-    // that linearly interpolates the perpendicular fan offset between
-    // the no-just layout (fanT=0) and the with-just layout (fanT=1).
-    // Used by the fan transition's attrTween so endpoints stay on the
-    // node boundary throughout (string interpolation cuts a chord).
-    function placedPathTween(d) {
-      if (d.u === d.v) {
-        const fixed = placedPath(d);
-        return function () { return fixed; };
-      }
+    // Centered offset of slot `idx` within a fan of `total` parallels.
+    // 0 when total <= 1 (collinear); otherwise idx - (total-1)/2 so
+    // the fan is symmetric around the centre line.
+    function centeredFanOffset(idx, total) {
+      return total <= 1 ? 0 : (idx - (total - 1) / 2);
+    }
+    // Linear-interpolation tween between two parallel-fan layouts for
+    // a non-loop edge `d`. cFrom / cTo are centered offsets (see
+    // centeredFanOffset). Endpoints are recomputed every frame from
+    // the current Q-control direction so they stay on the node
+    // boundary throughout — string-interp on `d` would cut a chord
+    // through the node, and a tick-race could snap d to the target
+    // value before the transition's first frame.
+    // Caller must guard d.u === d.v (loops use a separate path —
+    // placedPath for combined-halves, loopHalfPath for one half).
+    function parallelFanTween(d, cFrom, cTo) {
       const nu = viz.nodeById[String(d.u)];
       const nv = viz.nodeById[String(d.v)];
       if (!nu || !nv) return function () { return ""; };
       const swap = String(d.u) > String(d.v);
       const a = swap ? nv : nu, b = swap ? nu : nv;
       const ra = swap ? nodeR(d.v) : nodeR(d.u), rb = swap ? nodeR(d.u) : nodeR(d.v);
-      const k = pairKey(d.u, d.v);
-      const grpNoJust = dupInfoNoJust[k] || { total: 1 };
-      const grpWithJust = dupInfo[k] || { total: 1 };
-      const idx = d._dupIdx != null ? d._dupIdx : 0;
-      const cFrom = grpNoJust.total <= 1 ? 0 : (idx - (grpNoJust.total - 1) / 2);
-      const cTo   = grpWithJust.total <= 1 ? 0 : (idx - (grpWithJust.total - 1) / 2);
       const ax = a.x, ay = a.y, bx = b.x, by = b.y;
       return function (k) {
         const c = cFrom + (cTo - cFrom) * k;
         return fanPathCentered({ x: ax, y: ay }, { x: bx, y: by }, c, ra, rb);
       };
     }
+    // Placed-edge fan tween: no-just layout (fanT=0) → with-just
+    // layout (fanT=1). Reverse the tween (k → 1-k) for fan-in.
+    function placedPathTween(d) {
+      if (d.u === d.v) {
+        const fixed = placedPath(d);
+        return function () { return fixed; };
+      }
+      const k = pairKey(d.u, d.v);
+      const grpNoJust = dupInfoNoJust[k] || { total: 1 };
+      const grpWithJust = dupInfo[k] || { total: 1 };
+      const idx = d._dupIdx != null ? d._dupIdx : 0;
+      return parallelFanTween(d,
+        centeredFanOffset(idx, grpNoJust.total),
+        centeredFanOffset(idx, grpWithJust.total));
+    }
+    // Bridge fan tween: collinear (fanT=0) → target slot in the
+    // with-just layout (fanT=1). Self-loop bridges paint each half via
+    // loopHalfPath and don't fan.
     function bridgePathTween(d) {
       if (d.isLoop) {
         const fixed = loopHalfPath(d, d.side);
         return function () { return fixed; };
       }
-      const nu = viz.nodeById[String(d.u)];
-      const nv = viz.nodeById[String(d.v)];
-      if (!nu || !nv) return function () { return ""; };
-      const swap = String(d.u) > String(d.v);
-      const a = swap ? nv : nu, b = swap ? nu : nv;
-      const ra = swap ? nodeR(d.v) : nodeR(d.u), rb = swap ? nodeR(d.u) : nodeR(d.v);
       const k = pairKey(d.u, d.v);
       const grp = dupInfo[k] || { total: 1 };
       const targetIdx = d._dupIdx != null ? d._dupIdx : (grp.total - 1);
-      // From: collinear (centered=0). To: target slot in the with-just
-      // fan (centered = idx - (total-1)/2).
-      const cTo = grp.total <= 1 ? 0 : (targetIdx - (grp.total - 1) / 2);
-      const ax = a.x, ay = a.y, bx = b.x, by = b.y;
-      return function (k) {
-        const c = cTo * k;
-        return fanPathCentered({ x: ax, y: ay }, { x: bx, y: by }, c, ra, rb);
-      };
+      return parallelFanTween(d, 0, centeredFanOffset(targetIdx, grp.total));
     }
 
     function renderPlaced() {
