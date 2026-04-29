@@ -181,12 +181,19 @@
   function configModel(args) {
     const { clusters, w: wIn, s, hasOutliers, xi, rng, traceStages, overrides } = args;
     // overrides.clusterStubsByCluster: { kernelClusterId(1-based) -> stubArray }
-    // When given for a cluster, the kernel uses that stub array verbatim
-    // instead of building+shuffling its own. Multiset must match wInternal
-    // exactly. Downstream stages (recycle, residue, global) keep using the
-    // rng — so re-rolling cluster prePairs cascades into different clusterPost
-    // and bgPre.
+    //   When given for a cluster, the kernel uses that stub array verbatim
+    //   instead of building+shuffling its own. Multiset must match wInternal
+    //   exactly. Downstream stages (recycle, residue, global) keep using the
+    //   rng — so re-rolling cluster prePairs cascades into different
+    //   clusterPost and bgPre.
+    // overrides.wInternalByVertex: 0-based array of pre-residue wInternal[v]
+    //   When given, kernel skips randround / leader-bump rng draws and uses
+    //   these values directly. Caller must source from a base run (no
+    //   override) — the second pass then matches base's wInternal exactly,
+    //   so changes in one cluster's recycle don't shift later clusters'
+    //   randround state. clusterPre.length stays invariant across rerolls.
     const stubOverrides = (overrides && overrides.clusterStubsByCluster) || null;
+    const wInOverride = (overrides && overrides.wInternalByVertex) || null;
     const w = wIn.slice();
     const numClusters = s.length;
     const clusterWeight = new Array(numClusters).fill(0);
@@ -225,19 +232,25 @@
       let wsum = 0;
       for (let k = 0; k < cluster.length; k++) {
         if (k !== maxIdx0) {
-          const r = randround(wInternalRaw[cluster[k] - 1], rng);
+          const r = wInOverride
+            ? wInOverride[cluster[k] - 1]
+            : randround(wInternalRaw[cluster[k] - 1], rng);
           wInternal[cluster[k] - 1] = r;
           wsum += r;
         }
       }
-      const maxw = Math.floor(wInternalRaw[cluster[maxIdx0] - 1]);
-      let bump;
-      if (wsum % 2 !== 0) {
-        bump = maxw % 2 === 0 ? 1 : 0;
+      if (wInOverride) {
+        wInternal[cluster[maxIdx0] - 1] = wInOverride[cluster[maxIdx0] - 1];
       } else {
-        bump = maxw % 2 !== 0 ? 1 : 0;
+        const maxw = Math.floor(wInternalRaw[cluster[maxIdx0] - 1]);
+        let bump;
+        if (wsum % 2 !== 0) {
+          bump = maxw % 2 === 0 ? 1 : 0;
+        } else {
+          bump = maxw % 2 !== 0 ? 1 : 0;
+        }
+        wInternal[cluster[maxIdx0] - 1] = maxw + bump;
       }
-      wInternal[cluster[maxIdx0] - 1] = maxw + bump;
       if (wInternal[cluster[maxIdx0] - 1] > w[cluster[maxIdx0] - 1]) {
         w[cluster[maxIdx0] - 1] = wInternal[cluster[maxIdx0] - 1];
       }
@@ -245,11 +258,15 @@
       for (const v of cluster) {
         for (let k = 0; k < wInternal[v - 1]; k++) stubs.push(v);
       }
+      // Always consume the shuffle's rng draws so randround / recycle /
+      // global stages downstream stay in lock-step with the no-override
+      // run; only THEN overwrite stubs with the caller-supplied order.
+      // Skipping the shuffle when override is set would shift the rng
+      // state and change wInternal for later clusters.
+      shuffleInPlace(stubs, rng);
       const stubOverride = stubOverrides && stubOverrides[cidx0 + 1];
       if (stubOverride) {
         for (let i = 0; i < stubs.length; i++) stubs[i] = stubOverride[i];
-      } else {
-        shuffleInPlace(stubs, rng);
       }
       const stubsShuffledSnap = stubs.slice();
       // Snapshot wInternal[v] for cluster members BEFORE residue forwarding

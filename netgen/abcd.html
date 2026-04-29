@@ -835,7 +835,18 @@ window.MathJax = {
         clusterStubsByCluster[stage.cluster] = stubs;
         preIdx += stage.prePairs.length;
       });
-      kernelOverrides = { clusterStubsByCluster };
+      // Lock wInternal to base values so cluster K's recycle (which differs
+      // when override changes K's prePairs) can't shift later clusters'
+      // randround draws. Without this, clusterPre.length drifts across
+      // rerolls and yByNode (per-node spoke count) varies — visible to the
+      // user as a node "growing" or "losing" a spoke between rerolls.
+      const wInternalByVertex = new Array(NODES.length).fill(0);
+      baseCm.stages.perCluster.forEach(stage => {
+        stage.members.forEach((v, idx) => {
+          wInternalByVertex[v - 1] = stage.wInternalPreForward[idx];
+        });
+      });
+      kernelOverrides = { clusterStubsByCluster, wInternalByVertex };
     }
     // Second pass: kernel with overrides if any. Fresh rng so recycle /
     // global stages get fresh draws against the overridden prePairs.
