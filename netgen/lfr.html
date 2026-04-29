@@ -926,18 +926,8 @@ window.MathJax = {
       return CACHE;
     }
     function totalForCurrent() { return 1 + getTrace().prePairs.length + getTrace().rewireOps.length; }
-    function byNodeFromTrace(trace) {
-      const counts = {};
-      trace.prePairs.forEach(p => {
-        counts[p.u] = (counts[p.u] || 0) + 1;
-        counts[p.v] = (counts[p.v] || 0) + 1;
-      });
-      const out = {};
-      viz.eachNode(n => {
-        out[n.id] = { count: counts[n.id] || 0, color: COL.edge_inter };
-      });
-      return out;
-    }
+    const byNodeFromTrace = (trace) =>
+      NETGEN.spokeLayer.byNodeFromEdges(viz, trace.prePairs, COL.edge_inter);
     function placedFromState(state, includeInvalid) {
       const out = [];
       state.edges.forEach((e, key) => {
@@ -1214,23 +1204,18 @@ window.MathJax = {
       return out;
     }
     function bsByNode(clusterSets) {
-      const counts = {};
+      // Flatten cluster sets to a dedup'd edge stream so the helper
+      // gets one entry per unique key.
       const seen = new Set();
-      clusterSets.forEach(set => {
-        set.forEach(kk => {
-          if (seen.has(kk)) return;
-          seen.add(kk);
-          const [a, b] = kk.split("|").map(Number);
-          const u = a + 1, v = b + 1;
-          counts[u] = (counts[u] || 0) + 1;
-          counts[v] = (counts[v] || 0) + 1;
-        });
-      });
-      const out = {};
-      viz.eachNode(n => {
-        out[n.id] = { count: counts[n.id] || 0, color: COL.edge_intra ? COL.edge_intra.C1 : COL.edge_stage2 };
-      });
-      return out;
+      const flat = [];
+      clusterSets.forEach(set => set.forEach(kk => {
+        if (seen.has(kk)) return;
+        seen.add(kk);
+        const [a, b] = kk.split("|").map(Number);
+        flat.push({ u: a + 1, v: b + 1 });
+      }));
+      return NETGEN.spokeLayer.byNodeFromEdges(viz, flat,
+        COL.edge_intra ? COL.edge_intra.C1 : COL.edge_stage2);
     }
     function clusterSetsKeys(clusterSets) {
       const set = new Set();
@@ -1565,17 +1550,11 @@ window.MathJax = {
       return out;
     }
     function mateByNode(stateMap) {
-      const counts = {};
-      stateMap.forEach(([a, b]) => {
-        const u = a + 1, v = b + 1;
-        counts[u] = (counts[u] || 0) + 1;
-        counts[v] = (counts[v] || 0) + 1;
-      });
-      const out = {};
-      viz.eachNode(n => {
-        out[n.id] = { count: counts[n.id] || 0, color: COL.edge_inter };
-      });
-      return out;
+      // mateInitialEn entries are 0-based [a,b] arrays; lift to {u,v}
+      // page-id form for the helper.
+      const flat = [];
+      stateMap.forEach(([a, b]) => flat.push({ u: a + 1, v: b + 1 }));
+      return NETGEN.spokeLayer.byNodeFromEdges(viz, flat, COL.edge_inter);
     }
     function render(step) {
       const r = getRun();

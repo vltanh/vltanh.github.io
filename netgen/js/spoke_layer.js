@@ -1265,5 +1265,31 @@ NETGEN.spokeLayer = (function () {
     };
   }
 
-  return { attach: attach };
+  // Shared byNode helper for callers that drive `attach`. Counts edge
+  // incidence per node from any iterable that exposes forEach(e => ...)
+  // — Array, Map, Set of {u,v} entries all work. Returns the
+  // { nodeId: { count, color } } shape that syncState / snapToState /
+  // playMany expect on `state.byNode`. `colorFor` is either a function
+  // (id) => color or a constant string; defaults to the node's own
+  // viz colour.
+  function byNodeFromEdges(viz, edges, colorFor) {
+    const counts = {};
+    if (edges && typeof edges.forEach === "function") {
+      edges.forEach(function (e) {
+        if (!e) return;
+        counts[e.u] = (counts[e.u] || 0) + 1;
+        counts[e.v] = (counts[e.v] || 0) + 1;
+      });
+    }
+    const colorFn = (typeof colorFor === "function")
+      ? colorFor
+      : function (n) { return colorFor != null ? colorFor : n.color; };
+    const out = {};
+    viz.eachNode(function (n) {
+      out[n.id] = { count: counts[n.id] || 0, color: colorFn(n) };
+    });
+    return out;
+  }
+
+  return { attach: attach, byNodeFromEdges: byNodeFromEdges };
 })();
