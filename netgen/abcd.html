@@ -1251,9 +1251,63 @@ window.MathJax = {
       });
       return [...f];
     }
-    // Apply ops 0..k-1 to a working edge map (key -> {u,v,cluster}); ops
-    // mutate by removing p1/p2 keys and adding newp1/newp2 keys (when
-    // success). The clusterPre snapshot is the seed.
+    // Per-cluster ops override: { [cluster]: newOps[] } replaces the
+    // base ops for that cluster, in source order. effectiveOps merges.
+    let opsOverride = null;
+    function effectiveOps(R) {
+      if (!opsOverride) return R.clusterRewireOps;
+      const out = [];
+      const groupedNew = Object.assign({}, opsOverride);
+      // Walk base ops; when entering a cluster with override, drop the
+      // base ops for that cluster and splice in the override ops.
+      const seenCluster = new Set();
+      R.clusterRewireOps.forEach(op => {
+        if (groupedNew[op.cluster]) {
+          if (!seenCluster.has(op.cluster)) {
+            seenCluster.add(op.cluster);
+            groupedNew[op.cluster].forEach(o => out.push(o));
+          }
+          // Skip all base ops for this cluster.
+        } else {
+          out.push(op);
+        }
+      });
+      return out;
+    }
+    function clusterPrePairsByName(R, cname) {
+      const out = [];
+      const seenKey = new Set();
+      R.clusterPre.forEach(e => {
+        if (e.cluster !== cname) return;
+        const key = keyOf(e.u, e.v);
+        const isLoop = e.loop;
+        const isMulti = e.multi || (!isLoop && seenKey.has(key));
+        if (!isLoop && !isMulti) seenKey.add(key);
+        out.push({ u: e.u, v: e.v, bad: isLoop || isMulti });
+      });
+      return out;
+    }
+    let rewireRerollNonce = 0;
+    function rerollClusterRewireFromOp(opIdx) {
+      const xi = SYNTHETIC_XI;
+      const R = buildRealization(U_SEED, STUB_SEED, xi);
+      const baseOps = effectiveOps(R);
+      const op = baseOps[opIdx];
+      if (!op) return;
+      const cname = op.cluster;
+      const clusterOps = baseOps.filter(o => o.cluster === cname);
+      const opIdxInCluster = clusterOps.indexOf(op);
+      if (opIdxInCluster < 0) return;
+      rewireRerollNonce += 1;
+      const fresh = seededRng(STUB_SEED * 9173 + rewireRerollNonce * 31 + opIdx);
+      const prePairs = clusterPrePairsByName(R, cname);
+      const opsBefore = clusterOps.slice(0, opIdxInCluster);
+      const newOps = ABCDKernel.replayClusterRewireFromOps(prePairs, opsBefore, fresh);
+      // Tag each new op with the cluster so effectiveOps can route them.
+      newOps.forEach(o => { o.cluster = cname; });
+      opsOverride = opsOverride || {};
+      opsOverride[cname] = opsBefore.concat(newOps);
+    }
     function sameXY(e, p) {
       return (e.u === p[0] && e.v === p[1]) || (e.u === p[1] && e.v === p[0]);
     }
@@ -1263,6 +1317,7 @@ window.MathJax = {
     // their own ids. Unsuccessful ops requeue p1, so they leave the
     // list untouched.
     function stateAtStep(R, k) {
+      const ops = effectiveOps(R);
       const list = [];
       const seenKey = new Set();
       R.clusterPre.forEach((e, i) => {
@@ -1276,9 +1331,9 @@ window.MathJax = {
           id: "cr-pre-" + i,
         });
       });
-      const opsToApply = Math.min(k, R.clusterRewireOps.length);
+      const opsToApply = Math.min(k, ops.length);
       for (let oi = 0; oi < opsToApply; oi++) {
-        const op = R.clusterRewireOps[oi];
+        const op = ops[oi];
         if (!op || !op.success) continue;
         const i1 = list.findIndex(e => sameXY(e, op.p1) && e.bad);
         if (i1 >= 0) list.splice(i1, 1);
@@ -1298,7 +1353,7 @@ window.MathJax = {
       }
       // Final drop-stale step: any bad entry that survived all ops
       // (no legal swap ever found) is removed here.
-      if (k > R.clusterRewireOps.length) {
+      if (k > ops.length) {
         return list.filter(e => !e.bad);
       }
       return list;
@@ -1306,7 +1361,8 @@ window.MathJax = {
     function render(step) {
       const xi = SYNTHETIC_XI;
       const R = buildRealization(U_SEED, STUB_SEED, xi);
-      const opsCount = R.clusterRewireOps.length;
+      const ops = effectiveOps(R);
+      const opsCount = ops.length;
       const total = 2 + opsCount;
       document.getElementById("g-crewire-total").textContent = String(total - 1);
       document.getElementById("g-crewire-cur").textContent = String(step);
@@ -1315,7 +1371,7 @@ window.MathJax = {
       clearDimPick(viz);
 
       const isDropStale = step > opsCount;
-      const op = (step > 0 && !isDropStale) ? R.clusterRewireOps[step - 1] : null;
+      const op = (step > 0 && !isDropStale) ? ops[step - 1] : null;
       if (step === 0) {
         labelEl.textContent = "pre-rewire";
         descEl.innerHTML = '<span class="st">pre-rewire</span> &middot; ' +
@@ -1364,7 +1420,7 @@ window.MathJax = {
     function totalForCurrent() {
       const xi = SYNTHETIC_XI;
       const R = buildRealization(U_SEED, STUB_SEED, xi);
-      return 2 + R.clusterRewireOps.length;
+      return 2 + effectiveOps(R).length;
     }
     ctl = NETGEN.stepController({
       prevBtn: document.getElementById("g-crewire-prev"),
@@ -1377,24 +1433,37 @@ window.MathJax = {
       total: totalForCurrent(),
       onRender: render,
       getLocked: () => lockBusy,
-      onRandStep: rerollStub,
+      // Rand-step re-spins ops [k..end] of the affected cluster only.
+      // Pair stage and other clusters stay untouched. Drop-stale step
+      // (idx > opsCount) and failed-op steps have no swap to spin and
+      // are gated via randStepDisabledAt below.
+      onRandStep: idx => {
+        if (idx <= 0) return;
+        rerollClusterRewireFromOp(idx - 1);
+        // Total may have shifted (cluster's new ops have different
+        // recycle-loop length); keep the cursor at the same step idx
+        // and let the controller's post-handler render do the rest.
+        ctl.reconfigureKeep(totalForCurrent(), idx);
+      },
       onRandAll: () => {
+        opsOverride = null;
         rerollAll();
       },
-      // Rand-step rerolls the whole stub pool, which only makes sense
-      // on a step where rerolling would change the visible swap. The
-      // drop-stale step has nothing to switch, and a failed op step
-      // (no legal swap; p1 requeued) likewise has no swap to spin.
       randStepDisabledAt: (idx) => {
         const xi = SYNTHETIC_XI;
         const R = buildRealization(U_SEED, STUB_SEED, xi);
-        if (idx > R.clusterRewireOps.length) return true;
+        const ops = effectiveOps(R);
+        if (idx > ops.length) return true;
         if (idx <= 0) return false;
-        const o = R.clusterRewireOps[idx - 1];
+        const o = ops[idx - 1];
         return !o || !o.success;
       },
     });
-    function reconfigKeep() { ctl.reconfigureKeep(totalForCurrent(), ctl.idx); }
+    function reconfigKeep() {
+      // A fresh realization invalidates per-cluster op overrides.
+      opsOverride = null;
+      ctl.reconfigureKeep(totalForCurrent(), ctl.idx);
+    }
     onStubChanged.push(reconfigKeep);
     onUChanged.push(reconfigKeep);
     onClusterPreChanged.push(reconfigKeep);

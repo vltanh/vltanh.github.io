@@ -86,6 +86,143 @@
     return arr[i].split("-").map(Number);
   }
 
+  // Mutating recycle-loop. State is { localEdges:Set, recycle:Array<[a,b]>,
+  // lastRecycle, recycleCounter, stubsLen }. Each iteration shifts p1,
+  // tries up to floor(stubsLen/2) inner picks of p2 + orientation, and
+  // either commits a swap or pushes p1 back to the queue. Loop exits
+  // when the stagnation counter shows no progress this pass.
+  // Returns the per-op trace (same shape as configModel's rewireOps).
+  // Both the in-line config-model rewire pass AND replayClusterRewire-
+  // FromOps drive this same body so there is exactly one source of
+  // truth for the canonical recycle semantics.
+  function runClusterRewireLoop(state, rng) {
+    const { localEdges, recycle, stubsLen } = state;
+    let { lastRecycle, recycleCounter } = state;
+    const ops = [];
+    while (recycle.length > 0) {
+      recycleCounter -= 1;
+      if (recycleCounter < 0) {
+        if (recycle.length < lastRecycle) {
+          lastRecycle = recycle.length;
+          recycleCounter = lastRecycle;
+        } else break;
+      }
+      const p1 = recycle.shift();
+      const fromRecycle = (2 * recycle.length) / Math.max(1, stubsLen);
+      let success = false;
+      let chosenP2 = null, chosenSrc = null, chosenNewp1 = null, chosenNewp2 = null;
+      if (!(recycle.length === 0 && localEdges.size === 0)) {
+        const innerIters = Math.floor(stubsLen / 2);
+        for (let inner = 0; inner < innerIters; inner++) {
+          const coin1 = rng();
+          let usedRecycle, p2, recycleIdx = -1;
+          if (coin1 < fromRecycle || localEdges.size === 0) {
+            usedRecycle = true;
+            recycleIdx = Math.floor(rng() * recycle.length);
+            p2 = recycle[recycleIdx];
+          } else {
+            usedRecycle = false;
+            const pick = sampleFromKeySet(localEdges, rng);
+            p2 = epair(pick[0], pick[1]);
+          }
+          const coin2 = rng();
+          let newp1, newp2;
+          if (coin2 < 0.5) {
+            newp1 = epair(p1[0], p2[0]);
+            newp2 = epair(p1[1], p2[1]);
+          } else {
+            newp1 = epair(p1[0], p2[1]);
+            newp2 = epair(p1[1], p2[0]);
+          }
+          let goodChoice;
+          if (newp1[0] === newp2[0] && newp1[1] === newp2[1]) goodChoice = false;
+          else if (newp1[0] === newp1[1] || localEdges.has(ekey(newp1[0], newp1[1]))) goodChoice = false;
+          else if (newp2[0] === newp2[1] || localEdges.has(ekey(newp2[0], newp2[1]))) goodChoice = false;
+          else goodChoice = true;
+          if (goodChoice) {
+            if (usedRecycle) {
+              recycle[recycleIdx] = recycle[recycle.length - 1];
+              recycle.pop();
+            } else {
+              localEdges.delete(ekey(p2[0], p2[1]));
+            }
+            success = true;
+            chosenP2 = p2; chosenSrc = usedRecycle ? "recycle" : "valid";
+            chosenNewp1 = newp1; chosenNewp2 = newp2;
+            localEdges.add(ekey(newp1[0], newp1[1]));
+            localEdges.add(ekey(newp2[0], newp2[1]));
+            break;
+          }
+        }
+      }
+      ops.push({
+        p1: p1.slice(), p2: chosenP2 ? chosenP2.slice() : null,
+        newp1: chosenNewp1, newp2: chosenNewp2,
+        src: chosenSrc, success,
+      });
+      if (!success) recycle.push(p1);
+    }
+    return ops;
+  }
+
+  // Build a rewire-state at the point right before `opsBefore.length`
+  // ops have been applied to the cluster's pair-stage output. `prePairs`
+  // is `[{ u, v, bad }]` in the order produced by the kernel's pair
+  // pass (loop / multi entries seed the recycle queue, the rest seed
+  // localEdges). `opsBefore` is the prior op trace (same shape kernel
+  // emits) used to deterministically advance the state without
+  // consuming any RNG.
+  function buildRewireStateFromPrePairs(prePairs, opsBefore) {
+    const localEdges = new Set();
+    const recycle = [];
+    prePairs.forEach(p => {
+      if (p.bad) recycle.push(epair(p.u, p.v));
+      else localEdges.add(ekey(p.u, p.v));
+    });
+    let lastRecycle = recycle.length;
+    let recycleCounter = lastRecycle;
+    const stubsLen = 2 * prePairs.length;
+    function sameXY(e, p) {
+      return (e[0] === p[0] && e[1] === p[1]) || (e[0] === p[1] && e[1] === p[0]);
+    }
+    for (const baseOp of (opsBefore || [])) {
+      recycleCounter -= 1;
+      if (recycleCounter < 0) {
+        if (recycle.length < lastRecycle) {
+          lastRecycle = recycle.length;
+          recycleCounter = lastRecycle;
+        } else break;
+      }
+      if (recycle.length === 0) break;
+      const p1 = recycle.shift();
+      if (baseOp.success && baseOp.p2) {
+        if (baseOp.src === "recycle") {
+          const idx = recycle.findIndex(e => sameXY(e, baseOp.p2));
+          if (idx >= 0) {
+            recycle[idx] = recycle[recycle.length - 1];
+            recycle.pop();
+          }
+        } else {
+          localEdges.delete(ekey(baseOp.p2[0], baseOp.p2[1]));
+        }
+        if (baseOp.newp1) localEdges.add(ekey(baseOp.newp1[0], baseOp.newp1[1]));
+        if (baseOp.newp2) localEdges.add(ekey(baseOp.newp2[0], baseOp.newp2[1]));
+      } else {
+        recycle.push(p1);
+      }
+    }
+    return { localEdges, recycle, lastRecycle, recycleCounter, stubsLen };
+  }
+
+  // Public entry point for per-cluster, per-op rewire reseeding. Holds
+  // every op in `opsBefore` fixed (deterministic replay), then runs
+  // the canonical recycle loop with `freshRng` from there. Returns the
+  // new op trace from `opsBefore.length` onward.
+  function replayClusterRewireFromOps(prePairs, opsBefore, freshRng) {
+    const state = buildRewireStateFromPrePairs(prePairs, opsBefore);
+    return runClusterRewireLoop(state, freshRng);
+  }
+
   // populate_clusters: ports the Julia loop verbatim. w must be sorted
   // descending; s must be sorted descending too (s[0] is outlier mega-
   // cluster size when hasOutliers). mu/xi follow Julia's mul derivation.
@@ -289,72 +426,14 @@
         else localEdges.add(k);
         if (stages) prePairsSnap.push([a, b, loop, multi]);
       }
-      let lastRecycle = recycle.length;
-      let recycleCounter = lastRecycle;
-      const rewireOps = stages ? [] : null;
-      while (recycle.length > 0) {
-        recycleCounter -= 1;
-        if (recycleCounter < 0) {
-          if (recycle.length < lastRecycle) {
-            lastRecycle = recycle.length;
-            recycleCounter = lastRecycle;
-          } else break;
-        }
-        const p1 = recycle.shift();
-        const fromRecycle = (2 * recycle.length) / Math.max(1, stubs.length);
-        let success = false;
-        let chosenP2 = null, chosenSrc = null, chosenNewp1 = null, chosenNewp2 = null;
-        if (!(recycle.length === 0 && localEdges.size === 0)) {
-          const innerIters = Math.floor(stubs.length / 2);
-          for (let inner = 0; inner < innerIters; inner++) {
-            const coin1 = rng();
-            let usedRecycle, p2, recycleIdx = -1;
-            if (coin1 < fromRecycle || localEdges.size === 0) {
-              usedRecycle = true;
-              recycleIdx = Math.floor(rng() * recycle.length);
-              p2 = recycle[recycleIdx];
-            } else {
-              usedRecycle = false;
-              const pick = sampleFromKeySet(localEdges, rng);
-              p2 = epair(pick[0], pick[1]);
-            }
-            const coin2 = rng();
-            let newp1, newp2;
-            if (coin2 < 0.5) {
-              newp1 = epair(p1[0], p2[0]);
-              newp2 = epair(p1[1], p2[1]);
-            } else {
-              newp1 = epair(p1[0], p2[1]);
-              newp2 = epair(p1[1], p2[0]);
-            }
-            let goodChoice;
-            if (newp1[0] === newp2[0] && newp1[1] === newp2[1]) goodChoice = false;
-            else if (newp1[0] === newp1[1] || localEdges.has(ekey(newp1[0], newp1[1]))) goodChoice = false;
-            else if (newp2[0] === newp2[1] || localEdges.has(ekey(newp2[0], newp2[1]))) goodChoice = false;
-            else goodChoice = true;
-            if (goodChoice) {
-              if (usedRecycle) {
-                recycle[recycleIdx] = recycle[recycle.length - 1];
-                recycle.pop();
-              } else {
-                localEdges.delete(ekey(p2[0], p2[1]));
-              }
-              success = true;
-              chosenP2 = p2; chosenSrc = usedRecycle ? "recycle" : "valid";
-              chosenNewp1 = newp1; chosenNewp2 = newp2;
-              localEdges.add(ekey(newp1[0], newp1[1]));
-              localEdges.add(ekey(newp2[0], newp2[1]));
-              break;
-            }
-          }
-        }
-        if (rewireOps) rewireOps.push({
-          p1: p1.slice(), p2: chosenP2 ? chosenP2.slice() : null,
-          newp1: chosenNewp1, newp2: chosenNewp2,
-          src: chosenSrc, success,
-        });
-        if (!success) recycle.push(p1);
-      }
+      const rewireState = {
+        localEdges, recycle,
+        lastRecycle: recycle.length,
+        recycleCounter: recycle.length,
+        stubsLen: stubs.length,
+      };
+      const loopOps = runClusterRewireLoop(rewireState, rng);
+      const rewireOps = stages ? loopOps : null;
       for (const k of localEdges) edges.add(k);
       let residueForwarded = 0;
       for (const [a, b] of recycle) {
@@ -532,5 +611,6 @@
     populateClusters,
     configModel,
     sampleAbcd,
+    replayClusterRewireFromOps,
   };
 })();
