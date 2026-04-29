@@ -1291,5 +1291,46 @@ NETGEN.spokeLayer = (function () {
     return out;
   }
 
-  return { attach: attach, byNodeFromEdges: byNodeFromEdges };
+  // Generic cut-picker for rewire walkers. Given the current placed
+  // list and an array of cut endpoint pairs (each [u, v]), returns
+  // the specific placed entries to remove. Selection rule:
+  //   1. Prefer the bad-flagged copy of (u, v).
+  //   2. Among matches of the same bad-ness, prefer the LATER-added
+  //      copy (higher index in `placed`).
+  //   3. Each placed entry is picked at most once per call.
+  // Cut pairs that have no matching placed entry are silently skipped
+  // (the cut would be a no-op visually anyway).
+  function pickCutsByEndpoints(placed, cutPairs) {
+    const used = new Set();
+    const out = [];
+    function sameXY(e, p) {
+      return (e.u === p[0] && e.v === p[1]) || (e.u === p[1] && e.v === p[0]);
+    }
+    (cutPairs || []).forEach(function (p) {
+      if (!p) return;
+      let pickIdx = -1;
+      let pickIsBad = false;
+      // Latest-first scan: first bad match wins immediately. Otherwise
+      // remember the latest non-bad and keep scanning in case an
+      // earlier index still holds a bad copy.
+      for (let i = placed.length - 1; i >= 0; i--) {
+        if (used.has(i)) continue;
+        const e = placed[i];
+        if (!sameXY(e, p)) continue;
+        if (e.bad) { pickIdx = i; pickIsBad = true; break; }
+        if (pickIdx < 0) { pickIdx = i; }
+      }
+      if (pickIdx >= 0) {
+        used.add(pickIdx);
+        out.push(placed[pickIdx]);
+      }
+    });
+    return out;
+  }
+
+  return {
+    attach: attach,
+    byNodeFromEdges: byNodeFromEdges,
+    pickCutsByEndpoints: pickCutsByEndpoints,
+  };
 })();
