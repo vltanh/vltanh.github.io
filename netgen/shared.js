@@ -1694,15 +1694,21 @@ function rewireSpokeSwapAnimate(opts) {
   }
 
   const cutKey = (a, b) => (String(a) < String(b) ? a + "|" + b : b + "|" + a);
-  const beforeByKey = {};
-  (before || []).forEach(e => { beforeByKey[cutKey(e.u, e.v)] = e; });
-  const afterByKey = {};
-  (after || []).forEach(e => { afterByKey[cutKey(e.u, e.v)] = e; });
   function isBadEdge(e) {
     if (!e) return false;
     const cls = e.classes || "";
     return cls.indexOf("cm-bad") >= 0 || cls.indexOf("pick") >= 0;
   }
+  // For parallels sharing a key, prefer the bad edge in the style
+  // lookup so the cut bridge wears the red-dashed treatment — that's
+  // the parallel the rewire actually targets.
+  const beforeByKey = {};
+  (before || []).forEach(e => {
+    const k = cutKey(e.u, e.v);
+    if (!beforeByKey[k] || isBadEdge(e)) beforeByKey[k] = e;
+  });
+  const afterByKey = {};
+  (after || []).forEach(e => { afterByKey[cutKey(e.u, e.v)] = e; });
   function styleFor(e) {
     return {
       color: (e && e.color) || "#1a3478",
