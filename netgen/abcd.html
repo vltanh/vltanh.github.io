@@ -1508,9 +1508,27 @@ window.MathJax = {
         lastStep = idx;
         return "skip";
       },
+      // Random All re-spins every cluster's rewire pass from op 0
+      // with a fresh RNG, keeping the cluster-pairing stage (and
+      // therefore the prePairs) fixed. No U_SEED / STUB_SEED bump:
+      // the starting realization stays put.
       onRandAll: () => {
-        opsOverride = null;
-        rerollAll();
+        const xi = SYNTHETIC_XI;
+        const R = buildRealization(U_SEED, STUB_SEED, xi);
+        rewireRerollNonce += 1;
+        const fresh = seededRng(STUB_SEED * 9173 + rewireRerollNonce * 31 + 7);
+        const seenClusters = new Set();
+        const next = {};
+        R.clusterRewireOps.forEach(op => {
+          if (seenClusters.has(op.cluster)) return;
+          seenClusters.add(op.cluster);
+          const prePairs = clusterPrePairsByName(R, op.cluster);
+          const newOps = ABCDKernel.replayClusterRewireFromOps(prePairs, [], fresh);
+          newOps.forEach(o => { o.cluster = op.cluster; });
+          next[op.cluster] = newOps;
+        });
+        opsOverride = next;
+        ctl.reconfigureKeep(totalForCurrent(), 0);
       },
       randStepDisabledAt: (idx) => {
         const xi = SYNTHETIC_XI;
