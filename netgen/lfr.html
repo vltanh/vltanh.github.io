@@ -1013,7 +1013,9 @@ window.MathJax = {
           byNode, placed: placedFromState(state, inPair),
           just: null, justSeq: step,
         });
-        if (four.size > 0) dimAllExcept([...four]);
+        // Pair-phase keeps the dim cue so the active pair pops; cleanup
+        // settle drops it so the resolved state reads at full opacity.
+        if (inPair && four.size > 0) dimAllExcept([...four]);
         lastStep = step;
         return;
       }
@@ -1039,9 +1041,7 @@ window.MathJax = {
           });
         }
       });
-      spokes.playMany(removes, adds, () => {
-        if (four.size > 0) dimAllExcept([...four]);
-      });
+      spokes.playMany(removes, adds, () => {});
       lastStep = step;
     }
     // Random step: SBM-style suffix reseed in the pair phase only —
@@ -1310,20 +1310,15 @@ window.MathJax = {
 
       labelEl.textContent = label;
       descEl.innerHTML = desc;
-      function applyDim() {
+      function clearAllDim() {
         viz.clearAllNodeClass("dim");
         viz.clearAllNodeClass("pick");
         viz.clearAllNodeClass("swap-pick");
-        if (four.size > 0) {
-          viz.eachNode(n => {
-            if (!four.has(parseInt(n.id, 10))) viz.addNodeClass(n.id, "dim");
-          });
-        }
       }
       const isAdj = step === lastStep + 1 || step === lastStep - 1;
       if (!isAdj) {
         spokesBs.snapToState({ byNode, placed: placedAfter, just: null, justSeq: step });
-        applyDim();
+        clearAllDim();
         lastStep = step;
         return;
       }
@@ -1347,7 +1342,7 @@ window.MathJax = {
           color: COL.edge_intra ? COL.edge_intra.C1 : COL.edge_stage2,
         });
       });
-      spokesBs.playMany(removes, adds, applyDim);
+      spokesBs.playMany(removes, adds, clearAllDim);
       lastStep = step;
     }
     ctl = NETGEN.wireWalker({
@@ -1631,14 +1626,10 @@ window.MathJax = {
       }
       labelEl.textContent = label;
       descEl.innerHTML = desc;
-      function applyDim() {
-        clearDimPick();
-        if (four.size > 0) dimAllExcept([...four]);
-      }
       const isAdj = step !== 0 && (step === lastStep + 1 || step === lastStep - 1);
       if (!isAdj) {
         spokesMr.snapToState({ byNode, placed: placedAfter, just: null, justSeq: step });
-        applyDim();
+        clearDimPick();
         lastStep = step;
         return;
       }
@@ -1666,7 +1657,7 @@ window.MathJax = {
           badColor: COL.edge_drop,
         });
       });
-      spokesMr.playMany(removes, adds, applyDim);
+      spokesMr.playMany(removes, adds, () => {});
       lastStep = step;
     }
     ctl = NETGEN.wireWalker({

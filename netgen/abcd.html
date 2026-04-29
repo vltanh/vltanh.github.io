@@ -1358,7 +1358,6 @@ window.MathJax = {
           byNode, placed: afterList.map(placedEntry),
           just: null, justSeq: step,
         });
-        if (step !== 0 && op) dimAllExcept(viz, fourEndpoints(op));
         lastStep = step;
         return;
       }
@@ -1368,10 +1367,7 @@ window.MathJax = {
       const removes = beforeList.filter(e => !afterIds.has(e.id)).map(placedEntry);
       const adds    = afterList.filter(e => !beforeIds.has(e.id)).map(placedEntry);
 
-      const focusOp = step > lastStep ? op : R.clusterRewireOps[lastStep - 1];
-      spokes.playMany(removes, adds, () => {
-        if (focusOp) dimAllExcept(viz, fourEndpoints(focusOp));
-      });
+      spokes.playMany(removes, adds, () => {});
       lastStep = step;
     }
     function totalForCurrent() {
@@ -1462,8 +1458,18 @@ window.MathJax = {
         w: 1.2, id: "bp-cluster-" + i, classes: "fade",
       }));
       viz.setEdges(edges);
+      // byNode counts come from bgPre's actual incidence (mirror of
+      // cluster-pair). split[n].z is the pre-parity target; the
+      // sampled pool may drop a stub or two to even out and we
+      // don't want orphan spokes hanging off the last walker frame.
+      const zByNode = {};
+      NODES.forEach(n => { zByNode[n] = 0; });
+      R.bgPre.forEach(p => {
+        zByNode[p.u] = (zByNode[p.u] || 0) + 1;
+        zByNode[p.v] = (zByNode[p.v] || 0) + 1;
+      });
       const cfg = {};
-      NODES.forEach(n => { cfg[n] = { count: R.split[n].z, color: COL.edge_inter }; });
+      NODES.forEach(n => { cfg[n] = { count: zByNode[n], color: COL.edge_inter }; });
       // Cluster-post keys = duplicate-detection set for crossDup colour.
       const clusterKeys = {};
       R.clusterPost.forEach(e => { clusterKeys[keyOf(e.u, e.v)] = true; });
@@ -1678,7 +1684,6 @@ window.MathJax = {
           byNode, placed: placedFromMap(afterMap),
           just: null, justSeq: step,
         });
-        if (step !== 0 && op) dimAllExcept(viz, fourEndpoints(op));
         lastStep = step;
         return;
       }
@@ -1706,10 +1711,7 @@ window.MathJax = {
         }
       });
 
-      const focusOp = step > lastStep ? op : R.globalRewireOps[lastStep - 1];
-      spokes.playMany(removes, adds, () => {
-        if (focusOp) dimAllExcept(viz, fourEndpoints(focusOp));
-      });
+      spokes.playMany(removes, adds, () => {});
       lastStep = step;
     }
     function totalForCurrent() {
