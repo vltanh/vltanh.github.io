@@ -223,6 +223,135 @@
     return runClusterRewireLoop(state, freshRng);
   }
 
+  // Global-rewire canonical loop, factored from configModel so the page
+  // walker can drive a fresh tail with a fresh rng from any prefix.
+  // `globalEdges` Set + `recycle` queue describe the bg-pool state at
+  // the entry point; `clusterEdgeKeys` is the cluster-post key set used
+  // for the cross-duplicate check during placement.
+  function runGlobalRewireLoop(state, clusterEdgeKeys, rng) {
+    const { globalEdges, recycle, stubsLen } = state;
+    let { lastRecycle, recycleCounter } = state;
+    const ops = [];
+    while (recycle.length > 0) {
+      recycleCounter -= 1;
+      if (recycleCounter < 0) {
+        if (recycle.length < lastRecycle) {
+          lastRecycle = recycle.length;
+          recycleCounter = lastRecycle;
+        } else break;
+      }
+      const p1 = recycle.pop();
+      const fromRecycle = (2 * recycle.length) / Math.max(1, stubsLen);
+      const coin1 = rng();
+      let p2, chosenSrc;
+      if (coin1 < fromRecycle) {
+        const i = Math.floor(rng() * recycle.length);
+        const tmp = recycle[i];
+        recycle[i] = recycle[recycle.length - 1];
+        recycle.pop();
+        p2 = tmp; chosenSrc = "recycle";
+      } else {
+        const pick = sampleFromKeySet(globalEdges, rng);
+        if (!pick) {
+          ops.push({
+            p1: p1.slice(), p2: null, newp1: null, newp2: null,
+            src: null, success: false, reason: "no-valid-pool",
+            placedNewp1: false, placedNewp2: false,
+          });
+          recycle.push(p1); continue;
+        }
+        p2 = epair(pick[0], pick[1]);
+        globalEdges.delete(ekey(p2[0], p2[1]));
+        chosenSrc = "valid";
+      }
+      const coin2 = rng();
+      let newp1, newp2;
+      if (coin2 < 0.5) {
+        newp1 = epair(p1[0], p2[0]);
+        newp2 = epair(p1[1], p2[1]);
+      } else {
+        newp1 = epair(p1[0], p2[1]);
+        newp2 = epair(p1[1], p2[0]);
+      }
+      let placedNewp1 = false, placedNewp2 = false;
+      for (const np of [newp1, newp2]) {
+        const k = ekey(np[0], np[1]);
+        if (np[0] === np[1] || globalEdges.has(k) || clusterEdgeKeys.has(k)) recycle.push(np);
+        else { globalEdges.add(k); if (np === newp1) placedNewp1 = true; else placedNewp2 = true; }
+      }
+      ops.push({
+        p1: p1.slice(), p2: p2.slice(), newp1, newp2,
+        src: chosenSrc, success: placedNewp1 && placedNewp2,
+        placedNewp1, placedNewp2,
+      });
+    }
+    return ops;
+  }
+
+  // Build the global-rewire entry state from `globalPrePairs` (each entry
+  // is `[a, b, loop, multi, crossDup]` in whichever id-space the caller
+  // uses) and apply `opsBefore` deterministically (no rng draws). The
+  // canonical loop pops from the recycle tail (LIFO), so replay does the
+  // same. `clusterEdgeKeys` is unused during the deterministic advance —
+  // recorded ops already encode the placement outcome — but is plumbed
+  // through to the runner.
+  function buildGlobalRewireStateFromPrePairs(globalPrePairs, opsBefore) {
+    const globalEdges = new Set();
+    const recycle = [];
+    for (const p of globalPrePairs) {
+      const a = p[0], b = p[1], loop = p[2], multi = p[3], crossDup = p[4];
+      if (loop || multi || crossDup) recycle.push([a, b]);
+      else globalEdges.add(ekey(a, b));
+    }
+    let lastRecycle = recycle.length;
+    let recycleCounter = lastRecycle;
+    const stubsLen = 2 * globalPrePairs.length;
+    function sameXY(e, p) {
+      return (e[0] === p[0] && e[1] === p[1]) || (e[0] === p[1] && e[1] === p[0]);
+    }
+    for (const op of (opsBefore || [])) {
+      recycleCounter -= 1;
+      if (recycleCounter < 0) {
+        if (recycle.length < lastRecycle) {
+          lastRecycle = recycle.length;
+          recycleCounter = lastRecycle;
+        } else break;
+      }
+      if (recycle.length === 0) break;
+      recycle.pop();
+      if (op.reason === "no-valid-pool" || !op.p2) {
+        recycle.push(op.p1.slice());
+        continue;
+      }
+      if (op.src === "recycle") {
+        const idx2 = recycle.findIndex(e => sameXY(e, op.p2));
+        if (idx2 >= 0) {
+          recycle[idx2] = recycle[recycle.length - 1];
+          recycle.pop();
+        }
+      } else {
+        globalEdges.delete(ekey(op.p2[0], op.p2[1]));
+      }
+      if (op.newp1) {
+        if (op.placedNewp1) globalEdges.add(ekey(op.newp1[0], op.newp1[1]));
+        else recycle.push(op.newp1.slice());
+      }
+      if (op.newp2) {
+        if (op.placedNewp2) globalEdges.add(ekey(op.newp2[0], op.newp2[1]));
+        else recycle.push(op.newp2.slice());
+      }
+    }
+    return { globalEdges, recycle, lastRecycle, recycleCounter, stubsLen };
+  }
+
+  // Public entry point for global-rewire per-op reseeding. Mirrors
+  // replayClusterRewireFromOps but for the bg-pool stage. Returns the
+  // new op trace from `opsBefore.length` onward.
+  function replayGlobalRewireFromOps(globalPrePairs, clusterEdgeKeys, opsBefore, freshRng) {
+    const state = buildGlobalRewireStateFromPrePairs(globalPrePairs, opsBefore);
+    return runGlobalRewireLoop(state, clusterEdgeKeys, freshRng);
+  }
+
   // populate_clusters: ports the Julia loop verbatim. w must be sorted
   // descending; s must be sorted descending too (s[0] is outlier mega-
   // cluster size when hasOutliers). mu/xi follow Julia's mul derivation.
@@ -612,5 +741,6 @@
     configModel,
     sampleAbcd,
     replayClusterRewireFromOps,
+    replayGlobalRewireFromOps,
   };
 })();

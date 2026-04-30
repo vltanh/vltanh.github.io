@@ -1304,25 +1304,22 @@ window.MathJax = {
       const hi = Math.min(endG, baseOps.length);
       if (lo >= hi) return;
       rewireRerollNonce += 1;
-      // Per-cluster cutoff: count of base ops with global position < startG.
-      const cutoffByCluster = {};
-      for (let g = 0; g < lo; g++) {
-        const c = baseOps[g].cluster;
-        cutoffByCluster[c] = (cutoffByCluster[c] || 0) + 1;
-      }
-      // Cluster encounter order = first-touch position in [lo..hi).
+      const opsBeforeByCluster = {};
       const clusterOrder = [];
-      const seen = new Set();
-      for (let g = lo; g < hi; g++) {
+      const seenInRange = new Set();
+      for (let g = 0; g < hi; g++) {
         const c = baseOps[g].cluster;
-        if (!seen.has(c)) { seen.add(c); clusterOrder.push(c); }
+        if (g < lo) {
+          (opsBeforeByCluster[c] = opsBeforeByCluster[c] || []).push(baseOps[g]);
+        } else if (!seenInRange.has(c)) {
+          seenInRange.add(c);
+          clusterOrder.push(c);
+        }
       }
       const next = Object.assign({}, opsOverride || {});
       clusterOrder.forEach((cname, clusterSeed) => {
-        const cutoff = cutoffByCluster[cname] || 0;
-        const clusterOps = baseOps.filter(o => o.cluster === cname);
+        const opsBefore = opsBeforeByCluster[cname] || [];
         const prePairs = clusterPrePairsByName(R, cname);
-        const opsBefore = clusterOps.slice(0, cutoff);
         const fresh = seededRng(
           STUB_SEED * 9173 + rewireRerollNonce * 31 + clusterSeed * 113
         );
@@ -1553,13 +1550,7 @@ window.MathJax = {
         const newIdx = wasAtEnd ? newTotal - 1 : idx;
         ctl.reconfigureKeep(newTotal, newIdx);
       },
-      randStepDisabledAt: (idx) => {
-        const xi = SYNTHETIC_XI;
-        const R = buildRealization(U_SEED, STUB_SEED, xi);
-        const ops = effectiveOps(R);
-        if (idx > ops.length) return true;
-        return false;
-      },
+      randStepDisabledAt: (idx) => idx >= totalForCurrent() - 1,
     });
     function reconfigKeep() {
       // A fresh realization invalidates per-cluster op overrides.
@@ -1624,13 +1615,10 @@ window.MathJax = {
       const R = buildRealization(U_SEED, STUB_SEED, xi);
       const total = 1 + R.bgPre.length;
       if (step >= total) step = total - 1;
-      // Backdrop: faded cluster-post; spoke layer owns bg pair edges.
-      const edges = R.clusterPost.map((e, i) => ({
-        u: e.u, v: e.v,
-        color: CLUSTER_COLOR_OF[e.cluster] || COL.edge_stage2,
-        w: 1.2, id: "bp-cluster-" + i, classes: "fade",
-      }));
-      viz.setEdges(edges);
+      // Backdrop: cluster-post handed to spoke layer as siblings so they
+      // share dupInfo with bg pair edges and fan symmetrically when they
+      // share an (u,v) key. cy edge layer stays empty.
+      viz.setEdges([]);
       // byNode counts come from bgPre's actual incidence (mirror of
       // cluster-pair). split[n].z is the pre-parity target; the
       // sampled pool may drop a stub or two to even out and we
@@ -1657,7 +1645,12 @@ window.MathJax = {
           badColor: j.bad ? COL.edge_drop : null,
         };
       }
-      NETGEN.snapOrSync(spokes, { byNode: cfg, placed, just, justSeq: step, bridgeColor }, snap);
+      const siblings = R.clusterPost.map((e, i) => ({
+        u: e.u, v: e.v,
+        color: CLUSTER_COLOR_OF[e.cluster] || COL.edge_stage2,
+        w: 1.2, opacity: 0.45, id: "bp-cluster-" + i,
+      }));
+      NETGEN.snapOrSync(spokes, { byNode: cfg, placed, just, justSeq: step, bridgeColor, siblings }, snap);
 
       const totEl = document.getElementById("g-bgpair-total");
       const curEl = document.getElementById("g-bgpair-cur");
@@ -1699,11 +1692,15 @@ window.MathJax = {
         const R = buildRealization(U_SEED, STUB_SEED, xi);
         return rollBgPair(R, idx - 1).snap;
       },
-      // random all: reseed stubs so the bg pairing redraws from
-      // scratch. Snap is handled by stepController's withSnap.
+      // random all: in-stage reseed of the bg pair pool from position 0,
+      // keeping every other stage's seed untouched. Cursor stays at idx.
       onRandAll: idx => {
         if (idx <= 0) return;
-        rerollAll();
+        const xi = SYNTHETIC_XI;
+        const R = buildRealization(U_SEED, STUB_SEED, xi);
+        bgOverride = {};
+        rollBgPair(R, 0);
+        ctl.reconfigureKeep(totalFromR(R), idx);
       },
     });
     function reTotalReset() {
@@ -1739,7 +1736,53 @@ window.MathJax = {
       if (ctl) ctl.refreshButtons();
     }
     const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setLock });
+
+    // Per-op global-rewire override. null = use kernel's R.globalRewireOps
+    // verbatim. Otherwise an array that fully replaces the op trace; the
+    // page never partially mutates an override (a reroll always replays
+    // from a deterministic prefix and overwrites the whole array).
+    let opsOverride = null;
+    let rewireRerollNonce = 0;
+    function effectiveOps(R) { return opsOverride || R.globalRewireOps; }
+    // [[u, v, loop, multi, crossDup], ...] in page-node-id space, the
+    // shape ABCDKernel.replayGlobalRewireFromOps consumes.
+    function globalPrePairsTuples(R) {
+      return R.bgPre.map(e => [e.u, e.v, !!e.loop, !!e.multi, !!e.crossDup]);
+    }
+    // ekey-formatted (`${min}-${max}`) cluster-post key set for the
+    // kernel replay's crossDup check. Page's keyOf uses `|`, kernel
+    // uses `-`; we match the kernel here so its `Set.has` succeeds.
+    function clusterEdgeEkeys(R) {
+      const s = new Set();
+      R.clusterPost.forEach(e => {
+        const a = e.u < e.v ? e.u : e.v;
+        const b = e.u < e.v ? e.v : e.u;
+        s.add(a + "-" + b);
+      });
+      return s;
+    }
+    // Re-spin the global op range [startG..endG-1]: ops at positions
+    // < startG stay verbatim (deterministic replay seeds the new state),
+    // ops at positions >= startG are drawn fresh from a per-range RNG.
+    // bg has no per-cluster split, so the override is a flat array.
+    function rerollGlobalRewireRange(startG, endG) {
+      const xi = SYNTHETIC_XI;
+      const R = buildRealization(U_SEED, STUB_SEED, xi);
+      const baseOps = effectiveOps(R);
+      const lo = Math.max(0, startG);
+      const hi = Math.min(endG, baseOps.length);
+      if (lo >= hi) return;
+      rewireRerollNonce += 1;
+      const opsBefore = baseOps.slice(0, lo);
+      const fresh = seededRng(STUB_SEED * 7919 + rewireRerollNonce * 41);
+      const newOps = ABCDKernel.replayGlobalRewireFromOps(
+        globalPrePairsTuples(R), clusterEdgeEkeys(R), opsBefore, fresh
+      );
+      opsOverride = opsBefore.concat(newOps);
+    }
+
     function stateAtStep(R, k) {
+      const ops = effectiveOps(R);
       const map = new Map();
       R.bgPre.forEach(e => {
         const k2 = keyOf(e.u, e.v);
@@ -1748,7 +1791,7 @@ window.MathJax = {
         }
       });
       for (let i = 0; i < k; i++) {
-        const op = R.globalRewireOps[i];
+        const op = ops[i];
         if (!op) break;
         const k1 = keyOf(op.p1[0], op.p1[1]);
         map.delete(k1);
@@ -1784,31 +1827,15 @@ window.MathJax = {
       });
       return [...f];
     }
-    function render(step) {
-      const xi = SYNTHETIC_XI;
-      const R = buildRealization(U_SEED, STUB_SEED, xi);
-      const total = 1 + R.globalRewireOps.length;
-      document.getElementById("g-bgrewire-total").textContent = String(total - 1);
-      document.getElementById("g-bgrewire-cur").textContent = String(step);
+    function paintLabelDesc(step, ops) {
       const labelEl = document.getElementById("g-bgrewire-stage");
       const descEl = document.getElementById("g-bgrewire-desc");
-      clearDimPick(viz);
-      // Cluster post-rewire edges paint as a backdrop via viz.setEdges
-      // (faint, never animated). Spoke layer owns the bg-pool state on
-      // top of that.
-      const backdrop = R.clusterPost.map((e, i) => ({
-        u: e.u, v: e.v,
-        color: CLUSTER_COLOR_OF[e.cluster] || COL.edge_stage2,
-        w: 1.2, id: "br-cluster-" + i, classes: "fade",
-      }));
-      viz.setEdges(backdrop);
-
-      const op = step > 0 ? R.globalRewireOps[step - 1] : null;
+      const op = step > 0 ? ops[step - 1] : null;
       if (step === 0) {
         labelEl.textContent = "pre-rewire";
         descEl.innerHTML = '<span class="st">pre-rewire</span> &middot; ' +
-          R.globalRewireOps.length + " bg-pool collision op" +
-          (R.globalRewireOps.length === 1 ? "" : "s") +
+          ops.length + " bg-pool collision op" +
+          (ops.length === 1 ? "" : "s") +
           " ahead. Red-dashed = self-loop, parallel, or cluster duplicate.";
       } else {
         const tag = op.success
@@ -1825,6 +1852,21 @@ window.MathJax = {
             "</code>; pushed back onto the recycle queue.";
         descEl.innerHTML = '<span class="st">op ' + step + '</span> &middot; ' + desc;
       }
+    }
+    function render(step) {
+      const xi = SYNTHETIC_XI;
+      const R = buildRealization(U_SEED, STUB_SEED, xi);
+      const ops = effectiveOps(R);
+      const total = 1 + ops.length;
+      document.getElementById("g-bgrewire-total").textContent = String(total - 1);
+      document.getElementById("g-bgrewire-cur").textContent = String(step);
+      clearDimPick(viz);
+      // Cluster post-rewire edges paint as a backdrop via spokeLayer
+      // siblings so they share dupInfo with bg-pool edges and fan
+      // symmetrically when they share an (u,v) key.
+      viz.setEdges([]);
+
+      paintLabelDesc(step, ops);
 
       const beforeMap = stateAtStep(R, step === 0 ? 0 : lastStep);
       const afterMap  = stateAtStep(R, step);
@@ -1834,11 +1876,16 @@ window.MathJax = {
       // mid-animation a node may have one extra slot reserved by
       // justSlots — that's already handled by spoke_layer.
       const byNode = byNodeFromMap(afterMap);
+      const siblings = R.clusterPost.map((e, i) => ({
+        u: e.u, v: e.v,
+        color: CLUSTER_COLOR_OF[e.cluster] || COL.edge_stage2,
+        w: 1.2, opacity: 0.45, id: "br-cluster-" + i,
+      }));
 
       if (step === 0 || (step !== lastStep + 1 && step !== lastStep - 1)) {
         spokes.snapToState({
           byNode, placed: placedFromMap(afterMap),
-          just: null, justSeq: step,
+          just: null, justSeq: step, siblings,
         });
         lastStep = step;
         return;
@@ -1873,7 +1920,7 @@ window.MathJax = {
     function totalForCurrent() {
       const xi = SYNTHETIC_XI;
       const R = buildRealization(U_SEED, STUB_SEED, xi);
-      return 1 + R.globalRewireOps.length;
+      return 1 + effectiveOps(R).length;
     }
     ctl = NETGEN.stepController({
       prevBtn: document.getElementById("g-bgrewire-prev"),
@@ -1886,13 +1933,68 @@ window.MathJax = {
       total: totalForCurrent(),
       onRender: render,
       getLocked: () => lockBusy,
-      onRandStep: rerollStub,
-      onRandAll: () => {
-        rerollAll();
+      // Rand-step at idx re-spins ops [idx-1..end]: prior steps lock,
+      // future ops draw fresh. Drives playMany off the before/after
+      // diff so the swap animates instead of snaps.
+      onRandStep: idx => {
+        if (idx <= 0) return;
+        const xi = SYNTHETIC_XI;
+        const R = buildRealization(U_SEED, STUB_SEED, xi);
+        const beforeMap = stateAtStep(R, idx);
+        rerollGlobalRewireRange(idx - 1, effectiveOps(R).length);
+        const afterMap = stateAtStep(R, idx);
+        ctl.setTotalIdxSilent(totalForCurrent(), idx);
+        paintLabelDesc(idx, effectiveOps(R));
+        document.getElementById("g-bgrewire-cur").textContent = String(idx);
+        document.getElementById("g-bgrewire-total").textContent = String(totalForCurrent() - 1);
+        clearDimPick(viz);
+        const beforeKeys = new Set(beforeMap.keys());
+        const afterKeys = new Set(afterMap.keys());
+        const removes = [], adds = [];
+        beforeMap.forEach((e, key) => {
+          if (!afterKeys.has(key)) {
+            removes.push({
+              u: e.u, v: e.v, id: "br-state-" + key, bad: !!e.bad,
+              color: e.bad ? COL.edge_drop : COL.edge_inter,
+              badColor: COL.edge_drop,
+            });
+          }
+        });
+        afterMap.forEach((e, key) => {
+          if (!beforeKeys.has(key)) {
+            adds.push({
+              u: e.u, v: e.v, id: "br-state-" + key, bad: !!e.bad,
+              color: e.bad ? COL.edge_drop : COL.edge_inter,
+              badColor: COL.edge_drop,
+            });
+          }
+        });
+        spokes.playMany(removes, adds, () => {});
+        lastStep = idx;
+        return "skip";
       },
+      // Rand-all at idx re-spins ops [0..idx-1]: every op in the prefix
+      // draws fresh, ops at positions >= idx stay verbatim. At end-step
+      // the prefix covers everything; the new total may shrink or grow,
+      // so cursor follows to the new last step.
+      onRandAll: idx => {
+        if (idx <= 0) return;
+        const wasAtEnd = (idx === ctl.total - 1);
+        rerollGlobalRewireRange(0, idx);
+        const newTotal = totalForCurrent();
+        const newIdx = wasAtEnd ? newTotal - 1 : idx;
+        ctl.reconfigureKeep(newTotal, newIdx);
+      },
+      randStepDisabledAt: (idx) => idx >= totalForCurrent() - 1,
     });
-    function reconfigReset() { ctl.reconfigure(totalForCurrent()); }
-    function reconfigKeep() { ctl.reconfigureKeep(totalForCurrent(), ctl.idx); }
+    function reconfigReset() {
+      opsOverride = null;
+      ctl.reconfigure(totalForCurrent());
+    }
+    function reconfigKeep() {
+      opsOverride = null;
+      ctl.reconfigureKeep(totalForCurrent(), ctl.idx);
+    }
     onStubChanged.push(reconfigReset);
     onUChanged.push(reconfigReset);
     onClusterPreChanged.push(reconfigKeep);
