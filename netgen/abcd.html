@@ -112,8 +112,7 @@
 <section class="hook">
   <p>Given a network \(G\) with a clustering, the goal is a synthetic twin that keeps both the degree sequence and the cluster sizes verbatim while drawing every edge fresh. ABCD models the graph as a <em>union of independent random graphs</em>, one per cluster plus one global background, with a single scalar \(\xi\) trading weight between the two.</p>
   <p>Each node \(u\) has weight \(w_u\) (its target degree). ABCD splits this weight: \(y_u = (1 - \xi) w_u\) funds the cluster graph of \(u\)'s home cluster; \(z_u = \xi w_u\) funds the background graph on \(V\).</p>
-  <p>A configuration model on each cluster graph produces cluster-internal edges; a configuration model on all \(z\)-stubs produces background edges that can pair any two nodes. The final graph is the union. At \(\xi = 0\) the output is disjoint cluster graphs; at \(\xi = 1\) it is a pure random graph with no signal about cluster membership.</p>
-  <p>\(\xi\) is the <em>only</em> structural dial in the model. ABCD does not target triangle counts, clustering coefficients, or a per-pair block-count matrix. If the input has dense tight-triangle clusters, ABCD scatters those edges uniformly across each cluster's admissible pairs instead.</p>
+  <p>A configuration model on each cluster graph produces cluster-internal edges; a configuration model on all \(z\)-stubs produces background edges that can pair any two nodes. The final graph is the union. At \(\xi = 0\) the output is disjoint cluster graphs; at \(\xi = 1\) it is a pure random graph with no signal about cluster membership. \(\xi\) is the only structural dial: triangles, clustering coefficient, and per-pair block counts are not in the contract.</p>
 </section>
 
 <!-- ─────────── Profiling · the shared fixture ─────────── -->
@@ -148,8 +147,7 @@
 <section class="stage">
   <div class="stage-num">profiling · cluster sizes</div>
   <h2>One integer per cluster, sum to \(n\).</h2>
-  <p>The second file is <code>cluster_sizes.csv</code>, an integer size per cluster, sorted size desc. The paper requires \(\sum_j s_j = n\), so every input node lands in exactly one cluster. Our wrapper satisfies this via <code>outlier_mode=singleton</code>: every unclustered input node becomes a 1-node pseudo-cluster (ID <code>__outlier_&lt;id&gt;__</code>), so the size list sums to \(n\). Real clusters sort to the top; singletons tail.</p>
-  <p>The sampler uses this list for two things. First, vertex-to-cluster assignment respects a size cap: a vertex of degree \(w_u\) can land in cluster \(j\) only if its admissibility bound \(x_u\) (next section) satisfies \(x_u \le s_j - 1\). Second, each cluster graph is generated on exactly the members assigned to it, so the output partition has sizes matching the input verbatim.</p>
+  <p>The second file is <code>cluster_sizes.csv</code>, an integer size per cluster, sorted size desc. The paper requires \(\sum_j s_j = n\), so every input node lands in exactly one cluster. Our wrapper satisfies this via <code>outlier_mode=singleton</code>: every unclustered input node becomes a 1-node pseudo-cluster (ID <code>__outlier_&lt;id&gt;__</code>), so the size list sums to \(n\). Real clusters sort to the top; singletons tail. The next two sections show how the sampler uses this list to assign vertices and draw intra-cluster edges; output cluster sizes match the input verbatim.</p>
   <div class="graph" id="g-cs">
     <div class="graph-chrome">
       <span>input G &middot; dashed ring per cluster (incl. each singleton)</span>
@@ -192,10 +190,13 @@
     \phi \;=\; 1 - \sum_{j=1}^{k} \left(\frac{s_j}{n}\right)^{\!2}.
   \]
   <p>A permutation mapping vertex \(u\) to cluster \(j\) is admissible iff \(x_u \le s_j - 1\) (a vertex cannot have more intra-cluster neighbours than the cluster has other members). The sampler walks vertices in descending \(w_u\), tracks remaining slots per cluster, and samples the cluster for each vertex with probability proportional to that cluster's remaining capacity, restricted to clusters whose size still admits the vertex.</p>
-  <p>On inputs with no degree-0 nodes (like <code>dnc</code>, where every node has at least one edge), positive-degree vertices fail the admissibility for any singleton cluster (size \(s_j = 1\) requires \(x_u \le 0\), but \(\lceil (1-\xi\phi) w_u \rceil \ge 1\) for any \(w_u \ge 1\)). The sampler falls back: when every real cluster is full and a small-degree vertex is still unplaced, it takes the leftover singleton, issues a <code>bad_weights</code> warning, and moves on. Final \(\xi\) is biased by how many singletons had to absorb non-zero-degree vertices.</p>
   <div class="callout">
     <div class="tag">outliers in ABCD are a wrapper idea, not a model parameter</div>
     <p>The paper has no notion of "outlier"; it takes <code>cluster_sizes.csv</code> with \(\sum_j s_j = n\) and asks no further questions. Our wrapper's <code>outlier_mode=singleton</code> makes every unclustered input node a 1-node pseudo-cluster so the sum identity holds, and the post-processing step <code>drop_singleton_clusters</code> strips them from <code>com.csv</code> at the end. <a href="./abcd+o.html">ABCD+o</a> is the extended model that promotes outliers into a proper model-level parameter \(s_0\).</p>
+  </div>
+  <div class="callout warn">
+    <div class="tag">size-1 clusters are inadmissible for any positive-degree vertex</div>
+    <p>A singleton cluster has \(s_j = 1\), so admissibility requires \(x_u \le 0\); but \(\lceil (1-\xi\phi) w_u \rceil \ge 1\) for any \(w_u \ge 1\). On inputs with no degree-0 nodes (like <code>dnc</code>) every positive-degree vertex fails the admissibility for every singleton. The sampler falls back: when every real cluster is full and a small-degree vertex is still unplaced, it takes the leftover singleton, issues a <code>bad_weights</code> warning, and moves on. Final \(\xi\) is biased by how many singletons had to absorb non-zero-degree vertices.</p>
   </div>
 </section>
 
@@ -207,7 +208,11 @@
   \[
     y_u \;=\; (1 - \xi) \, w_u, \qquad z_u \;=\; \xi \, w_u.
   \]
-  <p>\(y_u\) funds the cluster graph \(G_{c(u)}\); \(z_u\) funds the background graph \(G_0\). For the exact-degree variant (our default), the cluster's non-leader members are rounded stochastically so \(\mathbb{E}[\hat y_u] = y_u\): \(\hat y_u = \lfloor y_u \rfloor + \mathbb{1}\{U_u < y_u - \lfloor y_u \rfloor\}\) with \(U_u \sim \text{Uniform}(0, 1)\). The leader (largest-weight member) takes the deterministic floor \(\lfloor y_\ell \rfloor\) and adds 0 or 1 by parity: the bump fires when the sum of non-leader \(\hat y_u\) is odd and the floor is even, or vice versa, so the cluster's total internal stub count ends up even. \(\hat z_u = w_u - \hat y_u\).</p>
+  <p>\(y_u\) funds the cluster graph \(G_{c(u)}\); \(z_u\) funds the background graph \(G_0\). For the exact-degree variant (our default), the cluster's non-leader members get \(\hat y_u\) by stochastic rounding so \(\mathbb{E}[\hat y_u] = y_u\); \(\hat z_u = w_u - \hat y_u\) absorbs whatever the rounding leaves over.</p>
+  <div class="callout">
+    <div class="tag">stochastic round + leader parity fix</div>
+    <p>Non-leader members: \(\hat y_u = \lfloor y_u \rfloor + \mathbb{1}\{U_u < y_u - \lfloor y_u \rfloor\}\) with \(U_u \sim \text{Uniform}(0, 1)\). The leader (largest-weight member) takes the deterministic floor \(\lfloor y_\ell \rfloor\) and adds 0 or 1 by parity: the bump fires when the sum of non-leader \(\hat y_u\) is odd and the floor is even, or vice versa, so the cluster's total internal stub count ends up even. Without that fixup, the cluster's configuration model would be one stub short of a clean pairing.</p>
+  </div>
   <div class="disk-panel">
     <div class="widget-row tight">
       <button class="btn primary" id="u-reroll">re-roll U</button>
@@ -256,7 +261,7 @@
   <div class="stage-num">generation · cluster rewire</div>
   <h2>Cut the collisions, swap into valid edges.</h2>
   <p>Cluster-graph collisions (self-loops and parallels) move to a recycle list. Each is paired with a random other cluster edge \((p_2)\); the four endpoints get re-stitched as \((p_1[0], p_2[0]), (p_1[1], p_2[1])\) (or the swapped variant) and accepted if both new edges are simple. The rewire loop runs until the cluster graph is collision-free or runs out of moves.</p>
-  <p>The viz below shows the before/after diff in two sub-steps: <span class="st">cut</span> (the going-to-be-removed pre-rewire edges go ghosted, kept ones stay) and <span class="st">place</span> (cuts disappear, replacement edges appear fresh). Per-rewire-op stepping needs a kernel trace; current build shows the aggregate diff.</p>
+  <p>The viz below shows the before/after diff in two sub-steps: <span class="st">cut</span> (the going-to-be-removed pre-rewire edges go ghosted, kept ones stay) and <span class="st">place</span> (cuts disappear, replacement edges appear fresh).</p>
   <div class="graph" id="g-crewire">
     <div class="graph-chrome">
       <span id="g-crewire-stage">pre-rewire (collisions visible)</span>
@@ -266,7 +271,7 @@
     <div class="widget-row row-top">
       <button class="btn" id="g-crewire-rand-step" type="button">random step</button>
       <button class="btn" id="g-crewire-rand-all" type="button">random all</button>
-      <span class="step-label"><em>step</em>: reroll cluster shuffles only &middot; <em>all</em>: reroll U + stubs</span>
+      <span class="step-label"><em>step</em>: reroll the swap targets &middot; <em>all</em>: reroll U + stubs</span>
     </div>
     <div class="widget-row row-mid">
       <button class="btn" id="g-crewire-start">to start</button>
@@ -282,8 +287,8 @@
 <section class="stage">
   <div class="stage-num">generation · background pairing</div>
   <h2>Pair \(\hat z_u\) stubs across the whole vertex set.</h2>
-  <p>The background graph \(G_0\) is a configuration model on every node's \(\hat z_u\) stubs, pooled globally. Any two nodes can pair, including two members of the same cluster. Self-loops, parallels, and duplicates of cluster edges all flag for rewire.</p>
-  <p>Same per-pair walker as the cluster phase: each <em>next</em> highlights the 2 stub endpoints and places the edge in one frame.</p>
+  <p>The background graph \(G_0\) is one global pool: every node drops its \(\hat z_u\) stubs into the same urn and the configuration model pairs them without regard for cluster membership. Two members of the same cluster can pair; the resulting edge counts as intra-cluster on the output even though it came from the background. A bg edge that duplicates an existing cluster edge flags for rewire alongside the usual self-loops and parallels.</p>
+  <p>The walker steps one pair per <em>next</em>: 2 stub endpoints highlight, the bridge fills, the edge settles.</p>
   <div class="graph" id="g-bgpair">
     <div class="graph-chrome">
       <span id="g-bgpair-stage">background stubs ready</span>
@@ -308,8 +313,8 @@
 <!-- ─────────── Generation · background rewire ─────────── -->
 <section class="stage">
   <div class="stage-num">generation · background rewire</div>
-  <h2>Cut bg collisions, swap into valid edges.</h2>
-  <p>Same recycle-and-rewire loop as cluster, on the background pool. Cut → place transition, kernel does not expose per-op trace.</p>
+  <h2>Same swap, global pool now.</h2>
+  <p>Same recycle-and-rewire loop as the cluster phase, but the swap partners are drawn from every bg edge instead of one cluster's edges. The forbidden set is wider too: bg rewire avoids every kept cluster edge, so any bg swap that would duplicate an intra-cluster pair gets rejected. Cut → place shows the before/after diff.</p>
   <div class="graph" id="g-bgrewire">
     <div class="graph-chrome">
       <span id="g-bgrewire-stage">pre-rewire (collisions visible)</span>
@@ -319,7 +324,7 @@
     <div class="widget-row row-top">
       <button class="btn" id="g-bgrewire-rand-step" type="button">random step</button>
       <button class="btn" id="g-bgrewire-rand-all" type="button">random all</button>
-      <span class="step-label"><em>step</em>: reroll bg shuffles only &middot; <em>all</em>: reroll U + stubs</span>
+      <span class="step-label"><em>step</em>: reroll the swap targets &middot; <em>all</em>: reroll U + stubs</span>
     </div>
     <div class="widget-row row-mid">
       <button class="btn" id="g-bgrewire-start">to start</button>
@@ -353,7 +358,7 @@
     <div class="readout" style="justify-content:center">
       <span class="item">total abs diff (this seed) <b id="deg-diff">&middot;</b></span>
       <span class="item target">matches exactly <b id="deg-match">&middot;</b></span>
-      <span class="item">summary over 10 seeds <b id="deg-seed-summary">9 of 10 zero-diff; max 2</b></span>
+      <span class="item">summary over 10 seeds <b id="deg-seed-summary">9 of 10 zero-diff; worst seed loses 1 edge</b></span>
     </div>
   </div>
 </section>
@@ -373,7 +378,6 @@
       <tr><th>mean degree</th><td class="val">23.02</td><td class="val">22.41</td><td class="desc">Follows the edge count; per-node degrees match the input multiset except for rewire attrition.</td></tr>
       <tr><th>global \(\xi\)</th><td class="val">0.718</td><td class="val">0.715</td><td class="desc">Hits the target within a stub. The target is high because 355 of 906 input nodes are outliers and each sits in its own 1-node pseudo-cluster, so every outlier-incident edge is inter by definition.</td></tr>
       <tr><th>global cc</th><td class="val">0.548</td><td class="val">0.307</td><td class="desc">Not targeted. Configuration-model pairing inside a cluster distributes intra-edges uniformly across admissible pairs; triangles happen only by coincidence.</td></tr>
-      <tr><th>mean local cc</th><td class="val">0.494</td><td class="val">0.234</td><td class="desc">Same story as global cc.</td></tr>
       <tr><th>clusters</th><td class="val">87</td><td class="val">87</td><td class="desc">Preserved after <code>drop_singleton_clusters</code> strips the 355 outlier singletons.</td></tr>
     </tbody>
   </table>

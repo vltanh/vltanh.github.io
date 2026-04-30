@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>SBM &middot; Degree-corrected Stochastic Block Model | Synthetic Network Generators</title>
 <link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐖</text></svg>">
-<meta name="description" content="The degree-corrected stochastic block model, walked through stage by stage on a small synthetic graph. Interactive: click edges to see the edge count matrix fill in, toggle dedup on and off.">
+<meta name="description" content="The degree-corrected stochastic block model, walked through stage by stage on a small synthetic graph. Interactive: click edges to see the edge count matrix fill in, toggle simplify on and off.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
@@ -156,7 +156,7 @@
 <section class="hook">
   <p>Given a network \(G\) with a block (think "community") structure, the goal is a synthetic twin that keeps the block structure and the per-node degrees while drawing every edge fresh. The <em>stochastic block model</em> picks out a few summaries of \(G\) that matter enough to freeze, and randomises the rest.</p>
   <p>Peixoto's micro-canonical degree-corrected SBM freezes three things: (1) each node's block label, (2) the edge count between every pair of blocks \(e_{rs}\), and (3) each node's degree \(k_i\). Any graph that meets those three constraints is equally likely under the model.</p>
-  <p>Dedup is the catch. Micro-SBM samples a multigraph where those constraints hit exactly, then a simplify step drops self-loops and parallel edges so the output is a simple graph. On dense blocks the simplify step removes a visible fraction of edges, and the three frozen quantities end up as upper bounds rather than targets hit.</p>
+  <p>Simplify is the catch. Micro-SBM samples a multigraph where those constraints hit exactly, then a simplify step drops self-loops and parallel edges so the output is a simple graph. On dense blocks the simplify step removes a visible fraction of edges, and the three frozen quantities end up as upper bounds rather than targets hit.</p>
 </section>
 
 <!-- ─────────── Profiling · the shared fixture ─────────── -->
@@ -298,16 +298,15 @@
       <tr><th>stat</th><th>input</th><th>sbm output</th><th>note</th></tr>
     </thead>
     <tbody>
-      <tr><th>N</th><td class="val">906</td><td class="val">902</td><td class="desc">Four isolated nodes after dedup have zero output-edges and drop out of <code>edge.csv</code>'s node set.</td></tr>
+      <tr><th>N</th><td class="val">906</td><td class="val">902</td><td class="desc">Four isolated nodes after simplify have zero output-edges and drop out of <code>edge.csv</code>'s node set.</td></tr>
       <tr><th>edges</th><td class="val">10,429</td><td class="val">7,438</td><td class="desc">2,991 lost (28.7%): parallels collapsed, self-loops dropped.</td></tr>
       <tr><th>mean degree</th><td class="val">23.02</td><td class="val">16.49</td><td class="desc">Follows from the edge count drop.</td></tr>
       <tr><th>global cc</th><td class="val">0.548</td><td class="val">0.341</td><td class="desc">DC-SBM has no triangle-level constraint; the only clustering that survives is whatever shook out of the stub match.</td></tr>
-      <tr><th>mean local cc</th><td class="val">0.494</td><td class="val">0.216</td><td class="desc">Same story: edges inside a block land on random pairs, not on closing triples.</td></tr>
       <tr><th>clusters</th><td class="val">87</td><td class="val">87</td><td class="desc">Passes through the input clustering, minus size-1 clusters (the input has none).</td></tr>
     </tbody>
   </table>
-  <p>The edge count matrix on <code>dnc</code> has 696 non-zero cells over 88 blocks. The largest cell is the diagonal of the 50-node cluster C<sub>2</sub>: 2,450 half-edges (1,225 intra-edges) in the profile. That is where dedup hits <strong>hardest</strong>: 894 half-edges collide, so 447 of those 1,225 intra-edges vanish. The outlier pseudo-block (355 nodes, 278 intra-edges pre-dedup) is the second-worst, losing 108.</p>
-  <p>Left: \(e_{rs}\) as extracted by profile. Right: the same matrix recomputed on the output graph. Bottom: per-cell dedup loss \((\text{input} - \text{output})\), log-scaled so small cells still register. Blocks are sorted by size desc; the <code>__outliers__</code> pseudo-block (355 nodes) sits top-left. Hover any cell for its triple.</p>
+  <p>The edge count matrix on <code>dnc</code> has 696 non-zero cells over 88 blocks. The largest cell is the diagonal of the 50-node cluster C<sub>2</sub>: 2,450 half-edges (1,225 intra-edges) in the profile. That is where simplify hits <strong>hardest</strong>: 894 half-edges collide, so 447 of those 1,225 intra-edges vanish. The outlier pseudo-block (355 nodes, 278 intra-edges pre-simplify) is the second-worst, losing 108.</p>
+  <p>Left: \(e_{rs}\) as extracted by profile. Right: the same matrix recomputed on the output graph. Bottom: per-cell simplify loss \((\text{input} - \text{output})\), log-scaled so small cells still register. Blocks are sorted by size desc; the <code>__outliers__</code> pseudo-block (355 nodes) sits top-left. Hover any cell for its triple.</p>
   <div class="disk-panel" style="padding:1.1rem 1rem">
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem 1.1rem; align-items:end">
       <div>
@@ -320,7 +319,7 @@
       </div>
     </div>
     <div style="margin-top:1rem">
-      <div class="step-desc heat-cap"><span class="st">per-cell dedup loss</span> &middot; input minus output, log-scaled. Darker red = more edges lost in that cell.</div>
+      <div class="step-desc heat-cap"><span class="st">per-cell simplify loss</span> &middot; input minus output, log-scaled. Darker red = more edges lost in that cell.</div>
       <svg id="heat-loss" viewBox="0 0 320 320" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;margin:0 auto"></svg>
       <div class="step-desc heat-cap" id="heat-loss-legend" style="margin-top:.3rem;margin-bottom:0"></div>
     </div>
@@ -331,8 +330,8 @@
     </div>
   </div>
   <div class="callout warn">
-    <div class="tag">caveat 1: dedup loss is not uniform</div>
-    <p>The red heatmap above is the story. Parallels collide where stubs concentrate, so the loss clusters on the diagonal of dense blocks and on the outlier pseudo-block; most off-diagonal cells keep their edges. On <code>dnc</code>, the hardest-hit cell alone loses 894 half-edges (out of 2,450) and the outlier block loses 108 of its 278 intra-edges. The degree sequence "we matched your hubs" is partly true pre-dedup and partly false post-dedup, and the discrepancy tracks block density.</p>
+    <div class="tag">caveat 1: simplify loss is not uniform</div>
+    <p>The red heatmap above is the story. Parallels collide where stubs concentrate, so the loss clusters on the diagonal of dense blocks and on the outlier pseudo-block; most off-diagonal cells keep their edges. On <code>dnc</code>, the hardest-hit cell alone loses 894 half-edges (out of 2,450) and the outlier block loses 108 of its 278 intra-edges. The degree sequence "we matched your hubs" is partly true pre-simplify and partly false post-simplify, and the discrepancy tracks block density.</p>
   </div>
   <div class="callout warn">
     <div class="tag">caveat 2: global cc is not a target</div>
@@ -418,7 +417,7 @@ window.MathJax = {
       { gen: "ec-sbm-v1", label: "EC-SBM v1",
         diff: "Micro-SBM sampling after a hand-built \\(K_{k+1}\\) core per cluster forces per-cluster edge connectivity \\(\\ge k\\). Outliers are singleton blocks; a greedy matcher tops up any residual degree." },
       { gen: "ec-sbm-v2", label: "EC-SBM v2",
-        diff: "Same \\(K_{k+1}\\) core idea, but residual edges pass through a single SBM call over all blocks (including outliers) and a block-preserving 2-opt rewire replaces the brute dedup." },
+        diff: "Same \\(K_{k+1}\\) core idea, but residual edges pass through a single SBM call over all blocks (including outliers) and a block-preserving 2-opt rewire replaces the brute simplify." },
     ],
   });
 
