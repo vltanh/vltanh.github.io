@@ -1288,25 +1288,49 @@ window.MathJax = {
       return out;
     }
     let rewireRerollNonce = 0;
-    function rerollClusterRewireFromOp(opIdx) {
+    // Re-roll the global step range [startG..endG-1] across every cluster
+    // whose ops fall in that range. For each touched cluster, ops at global
+    // positions < startG stay verbatim (opsBefore prefix) and ops at
+    // positions >= startG are replayed with a fresh per-cluster RNG.
+    // clusterSeed orders fresh RNG per cluster by first-touch global op
+    // position so the same range invoked from different walker entries
+    // (e.g. RandAll[1..k] vs RandStep[k..end] over the same span) produces
+    // byte-identical overrides under the same nonce.
+    function rerollClusterRewireRange(startG, endG) {
       const xi = SYNTHETIC_XI;
       const R = buildRealization(U_SEED, STUB_SEED, xi);
       const baseOps = effectiveOps(R);
-      const op = baseOps[opIdx];
-      if (!op) return;
-      const cname = op.cluster;
-      const clusterOps = baseOps.filter(o => o.cluster === cname);
-      const opIdxInCluster = clusterOps.indexOf(op);
-      if (opIdxInCluster < 0) return;
+      const lo = Math.max(0, startG);
+      const hi = Math.min(endG, baseOps.length);
+      if (lo >= hi) return;
       rewireRerollNonce += 1;
-      const fresh = seededRng(STUB_SEED * 9173 + rewireRerollNonce * 31 + opIdx);
-      const prePairs = clusterPrePairsByName(R, cname);
-      const opsBefore = clusterOps.slice(0, opIdxInCluster);
-      const newOps = ABCDKernel.replayClusterRewireFromOps(prePairs, opsBefore, fresh);
-      // Tag each new op with the cluster so effectiveOps can route them.
-      newOps.forEach(o => { o.cluster = cname; });
-      opsOverride = opsOverride || {};
-      opsOverride[cname] = opsBefore.concat(newOps);
+      // Per-cluster cutoff: count of base ops with global position < startG.
+      const cutoffByCluster = {};
+      for (let g = 0; g < lo; g++) {
+        const c = baseOps[g].cluster;
+        cutoffByCluster[c] = (cutoffByCluster[c] || 0) + 1;
+      }
+      // Cluster encounter order = first-touch position in [lo..hi).
+      const clusterOrder = [];
+      const seen = new Set();
+      for (let g = lo; g < hi; g++) {
+        const c = baseOps[g].cluster;
+        if (!seen.has(c)) { seen.add(c); clusterOrder.push(c); }
+      }
+      const next = Object.assign({}, opsOverride || {});
+      clusterOrder.forEach((cname, clusterSeed) => {
+        const cutoff = cutoffByCluster[cname] || 0;
+        const clusterOps = baseOps.filter(o => o.cluster === cname);
+        const prePairs = clusterPrePairsByName(R, cname);
+        const opsBefore = clusterOps.slice(0, cutoff);
+        const fresh = seededRng(
+          STUB_SEED * 9173 + rewireRerollNonce * 31 + clusterSeed * 113
+        );
+        const newOps = ABCDKernel.replayClusterRewireFromOps(prePairs, opsBefore, fresh);
+        newOps.forEach(o => { o.cluster = cname; });
+        next[cname] = opsBefore.concat(newOps);
+      });
+      opsOverride = next;
     }
     function sameXY(e, p) {
       return (e.u === p[0] && e.v === p[1]) || (e.u === p[1] && e.v === p[0]);
@@ -1398,11 +1422,11 @@ window.MathJax = {
         descEl.innerHTML = '<span class="st">op ' + step + '</span> &middot; ' + desc;
       }
 
-      const beforeList = stateAtStep(R, step === 0 ? 0 : lastStep);
+      const beforeList = stateAtStep(R, lastStep);
       const afterList  = stateAtStep(R, step);
       const byNode = byNodeFromList(afterList);
 
-      if (step === 0 || (step !== lastStep + 1 && step !== lastStep - 1)) {
+      if (step !== lastStep + 1 && step !== lastStep - 1) {
         spokes.snapToState({
           byNode, placed: afterList.map(placedEntry),
           just: null, justSeq: step,
@@ -1443,10 +1467,12 @@ window.MathJax = {
       total: totalForCurrent(),
       onRender: render,
       getLocked: () => lockBusy,
-      // Rand-step re-spins ops [k..end] of the affected cluster only.
-      // Pair stage and other clusters stay untouched. Drop-stale step
-      // (idx > opsCount) and failed-op steps have no swap to spin and
-      // are gated via randStepDisabledAt below.
+      // Rand-step re-spins the global op range [idx-1..end] across every
+      // cluster touched by that range. Cluster-pairing is untouched.
+      // Drop-stale step (idx > opsCount) has no op range to spin and is
+      // gated via randStepDisabledAt below. Failed ops are still
+      // re-rollable (recycle inner loop is RNG-bounded, so a re-roll
+      // may flip fail to success).
       // Drives an animated swap: capture state at idx with the OLD
       // ops, swap in the new ops, diff state at idx with the NEW ops,
       // and play the (removes, adds) through spokeLayer so the screen
@@ -1457,7 +1483,7 @@ window.MathJax = {
         const xi = SYNTHETIC_XI;
         const R = buildRealization(U_SEED, STUB_SEED, xi);
         const beforeList = stateAtStep(R, idx);
-        rerollClusterRewireFromOp(idx - 1);
+        rerollClusterRewireRange(idx - 1, effectiveOps(R).length);
         const afterList = stateAtStep(R, idx);
         ctl.setTotalIdxSilent(totalForCurrent(), idx);
         // Update labels + desc through the standard render but with
@@ -1508,37 +1534,31 @@ window.MathJax = {
         lastStep = idx;
         return "skip";
       },
-      // Random All re-spins the cluster of the current step from
-      // op 0 with a fresh RNG. Other clusters are left alone (their
-      // existing override or base ops stay put), so the per-cluster
-      // op count is preserved and the cursor still lands inside the
-      // same cluster's portion of the trace. Cluster-pairing is
-      // untouched (no U_SEED / STUB_SEED bump).
+      // Random All re-spins the global op range [0..idx-1] across every
+      // cluster touched by that prefix; ops at positions >= idx stay
+      // verbatim. At drop-stale (idx == opsCount + 1) the prefix covers
+      // every op, so every touched cluster re-rolls from scratch — the
+      // new total may shrink or grow as success/fail counts shift, so
+      // when the cursor was parked at the last step we follow it to the
+      // new last step instead of clamping mid-trace. Cluster-pairing is
+      // untouched (no U_SEED / STUB_SEED bump). Same
+      // `rerollClusterRewireRange` driver as Rand-step, so:
+      //   ToEnd → RandAll[0..end]  ≡  Next → RandStep[0..end]
+      // under the same nonce.
       onRandAll: idx => {
-        const xi = SYNTHETIC_XI;
-        const R = buildRealization(U_SEED, STUB_SEED, xi);
-        const baseOps = effectiveOps(R);
-        if (idx <= 0 || idx > baseOps.length) return;
-        const op = baseOps[idx - 1];
-        if (!op) return;
-        const cname = op.cluster;
-        rewireRerollNonce += 1;
-        const fresh = seededRng(STUB_SEED * 9173 + rewireRerollNonce * 31);
-        const prePairs = clusterPrePairsByName(R, cname);
-        const allNewOps = ABCDKernel.replayClusterRewireFromOps(prePairs, [], fresh);
-        allNewOps.forEach(o => { o.cluster = cname; });
-        opsOverride = opsOverride || {};
-        opsOverride[cname] = allNewOps;
-        ctl.reconfigureKeep(totalForCurrent(), idx);
+        if (idx <= 0) return;
+        const wasAtEnd = (idx === ctl.total - 1);
+        rerollClusterRewireRange(0, idx);
+        const newTotal = totalForCurrent();
+        const newIdx = wasAtEnd ? newTotal - 1 : idx;
+        ctl.reconfigureKeep(newTotal, newIdx);
       },
       randStepDisabledAt: (idx) => {
         const xi = SYNTHETIC_XI;
         const R = buildRealization(U_SEED, STUB_SEED, xi);
         const ops = effectiveOps(R);
         if (idx > ops.length) return true;
-        if (idx <= 0) return false;
-        const o = ops[idx - 1];
-        return !o || !o.success;
+        return false;
       },
     });
     function reconfigKeep() {
