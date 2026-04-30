@@ -33,7 +33,7 @@
 .profile-table td.desc{ color:var(--paper-2); font-size:.88rem; line-height:1.45; }
 /* DNC case-study table: 4 cols with short notes; let columns breathe instead
    of letting shared.css desc:70% squeeze the two value columns. */
-.profile-table.dnc-stats th       { width: 14%; }
+.profile-table.dnc-stats th       { width: 14%; min-width:9rem; white-space:nowrap !important; }
 .profile-table.dnc-stats td.val   { width: 18%; }
 .profile-table.dnc-stats td.desc  { width: auto !important; }
 .best-readout{ display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:.6rem; font-family:'Special Elite','Courier New',monospace; font-size:.78rem; color:var(--paper-3); }
@@ -80,7 +80,7 @@ g.viz-node-group:has(.viz-node.future) { display: none; }
 <section class="stage">
   <div class="stage-num">profiling · outliers are singletons</div>
   <h2>nPSO has no outlier category. Every node lives in a cluster.</h2>
-  <p>Under the default <code>outlier_mode=singleton</code>, a node that is not in a size-2+ community becomes its own 1-node cluster. The generator then treats every size-1 cluster like any other cluster. The graph below colours the 20-node synthetic by the resulting 5 clusters (3 real + 2 singletons).</p>
+  <p>By default, every node that is not part of a size-2+ community becomes its own 1-node cluster, and the generator treats those size-1 clusters like any other cluster. The graph below colours the 20-node fixture by the resulting 5 clusters (3 real + 2 singletons).</p>
   <div class="graph" id="g-input">
     <div class="graph-chrome">
       <span>input G &middot; singleton mode &middot; 5 clusters</span>
@@ -99,14 +99,14 @@ g.viz-node-group:has(.viz-node.future) { display: none; }
     <tbody>
       <tr><th>N</th><td class="val" id="prof-N">&middot;</td><td class="desc">Number of nodes.</td></tr>
       <tr><th>m</th><td class="val" id="prof-m">&middot;</td><td class="desc">Half of the mean degree, rounded. Controls how many existing nodes each arrival attaches to.</td></tr>
-      <tr><th>&gamma;</th><td class="val" id="prof-gamma">&middot;</td><td class="desc">Power-law exponent of the degree distribution, fit using the Python <code>powerlaw</code> package and floored at \(\gamma \ge 2\).</td></tr>
-      <tr><th>C</th><td class="val" id="prof-C">&middot;</td><td class="desc">Number of mixture components. Under outlier-mode <em>singleton</em> (the default), each input outlier becomes its own 1-node cluster, bumping C by the outlier count.</td></tr>
-      <tr><th>C<sub>G</sub></th><td class="val" id="prof-tcc">&middot;</td><td class="desc">Global clustering coefficient of the input (via <code>networkit</code>). This is the target the secant search tries to hit.</td></tr>
+      <tr><th>&gamma;</th><td class="val" id="prof-gamma">&middot;</td><td class="desc">Power-law exponent of the degree distribution, fit on the input degree sequence and floored at \(\gamma \ge 2\).</td></tr>
+      <tr><th>C</th><td class="val" id="prof-C">&middot;</td><td class="desc">Number of mixture components. Each input outlier becomes its own 1-node cluster, bumping C by the outlier count.</td></tr>
+      <tr><th>C<sub>G</sub></th><td class="val" id="prof-tcc">&middot;</td><td class="desc">Global clustering coefficient of the input. The secant search tries to hit this value.</td></tr>
     </tbody>
   </table>
 
   <div class="disk-panel" style="margin-top:1.2rem">
-    <div class="step-desc" style="margin-bottom:.6rem"><span class="st">degree histogram + power-law fit</span> &middot; log-log axes. On this \(20\)-node synthetic <code>powerlaw.Fit</code> picks \(x_{\min} = 3\) and returns \(\gamma \approx 2.73\).</div>
+    <div class="step-desc" style="margin-bottom:.6rem"><span class="st">degree histogram + power-law fit</span> &middot; log-log axes. On this 20-node fixture the fit picks \(x_{\min} = 3\) and returns \(\gamma \approx 2.73\).</div>
     <svg id="deg-hist" viewBox="0 0 640 260" preserveAspectRatio="xMidYMid meet"></svg>
   </div>
 
@@ -168,7 +168,7 @@ g.viz-node-group:has(.viz-node.future) { display: none; }
   </div>
   <div class="callout">
     <div class="tag">post-embedding cluster cleanup</div>
-    <p>Argmin reassignment can leave a cluster with only one node or with zero nodes. <code>gen.py</code>'s post-process applies <code>drop_singleton_clusters</code>: clusters with exactly one node get relabelled as outliers and dropped from <code>com.csv</code>; clusters with zero nodes are removed entirely. The final <code>com.csv</code> therefore only lists clusters of size &ge; 2.</p>
+    <p>Argmin reassignment can leave a cluster with only one node, or with zero nodes. A post-process drops both: a one-node cluster gets relabelled as an outlier, and a zero-node cluster is removed entirely. The final clustering only lists clusters of size 2 or more.</p>
   </div>
 </section>
 
@@ -196,7 +196,7 @@ g.viz-node-group:has(.viz-node.future) { display: none; }
     p(i, j) \;=\; \frac{1}{1 + \exp\!\bigl((h_{ij} - R_i(T)) / (2T)\bigr)}.
   \]
   <p>Pairs closer than \(R_i(T)\) get \(p \to 1\); pairs further than \(R_i(T)\) get \(p \to 0\); pairs sitting right on the radius get \(p = 1/2\). \(T\) controls how <em>sharp</em> the transition is: small \(T\) means hard step at the radius, large \(T\) means gradual slope.</p>
-  <p>The plot below shows \(p\) as a function of \(h_{ij}\) with the radius pinned at the dashed vertical. Drag the \(T\) slider to watch the sigmoid go from a hard step at \(T \to 0\) to a shallow slope at \(T \to 1\):</p>
+  <p>The plot below shows \(p\) as a function of \(h_{ij}\) with the radius pinned at the dashed vertical. The \(T\) slider scales the sigmoid: a hard step at \(T \to 0\), a shallow slope at \(T \to 1\).</p>
   <div class="disk-panel" style="padding:.9rem 1rem">
     <svg id="fd-curve" viewBox="0 0 640 260" preserveAspectRatio="xMidYMid meet"></svg>
     <div class="widget-row" style="padding:0;border:none;margin:.2rem 0 0">
@@ -283,13 +283,13 @@ g.viz-node-group:has(.viz-node.future) { display: none; }
   </div>
   <p>Why does \(T\) move \(cc\) when edge counts are fixed? Triangles need three pairwise-close nodes to all be wired up.</p>
   <p>At low \(T\) the weights \(p(i, j)\) collapse onto the hyperbolic ball: each arrival's \(m\) picks concentrate on its few nearest predecessors, so when two of \(i\)'s targets are themselves close to each other they get picked together and the triangle closes.</p>
-  <p>Crank \(T\) up and \(p(i, j)\) flattens toward uniform on \(V_i\); picks scatter across the disk, the "two of my targets are also close to each other" coincidence stops happening, and triangle density (hence \(cc\)) drops. Same edge budget, different geometry of <em>which</em> edges, very different clustering.</p>
+  <p>At high \(T\), \(p(i, j)\) flattens toward uniform on \(V_i\). Picks scatter across the disk, the "two of my targets are also close to each other" coincidence stops happening, and triangle density (and so \(cc\)) drops. Same edge budget, different geometry of which edges, different clustering.</p>
 </section>
 
 <!-- ─────────── Generation · the secant search ─────────── -->
 <section class="stage">
   <div class="stage-num">generation · the secant search</div>
-  <h2>Bracket, bisect, secant, keep the best.</h2>
+  <h2>Bracket, then secant, with a margin guard.</h2>
   <p>\(cc(T)\) trends downward in \(T\) but is noisy and not strictly monotone. The code nonetheless treats this as 1D root-finding. Start with \([T_{\min}, T_{\max}] = [0, 1]\) and bisect. Residual signs drive the bracket update backwards from the textbook: \(cc &gt; \mathrm{target}\) means \(T\) is too small, so \(T_{\min}\) moves right; \(cc &lt; \mathrm{target}\) means \(T\) is too large, so \(T_{\max}\) moves left.</p>
   <p>Once both bracket ends have opposite-signed residuals, secant kicks in:</p>
   \[
@@ -299,8 +299,7 @@ g.viz-node-group:has(.viz-node.future) { display: none; }
   <p>Stop conditions: residual \(&lt; 0.005\), step \(&lt; 0.0001\), or \(100\) iters. The wrapper keeps the lowest-residual iterate regardless of whether convergence was formally reached.</p>
   <div class="callout warn">
     <div class="tag">caveat 1: bisect + secant assumes monotone</div>
-    <p>The framework assumes \(cc(T)\) is monotone so residual signs carry information. Look at the ghost band below: the mean curve drifts downward but is not strictly so, and the \(\pm 1\sigma\) / \(\pm 2\sigma\) bands show the single-shot noise that a real search iterate carries. Equal-signed residuals can cluster on the wrong side, the secant never fires, and bisection walks into a local minimum.</p>
-    <p>Better options when \(cc(T)\) is noisy or non-monotone: grid-scan \(T\) on a log-uniform schedule and keep the best-residual iterate; sample several times per \(T\) and minimise over the mean (the same smoothing the ghost band applies); or a golden-section search if unimodality is plausible. The current code does none of these.</p>
+    <p>The framework assumes \(cc(T)\) is monotone so residual signs carry information. The ghost band below shows the mean curve drifting downward but not strictly so, and the \(\pm 1\sigma\) / \(\pm 2\sigma\) bands show the single-shot noise that a real search iterate carries. Equal-signed residuals can cluster on the wrong side, the secant never fires, and bisection walks into a local minimum.</p>
   </div>
   <div class="callout warn">
     <div class="tag">caveat 2: the target may be too high</div>
@@ -334,20 +333,20 @@ g.viz-node-group:has(.viz-node.future) { display: none; }
 <section class="stage">
   <div class="stage-num">case study · dnc</div>
   <h2>What you get on the shipped example.</h2>
-  <p>Default run on <code>dnc</code> + <code>sbm-flat-best+cc</code> at <code>--seed 1</code> (nPSO2, outlier-mode singleton):</p>
+  <p>Default run on <code>dnc</code> + <code>sbm-flat-best+cc</code> at <code>--seed 1</code>, nPSO2, every input outlier as its own singleton cluster:</p>
   <table class="profile-table dnc-stats">
     <thead>
       <tr><th>stat</th><th>input</th><th>nPSO output</th><th>note</th></tr>
     </thead>
     <tbody>
-      <tr><th>N</th><td class="val">906</td><td class="val">906</td><td class="desc">exact.</td></tr>
-      <tr><th>edges</th><td class="val">10,429</td><td class="val">10,794</td><td class="desc">within \(3.5\%\); \(m = \lfloor \text{mean deg} / 2 \rceil\).</td></tr>
-      <tr><th>mean degree</th><td class="val">23.02</td><td class="val">23.83</td><td class="desc">follows from edge count.</td></tr>
-      <tr><th>global cc</th><td class="val">0.548</td><td class="val">0.098</td><td class="desc"><strong>did not converge.</strong></td></tr>
-      <tr><th>num clusters</th><td class="val">87</td><td class="val">161</td><td class="desc">see paragraph below.</td></tr>
+      <tr><th># nodes</th><td class="val">906</td><td class="val">906</td><td class="desc">Exact: the disk is built node by node up to \(N\).</td></tr>
+      <tr><th># clusters</th><td class="val">87</td><td class="val">161</td><td class="desc">Argmin reassignment redistributes nodes across 442 mixture components (87 real + 355 singleton outliers); singleton outliers can catch stray nodes and graduate, real clusters can fragment.</td></tr>
+      <tr><th># edges</th><td class="val">10,429</td><td class="val">10,794</td><td class="desc">Within \(3.5\%\). Fixed at \(m(m+1)/2 + m(N - m - 1)\), where \(m = \lfloor \text{mean deg} / 2 \rceil = 12\); independent of \(T\) and search outcome.</td></tr>
+      <tr><th>global cc</th><td class="val">0.548</td><td class="val">0.098</td><td class="desc"><strong>Did not converge.</strong> On this single seed the search stalls at \(T_{\mathrm{best}} = 0.125\) with residual \(0.450\); could be a poor roll, or the achievable \(cc\) ceiling on \((N, m, \gamma, C)\) really sits below the target.</td></tr>
+      <tr><th>char. time</th><td class="val">40.41</td><td class="val">6.14</td><td class="desc">Early-arrival hubs sit near the disk centre and connect to most later nodes, so they shortcut walks across angular sectors.</td></tr>
+      <tr><th>pseudo-diameter</th><td class="val">8</td><td class="val">3</td><td class="desc">Same hub effect: rank-1 connects to almost every later node, so most pairs are within two hops through the centre.</td></tr>
     </tbody>
   </table>
-  <p>The input has \(87\) real clusters over \(551\) clustered nodes; the other \(355\) become singleton clusters under profile's <code>outlier-mode=singleton</code>, so nPSO sees \(C = 442\) mixture components. After argmin reassignment on the disk and the post-process <code>drop_singleton_clusters</code>, \(161\) components end up non-singleton in the output <code>com.csv</code>.</p>
   <p>nPSO with \((N = 906, m = 12, \gamma = 2.0, C = 442)\) peaks at \(cc \approx 0.098\) across the full \([0, 1]\) range: the hyperbolic disk with these parameters cannot generate clustering as high as \(0.548\). The search walks down the left half of the bracket by pure bisection, stalls after \(5\) iters at \(T_{\mathrm{best}} = 0.125\) with \(cc = 0.098\) and residual \(0.450\).</p>
   <div class="disk-panel">
     <svg id="dnc-traj" viewBox="0 0 640 300" preserveAspectRatio="xMidYMid meet"></svg>

@@ -49,8 +49,8 @@ const POSITIONS = {
   18: {x: -132, y:  260},
   // Outliers in the middle, pulled off the C2 axis so they don't
   // read as a continuation of the 9-12-13 line.
-  19: {x: -117, y:   10},
-  20: {x:   57, y:  -78},
+  19: {x: -117, y:   30},
+  20: {x:   57, y:  -18},
 };
 
 const C1 = [1,2,3,4,5,6,7,8];
@@ -763,28 +763,13 @@ const VIZ = {
 const CY = VIZ;
 
 // ── Tooltip helper (rich node + edge stats) ──────────────────
-// Pre-compute intra/inter degree + local clustering coefficient
-// from the canonical EDGES, so every page gets the same figures
-// landing uses.
-const __adj = {};
-NODES.forEach(n => { __adj[n] = new Set(); });
-EDGES.forEach(({u, v}) => { __adj[u].add(v); __adj[v].add(u); });
-const __intraDeg = {}, __interDeg = {}, __localCC = {};
+// Pre-compute intra/inter degree from the canonical EDGES.
+const __intraDeg = {}, __interDeg = {};
 NODES.forEach(n => { __intraDeg[n] = 0; __interDeg[n] = 0; });
 EDGES.forEach(({u, v}) => {
   const same = CLUSTER_OF[u] === CLUSTER_OF[v] && CLUSTER_OF[u] !== "OUT";
   if (same) { __intraDeg[u]++; __intraDeg[v]++; }
   else      { __interDeg[u]++; __interDeg[v]++; }
-});
-NODES.forEach(n => {
-  const nbrs = [...__adj[n]];
-  const k = nbrs.length;
-  if (k < 2) { __localCC[n] = 0; return; }
-  let tri = 0;
-  for (let i = 0; i < k; i++) for (let j = i + 1; j < k; j++) {
-    if (__adj[nbrs[i]].has(nbrs[j])) tri++;
-  }
-  __localCC[n] = (2 * tri) / (k * (k - 1));
 });
 function __edgeKind(u, v) {
   const cu = CLUSTER_OF[u], cv = CLUSTER_OF[v];
@@ -819,13 +804,11 @@ function makeTooltip(handle, container) {
     const dTot = DEGREES[id] || 0;
     const dInt = __intraDeg[id] || 0;
     const dExt = __interDeg[id] || 0;
-    const cc   = __localCC[id] || 0;
     const mu   = dTot > 0 ? dExt / dTot : 0;
     tip.innerHTML =
       '<div class="hd">node ' + id + ' &middot; ' + type + '</div>' +
       '<div>cluster <b>' + clLabel + '</b></div>' +
       '<div>degree <b>' + dTot + '</b> <span class="dim">(intra ' + dInt + ', inter ' + dExt + ')</span></div>' +
-      '<div>local cc <b>' + cc.toFixed(2) + '</b></div>' +
       '<div>&mu;<sub>i</sub> <b>' + mu.toFixed(2) + '</b></div>';
     tip.classList.add("on");
     place(ev.clientX, ev.clientY);
@@ -1114,7 +1097,7 @@ function singletonOpener(opts) {
       .attr("opacity", 0.95)
       .style("font-family", "Caveat Brush, cursive")
       .style("font-size", "18px")
-      .text(cd.label != null ? cd.label : (cd.id + (cd.isOutlier ? " · singleton" : "")));
+      .text(cd.label != null ? cd.label : cd.id);
     return { cd, rect, label };
   });
   const edgesIn = opts.edges || EDGES.map(e => ({
@@ -1128,8 +1111,10 @@ function singletonOpener(opts) {
   const tipHost = document.getElementById(opts.tooltipHostId || opts.hostId.replace(/-cy$/, ""));
   if (tipHost) makeTooltip(viz, tipHost);
   function syncRects() {
-    const padX = 30, padY = 34;
     rects.forEach(r => {
+      const isSingleton = r.cd.nodes.length === 1;
+      const padX = isSingleton ? 18 : 30;
+      const padY = isSingleton ? 18 : 34;
       let mx = Infinity, MX = -Infinity, my = Infinity, MY = -Infinity;
       r.cd.nodes.forEach(id => {
         const n = viz.nodeById[String(id)];
@@ -1142,14 +1127,16 @@ function singletonOpener(opts) {
       let w = (MX - mx) + 2 * padX, h = (MY - my) + 2 * padY;
       const labelW = r.label.node().getComputedTextLength
         ? r.label.node().getComputedTextLength() : 0;
-      const wanted = labelW + 24;
+      const wanted = labelW + 14;
       if (w < wanted) {
         const cx = (mx + MX) / 2;
         w = wanted;
         x = cx - w / 2;
       }
       r.rect.attr("x", x).attr("y", y).attr("width", w).attr("height", h);
-      r.label.attr("x", x + 12).attr("y", y + 20);
+      // Label above the rect's top edge so a singleton's lone node
+      // (centered inside its ring) cannot obscure the cluster name.
+      r.label.attr("x", x + 6).attr("y", y - 6);
     });
   }
   syncRects();
