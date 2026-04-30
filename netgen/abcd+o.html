@@ -582,6 +582,21 @@ window.MathJax = {
     onStubChanged.forEach(fn => fn());
   }
 
+  // Module-scoped per-stage overrides + listener bus, mirrors abcd.html.
+  // bg-pair override feeds bg-rewire's effective pre-state so a bg-pair
+  // reroll regenerates the bg-rewire op trace from the new bgPre. The
+  // cluster + global rewire-op overrides hold replay-derived traces from
+  // ABCDKernel.replay*RewireFromOps.
+  let bgPairOverride = {};
+  let clusterRewireOpsOverride = null;
+  let globalRewireOpsOverride = null;
+  let rewireRerollNonce = 0;
+  const onBgPairChanged = [];
+  function fireBgPairChanged() { onBgPairChanged.forEach(fn => fn()); }
+  function effectiveBgPre(R) { return R.bgPre.map((e, i) => bgPairOverride[i] || e); }
+  function effectiveClusterRewireOps(R) { return clusterRewireOpsOverride || R.clusterRewireOps; }
+  function effectiveGlobalRewireOps(R) { return globalRewireOpsOverride || R.globalRewireOps; }
+
   function seededRng(seed) { return d3.randomLcg(seed); }
   const keyOf = NETGEN.keyOf;
 
@@ -1081,8 +1096,9 @@ window.MathJax = {
       const kk = keyOf(e.u, e.v);
       if (!map.has(kk)) map.set(kk, { u: e.u, v: e.v, cluster: e.cluster, bad: e.loop || e.multi });
     });
+    const ops = effectiveClusterRewireOps(R);
     for (let i = 0; i < k; i++) {
-      const op = R.clusterRewireOps[i];
+      const op = ops[i];
       if (!op) break;
       map.delete(keyOf(op.p1[0], op.p1[1]));
       if (op.success) {
@@ -1098,15 +1114,16 @@ window.MathJax = {
   }
   function bgStateAfter(R, k) {
     const map = new Map();
-    R.bgPre.forEach(e => {
+    effectiveBgPre(R).forEach(e => {
       const kk = keyOf(e.u, e.v);
       if (!map.has(kk)) map.set(kk, {
         u: e.u, v: e.v, isOO: e.isOO, isCO: e.isCO,
         bad: e.loop || e.multi || e.crossDup,
       });
     });
+    const ops = effectiveGlobalRewireOps(R);
     for (let i = 0; i < k; i++) {
-      const op = R.globalRewireOps[i];
+      const op = ops[i];
       if (!op) break;
       map.delete(keyOf(op.p1[0], op.p1[1]));
       if (op.p2) map.delete(keyOf(op.p2[0], op.p2[1]));
@@ -1172,6 +1189,22 @@ window.MathJax = {
       });
       newTail.forEach((np, i) => { pairOverride[lay.startInClusterPre + l + i] = np; });
     }
+    function rollAllPairs(R) {
+      pairOverride = {};
+      R.clusterStubLayouts.forEach(lay => {
+        const newTail = NETGEN.stubPoolReseed({
+          layout: lay, prefix: [],
+          classify: (a, b, ctx) => {
+            const loop = (a === b);
+            const k = keyOf(a, b);
+            const multi = !loop && ctx.localEdges.has(k);
+            if (!loop && !multi) ctx.add(k);
+            return { u: a, v: b, cluster: lay.cname, loop, multi };
+          },
+        });
+        newTail.forEach((np, i) => { pairOverride[lay.startInClusterPre + i] = np; });
+      });
+    }
     function render(step) {
       const R = getCurrentR();
       applyOutlierColors(viz, R);
@@ -1218,7 +1251,12 @@ window.MathJax = {
         if (idx <= 0) return;
         rollPair(getCurrentR(), idx - 1);
       },
-      onRandAll: () => { rerollAll(); },
+      // RandAll: in-stage full reseed of every cluster bucket. No
+      // U_SEED / STUB_SEED bump.
+      onRandAll: idx => {
+        if (idx <= 0) return;
+        rollAllPairs(getCurrentR());
+      },
     });
     function reconfig() {
       pairOverride = {};
@@ -1328,17 +1366,88 @@ window.MathJax = {
       spokes.playMany(removes, adds, () => {});
       lastStep = step;
     }
-    function totalForCurrent() { return 1 + getCurrentR().clusterRewireOps.length; }
+    function totalForCurrent() { return 1 + effectiveClusterRewireOps(getCurrentR()).length; }
+    function clusterPrePairsByName(R, cname) {
+      const out = [];
+      const seenKey = new Set();
+      R.clusterPre.forEach(e => {
+        if (e.cluster !== cname) return;
+        const key = keyOf(e.u, e.v);
+        const isLoop = e.loop;
+        const isMulti = e.multi || (!isLoop && seenKey.has(key));
+        if (!isLoop && !isMulti) seenKey.add(key);
+        out.push({ u: e.u, v: e.v, bad: isLoop || isMulti });
+      });
+      return out;
+    }
+    function rerollClusterRewireRange(startG, endG) {
+      const R = getCurrentR();
+      const baseOps = effectiveClusterRewireOps(R);
+      const lo = Math.max(0, startG);
+      const hi = Math.min(endG, baseOps.length);
+      if (lo >= hi) return;
+      rewireRerollNonce += 1;
+      const opsBeforeByCluster = {};
+      const clusterOrder = [];
+      const seenInRange = new Set();
+      for (let g = 0; g < hi; g++) {
+        const c = baseOps[g].cluster;
+        if (g < lo) {
+          (opsBeforeByCluster[c] = opsBeforeByCluster[c] || []).push(baseOps[g]);
+        } else if (!seenInRange.has(c)) {
+          seenInRange.add(c);
+          clusterOrder.push(c);
+        }
+      }
+      const next = {};
+      const allClusters = new Set();
+      baseOps.forEach(o => allClusters.add(o.cluster));
+      // Untouched clusters stay verbatim by carrying over their existing ops
+      // from baseOps; touched-in-range clusters replay opsBefore + fresh rng.
+      const baseByCluster = {};
+      baseOps.forEach(o => { (baseByCluster[o.cluster] = baseByCluster[o.cluster] || []).push(o); });
+      allClusters.forEach(c => { if (!seenInRange.has(c)) next[c] = (baseByCluster[c] || []).slice(); });
+      clusterOrder.forEach((cname, clusterSeed) => {
+        const opsBefore = opsBeforeByCluster[cname] || [];
+        const prePairs = clusterPrePairsByName(R, cname);
+        const fresh = seededRng(STUB_SEED * 9173 + rewireRerollNonce * 31 + clusterSeed * 113);
+        const newOps = ABCDKernel.replayClusterRewireFromOps(prePairs, opsBefore, fresh);
+        newOps.forEach(o => { o.cluster = cname; });
+        next[cname] = opsBefore.concat(newOps);
+      });
+      // Flatten back to a global op array preserving the original cluster
+      // visit order (first-touch order across baseOps).
+      const visitOrder = [];
+      const visited = new Set();
+      baseOps.forEach(o => { if (!visited.has(o.cluster)) { visited.add(o.cluster); visitOrder.push(o.cluster); } });
+      const flat = [];
+      visitOrder.forEach(c => (next[c] || []).forEach(o => flat.push(o)));
+      clusterRewireOpsOverride = flat;
+    }
     ctl = NETGEN.wireWalker({
       prefix: "g-crewire",
       total: totalForCurrent(),
       onRender: render,
       getLocked: () => lockBusy,
-      onRandStep: () => { if (!lockBusy) rerollStub(); },
-      onRandAll: () => { if (lockBusy) return;
-        rerollAll(); },
+      // RandStep: re-spin ops [idx-1..end] across touched clusters.
+      // Disabled at the last step (nothing to spin).
+      onRandStep: idx => {
+        if (lockBusy || idx <= 0) return;
+        rerollClusterRewireRange(idx - 1, effectiveClusterRewireOps(getCurrentR()).length);
+        ctl.reconfigureKeep(totalForCurrent(), Math.min(idx, totalForCurrent() - 1));
+      },
+      // RandAll: re-spin every op [0..end] across every cluster.
+      onRandAll: idx => {
+        if (lockBusy || idx <= 0) return;
+        rerollClusterRewireRange(0, effectiveClusterRewireOps(getCurrentR()).length);
+        ctl.reconfigureKeep(totalForCurrent(), Math.min(idx, totalForCurrent() - 1));
+      },
+      randStepDisabledAt: (idx) => idx >= totalForCurrent() - 1,
     });
-    function reconfig() { ctl.reconfigureKeep(totalForCurrent(), ctl.idx); }
+    function reconfig() {
+      clusterRewireOpsOverride = null;
+      ctl.reconfigureKeep(totalForCurrent(), ctl.idx);
+    }
     onStubChanged.push(reconfig);
     document.getElementById("xi-slider").addEventListener("input", reconfig);
   })();
@@ -1347,8 +1456,7 @@ window.MathJax = {
   (function () {
     const viz = NETGEN.VIZ.init("g-bgpair-cy", { showLabels: true, edges: [], pinned: true });
     NETGEN.makeTooltip(viz, document.getElementById("g-bgpair"));
-    let bgOverride = {};
-    function effectiveBg(R, i) { return bgOverride[i] || R.bgPre[i]; }
+    function effectiveBg(R, i) { return bgPairOverride[i] || R.bgPre[i]; }
     function effPairs(R) { return R.bgPre.map((_, i) => effectiveBg(R, i)); }
     function rollBgPair(R, idx) {
       const lay = R.bgStubLayout;
@@ -1371,7 +1479,8 @@ window.MathJax = {
           };
         },
       });
-      newTail.forEach((np, i) => { bgOverride[idx + i] = np; });
+      newTail.forEach((np, i) => { bgPairOverride[idx + i] = np; });
+      fireBgPairChanged();
     }
     function render(step) {
       const R = getCurrentR();
@@ -1436,10 +1545,17 @@ window.MathJax = {
         if (idx <= 0) return;
         rollBgPair(getCurrentR(), idx - 1);
       },
-      onRandAll: () => { rerollAll(); },
+      // RandAll: in-stage full reseed of the bg pair pool from position 0.
+      onRandAll: idx => {
+        if (idx <= 0) return;
+        bgPairOverride = {};
+        rollBgPair(getCurrentR(), 0);
+        ctl.reconfigureKeep(totalForCurrent(), idx);
+      },
     });
     function reconfig() {
-      bgOverride = {};
+      bgPairOverride = {};
+      fireBgPairChanged();
       ctl.reconfigureKeep(totalForCurrent(), ctl.idx);
     }
     onStubChanged.push(reconfig);
@@ -1476,14 +1592,15 @@ window.MathJax = {
     function render(step) {
       const R = getCurrentR();
       applyOutlierColors(viz, R);
-      const total = 1 + R.globalRewireOps.length;
+      const ops = effectiveGlobalRewireOps(R);
+      const total = 1 + ops.length;
       document.getElementById("g-bgrewire-total").textContent = String(total - 1);
       document.getElementById("g-bgrewire-cur").textContent = String(step);
       const labelEl = document.getElementById("g-bgrewire-stage");
       const descEl = document.getElementById("g-bgrewire-desc");
       clearDimPick(viz);
       const backdrop = [];
-      const stateC = clusterStateAfter(R, R.clusterRewireOps.length);
+      const stateC = clusterStateAfter(R, effectiveClusterRewireOps(R).length);
       let i = 0;
       stateC.forEach(e => {
         backdrop.push({
@@ -1494,18 +1611,18 @@ window.MathJax = {
       });
       viz.setEdges(backdrop);
 
-      const op = step > 0 ? R.globalRewireOps[step - 1] : null;
+      const op = step > 0 ? ops[step - 1] : null;
       if (step === 0) {
         labelEl.textContent = "pre-rewire";
         descEl.innerHTML = '<span class="st">pre-rewire</span> &middot; ' +
-          R.globalRewireOps.length + " bg-pool collision op" +
-          (R.globalRewireOps.length === 1 ? "" : "s") +
+          ops.length + " bg-pool collision op" +
+          (ops.length === 1 ? "" : "s") +
           " ahead. Red-dashed = self-loop, parallel, or cluster duplicate.";
       } else {
         const placedNames = [];
         if (op.placedNewp1 && op.newp1) placedNames.push("<code>" + op.newp1.join("&ndash;") + "</code>");
         if (op.placedNewp2 && op.newp2) placedNames.push("<code>" + op.newp2.join("&ndash;") + "</code>");
-        labelEl.textContent = "bg rewire op " + step + " / " + R.globalRewireOps.length;
+        labelEl.textContent = "bg rewire op " + step + " / " + ops.length;
         descEl.innerHTML = '<span class="st">op ' + step + '</span> &middot; ' +
           (op.success
             ? "Cut <code>" + op.p1.join("&ndash;") + "</code> + <code>" + op.p2.join("&ndash;") + "</code>; place " + placedNames.join(" + ") + "."
@@ -1538,18 +1655,71 @@ window.MathJax = {
       spokes.playMany(removes, adds, () => {});
       lastStep = step;
     }
-    function totalForCurrent() { return 1 + getCurrentR().globalRewireOps.length; }
+    function totalForCurrent() { return 1 + effectiveGlobalRewireOps(getCurrentR()).length; }
+    function globalPrePairsTuples(R) {
+      return effectiveBgPre(R).map(e => [e.u, e.v, !!e.loop, !!e.multi, !!e.crossDup]);
+    }
+    function clusterEdgeEkeys(R) {
+      const s = new Set();
+      R.clusterPost.forEach(e => {
+        const a = e.u < e.v ? e.u : e.v;
+        const b = e.u < e.v ? e.v : e.u;
+        s.add(a + "-" + b);
+      });
+      return s;
+    }
+    function rerollGlobalRewireRange(startG, endG) {
+      const R = getCurrentR();
+      const baseOps = effectiveGlobalRewireOps(R);
+      const lo = Math.max(0, startG);
+      const hi = Math.min(endG, baseOps.length);
+      if (lo >= hi) return;
+      rewireRerollNonce += 1;
+      const opsBefore = baseOps.slice(0, lo);
+      const fresh = seededRng(STUB_SEED * 7919 + rewireRerollNonce * 41);
+      const newOps = ABCDKernel.replayGlobalRewireFromOps(
+        globalPrePairsTuples(R), clusterEdgeEkeys(R), opsBefore, fresh
+      );
+      globalRewireOpsOverride = opsBefore.concat(newOps);
+    }
     ctl = NETGEN.wireWalker({
       prefix: "g-bgrewire",
       total: totalForCurrent(),
       onRender: render,
       getLocked: () => lockBusy,
-      onRandStep: () => { if (!lockBusy) rerollStub(); },
-      onRandAll: () => { if (lockBusy) return;
-        rerollAll(); },
+      // RandStep: re-spin ops [idx-1..end].
+      onRandStep: idx => {
+        if (lockBusy || idx <= 0) return;
+        rerollGlobalRewireRange(idx - 1, effectiveGlobalRewireOps(getCurrentR()).length);
+        ctl.reconfigureKeep(totalForCurrent(), Math.min(idx, totalForCurrent() - 1));
+      },
+      // RandAll: re-spin every op [0..end].
+      onRandAll: idx => {
+        if (lockBusy || idx <= 0) return;
+        rerollGlobalRewireRange(0, effectiveGlobalRewireOps(getCurrentR()).length);
+        ctl.reconfigureKeep(totalForCurrent(), Math.min(idx, totalForCurrent() - 1));
+      },
+      randStepDisabledAt: (idx) => idx >= totalForCurrent() - 1,
     });
-    function reconfig() { ctl.reconfigureKeep(totalForCurrent(), ctl.idx); }
+    function reconfig() {
+      globalRewireOpsOverride = null;
+      ctl.reconfigureKeep(totalForCurrent(), ctl.idx);
+    }
+    // bg-pair reroll changes pre-state; regen the global op trace from
+    // the effective bgPre with a fresh rng. Uses empty opsBefore so the
+    // entire trace draws fresh against the new pre-pairs.
+    function regenFromBgPre() {
+      rewireRerollNonce += 1;
+      const R = getCurrentR();
+      const fresh = seededRng(STUB_SEED * 7919 + rewireRerollNonce * 41);
+      globalRewireOpsOverride = ABCDKernel.replayGlobalRewireFromOps(
+        globalPrePairsTuples(R), clusterEdgeEkeys(R), [], fresh
+      );
+      const newTotal = totalForCurrent();
+      ctl.reconfigureKeep(newTotal, Math.min(ctl.idx, newTotal - 1));
+    }
     onStubChanged.push(reconfig);
+    onBgPairChanged.push(regenFromBgPre);
     document.getElementById("xi-slider").addEventListener("input", reconfig);
   })();
 

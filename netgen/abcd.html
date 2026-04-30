@@ -798,6 +798,16 @@ window.MathJax = {
     overrideEpoch++;
     onClusterPreChanged.forEach(fn => fn());
   }
+  // Module-scoped bg-pair override + listener bus. Hoisted out of the
+  // bg-pair IIFE so bg-rewire can read the effective bgPre and regen
+  // its global-rewire ops when bg-pair rerolls. Each entry replaces
+  // R.bgPre[i] verbatim (same {u,v,loop,multi,crossDup} shape).
+  let bgPairOverride = {};
+  const onBgPairChanged = [];
+  function fireBgPairChanged() { onBgPairChanged.forEach(fn => fn()); }
+  function effectiveBgPre(R) {
+    return R.bgPre.map((e, i) => bgPairOverride[i] || e);
+  }
   function buildRealization(u_seed, stub_seed, xi) {
     const key = u_seed + "|" + stub_seed + "|" + xi.toFixed(4) + "|" + overrideEpoch;
     if (REAL_CACHE.has(key)) return REAL_CACHE.get(key);
@@ -1121,6 +1131,30 @@ window.MathJax = {
       return { snap: false };
     }
 
+    // Full cluster-pair reseed: drop overrides, then redraw every cluster
+    // bucket from position 0. Single fireClusterPreChanged at the end so
+    // downstream listeners re-derive once instead of per-bucket.
+    function rollAllPairs() {
+      pairOverride = {};
+      const xi = SYNTHETIC_XI;
+      const Rfresh = buildRealization(U_SEED, STUB_SEED, xi);
+      Rfresh.clusterStubLayouts.forEach(lay => {
+        const newTail = NETGEN.stubPoolReseed({
+          layout: lay, prefix: [],
+          classify: (a, b, ctx) => {
+            const loop = (a === b);
+            const k = keyOf(a, b);
+            const multi = !loop && ctx.localEdges.has(k);
+            if (!loop && !multi) ctx.add(k);
+            return { u: a, v: b, cluster: lay.cname, loop, multi };
+          },
+        });
+        newTail.forEach((np, i) => { pairOverride[lay.startInClusterPre + i] = np; });
+      });
+      fireClusterPreChanged();
+      spokes.markReroll();
+    }
+
     function render(step, snap) {
       const xi = SYNTHETIC_XI;
       const R = buildRealization(U_SEED, STUB_SEED, xi);
@@ -1198,13 +1232,12 @@ window.MathJax = {
         const R = buildRealization(U_SEED, STUB_SEED, xi);
         return rollPair(R, idx - 1).snap;
       },
-      // random all: reseed stubs so the cluster pairing redraws from
-      // scratch (new multiset, not just permuted positions). Snap is
-      // handled by stepController's withSnap on the rand-all click;
-      // every render fired during the listener cascade gets snap=true.
+      // random all: in-stage full reseed of every cluster bucket, no
+      // U_SEED / STUB_SEED bump. Snap handled by stepController's
+      // withSnap on the rand-all click.
       onRandAll: idx => {
         if (idx <= 0) return;
-        rerollAll();
+        rollAllPairs();
       },
     });
     function reTotalReset() {
@@ -1531,24 +1564,17 @@ window.MathJax = {
         lastStep = idx;
         return "skip";
       },
-      // Random All re-spins the global op range [0..idx-1] across every
-      // cluster touched by that prefix; ops at positions >= idx stay
-      // verbatim. At drop-stale (idx == opsCount + 1) the prefix covers
-      // every op, so every touched cluster re-rolls from scratch — the
-      // new total may shrink or grow as success/fail counts shift, so
-      // when the cursor was parked at the last step we follow it to the
-      // new last step instead of clamping mid-trace. Cluster-pairing is
-      // untouched (no U_SEED / STUB_SEED bump). Same
-      // `rerollClusterRewireRange` driver as Rand-step, so:
-      //   ToEnd → RandAll[0..end]  ≡  Next → RandStep[0..end]
-      // under the same nonce.
+      // Random All re-spins every op [0..end] across every cluster.
+      // Cluster-pairing untouched (no U_SEED / STUB_SEED bump). New
+      // trace length may shrink or grow as success/fail counts shift;
+      // cursor clamps to the new last step if it sat past it.
       onRandAll: idx => {
         if (idx <= 0) return;
-        const wasAtEnd = (idx === ctl.total - 1);
-        rerollClusterRewireRange(0, idx);
+        const xi = SYNTHETIC_XI;
+        const R = buildRealization(U_SEED, STUB_SEED, xi);
+        rerollClusterRewireRange(0, effectiveOps(R).length);
         const newTotal = totalForCurrent();
-        const newIdx = wasAtEnd ? newTotal - 1 : idx;
-        ctl.reconfigureKeep(newTotal, newIdx);
+        ctl.reconfigureKeep(newTotal, Math.min(idx, newTotal - 1));
       },
       randStepDisabledAt: (idx) => idx >= totalForCurrent() - 1,
     });
@@ -1577,8 +1603,7 @@ window.MathJax = {
     }
     const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setRandLock });
     function totalFromR(R) { return 1 + R.bgPre.length; }
-    let bgOverride = {};
-    function effectiveBg(R, i) { return bgOverride[i] || R.bgPre[i]; }
+    function effectiveBg(R, i) { return bgPairOverride[i] || R.bgPre[i]; }
     function rollBgPair(R, idx) {
       const lay = R.bgStubLayout;
       if (idx >= lay.numPairs) return { snap: false };
@@ -1596,8 +1621,9 @@ window.MathJax = {
           return { u: a, v: b, loop, multi, crossDup };
         },
       });
-      newTail.forEach((np, i) => { bgOverride[idx + i] = np; });
+      newTail.forEach((np, i) => { bgPairOverride[idx + i] = np; });
       spokes.markReroll();
+      fireBgPairChanged();
       return { snap: false };
     }
     function rollBgPrefix(R, kIncl) {
@@ -1607,7 +1633,8 @@ window.MathJax = {
         const r = Math.floor(Math.random() * (k + 1));
         [vals[k], vals[r]] = [vals[r], vals[k]];
       }
-      for (let i = 0; i <= kIncl; i++) bgOverride[i] = vals[i];
+      for (let i = 0; i <= kIncl; i++) bgPairOverride[i] = vals[i];
+      fireBgPairChanged();
     }
 
     function render(step, snap) {
@@ -1698,18 +1725,20 @@ window.MathJax = {
         if (idx <= 0) return;
         const xi = SYNTHETIC_XI;
         const R = buildRealization(U_SEED, STUB_SEED, xi);
-        bgOverride = {};
+        bgPairOverride = {};
         rollBgPair(R, 0);
         ctl.reconfigureKeep(totalFromR(R), idx);
       },
     });
     function reTotalReset() {
-      bgOverride = {};
+      bgPairOverride = {};
+      fireBgPairChanged();
       const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
       ctl.reconfigure(totalFromR(R));
     }
     function reTotalKeep() {
-      bgOverride = {};
+      bgPairOverride = {};
+      fireBgPairChanged();
       const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
       ctl.reconfigureKeep(totalFromR(R), ctl.idx);
     }
@@ -1745,9 +1774,11 @@ window.MathJax = {
     let rewireRerollNonce = 0;
     function effectiveOps(R) { return opsOverride || R.globalRewireOps; }
     // [[u, v, loop, multi, crossDup], ...] in page-node-id space, the
-    // shape ABCDKernel.replayGlobalRewireFromOps consumes.
+    // shape ABCDKernel.replayGlobalRewireFromOps consumes. Reads the
+    // bg-pair stage's effective pre-state so a bg-pair reroll feeds
+    // into bg-rewire's initial state and op trace.
     function globalPrePairsTuples(R) {
-      return R.bgPre.map(e => [e.u, e.v, !!e.loop, !!e.multi, !!e.crossDup]);
+      return effectiveBgPre(R).map(e => [e.u, e.v, !!e.loop, !!e.multi, !!e.crossDup]);
     }
     // ekey-formatted (`${min}-${max}`) cluster-post key set for the
     // kernel replay's crossDup check. Page's keyOf uses `|`, kernel
@@ -1784,7 +1815,7 @@ window.MathJax = {
     function stateAtStep(R, k) {
       const ops = effectiveOps(R);
       const map = new Map();
-      R.bgPre.forEach(e => {
+      effectiveBgPre(R).forEach(e => {
         const k2 = keyOf(e.u, e.v);
         if (!map.has(k2)) {
           map.set(k2, { u: e.u, v: e.v, bad: e.loop || e.multi || e.crossDup });
@@ -1994,9 +2025,25 @@ window.MathJax = {
       opsOverride = null;
       ctl.reconfigureKeep(totalForCurrent(), ctl.idx);
     }
+    // bg-pair reroll changes the bg pre-state; the kernel-recorded
+    // R.globalRewireOps no longer match the new pre-pairs, so regen
+    // the op trace from the effective bgPre with a fresh rng. Cursor
+    // clamps if the new trace is shorter.
+    function regenFromBgPre() {
+      rewireRerollNonce += 1;
+      const xi = SYNTHETIC_XI;
+      const R = buildRealization(U_SEED, STUB_SEED, xi);
+      const fresh = seededRng(STUB_SEED * 7919 + rewireRerollNonce * 41);
+      opsOverride = ABCDKernel.replayGlobalRewireFromOps(
+        globalPrePairsTuples(R), clusterEdgeEkeys(R), [], fresh
+      );
+      const newTotal = totalForCurrent();
+      ctl.reconfigureKeep(newTotal, Math.min(ctl.idx, newTotal - 1));
+    }
     onStubChanged.push(reconfigReset);
     onUChanged.push(reconfigReset);
     onClusterPreChanged.push(reconfigKeep);
+    onBgPairChanged.push(regenFromBgPre);
   })();
 
 
