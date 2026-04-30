@@ -857,6 +857,10 @@ function scrubSlider(opts) {
   fire();
 }
 
+// onRandStep can return this sentinel to tell stepController not to
+// render — handler already painted (e.g. drove playMany directly).
+const SKIP_SENTINEL = "skip";
+
 // ── Step-controller ──────────────────────────────────────────
 // opts (all optional unless noted):
 //   total            (required) number of steps including step 0
@@ -916,13 +920,13 @@ function stepController(opts) {
   randStepBtn && randStepBtn.addEventListener("click", () => {
     if (isLocked()) return;
     // onRandStep return values:
-    //   "skip"    — handler ran its own render (e.g. drove an
-    //               animated swap directly via spokes.playMany);
-    //               controller stays out of the render path.
-    //   truthy    — snap-render (jump, no animation).
-    //   falsy     — animated render (default).
+    //   NETGEN.SKIP  — handler ran its own render (e.g. drove an
+    //                  animated swap directly via spokes.playMany);
+    //                  controller stays out of the render path.
+    //   truthy       — snap-render (jump, no animation).
+    //   falsy        — animated render (default).
     const ret = onRandStep ? onRandStep(idx) : false;
-    if (ret === "skip") return;
+    if (ret === SKIP_SENTINEL) return;
     if (ret) withSnap(render);
     else render();
   });
@@ -1290,8 +1294,7 @@ function wireWalker(opts) {
 
 // ── Reroll walker ─────────────────────────────────────────────
 // Higher-level wrapper around wireWalker. Adds three behaviours
-// every reroll-bearing walker needs (per nPSO + SBM as the gold
-// standard, plus was-at-end cursor tracking shipped on abcd):
+// every reroll-bearing walker needs:
 //
 //   1. RandStep[idx-1..end] / RandAll[0..end] semantics — driver
 //      doesn't enforce a kernel contract; page supplies handlers
@@ -1457,22 +1460,29 @@ function makeRewireRender(opts) {
   const totalEl = document.getElementById(prefix + "-total");
   const curEl = document.getElementById(prefix + "-cur");
   const noopFn = function () {};
-  return function render(step) {
+  return function render(step, snap) {
     const R = getR();
     const ops = opsOf(R);
     const total = 2 + ops.length;
     if (totalEl) totalEl.textContent = String(total - 1);
     if (curEl) curEl.textContent = String(step);
     if (viz && viz.setEdges) viz.setEdges([]);
-    paintLabelDesc(step, ops, step > ops.length);
+    const isDropStale = step > ops.length;
+    paintLabelDesc(step, ops, isDropStale);
 
     const lastStep = getLastStep();
-    const beforeList = stateAtStep(R, lastStep);
     const afterList  = stateAtStep(R, step);
     const byNode = byNodeFromList(afterList);
     const backdrop = backdropOf ? backdropOf(R) : [];
 
-    if (step !== lastStep + 1 && step !== lastStep - 1) {
+    // Snap path: non-adjacent step OR caller flagged snap (RandAll
+    // / ToEnd / ToStart wrap onRender in withSnap). RandAll into
+    // drop-stale animated would drift via id-keyed simplify against
+    // a state.placed that no longer matches — snap rebuilds
+    // state.placed wholesale from afterList. Adjacent Next/Prev
+    // (snap=false) keeps the dedup animation.
+    const adjacent = step === lastStep + 1 || step === lastStep - 1;
+    if (!adjacent || snap) {
       spokes.snapToState({
         byNode,
         placed: backdrop.concat(afterList.map(placedEntry)),
@@ -1482,6 +1492,7 @@ function makeRewireRender(opts) {
       return;
     }
 
+    const beforeList = stateAtStep(R, lastStep);
     const beforeIds = new Set(beforeList.map(function (e) { return e.id; }));
     const afterIds  = new Set(afterList.map(function (e) { return e.id; }));
     const removes = beforeList.filter(function (e) { return !afterIds.has(e.id); }).map(placedEntry);
@@ -1520,6 +1531,160 @@ function clusterPostBackdrop(R, opts) {
   });
 }
 
+// ── Cluster-rewire / bg-rewire applyOp presets ───────────────
+// Both run kernel ops over a stateful edge list; cluster-rewire is
+// no-op on failure (kernel inner loop tries every candidate; if none
+// clears, p1 is requeued without cutting), bg-rewire always cuts
+// (when op has p2) and flags rejected newps as bad (recycle queue).
+//
+// abcdClusterRewireApplyOp: copies op.cluster onto pushed newp entries.
+// abcdBgRewireApplyOp: bad iff !op.placedNewp{1,2}; optional `tagFn(np)`
+// adds extra fields (e.g. ABCD+o's isOO/isCO from R.outliers).
+function abcdClusterRewireApplyOp(list, op, oi, idPrefix) {
+  if (!op || !op.success) return;
+  const cuts = op.p2 ? [op.p1, op.p2] : [op.p1];
+  const picks = spokeLayerHandle().pickCutsByEndpoints(list, cuts);
+  picks.forEach(function (p) {
+    const idx = list.indexOf(p);
+    if (idx >= 0) list.splice(idx, 1);
+  });
+  if (op.newp1) list.push({
+    u: op.newp1[0], v: op.newp1[1], cluster: op.cluster,
+    bad: false, id: idPrefix + "-op" + oi + "-1",
+  });
+  if (op.newp2) list.push({
+    u: op.newp2[0], v: op.newp2[1], cluster: op.cluster,
+    bad: false, id: idPrefix + "-op" + oi + "-2",
+  });
+}
+function abcdBgRewireApplyOp(tagFn) {
+  return function (list, op, i, idPrefix) {
+    if (!op || !op.p2) return;
+    const picks = spokeLayerHandle().pickCutsByEndpoints(list, [op.p1, op.p2]);
+    picks.forEach(function (p) {
+      const idx = list.indexOf(p);
+      if (idx >= 0) list.splice(idx, 1);
+    });
+    function push(np, placed, suffix) {
+      if (!np) return;
+      const entry = {
+        u: np[0], v: np[1],
+        bad: !placed, id: idPrefix + "-op" + i + "-" + suffix,
+      };
+      if (tagFn) Object.assign(entry, tagFn(np));
+      list.push(entry);
+    }
+    push(op.newp1, op.placedNewp1, "1");
+    push(op.newp2, op.placedNewp2, "2");
+  };
+}
+// Lazy spoke-layer accessor: shared.js loads before js/spoke_layer.js,
+// so referencing NETGEN.spokeLayer at module-eval time is undefined.
+// Defer resolution to call time when both modules are loaded.
+function spokeLayerHandle() { return (typeof window !== "undefined" ? window : global).NETGEN.spokeLayer; }
+
+// ── ABCD-kernel adapters ──────────────────────────────────────
+// Helpers shared by abcd / abcd+o for ABCDKernel.replay* invocations.
+//
+// clusterPrePairsByName: filter R.clusterPre to one cluster, flag
+// loop / multi (recompute multi against per-cluster seenKey).
+function clusterPrePairsByName(R, cname) {
+  const out = [];
+  const seenKey = new Set();
+  R.clusterPre.forEach(function (e) {
+    if (e.cluster !== cname) return;
+    const key = keyOf(e.u, e.v);
+    const isLoop = !!e.loop;
+    const isMulti = !!e.multi || (!isLoop && seenKey.has(key));
+    if (!isLoop && !isMulti) seenKey.add(key);
+    out.push({ u: e.u, v: e.v, bad: isLoop || isMulti });
+  });
+  return out;
+}
+// globalPrePairsTuples: shape effectiveBgPre into the [u,v,loop,multi,
+// crossDup] tuple ABCDKernel.replayGlobalRewireFromOps expects.
+function globalPrePairsTuples(bgPre) {
+  return bgPre.map(function (e) {
+    return [e.u, e.v, !!e.loop, !!e.multi, !!e.crossDup];
+  });
+}
+// clusterEdgeEkeys: cluster-post key set in the kernel's `${min}-${max}`
+// format. Page's keyOf uses `|`, kernel uses `-`; this matches kernel
+// so its `Set.has` succeeds.
+function clusterEdgeEkeys(clusterPost) {
+  const s = new Set();
+  clusterPost.forEach(function (e) {
+    const a = e.u < e.v ? e.u : e.v;
+    const b = e.u < e.v ? e.v : e.u;
+    s.add(a + "-" + b);
+  });
+  return s;
+}
+
+// ── Cluster-rewire range reroller ─────────────────────────────
+// Re-spin the global op range [startG..endG-1] across every cluster
+// touched by that range. Ops at positions < startG stay verbatim
+// (opsBefore prefix); ops at positions >= startG draw fresh from a
+// per-cluster RNG. clusterSeed orders fresh RNG per cluster by first-
+// touch global op position so byte-identical overrides land regardless
+// of walker entry (RandAll[1..k] vs RandStep[k..end] over same span).
+//
+// storeShape:
+//   "byCluster" — return object keyed by cluster name (abcd's
+//     opsOverride; consumed by an effectiveOps that merges per-cluster).
+//   "flat"      — return flat array preserving baseOps' first-touch
+//     cluster visit order (abcd+o's clusterRewireOpsOverride; consumed
+//     by an effectiveOps that returns the array verbatim).
+function rerollClusterRewireRange(opts) {
+  const baseOps = opts.baseOps;
+  const lo = Math.max(0, opts.startG);
+  const hi = Math.min(opts.endG, baseOps.length);
+  if (lo >= hi) return null;
+  const opsBeforeByCluster = {};
+  const clusterOrder = [];
+  const seenInRange = new Set();
+  for (let g = 0; g < hi; g++) {
+    const c = baseOps[g].cluster;
+    if (g < lo) {
+      (opsBeforeByCluster[c] = opsBeforeByCluster[c] || []).push(baseOps[g]);
+    } else if (!seenInRange.has(c)) {
+      seenInRange.add(c);
+      clusterOrder.push(c);
+    }
+  }
+  const next = Object.assign({}, opts.currentByCluster || {});
+  if (opts.storeShape === "flat") {
+    const baseByCluster = {};
+    baseOps.forEach(function (o) {
+      (baseByCluster[o.cluster] = baseByCluster[o.cluster] || []).push(o);
+    });
+    Object.keys(baseByCluster).forEach(function (c) {
+      if (!seenInRange.has(c)) next[c] = baseByCluster[c].slice();
+    });
+  }
+  clusterOrder.forEach(function (cname, clusterSeed) {
+    const opsBefore = opsBeforeByCluster[cname] || [];
+    const prePairs = opts.prePairsByName(opts.R, cname);
+    const fresh = opts.rngFor(clusterSeed);
+    const newOps = opts.replayFromOps(prePairs, opsBefore, fresh);
+    newOps.forEach(function (o) { o.cluster = cname; });
+    next[cname] = opsBefore.concat(newOps);
+  });
+  if (opts.storeShape === "flat") {
+    const visitOrder = [];
+    const visited = new Set();
+    baseOps.forEach(function (o) {
+      if (!visited.has(o.cluster)) { visited.add(o.cluster); visitOrder.push(o.cluster); }
+    });
+    const flat = [];
+    visitOrder.forEach(function (c) {
+      (next[c] || []).forEach(function (o) { flat.push(o); });
+    });
+    return flat;
+  }
+  return next;
+}
+
 // ── Cross-figure cursor follow rule ──────────────────────────
 // Convention: when an upstream figure rerolls, downstream walkers
 // reset to step 0 — UNLESS they were parked at the last step, in
@@ -1528,7 +1693,9 @@ function clusterPostBackdrop(R, opts) {
 // each downstream stage, while preserving "settled" views.
 function followCursor(ctl, newTotal) {
   const wasAtEnd = ctl.idx >= ctl.total - 1;
-  ctl.reconfigureKeep(newTotal, wasAtEnd ? newTotal - 1 : 0);
+  const target = wasAtEnd ? newTotal - 1 : 0;
+  if (newTotal === ctl.total && target === ctl.idx) return;
+  ctl.reconfigureKeep(newTotal, target);
 }
 
 // ── Page event bus ───────────────────────────────────────────
@@ -1865,7 +2032,8 @@ global.NETGEN = {
   C1, C2, C3, OUT, INTRA, INTER, OUT_EDGES,
   CORE_NODES, CORE_EDGES, topK, cliqueEdges,
   COLORS, CY, VIZ,
-  makeTooltip, scrubSlider, stepController, walkerRow, wireWalker, rerollWalker, makePageBus, makeRewireStateAtStep, makeRewireRender, clusterPostBackdrop, followCursor, snapOrSync, singletonOpener, defaultSingletonClusters, bindPanelToggle, mountGxPanel, walkerMarkPlaced, walkerMarkJust, reseedSuffix, stubPoolReseed, keyOf, toggle,
+  makeTooltip, scrubSlider, stepController, walkerRow, wireWalker, rerollWalker, makePageBus, makeRewireStateAtStep, makeRewireRender, clusterPostBackdrop, followCursor, clusterPrePairsByName, globalPrePairsTuples, clusterEdgeEkeys, rerollClusterRewireRange, abcdClusterRewireApplyOp, abcdBgRewireApplyOp, snapOrSync, singletonOpener, defaultSingletonClusters, bindPanelToggle, mountGxPanel, walkerMarkPlaced, walkerMarkJust, reseedSuffix, stubPoolReseed, keyOf, toggle,
+  SKIP: SKIP_SENTINEL,
   linksRow, kinSection,
   fitViewBoxAttr,
   retypeset,

@@ -599,7 +599,6 @@ window.MathJax = {
   let bgPairOverride = {};
   let clusterRewireOpsOverride = null;
   let globalRewireOpsOverride = null;
-  let rewireRerollNonce = 0;
   const onClusterPreChanged = [];
   const onClusterRewireChanged = [];
   const onBgPairChanged = [];
@@ -1341,23 +1340,7 @@ window.MathJax = {
       opsOf: R => effectiveClusterRewireOps(R),
       idPrefix: "cr",
       entryDecorator: (entry, e) => Object.assign(entry, { cluster: e.cluster }),
-      applyOp: (list, op, oi, idPrefix) => {
-        if (!op || !op.success) return;
-        const cuts = op.p2 ? [op.p1, op.p2] : [op.p1];
-        const picks = NETGEN.spokeLayer.pickCutsByEndpoints(list, cuts);
-        picks.forEach(p => {
-          const idx = list.indexOf(p);
-          if (idx >= 0) list.splice(idx, 1);
-        });
-        if (op.newp1) list.push({
-          u: op.newp1[0], v: op.newp1[1], cluster: op.cluster,
-          bad: false, id: idPrefix + "-op" + oi + "-1",
-        });
-        if (op.newp2) list.push({
-          u: op.newp2[0], v: op.newp2[1], cluster: op.cluster,
-          bad: false, id: idPrefix + "-op" + oi + "-2",
-        });
-      },
+      applyOp: NETGEN.abcdClusterRewireApplyOp,
     });
     function paintLabelDesc(step, ops, isDropStale) {
       const R = getCurrentR();
@@ -1397,60 +1380,19 @@ window.MathJax = {
       setLastStep: (s) => { lastStep = s; },
     });
     function totalForCurrent() { return 2 + effectiveClusterRewireOps(getCurrentR()).length; }
-    function clusterPrePairsByName(R, cname) {
-      const out = [];
-      const seenKey = new Set();
-      R.clusterPre.forEach(e => {
-        if (e.cluster !== cname) return;
-        const key = keyOf(e.u, e.v);
-        const isLoop = e.loop;
-        const isMulti = e.multi || (!isLoop && seenKey.has(key));
-        if (!isLoop && !isMulti) seenKey.add(key);
-        out.push({ u: e.u, v: e.v, bad: isLoop || isMulti });
-      });
-      return out;
-    }
+    let crewireRerollNonce = 0;
     function rerollClusterRewireRange(startG, endG) {
       const R = getCurrentR();
-      const baseOps = effectiveClusterRewireOps(R);
-      const lo = Math.max(0, startG);
-      const hi = Math.min(endG, baseOps.length);
-      if (lo >= hi) return;
-      rewireRerollNonce += 1;
-      const opsBeforeByCluster = {};
-      const clusterOrder = [];
-      const seenInRange = new Set();
-      for (let g = 0; g < hi; g++) {
-        const c = baseOps[g].cluster;
-        if (g < lo) {
-          (opsBeforeByCluster[c] = opsBeforeByCluster[c] || []).push(baseOps[g]);
-        } else if (!seenInRange.has(c)) {
-          seenInRange.add(c);
-          clusterOrder.push(c);
-        }
-      }
-      const next = {};
-      const allClusters = new Set();
-      baseOps.forEach(o => allClusters.add(o.cluster));
-      const baseByCluster = {};
-      baseOps.forEach(o => { (baseByCluster[o.cluster] = baseByCluster[o.cluster] || []).push(o); });
-      allClusters.forEach(c => { if (!seenInRange.has(c)) next[c] = (baseByCluster[c] || []).slice(); });
-      clusterOrder.forEach((cname, clusterSeed) => {
-        const opsBefore = opsBeforeByCluster[cname] || [];
-        const prePairs = clusterPrePairsByName(R, cname);
-        const fresh = seededRng(STUB_SEED * 9173 + rewireRerollNonce * 31 + clusterSeed * 113);
-        const newOps = ABCDKernel.replayClusterRewireFromOps(prePairs, opsBefore, fresh);
-        newOps.forEach(o => { o.cluster = cname; });
-        next[cname] = opsBefore.concat(newOps);
+      crewireRerollNonce += 1;
+      const flat = NETGEN.rerollClusterRewireRange({
+        R, baseOps: effectiveClusterRewireOps(R), startG, endG,
+        prePairsByName: NETGEN.clusterPrePairsByName,
+        replayFromOps: ABCDKernel.replayClusterRewireFromOps,
+        rngFor: clusterSeed =>
+          seededRng(STUB_SEED * 9173 + crewireRerollNonce * 31 + clusterSeed * 113),
+        storeShape: "flat",
       });
-      // Flatten back to a global op array preserving the original cluster
-      // visit order (first-touch order across baseOps).
-      const visitOrder = [];
-      const visited = new Set();
-      baseOps.forEach(o => { if (!visited.has(o.cluster)) { visited.add(o.cluster); visitOrder.push(o.cluster); } });
-      const flat = [];
-      visitOrder.forEach(c => (next[c] || []).forEach(o => flat.push(o)));
-      clusterRewireOpsOverride = flat;
+      if (flat) clusterRewireOpsOverride = flat;
     }
     ctl = NETGEN.rerollWalker({
       prefix: "g-crewire",
@@ -1636,38 +1578,15 @@ window.MathJax = {
       opsOf: R => effectiveGlobalRewireOps(R),
       idPrefix: "br",
       entryDecorator: (entry, e) => Object.assign(entry, { isOO: !!e.isOO, isCO: !!e.isCO }),
-      applyOp: (list, op, i, idPrefix) => {
-        if (!op || !op.p2) return;
-        const cuts = [op.p1, op.p2];
-        const picks = NETGEN.spokeLayer.pickCutsByEndpoints(list, cuts);
-        picks.forEach(p => {
-          const idx = list.indexOf(p);
-          if (idx >= 0) list.splice(idx, 1);
-        });
+      applyOp: NETGEN.abcdBgRewireApplyOp(np => {
+        // R.outliers latched at applyOp call time so a fresh outlier
+        // pick re-classifies newp entries in the next render.
         const outliers = getCurrentR().outliers;
-        function tag(np) {
-          return {
-            isOO: outliers.has(np[0]) && outliers.has(np[1]),
-            isCO: outliers.has(np[0]) !== outliers.has(np[1]),
-          };
-        }
-        if (op.newp1) {
-          const t = tag(op.newp1);
-          list.push({
-            u: op.newp1[0], v: op.newp1[1],
-            isOO: t.isOO, isCO: t.isCO,
-            bad: !op.placedNewp1, id: idPrefix + "-op" + i + "-1",
-          });
-        }
-        if (op.newp2) {
-          const t = tag(op.newp2);
-          list.push({
-            u: op.newp2[0], v: op.newp2[1],
-            isOO: t.isOO, isCO: t.isCO,
-            bad: !op.placedNewp2, id: idPrefix + "-op" + i + "-2",
-          });
-        }
-      },
+        return {
+          isOO: outliers.has(np[0]) && outliers.has(np[1]),
+          isCO: outliers.has(np[0]) !== outliers.has(np[1]),
+        };
+      }),
     });
     const placedEntry = (e) => ({
       u: e.u, v: e.v, id: e.id, bad: !!e.bad,
@@ -1731,29 +1650,20 @@ window.MathJax = {
       setLastStep: (s) => { lastStep = s; },
     });
     function totalForCurrent() { return 2 + effectiveGlobalRewireOps(getCurrentR()).length; }
-    function globalPrePairsTuples(R) {
-      return effectiveBgPre(R).map(e => [e.u, e.v, !!e.loop, !!e.multi, !!e.crossDup]);
-    }
-    function clusterEdgeEkeys(R) {
-      const s = new Set();
-      R.clusterPost.forEach(e => {
-        const a = e.u < e.v ? e.u : e.v;
-        const b = e.u < e.v ? e.v : e.u;
-        s.add(a + "-" + b);
-      });
-      return s;
-    }
+    let bgrewireRerollNonce = 0;
     function rerollGlobalRewireRange(startG, endG) {
       const R = getCurrentR();
       const baseOps = effectiveGlobalRewireOps(R);
       const lo = Math.max(0, startG);
       const hi = Math.min(endG, baseOps.length);
       if (lo >= hi) return;
-      rewireRerollNonce += 1;
+      bgrewireRerollNonce += 1;
       const opsBefore = baseOps.slice(0, lo);
-      const fresh = seededRng(STUB_SEED * 7919 + rewireRerollNonce * 41);
+      const fresh = seededRng(STUB_SEED * 7919 + bgrewireRerollNonce * 41);
       const newOps = ABCDKernel.replayGlobalRewireFromOps(
-        globalPrePairsTuples(R), clusterEdgeEkeys(R), opsBefore, fresh
+        NETGEN.globalPrePairsTuples(effectiveBgPre(R)),
+        NETGEN.clusterEdgeEkeys(R.clusterPost),
+        opsBefore, fresh,
       );
       globalRewireOpsOverride = opsBefore.concat(newOps);
     }
@@ -1786,11 +1696,13 @@ window.MathJax = {
     // the effective bgPre with a fresh rng. Uses empty opsBefore so the
     // entire trace draws fresh against the new pre-pairs.
     function regenFromBgPre() {
-      rewireRerollNonce += 1;
+      bgrewireRerollNonce += 1;
       const R = getCurrentR();
-      const fresh = seededRng(STUB_SEED * 7919 + rewireRerollNonce * 41);
+      const fresh = seededRng(STUB_SEED * 7919 + bgrewireRerollNonce * 41);
       globalRewireOpsOverride = ABCDKernel.replayGlobalRewireFromOps(
-        globalPrePairsTuples(R), clusterEdgeEkeys(R), [], fresh
+        NETGEN.globalPrePairsTuples(effectiveBgPre(R)),
+        NETGEN.clusterEdgeEkeys(R.clusterPost),
+        [], fresh,
       );
       NETGEN.followCursor(ctl, totalForCurrent());
     }

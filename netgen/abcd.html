@@ -1268,13 +1268,8 @@ window.MathJax = {
 
     const xi0 = SYNTHETIC_XI;
     const R0 = buildRealization(U_SEED, STUB_SEED, xi0);
-    // random step: swap the active pair with another same-cluster
-    // pair. rollPair prefers future positions so the placed prefix
-    // stays intact under the animated path; when only a past swap is
-    // available it returns snap=true so the controller renders a jump
-    // instead of an animated rewind+forward.
-    // random all: in-stage full reseed of every cluster bucket, no
-    // U_SEED / STUB_SEED bump. Driver wraps in withSnap.
+    // RandStep: swap the active pair with another same-cluster pair.
+    // RandAll: in-stage full reseed of every cluster bucket.
     ctl = NETGEN.rerollWalker({
       prefix: "g-cpair",
       total: totalFromR(R0),
@@ -1358,60 +1353,20 @@ window.MathJax = {
       });
       return out;
     }
-    function clusterPrePairsByName(R, cname) {
-      const out = [];
-      const seenKey = new Set();
-      R.clusterPre.forEach(e => {
-        if (e.cluster !== cname) return;
-        const key = keyOf(e.u, e.v);
-        const isLoop = e.loop;
-        const isMulti = e.multi || (!isLoop && seenKey.has(key));
-        if (!isLoop && !isMulti) seenKey.add(key);
-        out.push({ u: e.u, v: e.v, bad: isLoop || isMulti });
-      });
-      return out;
-    }
     let rewireRerollNonce = 0;
-    // Re-roll the global step range [startG..endG-1] across every cluster
-    // whose ops fall in that range. For each touched cluster, ops at global
-    // positions < startG stay verbatim (opsBefore prefix) and ops at
-    // positions >= startG are replayed with a fresh per-cluster RNG.
-    // clusterSeed orders fresh RNG per cluster by first-touch global op
-    // position so the same range invoked from different walker entries
-    // (e.g. RandAll[1..k] vs RandStep[k..end] over the same span) produces
-    // byte-identical overrides under the same nonce.
     function rerollClusterRewireRange(startG, endG) {
-      const xi = SYNTHETIC_XI;
-      const R = buildRealization(U_SEED, STUB_SEED, xi);
-      const baseOps = effectiveOps(R);
-      const lo = Math.max(0, startG);
-      const hi = Math.min(endG, baseOps.length);
-      if (lo >= hi) return;
+      const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
       rewireRerollNonce += 1;
-      const opsBeforeByCluster = {};
-      const clusterOrder = [];
-      const seenInRange = new Set();
-      for (let g = 0; g < hi; g++) {
-        const c = baseOps[g].cluster;
-        if (g < lo) {
-          (opsBeforeByCluster[c] = opsBeforeByCluster[c] || []).push(baseOps[g]);
-        } else if (!seenInRange.has(c)) {
-          seenInRange.add(c);
-          clusterOrder.push(c);
-        }
-      }
-      const next = Object.assign({}, opsOverride || {});
-      clusterOrder.forEach((cname, clusterSeed) => {
-        const opsBefore = opsBeforeByCluster[cname] || [];
-        const prePairs = clusterPrePairsByName(R, cname);
-        const fresh = seededRng(
-          STUB_SEED * 9173 + rewireRerollNonce * 31 + clusterSeed * 113
-        );
-        const newOps = ABCDKernel.replayClusterRewireFromOps(prePairs, opsBefore, fresh);
-        newOps.forEach(o => { o.cluster = cname; });
-        next[cname] = opsBefore.concat(newOps);
+      const next = NETGEN.rerollClusterRewireRange({
+        R, baseOps: effectiveOps(R), startG, endG,
+        prePairsByName: NETGEN.clusterPrePairsByName,
+        replayFromOps: ABCDKernel.replayClusterRewireFromOps,
+        rngFor: clusterSeed =>
+          seededRng(STUB_SEED * 9173 + rewireRerollNonce * 31 + clusterSeed * 113),
+        currentByCluster: opsOverride,
+        storeShape: "byCluster",
       });
-      opsOverride = next;
+      if (next) opsOverride = next;
     }
     function sameXY(e, p) {
       return (e.u === p[0] && e.v === p[1]) || (e.u === p[1] && e.v === p[0]);
@@ -1429,23 +1384,7 @@ window.MathJax = {
       opsOf: R => effectiveOps(R),
       idPrefix: "cr",
       entryDecorator: (entry, e) => Object.assign(entry, { cluster: e.cluster }),
-      applyOp: (list, op, oi, idPrefix) => {
-        if (!op || !op.success) return;
-        const cuts = op.p2 ? [op.p1, op.p2] : [op.p1];
-        const picks = NETGEN.spokeLayer.pickCutsByEndpoints(list, cuts);
-        picks.forEach(p => {
-          const idx = list.indexOf(p);
-          if (idx >= 0) list.splice(idx, 1);
-        });
-        if (op.newp1) list.push({
-          u: op.newp1[0], v: op.newp1[1], cluster: op.cluster,
-          bad: false, id: idPrefix + "-op" + oi + "-1",
-        });
-        if (op.newp2) list.push({
-          u: op.newp2[0], v: op.newp2[1], cluster: op.cluster,
-          bad: false, id: idPrefix + "-op" + oi + "-2",
-        });
-      },
+      applyOp: NETGEN.abcdClusterRewireApplyOp,
     });
     crewireStateAtStep = stateAtStep;
     function paintLabelDesc(step, ops, isDropStale) {
@@ -1491,15 +1430,9 @@ window.MathJax = {
       const R = buildRealization(U_SEED, STUB_SEED, xi);
       return 2 + effectiveOps(R).length;
     }
-    // Rand-step re-spins the global op range [idx-1..end] across every
-    // cluster touched by that range. Cluster-pairing is untouched.
-    // Failed ops are re-rollable (recycle inner loop is RNG-bounded,
-    // so a re-roll may flip fail to success). Drives an animated swap
-    // via spokes.playMany; returns "skip" so the controller doesn't
-    // re-render over the animation.
-    //
-    // Rand-all re-spins the full op range [0..end]. Cursor handling
-    // (was-at-end → snap to new last) is owned by rerollWalker.
+    // RandStep re-spins ops [idx-1..end] across touched clusters via
+    // spokes.playMany; returns NETGEN.SKIP so controller skips re-render.
+    // RandAll re-spins ops [0..end].
     ctl = NETGEN.rerollWalker({
       prefix: "g-crewire",
       total: totalForCurrent(),
@@ -1555,7 +1488,7 @@ window.MathJax = {
         const byNode = byNodeFromList(afterList);
         spokes.playMany(removes, adds, () => {}, { byNode });
         lastStep = idx;
-        return "skip";
+        return NETGEN.SKIP;
       },
       onRandAll: idx => {
         if (idx <= 0) return;
@@ -1760,28 +1693,8 @@ window.MathJax = {
     // shape ABCDKernel.replayGlobalRewireFromOps consumes. Reads the
     // bg-pair stage's effective pre-state so a bg-pair reroll feeds
     // into bg-rewire's initial state and op trace.
-    function globalPrePairsTuples(R) {
-      return effectiveBgPre(R).map(e => [e.u, e.v, !!e.loop, !!e.multi, !!e.crossDup]);
-    }
-    // ekey-formatted (`${min}-${max}`) cluster-post key set for the
-    // kernel replay's crossDup check. Page's keyOf uses `|`, kernel
-    // uses `-`; we match the kernel here so its `Set.has` succeeds.
-    function clusterEdgeEkeys(R) {
-      const s = new Set();
-      R.clusterPost.forEach(e => {
-        const a = e.u < e.v ? e.u : e.v;
-        const b = e.u < e.v ? e.v : e.u;
-        s.add(a + "-" + b);
-      });
-      return s;
-    }
-    // Re-spin the global op range [startG..endG-1]: ops at positions
-    // < startG stay verbatim (deterministic replay seeds the new state),
-    // ops at positions >= startG are drawn fresh from a per-range RNG.
-    // bg has no per-cluster split, so the override is a flat array.
     function rerollGlobalRewireRange(startG, endG) {
-      const xi = SYNTHETIC_XI;
-      const R = buildRealization(U_SEED, STUB_SEED, xi);
+      const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
       const baseOps = effectiveOps(R);
       const lo = Math.max(0, startG);
       const hi = Math.min(endG, baseOps.length);
@@ -1790,7 +1703,9 @@ window.MathJax = {
       const opsBefore = baseOps.slice(0, lo);
       const fresh = seededRng(STUB_SEED * 7919 + rewireRerollNonce * 41);
       const newOps = ABCDKernel.replayGlobalRewireFromOps(
-        globalPrePairsTuples(R), clusterEdgeEkeys(R), opsBefore, fresh
+        NETGEN.globalPrePairsTuples(effectiveBgPre(R)),
+        NETGEN.clusterEdgeEkeys(R.clusterPost),
+        opsBefore, fresh,
       );
       opsOverride = opsBefore.concat(newOps);
     }
@@ -1804,23 +1719,7 @@ window.MathJax = {
       prePairsOf: R => effectiveBgPre(R),
       opsOf: R => effectiveOps(R),
       idPrefix: "br",
-      applyOp: (list, op, i, idPrefix) => {
-        if (!op || !op.p2) return;
-        const cuts = [op.p1, op.p2];
-        const picks = NETGEN.spokeLayer.pickCutsByEndpoints(list, cuts);
-        picks.forEach(p => {
-          const idx = list.indexOf(p);
-          if (idx >= 0) list.splice(idx, 1);
-        });
-        if (op.newp1) list.push({
-          u: op.newp1[0], v: op.newp1[1],
-          bad: !op.placedNewp1, id: idPrefix + "-op" + i + "-1",
-        });
-        if (op.newp2) list.push({
-          u: op.newp2[0], v: op.newp2[1],
-          bad: !op.placedNewp2, id: idPrefix + "-op" + i + "-2",
-        });
-      },
+      applyOp: NETGEN.abcdBgRewireApplyOp(),
     });
     bgrewireStateAtStep = stateAtStep;
     function placedFromList(list) {
@@ -1857,38 +1756,36 @@ window.MathJax = {
           "before the canonical loop's fairness counter expired) are " +
           "dropped from the bg-pool output.";
       } else {
-        const partial = !op.success && (op.placedNewp1 || op.placedNewp2);
-        const allRejected = !op.success && op.p2 && !op.placedNewp1 && !op.placedNewp2;
-        const tag = op.success
-          ? (op.src === "valid" ? "swap with valid bg edge" : "swap with recycled pair")
-          : (op.reason === "no-valid-pool" ? "no valid pool to swap with"
-              : partial ? "partial: one newp placed, one to recycle"
-              : allRejected ? "both newp pushed to recycle"
-              : "p1 requeued");
-        labelEl.textContent = "op " + step + " · " + tag;
-        const placedNames = [];
-        if (op.placedNewp1 && op.newp1) placedNames.push(op.newp1.join("–"));
-        if (op.placedNewp2 && op.newp2) placedNames.push(op.newp2.join("–"));
-        const recycledNames = [];
-        if (!op.placedNewp1 && op.newp1) recycledNames.push(op.newp1.join("–"));
-        if (!op.placedNewp2 && op.newp2) recycledNames.push(op.newp2.join("–"));
         const code = (s) => "<code>" + s + "</code>";
-        let desc;
-        if (op.success) {
-          desc = "Cut " + code(op.p1.join("–")) + " + " + code(op.p2.join("–")) +
-            "; place " + placedNames.map(code).join(" + ") + ".";
-        } else if (op.reason === "no-valid-pool") {
-          desc = "No valid swap partner for " + code(op.p1.join("–")) +
-            "; pushed back onto recycle queue.";
-        } else if (partial) {
-          desc = "Cut " + code(op.p1.join("–")) + " + " + code(op.p2.join("–")) +
-            "; place " + placedNames.map(code).join(" + ") +
-            "; " + recycledNames.map(code).join(" + ") + " pushed to recycle.";
-        } else {
-          desc = "Cut " + code(op.p1.join("–")) + " + " + code(op.p2.join("–")) +
-            "; " + recycledNames.map(code).join(" + ") + " both pushed to recycle.";
-        }
-        descEl.innerHTML = '<span class="st">op ' + step + '</span> &middot; ' + desc;
+        const placedNames = [];
+        const recycledNames = [];
+        if (op.newp1) (op.placedNewp1 ? placedNames : recycledNames).push(op.newp1.join("–"));
+        if (op.newp2) (op.placedNewp2 ? placedNames : recycledNames).push(op.newp2.join("–"));
+        const cutPair = code(op.p1.join("–")) + (op.p2 ? " + " + code(op.p2.join("–")) : "");
+        // Outcome key: "success" | "no-valid-pool" | "partial" | "all-rejected".
+        let outcome;
+        if (op.success) outcome = "success";
+        else if (op.reason === "no-valid-pool") outcome = "no-valid-pool";
+        else if (op.placedNewp1 || op.placedNewp2) outcome = "partial";
+        else if (op.p2) outcome = "all-rejected";
+        else outcome = "no-valid-pool";
+        const TAG = {
+          "success": op.src === "valid" ? "swap with valid bg edge" : "swap with recycled pair",
+          "no-valid-pool": "no valid pool to swap with",
+          "partial": "partial: one newp placed, one to recycle",
+          "all-rejected": "both newp pushed to recycle",
+        };
+        const DESC = {
+          "success": "Cut " + cutPair + "; place " + placedNames.map(code).join(" + ") + ".",
+          "no-valid-pool": "No valid swap partner for " + code(op.p1.join("–")) +
+                           "; pushed back onto recycle queue.",
+          "partial": "Cut " + cutPair + "; place " + placedNames.map(code).join(" + ") +
+                     "; " + recycledNames.map(code).join(" + ") + " pushed to recycle.",
+          "all-rejected": "Cut " + cutPair + "; " +
+                          recycledNames.map(code).join(" + ") + " both pushed to recycle.",
+        };
+        labelEl.textContent = "op " + step + " · " + TAG[outcome];
+        descEl.innerHTML = '<span class="st">op ' + step + '</span> &middot; ' + DESC[outcome];
       }
     }
     const placedEntry = (e) => ({
@@ -1914,11 +1811,8 @@ window.MathJax = {
       // 1 (pre-rewire) + opsCount + 1 (drop-stale) = 2 + opsCount.
       return 2 + effectiveOps(R).length;
     }
-    // Rand-step at idx re-spins ops [idx-1..end]: prior steps lock,
-    // future ops draw fresh. Drives playMany off the before/after
-    // diff so the swap animates instead of snaps.
-    // Rand-all re-spins every op [0..end] in stage. Cursor handling
-    // (was-at-end → snap to new last) is owned by rerollWalker.
+    // RandStep re-spins ops [idx-1..end]; RandAll re-spins ops [0..end].
+    // playMany off before/after diff animates the swap.
     ctl = NETGEN.rerollWalker({
       prefix: "g-bgrewire",
       total: totalForCurrent(),
@@ -1947,7 +1841,7 @@ window.MathJax = {
         const byNode = byNodeFromList(afterList);
         spokes.playMany(removes, adds, () => {}, { byNode });
         lastStep = idx;
-        return "skip";
+        return NETGEN.SKIP;
       },
       onRandAll: idx => {
         if (idx <= 0) return;
@@ -1973,7 +1867,9 @@ window.MathJax = {
       const R = buildRealization(U_SEED, STUB_SEED, xi);
       const fresh = seededRng(STUB_SEED * 7919 + rewireRerollNonce * 41);
       opsOverride = ABCDKernel.replayGlobalRewireFromOps(
-        globalPrePairsTuples(R), clusterEdgeEkeys(R), [], fresh
+        NETGEN.globalPrePairsTuples(effectiveBgPre(R)),
+        NETGEN.clusterEdgeEkeys(R.clusterPost),
+        [], fresh,
       );
       NETGEN.followCursor(ctl, totalForCurrent());
     }

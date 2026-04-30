@@ -1416,9 +1416,6 @@ NETGEN.spokeLayer = (function () {
       snapToState: snapToState,
       playMany: playMany,
       simplify: simplify,
-      // Legacy alias: every playDedup callsite is being migrated to
-      // `simplify`; remove this once all pages are on the new name.
-      playDedup: simplify,
       markReroll: function () { pendingReroll = true; },
       rerender: function () { recompute(); render(false); },
       isAnimating: function () { return animating; },
