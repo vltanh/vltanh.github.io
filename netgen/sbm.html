@@ -267,21 +267,23 @@
   </div>
 </section>
 
-<!-- ─────────── Generation · dedup ─────────── -->
+<!-- ─────────── Generation · simplify ─────────── -->
 <section class="stage">
-  <div class="stage-num">generation · dedup</div>
+  <div class="stage-num">generation · simplify</div>
   <h2>Collapse parallels, drop self-loops. Degree sequence stops being exact.</h2>
   <p>Every generator in this project ships a simple graph, so the last step of <code>gen.py</code> is a shared utility, <code>simplify_edges</code>, that drops self-loops and collapses parallels in pandas. graph-tool's own <code>remove_parallel_edges</code> + <code>remove_self_loops</code> would do the same job; we keep the pandas version so the guard is identical across sbm, ec-sbm, abcd, lfr, and npso.</p>
   <p>Each parallel edge between \((u, v)\) is collapsed to one; each self-loop on \(u\) is dropped. Every dropped half-edge is a unit of degree the sampler can no longer account for, so the output degree sequence sits at-or-below the target.</p>
-  <p>Toggle the switch to watch the multigraph above simplify. The top-right panel compares target vs achieved degree per node, sorted by target; a node whose bar shrinks after the toggle lost a duplicate or a self-loop. Hover a node or a row to link them.</p>
+  <p>Press <em>simplify</em> to watch the multigraph above lose its red-dashed edges; <em>reset</em> snaps back to the pre-state. The top-right panel compares target vs achieved degree per node, sorted by target; a node whose bar shrinks after simplify lost a duplicate or a self-loop. Hover a node or a row to link them.</p>
   <div class="graph" id="g4">
     <div class="graph-chrome">
-      <span id="g4-label">dedup</span>
+      <span id="g4-label">before simplify</span>
       <span class="right" id="g4-edges">edges: &middot;</span>
     </div>
     <div class="graph-canvas" id="g4-cy"></div>
     <div class="widget-row">
-      <span class="step-label">red-dashed edges = dedup removes them &middot; degree bars: target vs achieved (mint = achieved, faint red = lost)</span>
+      <button class="btn primary" id="g4-play" type="button">simplify</button>
+      <button class="btn" id="g4-reset" type="button">reset</button>
+      <span class="step-label">red-dashed edges = simplify drops them &middot; degree bars: target vs achieved (mint = achieved, faint red = lost)</span>
     </div>
   </div>
 </section>
@@ -979,9 +981,10 @@ window.MathJax = {
     }
 
     freshTrace(currentSeed);
-    ctl = NETGEN.wireWalker({
+    ctl = NETGEN.rerollWalker({
       prefix: "g3",
       total: totalPairs + 1,
+      totalForCurrent: () => totalPairs + 1,
       curId: "g3-cur", totId: "g3-total",
       getLocked: () => lockOverride,
       // snap is provided by stepController on rand-all + start/end nav.
@@ -999,21 +1002,27 @@ window.MathJax = {
         if (idx <= 0) return;
         currentSeed += 1;
         freshTrace(currentSeed);
-        ctl.reconfigureKeep(totalPairs + 1, idx);
       },
     });
   })();
 
-  // ── Generation · dedup toggle + target-vs-achieved degree bars ──
+  // ── Generation · simplify (spoke-layer animation) + degree bars ──
+  // Spoke layer carries the pre-simplify multigraph (good edges in
+  // block colour, loop / parallel edges dashed red). The simplify
+  // button calls spokes.simplify(removes, …) which is the shared
+  // primitive used by every gen page's drop-stale step. byNode
+  // refreshes to the post-simplify degree count so spokes shrink with
+  // the dropped edges.
   (function () {
     const viz = NETGEN.VIZ.init("g4-cy", {
-      showLabels: true,
-      edges: [],
-      pad: 40,
-      padRight: 340,
+      showLabels: true, edges: [], pinned: true,
+      pad: 40, padRight: 340,
+      nodeColor: n => COL[CLUSTER_OF[n]] || COL.OUT,
     });
     const label     = document.getElementById("g4-label");
     const edgeCount = document.getElementById("g4-edges");
+    const playBtn   = document.getElementById("g4-play");
+    const resetBtn  = document.getElementById("g4-reset");
 
     NETGEN.mountGxPanel({
       viz, hostId: "g4-cy", prefix: "g4-deg",
@@ -1021,40 +1030,90 @@ window.MathJax = {
       bodyHTML: '<svg id="deg-bars" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet" style="display:block;width:18rem;height:auto"></svg>',
     });
 
-    function render(sample) {
-      const edges = sample.all.map((e, i) => {
+    let lockBusy = false;
+    function setLock(b) {
+      if (lockBusy === b) return;
+      lockBusy = b;
+      if (playBtn) playBtn.disabled = b || simplified;
+      if (resetBtn) resetBtn.disabled = b;
+    }
+    const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setLock });
+    let simplified = false;
+
+    function spokeColor(n) { return COL[CLUSTER_OF[n]] || COL.OUT; }
+    function placedFor(sample) {
+      return sample.all.map((e, i) => {
         const bad = e.loop || e.multi;
-        if (bad) {
-          // Dedup viz always shows bad edges dashed red — the dashed
-          // pattern IS the "removal" cue, no toggle needed. The pre-
-          // dedup multigraph view (with bad edges solid red) lives in
-          // the stub-matching + rewiring panels above.
-          return {
-            u: e.u, v: e.v,
-            color: COL.edge_drop, w: 1.6,
-            id: "s4-" + i, classes: "dashed",
-          };
-        }
         return {
           u: e.u, v: e.v,
-          color: e.intra ? (COL.edge_intra[blockOf(e.u)] || COL.edge_stage2) : COL.edge_inter,
-          w: 1.6,
+          color: bad ? COL.edge_drop
+                     : (e.intra ? (COL.edge_intra[blockOf(e.u)] || COL.edge_stage2) : COL.edge_inter),
+          badColor: COL.edge_drop, bad,
           id: "s4-" + i,
         };
       });
-      viz.setEdges(edges);
-      label.textContent = "dedup";
+    }
+    function byNodeFor(sample, post) {
+      // Spoke counts reflect raw incidence on the current state. Pre-
+      // simplify: every entry in sample.all contributes; post-simplify:
+      // only sample.kept.
+      const cfg = {};
+      NODES.forEach(n => { cfg[n] = { count: 0, color: spokeColor(n) }; });
+      const src = post ? sample.kept : sample.all;
+      src.forEach(e => { cfg[e.u].count++; cfg[e.v].count++; });
+      return cfg;
+    }
+    function preLabel(sample) {
+      const pre = sample.stats.preEdges;
+      const drop = sample.stats.nLoops + sample.stats.nParallels;
+      label.textContent = "before simplify";
+      edgeCount.textContent = "edges: " + pre + " · " +
+        sample.stats.nLoops + " loop" + (sample.stats.nLoops === 1 ? "" : "s") + " + " +
+        sample.stats.nParallels + " parallel" + (sample.stats.nParallels === 1 ? "" : "s") +
+        " queued (" + drop + " to drop)";
+    }
+    function postLabel(sample) {
       const pre  = sample.stats.preEdges;
       const post = sample.stats.postEdges;
       const lostPct = pre > 0 ? ((pre - post) / pre * 100).toFixed(1) : "0.0";
+      label.textContent = "after simplify";
       edgeCount.textContent = "edges: " + pre + " → " + post + " (" + lostPct + "% lost)";
     }
+    function snapPre(sample) {
+      simplified = false;
+      spokes.snapToState({
+        byNode: byNodeFor(sample, false),
+        placed: placedFor(sample),
+        just: null, justSeq: 0,
+      });
+      preLabel(sample);
+      if (playBtn) playBtn.disabled = false;
+    }
+    function playSimplify(sample) {
+      if (simplified || lockBusy) return;
+      const removes = placedFor(sample).filter(e => e.bad);
+      if (removes.length === 0) {
+        // No bad edges — already simple. Just update label.
+        simplified = true;
+        postLabel(sample);
+        if (playBtn) playBtn.disabled = true;
+        return;
+      }
+      spokes.simplify(removes, () => {
+        simplified = true;
+        postLabel(sample);
+        if (playBtn) playBtn.disabled = true;
+      }, { byNode: byNodeFor(sample, true) });
+    }
+    function render(sample) { snapPre(sample); }
 
     render(SAMPLE);
     onSampleReroll((sample) => {
       render(sample);
       renderDegBars(sample);
     });
+    if (playBtn) playBtn.addEventListener("click", () => playSimplify(SAMPLE));
+    if (resetBtn) resetBtn.addEventListener("click", () => render(SAMPLE));
 
     // Target-vs-achieved degree bars, horizontal, one row per node.
     // Stacked: mint segment = achieved, faint red tail = dropped
