@@ -186,14 +186,15 @@ NETGEN.spokeLayer = (function () {
     }
 
     // Layer order: placed-edges < bridges < spokes < counter < nodes.
+    // Backdrop entries (e.g. cluster-post fading behind bg-pair) ride
+    // in placedLayer with `noSlot: true` + style flags (opacity / w /
+    // dash) so they share placedPath + dupInfo with active edges,
+    // fanning symmetrically when (u,v) collides. Place them first in
+    // state.placed so they paint behind active edges within the same g.
     const placedLayer = viz.svg.insert("g", "g.viz-nodes").attr("class", "sp-placed");
     const bridgeLayer = viz.svg.insert("g", "g.viz-nodes").attr("class", "sp-bridges");
     const spokeLayer  = viz.svg.insert("g", "g.viz-nodes").attr("class", "sp-spokes");
     const countLayer  = viz.svg.insert("g", "g.viz-nodes").attr("class", "sp-counter");
-    // Defensive: any code that re-appends g.viz-nodes (e.g. a viz
-    // refresh) would push it back into the middle of the children
-    // and break paint order. Re-assert "all spoke layers before
-    // viz-nodes" once at attach time and after every render.
     function ensureLayerOrder() {
       const svgEl = viz.svg.node();
       const vizNodes = viz.svg.select("g.viz-nodes").node();
@@ -222,6 +223,7 @@ NETGEN.spokeLayer = (function () {
       sp.interrupt("orbit");
       sp.interrupt("rewindFade");
       sp.interrupt("justFade");
+      sp.interrupt("spokeGrow");
       const br = bridgeLayer.selectAll("path.sp-bridge");
       br.interrupt();
       br.interrupt("bridge");
@@ -324,8 +326,10 @@ NETGEN.spokeLayer = (function () {
           justSlots: [],
         };
       });
-      // Greedy chronological assignment of placed pairs.
-      (state.placed || []).forEach(function (p) { assignPair(p, false); });
+      // Greedy chronological assignment of placed pairs. Backdrop
+      // entries (`noSlot: true`) skip slot consumption — they only
+      // participate via dupInfo for fan layout.
+      (state.placed || []).forEach(function (p) { if (!p.noSlot) assignPair(p, false); });
       justs.forEach(function (j) { assignPair(j, true); });
     }
 
@@ -797,11 +801,24 @@ NETGEN.spokeLayer = (function () {
         .attr("stroke-width", function (d) { return d.isJust ? 2.6 : 2.4; })
         .attr("opacity", function (d) { return d.isJust ? 1 : (d.consumed ? 0.22 : 0.92); });
       // Snap non-active spokes to their effective angle (rest if free,
-      // partner-direction if consumed).
+      // partner-direction if consumed). Entering free spokes grow
+      // outward from the node rim (length 0 → spokeOuter) over the
+      // bridgeGrow duration so a byNode bump mid-animation doesn't
+      // pop fresh stubs into existence at full length.
+      const enterIds = new Set();
+      ent.each(function (d) { enterIds.add(d.id); });
       merged.filter(function (d) { return !d.isJust; }).each(function (d) {
         const t = spokeTip(d.nid, d.slot, { angle: effectiveAngle(d.nid, d.slot) });
         if (!t) return;
-        d3.select(this).attr("x1", t.x1).attr("y1", t.y1).attr("x2", t.x2).attr("y2", t.y2);
+        const sel = d3.select(this);
+        if (animate && enterIds.has(d.id) && !d.consumed) {
+          sel.attr("x1", t.x1).attr("y1", t.y1)
+            .attr("x2", t.x1).attr("y2", t.y1).attr("opacity", 0)
+            .transition("spokeGrow").duration(T.bridgeGrow).ease(d3.easeCubicOut)
+            .attr("x2", t.x2).attr("y2", t.y2).attr("opacity", 0.92);
+        } else {
+          sel.attr("x1", t.x1).attr("y1", t.y1).attr("x2", t.x2).attr("y2", t.y2);
+        }
       });
       // Active spoke: orbit from rest to live-aim, then live tick keeps it.
       const justSel = merged.filter(function (d) { return d.isJust; });
@@ -945,20 +962,27 @@ NETGEN.spokeLayer = (function () {
     function renderPlaced() {
       // During the active animation, every placed edge dims so the
       // new bridge stands alone. After the animation settles, all
-      // restore to full opacity.
+      // restore to full opacity. Per-entry style flags from data
+      // (opacity / w / dash / noSlot) let backdrop / sibling-style
+      // entries paint with their own appearance from the same layer
+      // — they share placedPath + dupInfo so parallels fan around
+      // them symmetrically.
       const dim = animating && hasJust();
       const sel = placedLayer.selectAll("path.sp-placed-edge").data(state.placed, function (d) { return d.id || (d.u + "-" + d.v); });
       sel.exit().remove();
       const ent = sel.enter().append("path")
         .attr("class", "sp-placed-edge").attr("fill", "none")
-        .attr("stroke-linecap", "round").attr("stroke-width", 1.6);
+        .attr("stroke-linecap", "round");
       ent.merge(sel)
         .attr("stroke", function (d) { return d.color; })
-        .attr("stroke-width", 1.6)
-        // Bad placed edges paint solid red. Dashed-red is reserved for
-        // the dedup animation (see playDedup): solid → dashed → fade.
-        .attr("stroke-dasharray", null)
-        .attr("opacity", dim ? 0.18 : 1)
+        .attr("stroke-width", function (d) { return d.w != null ? d.w : 1.6; })
+        // Bad placed edges paint solid red. Dashed-red is reserved
+        // for the simplify animation (solid → dashed → fade).
+        .attr("stroke-dasharray", function (d) { return d.dash || null; })
+        .attr("opacity", function (d) {
+          if (d.opacity != null) return dim ? d.opacity * 0.4 : d.opacity;
+          return dim ? 0.18 : 1;
+        })
         .attr("d", placedPath);
     }
 
@@ -1107,7 +1131,7 @@ NETGEN.spokeLayer = (function () {
       spokeLayer.selectAll("line.sp-spoke").each(function (d) {
         const a = assigned[d.nid];
         if (!a) return;
-        const trans = d3.active(this, "orbit") || d3.active(this, "rewindFade") || d3.active(this, "justFade");
+        const trans = d3.active(this, "orbit") || d3.active(this, "rewindFade") || d3.active(this, "justFade") || d3.active(this, "spokeGrow");
         if (trans) return;
         const t = spokeTip(d.nid, d.slot, { angle: effectiveAngle(d.nid, d.slot) });
         if (!t) return;
@@ -1167,10 +1191,19 @@ NETGEN.spokeLayer = (function () {
     // the whole sequence settles. Either side can be empty:
     //   removes=[], adds=[A,B] → forward-only (orbit→grow→fan→colorize).
     //   removes=[A,B], adds=[] → rewind-only (colour-back→fan-in→retract→orbit).
-    function playMany(removes, adds, onDone) {
+    function playMany(removes, adds, onDone, opts) {
       const myToken = ++token;
       interruptAll();
       clearPhaseTimers();
+      // Optional byNode refresh for the post-animation state. Defer
+      // application: forward-only applies at top (new endpoints' stubs
+      // need to be in place before the bridge grows). With-rewind path
+      // applies after rewind so stubs appear in sync with the forward
+      // phase, not while removes are still unrolling. Without this,
+      // walking N steps inherits whatever the last snapToState set —
+      // singletons whose self-loop gets removed mid-walk keep stale
+      // spokes (the drop-stale fix).
+      const newByNode = opts && opts.byNode;
 
       const removesList = (removes || []).slice();
       const addsList = (adds || []).slice();
@@ -1198,6 +1231,7 @@ NETGEN.spokeLayer = (function () {
 
       // Forward-only: skip rewind. Promote adds to justs, run forward.
       if (!willRewind) {
+        if (newByNode) state = Object.assign({}, state, { byNode: newByNode });
         state = Object.assign({}, state, { placed: placedSansRemoves, justs: addsList });
         recompute();
         bridgeStartMs = computeBridgeStartMs();
@@ -1238,6 +1272,7 @@ NETGEN.spokeLayer = (function () {
       runRewind(function () {
         if (myToken !== token) return;
         if (!willForward) {
+          if (newByNode) state = Object.assign({}, state, { byNode: newByNode });
           state = Object.assign({}, state, { placed: placedSansRemoves, justs: [] });
           lastKey = ""; lastSeq = state.justSeq;
           recompute();
@@ -1246,6 +1281,7 @@ NETGEN.spokeLayer = (function () {
           return;
         }
         // Forward phase: swap removes → adds as the active justs.
+        if (newByNode) state = Object.assign({}, state, { byNode: newByNode });
         state = Object.assign({}, state, { placed: placedSansRemoves, justs: addsList });
         recompute();
         bridgeStartMs = computeBridgeStartMs();
@@ -1269,10 +1305,11 @@ NETGEN.spokeLayer = (function () {
     //      the slot (480ms tween from with-removes layout to without).
     // Commits state.placed -= removes at the end; single onDone fires
     // when the whole sequence settles. No forward grow phase.
-    function playDedup(removes, onDone) {
+    function simplify(removes, onDone, opts) {
       const myToken = ++token;
       interruptAll();
       clearPhaseTimers();
+      if (opts && opts.byNode) state = Object.assign({}, state, { byNode: opts.byNode });
       const removesList = (removes || []).slice();
       removesList.forEach(function (r, i) {
         if (r.id == null) r.id = "rmd" + i + "_" + r.u + "_" + r.v;
@@ -1378,7 +1415,10 @@ NETGEN.spokeLayer = (function () {
       syncState: syncState,
       snapToState: snapToState,
       playMany: playMany,
-      playDedup: playDedup,
+      simplify: simplify,
+      // Legacy alias: every playDedup callsite is being migrated to
+      // `simplify`; remove this once all pages are on the new name.
+      playDedup: simplify,
       markReroll: function () { pendingReroll = true; },
       rerender: function () { recompute(); render(false); },
       isAnimating: function () { return animating; },

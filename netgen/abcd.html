@@ -539,7 +539,12 @@ window.MathJax = {
   //    Weight-split only depends on U_SEED. Step-through + deg-cmp
   //    depend on both. The top-level "random" buttons per panel advance
   //    one seed and fire its cascade.
-  let U_SEED = 1;
+  // Seed pair chosen for the demo: U=6 / S=1 yields 13 cluster-rewire
+  // ops + 5 bg-rewire ops + 2 drop-stale residue (recycle leftovers
+  // that survived canonical rewire). Every walker has enough steps to
+  // walk through, and bg-rewire shows the drop-stale story on first
+  // load instead of needing rerolls to find a good seed.
+  let U_SEED = 6;
   let STUB_SEED = 1;
   const onUChanged = [];
   const onStubChanged = [];
@@ -805,6 +810,53 @@ window.MathJax = {
   let bgPairOverride = {};
   const onBgPairChanged = [];
   function fireBgPairChanged() { onBgPairChanged.forEach(fn => fn()); }
+  // Cluster-rewire reroll bus: invalidates downstream walkers' cursors
+  // (cluster-rewire output is the clusterPost that bg-pair / bg-rewire
+  // paint as backdrop). bg-pair + bg-rewire subscribe to follow rule.
+  const onClusterRewireChanged = [];
+  function fireClusterRewireChanged() {
+    onClusterRewireChanged.forEach(fn => fn());
+  }
+  // Bg-rewire reroll bus: terminal stage, no walkers downstream — kept
+  // for symmetry / future hooks.
+  const onBgRewireChanged = [];
+  function fireBgRewireChanged() {
+    onBgRewireChanged.forEach(fn => fn());
+  }
+  // Walker stateAtStep handles, exposed at module scope after walker
+  // IIFEs construct them. Lets the degree-preservation panel (and any
+  // future cross-walker consumer) compute effective final edges with
+  // rewire overrides applied — instead of reading R.outDeg which
+  // reflects only the kernel baseline.
+  let crewireStateAtStep = null;
+  let bgrewireStateAtStep = null;
+  function effectiveFinalEdges(R) {
+    const out = [];
+    if (crewireStateAtStep) {
+      crewireStateAtStep(R, Infinity).forEach(e => {
+        if (!e.bad) out.push({ u: e.u, v: e.v });
+      });
+    } else {
+      R.clusterPost.forEach(e => out.push({ u: e.u, v: e.v }));
+    }
+    if (bgrewireStateAtStep) {
+      bgrewireStateAtStep(R, Infinity).forEach(e => {
+        if (!e.bad) out.push({ u: e.u, v: e.v });
+      });
+    } else {
+      (R.bgPost || []).forEach(e => out.push({ u: e.u, v: e.v }));
+    }
+    return out;
+  }
+  function effectiveOutDeg(R) {
+    const deg = {};
+    NODES.forEach(n => { deg[n] = 0; });
+    effectiveFinalEdges(R).forEach(e => {
+      deg[e.u] = (deg[e.u] || 0) + 1;
+      deg[e.v] = (deg[e.v] || 0) + 1;
+    });
+    return deg;
+  }
   function effectiveBgPre(R) {
     return R.bgPre.map((e, i) => bgPairOverride[i] || e);
   }
@@ -1100,6 +1152,7 @@ window.MathJax = {
     }
     const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setRandLock });
     function totalFromR(R) { return 1 + R.clusterPre.length; }
+    let cpairRerollNonce = 0;
 
     // Cluster-pair reroll: writes module-scoped pairOverride and fires
     // onClusterPreChanged so every downstream walker re-derives from
@@ -1115,8 +1168,10 @@ window.MathJax = {
       }
       if (!lay) return { snap: false };
       const prefix = R.clusterPre.slice(lay.startInClusterPre, lay.startInClusterPre + l);
+      cpairRerollNonce += 1;
+      const fresh = seededRng(STUB_SEED * 8191 + cpairRerollNonce * 41 + idx * 113);
       const newTail = NETGEN.stubPoolReseed({
-        layout: lay, prefix,
+        layout: lay, prefix, rng: fresh,
         classify: (a, b, ctx) => {
           const loop = (a === b);
           const k = keyOf(a, b);
@@ -1136,11 +1191,13 @@ window.MathJax = {
     // downstream listeners re-derive once instead of per-bucket.
     function rollAllPairs() {
       pairOverride = {};
+      cpairRerollNonce += 1;
       const xi = SYNTHETIC_XI;
       const Rfresh = buildRealization(U_SEED, STUB_SEED, xi);
-      Rfresh.clusterStubLayouts.forEach(lay => {
+      Rfresh.clusterStubLayouts.forEach((lay, i) => {
+        const fresh = seededRng(STUB_SEED * 8191 + cpairRerollNonce * 41 + i * 113);
         const newTail = NETGEN.stubPoolReseed({
-          layout: lay, prefix: [],
+          layout: lay, prefix: [], rng: fresh,
           classify: (a, b, ctx) => {
             const loop = (a === b);
             const k = keyOf(a, b);
@@ -1211,30 +1268,24 @@ window.MathJax = {
 
     const xi0 = SYNTHETIC_XI;
     const R0 = buildRealization(U_SEED, STUB_SEED, xi0);
-    ctl = NETGEN.stepController({
-      prevBtn: document.getElementById("g-cpair-prev"),
-      nextBtn: document.getElementById("g-cpair-next"),
-      resetBtn: document.getElementById("g-cpair-start"),
-      endBtn: document.getElementById("g-cpair-end"),
-      randStepBtn: document.getElementById("g-cpair-rand-step"),
-      randAllBtn: document.getElementById("g-cpair-rand-all"),
+    // random step: swap the active pair with another same-cluster
+    // pair. rollPair prefers future positions so the placed prefix
+    // stays intact under the animated path; when only a past swap is
+    // available it returns snap=true so the controller renders a jump
+    // instead of an animated rewind+forward.
+    // random all: in-stage full reseed of every cluster bucket, no
+    // U_SEED / STUB_SEED bump. Driver wraps in withSnap.
+    ctl = NETGEN.rerollWalker({
+      prefix: "g-cpair",
       total: totalFromR(R0),
+      totalForCurrent: () => totalFromR(buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI)),
       onRender: render,
       getLocked: () => lockOverride,
-      // random step: swap the active pair with another same-cluster
-      // pair. rollPair prefers future positions so the placed prefix
-      // stays intact under the animated path; when only a past swap
-      // is available it returns snap=true so the controller renders
-      // a jump instead of an animated rewind+forward.
       onRandStep: idx => {
         if (idx <= 0) return false;
-        const xi = SYNTHETIC_XI;
-        const R = buildRealization(U_SEED, STUB_SEED, xi);
+        const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
         return rollPair(R, idx - 1).snap;
       },
-      // random all: in-stage full reseed of every cluster bucket, no
-      // U_SEED / STUB_SEED bump. Snap handled by stepController's
-      // withSnap on the rand-all click.
       onRandAll: idx => {
         if (idx <= 0) return;
         rollAllPairs();
@@ -1370,28 +1421,16 @@ window.MathJax = {
     // as distinct entries; new edges from successful ops append with
     // their own ids. Unsuccessful ops requeue p1, so they leave the
     // list untouched.
-    function stateAtStep(R, k) {
-      const ops = effectiveOps(R);
-      const list = [];
-      const seenKey = new Set();
-      R.clusterPre.forEach((e, i) => {
-        const key = keyOf(e.u, e.v);
-        const isLoop = e.loop;
-        const isMulti = e.multi || (!isLoop && seenKey.has(key));
-        if (!isLoop && !isMulti) seenKey.add(key);
-        list.push({
-          u: e.u, v: e.v, cluster: e.cluster,
-          bad: isLoop || isMulti,
-          id: "cr-pre-" + i,
-        });
-      });
-      const opsToApply = Math.min(k, ops.length);
-      for (let oi = 0; oi < opsToApply; oi++) {
-        const op = ops[oi];
-        if (!op || !op.success) continue;
-        // Cut targets: prefer the bad parallel + latest-added copy
-        // (NETGEN.spokeLayer.pickCutsByEndpoints encodes the rule once
-        // for every rewire walker).
+    // cluster-rewire: failed ops are no-ops (kernel inner loop tries
+    // every candidate; if none clears, p1 is requeued without cutting).
+    // The list is therefore untouched on failure.
+    const stateAtStep = NETGEN.makeRewireStateAtStep({
+      prePairsOf: R => R.clusterPre,
+      opsOf: R => effectiveOps(R),
+      idPrefix: "cr",
+      entryDecorator: (entry, e) => Object.assign(entry, { cluster: e.cluster }),
+      applyOp: (list, op, oi, idPrefix) => {
+        if (!op || !op.success) return;
         const cuts = op.p2 ? [op.p1, op.p2] : [op.p1];
         const picks = NETGEN.spokeLayer.pickCutsByEndpoints(list, cuts);
         picks.forEach(p => {
@@ -1400,33 +1439,20 @@ window.MathJax = {
         });
         if (op.newp1) list.push({
           u: op.newp1[0], v: op.newp1[1], cluster: op.cluster,
-          bad: false, id: "cr-op" + oi + "-1",
+          bad: false, id: idPrefix + "-op" + oi + "-1",
         });
         if (op.newp2) list.push({
           u: op.newp2[0], v: op.newp2[1], cluster: op.cluster,
-          bad: false, id: "cr-op" + oi + "-2",
+          bad: false, id: idPrefix + "-op" + oi + "-2",
         });
-      }
-      // Final drop-stale step: any bad entry that survived all ops
-      // (no legal swap ever found) is removed here.
-      if (k > ops.length) {
-        return list.filter(e => !e.bad);
-      }
-      return list;
-    }
-    function render(step) {
-      const xi = SYNTHETIC_XI;
-      const R = buildRealization(U_SEED, STUB_SEED, xi);
-      const ops = effectiveOps(R);
+      },
+    });
+    crewireStateAtStep = stateAtStep;
+    function paintLabelDesc(step, ops, isDropStale) {
+      clearDimPick(viz);
       const opsCount = ops.length;
-      const total = 2 + opsCount;
-      document.getElementById("g-crewire-total").textContent = String(total - 1);
-      document.getElementById("g-crewire-cur").textContent = String(step);
       const labelEl = document.getElementById("g-crewire-stage");
       const descEl = document.getElementById("g-crewire-desc");
-      clearDimPick(viz);
-
-      const isDropStale = step > opsCount;
       const op = (step > 0 && !isDropStale) ? ops[step - 1] : null;
       if (step === 0) {
         labelEl.textContent = "pre-rewire";
@@ -1451,63 +1477,37 @@ window.MathJax = {
             "</code>; pushed back onto the recycle queue.";
         descEl.innerHTML = '<span class="st">op ' + step + '</span> &middot; ' + desc;
       }
-
-      const beforeList = stateAtStep(R, lastStep);
-      const afterList  = stateAtStep(R, step);
-      const byNode = byNodeFromList(afterList);
-
-      if (step !== lastStep + 1 && step !== lastStep - 1) {
-        spokes.snapToState({
-          byNode, placed: afterList.map(placedEntry),
-          just: null, justSeq: step,
-        });
-        lastStep = step;
-        return;
-      }
-
-      const beforeIds = new Set(beforeList.map(e => e.id));
-      const afterIds  = new Set(afterList.map(e => e.id));
-      const removes = beforeList.filter(e => !afterIds.has(e.id)).map(placedEntry);
-      const adds    = afterList.filter(e => !beforeIds.has(e.id)).map(placedEntry);
-
-      // Drop-stale step: only removes, no adds — play the dedup
-      // animation (solid → dashed → fade w/ survivor fan-in). Swap
-      // ops (cuts + places): the standard rewind + forward sequence
-      // through playMany so the cuts and places run in parallel.
-      if (removes.length > 0 && adds.length === 0) {
-        spokes.playDedup(removes, () => {});
-      } else {
-        spokes.playMany(removes, adds, () => {});
-      }
-      lastStep = step;
     }
+    const render = NETGEN.makeRewireRender({
+      viz, spokes, prefix: "g-crewire",
+      R: () => buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI),
+      opsOf: R => effectiveOps(R),
+      stateAtStep, placedEntry, paintLabelDesc, byNodeFromList,
+      getLastStep: () => lastStep,
+      setLastStep: (s) => { lastStep = s; },
+    });
     function totalForCurrent() {
       const xi = SYNTHETIC_XI;
       const R = buildRealization(U_SEED, STUB_SEED, xi);
       return 2 + effectiveOps(R).length;
     }
-    ctl = NETGEN.stepController({
-      prevBtn: document.getElementById("g-crewire-prev"),
-      nextBtn: document.getElementById("g-crewire-next"),
-      resetBtn: document.getElementById("g-crewire-start"),
-      endBtn: document.getElementById("g-crewire-end"),
-      randStepBtn: document.getElementById("g-crewire-rand-step"),
-      randAllBtn: document.getElementById("g-crewire-rand-all"),
-      labelCur: null, labelTotal: document.getElementById("g-crewire-total"),
+    // Rand-step re-spins the global op range [idx-1..end] across every
+    // cluster touched by that range. Cluster-pairing is untouched.
+    // Failed ops are re-rollable (recycle inner loop is RNG-bounded,
+    // so a re-roll may flip fail to success). Drives an animated swap
+    // via spokes.playMany; returns "skip" so the controller doesn't
+    // re-render over the animation.
+    //
+    // Rand-all re-spins the full op range [0..end]. Cursor handling
+    // (was-at-end → snap to new last) is owned by rerollWalker.
+    ctl = NETGEN.rerollWalker({
+      prefix: "g-crewire",
       total: totalForCurrent(),
+      totalForCurrent,
       onRender: render,
       getLocked: () => lockBusy,
-      // Rand-step re-spins the global op range [idx-1..end] across every
-      // cluster touched by that range. Cluster-pairing is untouched.
-      // Drop-stale step (idx > opsCount) has no op range to spin and is
-      // gated via randStepDisabledAt below. Failed ops are still
-      // re-rollable (recycle inner loop is RNG-bounded, so a re-roll
-      // may flip fail to success).
-      // Drives an animated swap: capture state at idx with the OLD
-      // ops, swap in the new ops, diff state at idx with the NEW ops,
-      // and play the (removes, adds) through spokeLayer so the screen
-      // shows the orbit → grow → fan → colorize sequence instead of
-      // a snap.
+      // Drop-stale at total-1: no op range to spin there.
+      randStepDisabledAt: (idx) => idx >= totalForCurrent() - 1,
       onRandStep: idx => {
         if (idx <= 0) return;
         const xi = SYNTHETIC_XI;
@@ -1515,17 +1515,9 @@ window.MathJax = {
         const beforeList = stateAtStep(R, idx);
         rerollClusterRewireRange(idx - 1, effectiveOps(R).length);
         const afterList = stateAtStep(R, idx);
-        ctl.setTotalIdxSilent(totalForCurrent(), idx);
-        // Update labels + desc through the standard render but with
-        // lastStep set to idx so the render's adjacency check falls
-        // into the snap branch (which is a no-op on the spoke layer
-        // because we're about to drive playMany). render() will redo
-        // the snap if we let it; instead we update labels manually.
         const op = R.clusterRewireOps[idx - 1] && effectiveOps(R)[idx - 1];
         const labelEl = document.getElementById("g-crewire-stage");
         const descEl = document.getElementById("g-crewire-desc");
-        document.getElementById("g-crewire-cur").textContent = String(idx);
-        document.getElementById("g-crewire-total").textContent = String(totalForCurrent() - 1);
         if (op) {
           const tag = op.success
             ? (op.src === "valid" ? "swap with valid edge" : "swap with recycled pair")
@@ -1560,28 +1552,21 @@ window.MathJax = {
         afterById.forEach((ae, id) => {
           if (!beforeById.has(id)) adds.push(placedEntry(ae));
         });
-        spokes.playMany(removes, adds, () => {});
+        const byNode = byNodeFromList(afterList);
+        spokes.playMany(removes, adds, () => {}, { byNode });
         lastStep = idx;
         return "skip";
       },
-      // Random All re-spins every op [0..end] across every cluster.
-      // Cluster-pairing untouched (no U_SEED / STUB_SEED bump). New
-      // trace length may shrink or grow as success/fail counts shift;
-      // cursor clamps to the new last step if it sat past it.
       onRandAll: idx => {
         if (idx <= 0) return;
-        const xi = SYNTHETIC_XI;
-        const R = buildRealization(U_SEED, STUB_SEED, xi);
+        const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
         rerollClusterRewireRange(0, effectiveOps(R).length);
-        const newTotal = totalForCurrent();
-        ctl.reconfigureKeep(newTotal, Math.min(idx, newTotal - 1));
       },
-      randStepDisabledAt: (idx) => idx >= totalForCurrent() - 1,
+      onAfterRandAll: () => fireClusterRewireChanged(),
     });
     function reconfigKeep() {
-      // A fresh realization invalidates per-cluster op overrides.
       opsOverride = null;
-      ctl.reconfigureKeep(totalForCurrent(), ctl.idx);
+      NETGEN.followCursor(ctl, totalForCurrent());
     }
     onStubChanged.push(reconfigKeep);
     onUChanged.push(reconfigKeep);
@@ -1604,14 +1589,17 @@ window.MathJax = {
     const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setRandLock });
     function totalFromR(R) { return 1 + R.bgPre.length; }
     function effectiveBg(R, i) { return bgPairOverride[i] || R.bgPre[i]; }
+    let bgpairRerollNonce = 0;
     function rollBgPair(R, idx) {
       const lay = R.bgStubLayout;
       if (idx >= lay.numPairs) return { snap: false };
       const prefix = [];
       for (let i = 0; i < idx; i++) prefix.push(effectiveBg(R, i));
       const clusterEdgeKeys = new Set(R.clusterPost.map(e => keyOf(e.u, e.v)));
+      bgpairRerollNonce += 1;
+      const fresh = seededRng(STUB_SEED * 5779 + bgpairRerollNonce * 47 + idx * 113);
       const newTail = NETGEN.stubPoolReseed({
-        layout: lay, prefix,
+        layout: lay, prefix, rng: fresh,
         classify: (a, b, ctx) => {
           const loop = (a === b);
           const k = keyOf(a, b);
@@ -1642,9 +1630,9 @@ window.MathJax = {
       const R = buildRealization(U_SEED, STUB_SEED, xi);
       const total = 1 + R.bgPre.length;
       if (step >= total) step = total - 1;
-      // Backdrop: cluster-post handed to spoke layer as siblings so they
-      // share dupInfo with bg pair edges and fan symmetrically when they
-      // share an (u,v) key. cy edge layer stays empty.
+      // Backdrop: cluster-post rides in the placed prefix with noSlot
+      // so it shares dupInfo with bg-pair edges (parallels at the
+      // same (u,v) fan symmetrically). cy edge layer stays empty.
       viz.setEdges([]);
       // byNode counts come from bgPre's actual incidence (mirror of
       // cluster-pair). split[n].z is the pre-parity target; the
@@ -1672,12 +1660,11 @@ window.MathJax = {
           badColor: j.bad ? COL.edge_drop : null,
         };
       }
-      const siblings = R.clusterPost.map((e, i) => ({
-        u: e.u, v: e.v,
-        color: CLUSTER_COLOR_OF[e.cluster] || COL.edge_stage2,
-        w: 1.2, opacity: 0.45, id: "bp-cluster-" + i,
-      }));
-      NETGEN.snapOrSync(spokes, { byNode: cfg, placed, just, justSeq: step, bridgeColor, siblings }, snap);
+      const backdrop = NETGEN.clusterPostBackdrop(R, {
+        idPrefix: "bp-cluster-",
+        colorOf: e => CLUSTER_COLOR_OF[e.cluster] || COL.edge_stage2,
+      });
+      NETGEN.snapOrSync(spokes, { byNode: cfg, placed: backdrop.concat(placed), just, justSeq: step, bridgeColor }, snap);
 
       const totEl = document.getElementById("g-bgpair-total");
       const curEl = document.getElementById("g-bgpair-cur");
@@ -1703,31 +1690,24 @@ window.MathJax = {
 
     const xi0 = SYNTHETIC_XI;
     const R0 = buildRealization(U_SEED, STUB_SEED, xi0);
-    ctl = NETGEN.stepController({
-      prevBtn: document.getElementById("g-bgpair-prev"),
-      nextBtn: document.getElementById("g-bgpair-next"),
-      resetBtn: document.getElementById("g-bgpair-start"),
-      endBtn: document.getElementById("g-bgpair-end"),
-      randStepBtn: document.getElementById("g-bgpair-rand-step"),
-      randAllBtn: document.getElementById("g-bgpair-rand-all"),
+    ctl = NETGEN.rerollWalker({
+      prefix: "g-bgpair",
       total: totalFromR(R0),
+      totalForCurrent: () => totalFromR(buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI)),
       getLocked: () => lockOverride,
       onRender: render,
       onRandStep: idx => {
         if (idx <= 0) return false;
-        const xi = SYNTHETIC_XI;
-        const R = buildRealization(U_SEED, STUB_SEED, xi);
+        const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
         return rollBgPair(R, idx - 1).snap;
       },
       // random all: in-stage reseed of the bg pair pool from position 0,
-      // keeping every other stage's seed untouched. Cursor stays at idx.
+      // keeping every other stage's seed untouched.
       onRandAll: idx => {
         if (idx <= 0) return;
-        const xi = SYNTHETIC_XI;
-        const R = buildRealization(U_SEED, STUB_SEED, xi);
         bgPairOverride = {};
+        const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
         rollBgPair(R, 0);
-        ctl.reconfigureKeep(totalFromR(R), idx);
       },
     });
     function reTotalReset() {
@@ -1740,11 +1720,14 @@ window.MathJax = {
       bgPairOverride = {};
       fireBgPairChanged();
       const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
-      ctl.reconfigureKeep(totalFromR(R), ctl.idx);
+      NETGEN.followCursor(ctl, totalFromR(R));
     }
     onStubChanged.push(reTotalReset);
     onUChanged.push(reTotalReset);
     onClusterPreChanged.push(reTotalKeep);
+    // crewire RandAll changes clusterPost (bg-pair backdrop + crossDup
+    // detection input). Apply follow rule on bg-pair.
+    onClusterRewireChanged.push(reTotalKeep);
   })();
 
   // Stage 4: background rewire — per-op walker. Mirrors g-crewire's
@@ -1812,45 +1795,43 @@ window.MathJax = {
       opsOverride = opsBefore.concat(newOps);
     }
 
-    function stateAtStep(R, k) {
-      const ops = effectiveOps(R);
-      const map = new Map();
-      effectiveBgPre(R).forEach(e => {
-        const k2 = keyOf(e.u, e.v);
-        if (!map.has(k2)) {
-          map.set(k2, { u: e.u, v: e.v, bad: e.loop || e.multi || e.crossDup });
-        }
-      });
-      for (let i = 0; i < k; i++) {
-        const op = ops[i];
-        if (!op) break;
-        const k1 = keyOf(op.p1[0], op.p1[1]);
-        map.delete(k1);
-        if (op.p2) map.delete(keyOf(op.p2[0], op.p2[1]));
-        if (op.placedNewp1 && op.newp1) {
-          map.set(keyOf(op.newp1[0], op.newp1[1]),
-            { u: op.newp1[0], v: op.newp1[1], bad: false });
-        }
-        if (op.placedNewp2 && op.newp2) {
-          map.set(keyOf(op.newp2[0], op.newp2[1]),
-            { u: op.newp2[0], v: op.newp2[1], bad: false });
-        }
-      }
-      return map;
-    }
-    function placedFromMap(map) {
-      const out = [];
-      map.forEach((e, key) => {
-        out.push({
-          u: e.u, v: e.v, id: "br-state-" + key, bad: !!e.bad,
-          color: e.bad ? COL.edge_drop : COL.edge_inter,
-          badColor: COL.edge_drop,
+    // bg-rewire: each newp evaluated independently against globalEdges
+    // + clusterEdgeKeys + self-loop. Cuts always apply (when op has
+    // p2); rejected newps still go into the multigraph as bad edges
+    // awaiting future rewire (canonical recycle queue). Pool stub
+    // balance preserved; "drop stale" filters survivors.
+    const stateAtStep = NETGEN.makeRewireStateAtStep({
+      prePairsOf: R => effectiveBgPre(R),
+      opsOf: R => effectiveOps(R),
+      idPrefix: "br",
+      applyOp: (list, op, i, idPrefix) => {
+        if (!op || !op.p2) return;
+        const cuts = [op.p1, op.p2];
+        const picks = NETGEN.spokeLayer.pickCutsByEndpoints(list, cuts);
+        picks.forEach(p => {
+          const idx = list.indexOf(p);
+          if (idx >= 0) list.splice(idx, 1);
         });
-      });
-      return out;
+        if (op.newp1) list.push({
+          u: op.newp1[0], v: op.newp1[1],
+          bad: !op.placedNewp1, id: idPrefix + "-op" + i + "-1",
+        });
+        if (op.newp2) list.push({
+          u: op.newp2[0], v: op.newp2[1],
+          bad: !op.placedNewp2, id: idPrefix + "-op" + i + "-2",
+        });
+      },
+    });
+    bgrewireStateAtStep = stateAtStep;
+    function placedFromList(list) {
+      return list.map(e => ({
+        u: e.u, v: e.v, id: e.id, bad: !!e.bad,
+        color: e.bad ? COL.edge_drop : COL.edge_inter,
+        badColor: COL.edge_drop,
+      }));
     }
-    const byNodeFromMap = (map) =>
-      NETGEN.spokeLayer.byNodeFromEdges(viz, map, n => nodeColorOf(parseInt(n.id, 10)));
+    const byNodeFromList = (list) =>
+      NETGEN.spokeLayer.byNodeFromEdges(viz, list, n => nodeColorOf(parseInt(n.id, 10)));
     function fourEndpoints(op) {
       const f = new Set();
       [op && op.p1, op && op.p2, op && op.newp1, op && op.newp2].forEach(p => {
@@ -1858,164 +1839,122 @@ window.MathJax = {
       });
       return [...f];
     }
-    function paintLabelDesc(step, ops) {
+    function paintLabelDesc(step, ops, isDropStale) {
+      clearDimPick(viz);
       const labelEl = document.getElementById("g-bgrewire-stage");
       const descEl = document.getElementById("g-bgrewire-desc");
-      const op = step > 0 ? ops[step - 1] : null;
+      const op = (step > 0 && !isDropStale) ? ops[step - 1] : null;
       if (step === 0) {
         labelEl.textContent = "pre-rewire";
         descEl.innerHTML = '<span class="st">pre-rewire</span> &middot; ' +
           ops.length + " bg-pool collision op" +
           (ops.length === 1 ? "" : "s") +
           " ahead. Red-dashed = self-loop, parallel, or cluster duplicate.";
+      } else if (isDropStale) {
+        labelEl.textContent = "drop stale";
+        descEl.innerHTML = '<span class="st">drop stale</span> &middot; ' +
+          "Recycle-queue leftovers (bad edges that never got rewired " +
+          "before the canonical loop's fairness counter expired) are " +
+          "dropped from the bg-pool output.";
       } else {
+        const partial = !op.success && (op.placedNewp1 || op.placedNewp2);
+        const allRejected = !op.success && op.p2 && !op.placedNewp1 && !op.placedNewp2;
         const tag = op.success
           ? (op.src === "valid" ? "swap with valid bg edge" : "swap with recycled pair")
-          : (op.reason === "no-valid-pool" ? "no valid pool to swap with" : "newp1/newp2 collide; partial");
+          : (op.reason === "no-valid-pool" ? "no valid pool to swap with"
+              : partial ? "partial: one newp placed, one to recycle"
+              : allRejected ? "both newp pushed to recycle"
+              : "p1 requeued");
         labelEl.textContent = "op " + step + " · " + tag;
         const placedNames = [];
         if (op.placedNewp1 && op.newp1) placedNames.push(op.newp1.join("–"));
         if (op.placedNewp2 && op.newp2) placedNames.push(op.newp2.join("–"));
-        const desc = op.success
-          ? "Cut <code>" + op.p1.join("–") + "</code> + <code>" + op.p2.join("–") +
-            "</code>; place <code>" + placedNames.join("</code> + <code>") + "</code>."
-          : "Outer iteration could not place a clean pair for <code>" + op.p1.join("–") +
-            "</code>; pushed back onto the recycle queue.";
+        const recycledNames = [];
+        if (!op.placedNewp1 && op.newp1) recycledNames.push(op.newp1.join("–"));
+        if (!op.placedNewp2 && op.newp2) recycledNames.push(op.newp2.join("–"));
+        const code = (s) => "<code>" + s + "</code>";
+        let desc;
+        if (op.success) {
+          desc = "Cut " + code(op.p1.join("–")) + " + " + code(op.p2.join("–")) +
+            "; place " + placedNames.map(code).join(" + ") + ".";
+        } else if (op.reason === "no-valid-pool") {
+          desc = "No valid swap partner for " + code(op.p1.join("–")) +
+            "; pushed back onto recycle queue.";
+        } else if (partial) {
+          desc = "Cut " + code(op.p1.join("–")) + " + " + code(op.p2.join("–")) +
+            "; place " + placedNames.map(code).join(" + ") +
+            "; " + recycledNames.map(code).join(" + ") + " pushed to recycle.";
+        } else {
+          desc = "Cut " + code(op.p1.join("–")) + " + " + code(op.p2.join("–")) +
+            "; " + recycledNames.map(code).join(" + ") + " both pushed to recycle.";
+        }
         descEl.innerHTML = '<span class="st">op ' + step + '</span> &middot; ' + desc;
       }
     }
-    function render(step) {
-      const xi = SYNTHETIC_XI;
-      const R = buildRealization(U_SEED, STUB_SEED, xi);
-      const ops = effectiveOps(R);
-      const total = 1 + ops.length;
-      document.getElementById("g-bgrewire-total").textContent = String(total - 1);
-      document.getElementById("g-bgrewire-cur").textContent = String(step);
-      clearDimPick(viz);
-      // Cluster post-rewire edges paint as a backdrop via spokeLayer
-      // siblings so they share dupInfo with bg-pool edges and fan
-      // symmetrically when they share an (u,v) key.
-      viz.setEdges([]);
-
-      paintLabelDesc(step, ops);
-
-      const beforeMap = stateAtStep(R, step === 0 ? 0 : lastStep);
-      const afterMap  = stateAtStep(R, step);
-      // Pool-degree counts can change across rewire ops (partial-success
-      // ops drop without re-placing). Use the after map's degrees so
-      // settled state has matching node-rim spoke counts; transient
-      // mid-animation a node may have one extra slot reserved by
-      // justSlots — that's already handled by spoke_layer.
-      const byNode = byNodeFromMap(afterMap);
-      const siblings = R.clusterPost.map((e, i) => ({
-        u: e.u, v: e.v,
-        color: CLUSTER_COLOR_OF[e.cluster] || COL.edge_stage2,
-        w: 1.2, opacity: 0.45, id: "br-cluster-" + i,
-      }));
-
-      if (step === 0 || (step !== lastStep + 1 && step !== lastStep - 1)) {
-        spokes.snapToState({
-          byNode, placed: placedFromMap(afterMap),
-          just: null, justSeq: step, siblings,
-        });
-        lastStep = step;
-        return;
-      }
-
-      const beforeKeys = new Set(beforeMap.keys());
-      const afterKeys = new Set(afterMap.keys());
-      const removes = [];
-      beforeMap.forEach((e, key) => {
-        if (!afterKeys.has(key)) {
-          removes.push({
-            u: e.u, v: e.v, id: "br-state-" + key, bad: !!e.bad,
-            color: e.bad ? COL.edge_drop : COL.edge_inter,
-            badColor: COL.edge_drop,
-          });
-        }
-      });
-      const adds = [];
-      afterMap.forEach((e, key) => {
-        if (!beforeKeys.has(key)) {
-          adds.push({
-            u: e.u, v: e.v, id: "br-state-" + key, bad: !!e.bad,
-            color: e.bad ? COL.edge_drop : COL.edge_inter,
-            badColor: COL.edge_drop,
-          });
-        }
-      });
-
-      spokes.playMany(removes, adds, () => {});
-      lastStep = step;
-    }
+    const placedEntry = (e) => ({
+      u: e.u, v: e.v, id: e.id, bad: !!e.bad,
+      color: e.bad ? COL.edge_drop : COL.edge_inter,
+      badColor: COL.edge_drop,
+    });
+    const render = NETGEN.makeRewireRender({
+      viz, spokes, prefix: "g-bgrewire",
+      R: () => buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI),
+      opsOf: R => effectiveOps(R),
+      stateAtStep, placedEntry, paintLabelDesc, byNodeFromList,
+      backdropOf: R => NETGEN.clusterPostBackdrop(R, {
+        idPrefix: "br-cluster-",
+        colorOf: e => CLUSTER_COLOR_OF[e.cluster] || COL.edge_stage2,
+      }),
+      getLastStep: () => lastStep,
+      setLastStep: (s) => { lastStep = s; },
+    });
     function totalForCurrent() {
       const xi = SYNTHETIC_XI;
       const R = buildRealization(U_SEED, STUB_SEED, xi);
-      return 1 + effectiveOps(R).length;
+      // 1 (pre-rewire) + opsCount + 1 (drop-stale) = 2 + opsCount.
+      return 2 + effectiveOps(R).length;
     }
-    ctl = NETGEN.stepController({
-      prevBtn: document.getElementById("g-bgrewire-prev"),
-      nextBtn: document.getElementById("g-bgrewire-next"),
-      resetBtn: document.getElementById("g-bgrewire-start"),
-      endBtn: document.getElementById("g-bgrewire-end"),
-      randStepBtn: document.getElementById("g-bgrewire-rand-step"),
-      randAllBtn: document.getElementById("g-bgrewire-rand-all"),
-      labelCur: null, labelTotal: document.getElementById("g-bgrewire-total"),
+    // Rand-step at idx re-spins ops [idx-1..end]: prior steps lock,
+    // future ops draw fresh. Drives playMany off the before/after
+    // diff so the swap animates instead of snaps.
+    // Rand-all re-spins every op [0..end] in stage. Cursor handling
+    // (was-at-end → snap to new last) is owned by rerollWalker.
+    ctl = NETGEN.rerollWalker({
+      prefix: "g-bgrewire",
       total: totalForCurrent(),
+      totalForCurrent,
       onRender: render,
       getLocked: () => lockBusy,
-      // Rand-step at idx re-spins ops [idx-1..end]: prior steps lock,
-      // future ops draw fresh. Drives playMany off the before/after
-      // diff so the swap animates instead of snaps.
+      // Drop-stale at total-1: no op range to spin there.
+      randStepDisabledAt: (idx) => idx >= totalForCurrent() - 1,
       onRandStep: idx => {
         if (idx <= 0) return;
-        const xi = SYNTHETIC_XI;
-        const R = buildRealization(U_SEED, STUB_SEED, xi);
-        const beforeMap = stateAtStep(R, idx);
+        const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
+        const beforeList = stateAtStep(R, idx);
         rerollGlobalRewireRange(idx - 1, effectiveOps(R).length);
-        const afterMap = stateAtStep(R, idx);
-        ctl.setTotalIdxSilent(totalForCurrent(), idx);
+        const afterList = stateAtStep(R, idx);
         paintLabelDesc(idx, effectiveOps(R));
-        document.getElementById("g-bgrewire-cur").textContent = String(idx);
-        document.getElementById("g-bgrewire-total").textContent = String(totalForCurrent() - 1);
         clearDimPick(viz);
-        const beforeKeys = new Set(beforeMap.keys());
-        const afterKeys = new Set(afterMap.keys());
-        const removes = [], adds = [];
-        beforeMap.forEach((e, key) => {
-          if (!afterKeys.has(key)) {
-            removes.push({
-              u: e.u, v: e.v, id: "br-state-" + key, bad: !!e.bad,
-              color: e.bad ? COL.edge_drop : COL.edge_inter,
-              badColor: COL.edge_drop,
-            });
-          }
+        const beforeIds = new Set(beforeList.map(e => e.id));
+        const afterIds = new Set(afterList.map(e => e.id));
+        const toEntry = (e) => ({
+          u: e.u, v: e.v, id: e.id, bad: !!e.bad,
+          color: e.bad ? COL.edge_drop : COL.edge_inter,
+          badColor: COL.edge_drop,
         });
-        afterMap.forEach((e, key) => {
-          if (!beforeKeys.has(key)) {
-            adds.push({
-              u: e.u, v: e.v, id: "br-state-" + key, bad: !!e.bad,
-              color: e.bad ? COL.edge_drop : COL.edge_inter,
-              badColor: COL.edge_drop,
-            });
-          }
-        });
-        spokes.playMany(removes, adds, () => {});
+        const removes = beforeList.filter(e => !afterIds.has(e.id)).map(toEntry);
+        const adds = afterList.filter(e => !beforeIds.has(e.id)).map(toEntry);
+        const byNode = byNodeFromList(afterList);
+        spokes.playMany(removes, adds, () => {}, { byNode });
         lastStep = idx;
         return "skip";
       },
-      // Rand-all re-spins every op [0..end]: full bg-rewire reseed
-      // regardless of cursor. New trace length may shrink or grow;
-      // cursor clamps to new last step if it sat past it.
       onRandAll: idx => {
         if (idx <= 0) return;
-        const xi = SYNTHETIC_XI;
-        const R = buildRealization(U_SEED, STUB_SEED, xi);
+        const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
         rerollGlobalRewireRange(0, effectiveOps(R).length);
-        const newTotal = totalForCurrent();
-        ctl.reconfigureKeep(newTotal, Math.min(idx, newTotal - 1));
       },
-      randStepDisabledAt: (idx) => idx >= totalForCurrent() - 1,
+      onAfterRandAll: () => fireBgRewireChanged(),
     });
     function reconfigReset() {
       opsOverride = null;
@@ -2023,12 +1962,11 @@ window.MathJax = {
     }
     function reconfigKeep() {
       opsOverride = null;
-      ctl.reconfigureKeep(totalForCurrent(), ctl.idx);
+      NETGEN.followCursor(ctl, totalForCurrent());
     }
     // bg-pair reroll changes the bg pre-state; the kernel-recorded
     // R.globalRewireOps no longer match the new pre-pairs, so regen
-    // the op trace from the effective bgPre with a fresh rng. Cursor
-    // clamps if the new trace is shorter.
+    // the op trace from the effective bgPre with a fresh rng.
     function regenFromBgPre() {
       rewireRerollNonce += 1;
       const xi = SYNTHETIC_XI;
@@ -2037,13 +1975,18 @@ window.MathJax = {
       opsOverride = ABCDKernel.replayGlobalRewireFromOps(
         globalPrePairsTuples(R), clusterEdgeEkeys(R), [], fresh
       );
-      const newTotal = totalForCurrent();
-      ctl.reconfigureKeep(newTotal, Math.min(ctl.idx, newTotal - 1));
+      NETGEN.followCursor(ctl, totalForCurrent());
     }
+    // Cluster-pair RandAll cascades cluster-pre → bg-pair (reTotalKeep)
+    // → bg-pair fires bgPairChanged → regenFromBgPre handles bg-rewire.
+    // No direct cluster-pre subscription — it would fight regenFromBgPre
+    // for cursor control.
     onStubChanged.push(reconfigReset);
     onUChanged.push(reconfigReset);
-    onClusterPreChanged.push(reconfigKeep);
     onBgPairChanged.push(regenFromBgPre);
+    // crewire RandAll changes clusterPost (bg-rewire's backdrop +
+    // clusterEdgeKeys for crossDup gating). Apply follow rule.
+    onClusterRewireChanged.push(reconfigKeep);
   })();
 
 
@@ -2080,7 +2023,7 @@ window.MathJax = {
       .style("font-size", "10px").text("degree");
 
     // Legend
-    const legend = svg.append("g").attr("transform", `translate(${W - 180},${PAD.top - 6})`);
+    const legend = svg.append("g").attr("transform", `translate(${W - 230},${PAD.top - 6})`);
     legend.append("rect").attr("x", 0).attr("y", 0).attr("width", 14).attr("height", 10).attr("fill", COL.azure).attr("opacity", 0.85);
     legend.append("text").attr("x", 18).attr("y", 9).style("fill", "#2f3a54")
       .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px")
@@ -2089,6 +2032,12 @@ window.MathJax = {
     legend.append("text").attr("x", 104).attr("y", 9).style("fill", "#2f3a54")
       .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px")
       .text("output");
+    legend.append("rect").attr("x", 142).attr("y", 0).attr("width", 14).attr("height", 10)
+      .attr("fill", COL.edge_drop || "#c33").attr("opacity", 0.5)
+      .attr("stroke", COL.edge_drop || "#c33").attr("stroke-width", 1).attr("stroke-dasharray", "3 2");
+    legend.append("text").attr("x", 160).attr("y", 9).style("fill", "#2f3a54")
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px")
+      .text("missing");
 
     const halfW = x.bandwidth() * 0.45;
     const rows = g.selectAll(".cmp").data(NODES_SORTED).join("g")
@@ -2100,22 +2049,41 @@ window.MathJax = {
     rows.append("rect").attr("class", "out")
       .attr("x", halfW + 2).attr("y", y(0)).attr("width", halfW).attr("height", 0)
       .attr("fill", COL.mint).attr("opacity", 0.9);
+    // Missing-degree overlay: when wout < win, draw a red-dashed rect
+    // on the output column spanning [wout..win]. Visualises drop-stale
+    // residue + partial-success op losses node-by-node.
+    rows.append("rect").attr("class", "miss")
+      .attr("x", halfW + 2).attr("y", y(0)).attr("width", halfW).attr("height", 0)
+      .attr("fill", COL.edge_drop || "#c33").attr("opacity", 0.5)
+      .attr("stroke", COL.edge_drop || "#c33").attr("stroke-width", 1)
+      .attr("stroke-dasharray", "3 2");
 
     function render() {
       const xi = SYNTHETIC_XI;
       const R = buildRealization(U_SEED, STUB_SEED, xi);
+      // effectiveOutDeg threads cluster-rewire + bg-rewire walker
+      // overrides through the final-edge tally so the panel tracks the
+      // walker viz instead of just the kernel baseline.
+      const effDeg = effectiveOutDeg(R);
       let diff = 0, match = 0;
       rows.each(function (nid) {
         const win = DEGREES[nid];
-        const wout = R.outDeg[nid] || 0;
+        const wout = effDeg[nid] || 0;
         diff += Math.abs(win - wout);
         if (win === wout) match++;
+        const missTop = Math.min(win, wout);   // bottom of missing band
+        const missBot = Math.max(win, wout);   // top of missing band
+        const missing = missBot - missTop;
         d3.select(this).select(".in")
           .transition().duration(250)
           .attr("y", y(win)).attr("height", ih - y(win));
         d3.select(this).select(".out")
           .transition().duration(250)
           .attr("y", y(wout)).attr("height", ih - y(wout));
+        d3.select(this).select(".miss")
+          .transition().duration(250)
+          .attr("y", y(missBot))
+          .attr("height", missing > 0 ? y(missTop) - y(missBot) : 0);
       });
       document.getElementById("deg-diff").textContent = diff;
       document.getElementById("deg-match").textContent = match + "/" + NODES.length;
@@ -2123,6 +2091,9 @@ window.MathJax = {
     onStubChanged.push(render);
     onUChanged.push(render);
     onClusterPreChanged.push(render);
+    onClusterRewireChanged.push(render);
+    onBgPairChanged.push(render);
+    onBgRewireChanged.push(render);
     render();
   })();
 

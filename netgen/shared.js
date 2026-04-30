@@ -1273,6 +1273,7 @@ function wireWalker(opts) {
     onRender, onRandStep, onRandAll, getLocked,
     keyboard, randAtStart,
     curId, totId,
+    randStepDisabledAt,
   } = opts;
   const $ = (suffix) => document.getElementById(`${prefix}-${suffix}`);
   return stepController({
@@ -1283,7 +1284,273 @@ function wireWalker(opts) {
     labelCur: document.getElementById(curId || `${prefix}-cur`),
     labelTotal: document.getElementById(totId || `${prefix}-total`),
     onRender, onRandStep, onRandAll, getLocked, keyboard, randAtStart,
+    randStepDisabledAt,
   });
+}
+
+// ── Reroll walker ─────────────────────────────────────────────
+// Higher-level wrapper around wireWalker. Adds three behaviours
+// every reroll-bearing walker needs (per nPSO + SBM as the gold
+// standard, plus was-at-end cursor tracking shipped on abcd):
+//
+//   1. RandStep[idx-1..end] / RandAll[0..end] semantics — driver
+//      doesn't enforce a kernel contract; page supplies handlers
+//      that mutate its own override / trace store. After each
+//      handler, driver re-syncs total via totalForCurrent() and
+//      runs onAfterRand{Step,All}(idx, newTotal) so the page can
+//      publish to its event bus (cross-figure sync).
+//   2. was-at-end cursor — RandAll captures `idx === ctl.total-1`
+//      pre-handler; if true, post-handler cursor lands on the new
+//      last step (newTotal-1). Mid-walk cursor stays at idx,
+//      auto-clamped by reconfigureKeep when newTotal shrinks.
+//      RandStep keeps idx silently via setTotalIdxSilent; the
+//      page's onRandStep is responsible for driving its own
+//      animation (return "skip" to bypass controller render).
+//   3. Drop-stale gate convention — randStepDisabledAt defaults
+//      to (idx) => idx >= totalForCurrent() - 1, matching the
+//      "no op range to spin" rule. Page can override.
+//
+// Page contract:
+//   prefix:           DOM id prefix (g-bgpair, g-cpair, ...)
+//   total / totalForCurrent: initial total + live total accessor
+//   onRender(step, snap): page paints viz + labels + descriptions
+//   onRandStep(idx) / onRandAll(idx): page's reroll handlers.
+//     Same return-value semantics as stepController:
+//       "skip"  — handler ran its own render (e.g. playMany)
+//       truthy  — snap-render
+//       falsy   — animated render
+//     For RandAll the driver always wraps in withSnap (per
+//     stepController's randAllBtn handler), so the return value
+//     is ignored except to suppress double-render.
+//   onAfterRandStep(idx, newTotal) / onAfterRandAll(idx, newTotal):
+//     fired after the handler + total/idx sync. Page publishes
+//     cross-figure events here (downstream walker reconfigKeep).
+//   trackEndCursor: bool, default true. False → mid-walk semantics
+//     even at the last step (RandAll keeps idx, lets reconfigureKeep
+//     clamp).
+function rerollWalker(opts) {
+  const {
+    prefix, total,
+    totalForCurrent = () => total,
+    onRender,
+    onRandStep, onRandAll,
+    onAfterRandStep, onAfterRandAll,
+    trackEndCursor = true,
+    getLocked, keyboard, randAtStart, curId, totId,
+    randStepDisabledAt,
+  } = opts;
+  let ctl = null;
+  const wrappedRandStep = onRandStep ? (idx) => {
+    const ret = onRandStep(idx);
+    if (ctl) {
+      const newTotal = totalForCurrent();
+      if (newTotal !== ctl.total) ctl.setTotalIdxSilent(newTotal, idx);
+      if (onAfterRandStep) onAfterRandStep(idx, newTotal);
+    }
+    return ret;
+  } : undefined;
+  // RandAll: handler mutates page state; driver silently updates total
+  // + idx (was-at-end → newTotal-1, else clamp). stepController's
+  // randAllBtn click then fires its own render() under withSnap, which
+  // paints the new state. Driver does NOT render itself — that would
+  // double-render with the controller's post-handler render.
+  const wrappedRandAll = onRandAll ? (idx) => {
+    const wasAtEnd = trackEndCursor && ctl && idx === ctl.total - 1;
+    const ret = onRandAll(idx);
+    if (ctl) {
+      const newTotal = totalForCurrent();
+      const newIdx = Math.max(0, Math.min(newTotal - 1, wasAtEnd ? newTotal - 1 : idx));
+      ctl.setTotalIdxSilent(newTotal, newIdx);
+      if (onAfterRandAll) onAfterRandAll(newIdx, newTotal);
+    }
+    return ret;
+  } : undefined;
+  ctl = wireWalker({
+    prefix, total,
+    onRender,
+    onRandStep: wrappedRandStep,
+    onRandAll: wrappedRandAll,
+    getLocked, keyboard, randAtStart, curId, totId,
+    randStepDisabledAt,
+  });
+  return ctl;
+}
+
+// ── Rewire stateAtStep factory ────────────────────────────────
+// Shared construction for rewire walkers (cluster-rewire, bg-rewire,
+// any future ec-sbm / lfr rewire). Builds the per-step edge list:
+//   1. prePairs seed the list, with bad-flag inferred from
+//      loop / multi / crossDup.
+//   2. ops in [0..k) mutate the list via the walker-specific applyOp.
+//   3. Drop-stale step (k > ops.length) filters bad entries — the
+//      recycle-queue leftovers at canonical exit.
+//
+// Page contract:
+//   prePairsOf(R)        — array of pre-pairs (cluster-pre / bg-pre);
+//                          may apply a page-side override.
+//   opsOf(R)             — array of ops (with effectiveOps semantics).
+//   idPrefix             — "cr" / "br" for stable per-entry ids.
+//   applyOp(list, op, i, idPrefix) — mutate list in place per the op
+//                          (kernel-specific cut + place; cluster vs
+//                          bg semantics differ on no-op handling and
+//                          newp placement flags).
+//   entryDecorator(entry, prePair) — attach extra fields (e.g.
+//                          `cluster` for cluster-rewire; identity for
+//                          bg-rewire).
+function makeRewireStateAtStep(opts) {
+  const { prePairsOf, opsOf, idPrefix, applyOp, entryDecorator } = opts;
+  const decorate = entryDecorator || ((e) => e);
+  return function stateAtStep(R, k) {
+    const ops = opsOf(R);
+    const list = [];
+    const seenKey = new Set();
+    prePairsOf(R).forEach(function (e, i) {
+      const key = keyOf(e.u, e.v);
+      const isLoop = !!e.loop;
+      const isMulti = !!e.multi || (!isLoop && seenKey.has(key));
+      const isCrossDup = !!e.crossDup;
+      if (!isLoop && !isMulti && !isCrossDup) seenKey.add(key);
+      list.push(decorate({
+        u: e.u, v: e.v,
+        bad: isLoop || isMulti || isCrossDup,
+        id: idPrefix + "-pre-" + i,
+      }, e));
+    });
+    const opsToApply = Math.min(k, ops.length);
+    for (let i = 0; i < opsToApply; i++) {
+      applyOp(list, ops[i], i, idPrefix);
+    }
+    if (k > ops.length) return list.filter(function (e) { return !e.bad; });
+    return list;
+  };
+}
+
+// ── Rewire render factory ─────────────────────────────────────
+// Shared render(step, snap) for any rewire walker (cluster-rewire,
+// bg-rewire, abcd+o equivalents, lfr, ec-sbm). Handles:
+//   - total + cur DOM updates
+//   - paintLabelDesc dispatch
+//   - backdrop (optional) prefix on placed
+//   - snap vs animated branch (adjacency check)
+//   - playMany / simplify split (drop-stale = simplify)
+//
+// Page contract:
+//   viz                       cytoscape viz handle
+//   spokes                    spokeLayer.attach handle
+//   prefix                    DOM id prefix ("g-crewire", "g-bgrewire")
+//   R()                       realization getter
+//   opsOf(R)                  current op trace
+//   stateAtStep(R, k)         (typically from makeRewireStateAtStep)
+//   placedEntry(e)            edge → spoke-layer placed entry
+//   paintLabelDesc(step, ops, isDropStale)
+//   backdropOf(R)             optional → noSlot prefix on placed
+//   getLastStep / setLastStep accessors for the walker's lastStep
+//
+// Returns render(step). isDropStale = step > opsOf(R).length.
+function makeRewireRender(opts) {
+  const {
+    viz, spokes, prefix, R: getR, opsOf, stateAtStep,
+    placedEntry, paintLabelDesc, backdropOf,
+    getLastStep, setLastStep,
+    byNodeFromList,
+  } = opts;
+  const totalEl = document.getElementById(prefix + "-total");
+  const curEl = document.getElementById(prefix + "-cur");
+  const noopFn = function () {};
+  return function render(step) {
+    const R = getR();
+    const ops = opsOf(R);
+    const total = 2 + ops.length;
+    if (totalEl) totalEl.textContent = String(total - 1);
+    if (curEl) curEl.textContent = String(step);
+    if (viz && viz.setEdges) viz.setEdges([]);
+    paintLabelDesc(step, ops, step > ops.length);
+
+    const lastStep = getLastStep();
+    const beforeList = stateAtStep(R, lastStep);
+    const afterList  = stateAtStep(R, step);
+    const byNode = byNodeFromList(afterList);
+    const backdrop = backdropOf ? backdropOf(R) : [];
+
+    if (step !== lastStep + 1 && step !== lastStep - 1) {
+      spokes.snapToState({
+        byNode,
+        placed: backdrop.concat(afterList.map(placedEntry)),
+        just: null, justSeq: step,
+      });
+      setLastStep(step);
+      return;
+    }
+
+    const beforeIds = new Set(beforeList.map(function (e) { return e.id; }));
+    const afterIds  = new Set(afterList.map(function (e) { return e.id; }));
+    const removes = beforeList.filter(function (e) { return !afterIds.has(e.id); }).map(placedEntry);
+    const adds    = afterList.filter(function (e) { return !beforeIds.has(e.id); }).map(placedEntry);
+
+    if (removes.length > 0 && adds.length === 0) {
+      spokes.simplify(removes, noopFn, { byNode });
+    } else {
+      spokes.playMany(removes, adds, noopFn, { byNode });
+    }
+    setLastStep(step);
+  };
+}
+
+// ── Cluster-post backdrop helper ──────────────────────────────
+// Build the noSlot placed-prefix every walker that paints cluster-
+// post in faded grey/cluster-color behind its own edges (bg-pair,
+// bg-rewire, lfr's bg-equivalent, ec-sbm v2 etc.) needs.
+//   const backdrop = NETGEN.clusterPostBackdrop(R, {
+//     idPrefix: "bp-cluster-",
+//     colorOf: e => CLUSTER_COLOR_OF[e.cluster] || COL.edge_stage2,
+//   });
+// Then prefix it onto state.placed so it paints behind active edges
+// while sharing dupInfo for symmetric fan-out at colliding (u,v).
+function clusterPostBackdrop(R, opts) {
+  const idPrefix = (opts && opts.idPrefix) || "backdrop-";
+  const colorOf  = (opts && opts.colorOf)  || function (e) { return e.color || "#888"; };
+  const w        = (opts && opts.w != null) ? opts.w : 1.2;
+  const opacity  = (opts && opts.opacity != null) ? opts.opacity : 0.45;
+  return (R.clusterPost || []).map(function (e, i) {
+    return {
+      u: e.u, v: e.v,
+      color: colorOf(e),
+      w: w, opacity: opacity, id: idPrefix + i, noSlot: true,
+    };
+  });
+}
+
+// ── Cross-figure cursor follow rule ──────────────────────────
+// Convention: when an upstream figure rerolls, downstream walkers
+// reset to step 0 — UNLESS they were parked at the last step, in
+// which case they follow to the new last step (drop-stale or final
+// op). Lets the user RandAll an early stage and walk fresh through
+// each downstream stage, while preserving "settled" views.
+function followCursor(ctl, newTotal) {
+  const wasAtEnd = ctl.idx >= ctl.total - 1;
+  ctl.reconfigureKeep(newTotal, wasAtEnd ? newTotal - 1 : 0);
+}
+
+// ── Page event bus ───────────────────────────────────────────
+// Per-page publish/subscribe hub for cross-figure sync. Each
+// downstream walker that depends on an upstream walker's reroll
+// subscribes to the event the upstream publishes from its
+// onAfterRand{Step,All}. Event names are page-defined (e.g.
+// "stubChanged", "clusterPreChanged", "bgPreChanged").
+//
+//   const bus = NETGEN.makePageBus();
+//   bus.subscribe("stubChanged", reconfigKeep);
+//   bus.publish("stubChanged");
+//
+// Replaces ad-hoc onStubChanged / onUChanged listener arrays.
+function makePageBus() {
+  const subs = {};
+  return {
+    subscribe(name, fn) { (subs[name] = subs[name] || []).push(fn); },
+    publish(name, payload) {
+      (subs[name] || []).forEach((fn) => fn(payload));
+    },
+  };
 }
 
 // ── Toggle widget ────────────────────────────────────────────
@@ -1598,7 +1865,7 @@ global.NETGEN = {
   C1, C2, C3, OUT, INTRA, INTER, OUT_EDGES,
   CORE_NODES, CORE_EDGES, topK, cliqueEdges,
   COLORS, CY, VIZ,
-  makeTooltip, scrubSlider, stepController, walkerRow, wireWalker, snapOrSync, singletonOpener, defaultSingletonClusters, bindPanelToggle, mountGxPanel, walkerMarkPlaced, walkerMarkJust, reseedSuffix, stubPoolReseed, keyOf, toggle,
+  makeTooltip, scrubSlider, stepController, walkerRow, wireWalker, rerollWalker, makePageBus, makeRewireStateAtStep, makeRewireRender, clusterPostBackdrop, followCursor, snapOrSync, singletonOpener, defaultSingletonClusters, bindPanelToggle, mountGxPanel, walkerMarkPlaced, walkerMarkJust, reseedSuffix, stubPoolReseed, keyOf, toggle,
   linksRow, kinSection,
   fitViewBoxAttr,
   retypeset,
