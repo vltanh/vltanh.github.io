@@ -582,16 +582,25 @@ window.MathJax = {
     onStubChanged.forEach(fn => fn());
   }
 
-  // Module-scoped per-stage overrides + listener bus, mirrors abcd.html.
-  // bg-pair override feeds bg-rewire's effective pre-state so a bg-pair
-  // reroll regenerates the bg-rewire op trace from the new bgPre. The
-  // cluster + global rewire-op overrides hold replay-derived traces from
+  // Module-scoped per-stage overrides + listener buses, mirrors abcd.html.
+  // pairOverride threads into buildRealization's two-pass kernel so a
+  // cluster-pair reroll cascades through clusterPost / clusterRewireOps /
+  // bgPre / globalRewireOps deterministically. bgPairOverride feeds the
+  // bg-rewire walker's effective pre-state. clusterRewireOpsOverride and
+  // globalRewireOpsOverride hold replay-derived per-op traces from
   // ABCDKernel.replay*RewireFromOps.
+  let pairOverride = {};
+  let overrideEpoch = 0;
   let bgPairOverride = {};
   let clusterRewireOpsOverride = null;
   let globalRewireOpsOverride = null;
   let rewireRerollNonce = 0;
+  const onClusterPreChanged = [];
   const onBgPairChanged = [];
+  function fireClusterPreChanged() {
+    overrideEpoch++;
+    onClusterPreChanged.forEach(fn => fn());
+  }
   function fireBgPairChanged() { onBgPairChanged.forEach(fn => fn()); }
   function effectiveBgPre(R) { return R.bgPre.map((e, i) => bgPairOverride[i] || e); }
   function effectiveClusterRewireOps(R) { return clusterRewireOpsOverride || R.clusterRewireOps; }
@@ -633,10 +642,10 @@ window.MathJax = {
   const PAGE_NODE_BY_KIDX = NODES.slice();
   const KERNEL_W = NODES.map(n => DEG_KEPT[n]);
 
-  // Full realisation cache, keyed by (o_seed, u_seed, stub_seed, xi).
+  // Full realisation cache, keyed by (o_seed, u_seed, stub_seed, xi, overrideEpoch).
   const REAL_CACHE = new Map();
   function buildRealization(o_seed, u_seed, stub_seed, xi) {
-    const key = o_seed + "|" + u_seed + "|" + stub_seed + "|" + xi.toFixed(4);
+    const key = o_seed + "|" + u_seed + "|" + stub_seed + "|" + xi.toFixed(4) + "|" + overrideEpoch;
     if (REAL_CACHE.has(key)) return REAL_CACHE.get(key);
     const { eligible, threshold } = computeEligible(xi);
     const outliers = pickOutliers(eligible, o_seed);
@@ -645,16 +654,56 @@ window.MathJax = {
     const clusters = NODES.map(n => outliers.has(n) ? 1 : KERNEL_REAL_CLUSTER_BY_NODE[n]);
     const KERNEL_S = [N_OUTLIERS, C1.length, C2.length, C3.length];
     const seedInt = ((u_seed * 1009 + 17) ^ (stub_seed * 131 + 7)) >>> 0;
-    const rng = seededRng(seedInt + 1);
-    const cm = ABCDKernel.configModel({
+    // First pass: kernel without overrides — needed to learn cluster
+    // layouts (member sets, prePair offsets) before pairOverride entries
+    // can be translated to per-cluster stub arrays.
+    const baseCm = ABCDKernel.configModel({
       clusters,
       w: KERNEL_W,
       s: KERNEL_S,
       hasOutliers: true,
       xi,
-      rng,
+      rng: seededRng(seedInt + 1),
       traceStages: true,
     });
+    let kernelOverrides;
+    if (Object.keys(pairOverride).length > 0) {
+      const clusterStubsByCluster = {};
+      let preIdx = 0;
+      baseCm.stages.perCluster.forEach(stage => {
+        const cname = NAMED_CLUSTER_OF_KERNEL[stage.cluster];
+        if (!cname) return; // skip cluster 1 (outliers, no prePairs anyway)
+        const stubs = [];
+        for (let i = 0; i < stage.prePairs.length; i++) {
+          const o = pairOverride[preIdx + i];
+          if (o) stubs.push(o.u, o.v);
+          else stubs.push(stage.prePairs[i][0], stage.prePairs[i][1]);
+        }
+        clusterStubsByCluster[stage.cluster] = stubs;
+        preIdx += stage.prePairs.length;
+      });
+      // Lock wInternal to base values so cluster K's override-driven
+      // recycle differences can't shift later clusters' randround draws.
+      const wInternalByVertex = new Array(NODES.length).fill(0);
+      baseCm.stages.perCluster.forEach(stage => {
+        stage.members.forEach((v, idx) => {
+          wInternalByVertex[v - 1] = stage.wInternalPreForward[idx];
+        });
+      });
+      kernelOverrides = { clusterStubsByCluster, wInternalByVertex };
+    }
+    // Second pass: kernel with overrides if any. Fresh rng so recycle /
+    // global stages get fresh draws against the overridden prePairs.
+    const cm = kernelOverrides ? ABCDKernel.configModel({
+      clusters,
+      w: KERNEL_W,
+      s: KERNEL_S,
+      hasOutliers: true,
+      xi,
+      rng: seededRng(seedInt + 1),
+      traceStages: true,
+      overrides: kernelOverrides,
+    }) : baseCm;
     const wInternalPreForward = new Array(NODES.length).fill(0);
     cm.stages.perCluster.forEach(stage => {
       stage.members.forEach((v, idx) => {
@@ -1162,11 +1211,10 @@ window.MathJax = {
   (function () {
     const viz = NETGEN.VIZ.init("g-cpair-cy", { showLabels: true, edges: [], pinned: true });
     NETGEN.makeTooltip(viz, document.getElementById("g-cpair"));
-    let pairOverride = {};
-    function effectivePair(R, i) { return pairOverride[i] || R.clusterPre[i]; }
-    function effPairs(R) {
-      return R.clusterPre.map((_, i) => effectivePair(R, i));
-    }
+    // pairOverride lives at module scope; buildRealization threads it
+    // into the kernel's second pass, so R.clusterPre / clusterPost /
+    // clusterRewireOps / bgPre / globalRewireOps already reflect the
+    // override deterministically.
     function rollPair(R, idx) {
       let lay = null, l = 0;
       for (const c of R.clusterStubLayouts) {
@@ -1175,8 +1223,7 @@ window.MathJax = {
         }
       }
       if (!lay) return;
-      const prefix = [];
-      for (let i = 0; i < l; i++) prefix.push(effectivePair(R, lay.startInClusterPre + i));
+      const prefix = R.clusterPre.slice(lay.startInClusterPre, lay.startInClusterPre + l);
       const newTail = NETGEN.stubPoolReseed({
         layout: lay, prefix,
         classify: (a, b, ctx) => {
@@ -1188,10 +1235,12 @@ window.MathJax = {
         },
       });
       newTail.forEach((np, i) => { pairOverride[lay.startInClusterPre + l + i] = np; });
+      fireClusterPreChanged();
     }
-    function rollAllPairs(R) {
+    function rollAllPairs() {
       pairOverride = {};
-      R.clusterStubLayouts.forEach(lay => {
+      const Rfresh = getCurrentR();
+      Rfresh.clusterStubLayouts.forEach(lay => {
         const newTail = NETGEN.stubPoolReseed({
           layout: lay, prefix: [],
           classify: (a, b, ctx) => {
@@ -1204,11 +1253,12 @@ window.MathJax = {
         });
         newTail.forEach((np, i) => { pairOverride[lay.startInClusterPre + i] = np; });
       });
+      fireClusterPreChanged();
     }
     function render(step) {
       const R = getCurrentR();
       applyOutlierColors(viz, R);
-      const ePairs = effPairs(R);
+      const ePairs = R.clusterPre;
       const total = 1 + ePairs.length;
       document.getElementById("g-cpair-total").textContent = String(total - 1);
       document.getElementById("g-cpair-cur").textContent = String(step);
@@ -1255,11 +1305,12 @@ window.MathJax = {
       // U_SEED / STUB_SEED bump.
       onRandAll: idx => {
         if (idx <= 0) return;
-        rollAllPairs(getCurrentR());
+        rollAllPairs();
       },
     });
     function reconfig() {
       pairOverride = {};
+      fireClusterPreChanged();
       ctl.reconfigureKeep(totalForCurrent(), ctl.idx);
     }
     onStubChanged.push(reconfig);
@@ -1449,6 +1500,7 @@ window.MathJax = {
       ctl.reconfigureKeep(totalForCurrent(), ctl.idx);
     }
     onStubChanged.push(reconfig);
+    onClusterPreChanged.push(reconfig);
     document.getElementById("xi-slider").addEventListener("input", reconfig);
   })();
 
@@ -1559,6 +1611,7 @@ window.MathJax = {
       ctl.reconfigureKeep(totalForCurrent(), ctl.idx);
     }
     onStubChanged.push(reconfig);
+    onClusterPreChanged.push(reconfig);
     document.getElementById("xi-slider").addEventListener("input", reconfig);
   })();
 
@@ -1719,6 +1772,7 @@ window.MathJax = {
       ctl.reconfigureKeep(newTotal, Math.min(ctl.idx, newTotal - 1));
     }
     onStubChanged.push(reconfig);
+    onClusterPreChanged.push(reconfig);
     onBgPairChanged.push(regenFromBgPre);
     document.getElementById("xi-slider").addEventListener("input", reconfig);
   })();
