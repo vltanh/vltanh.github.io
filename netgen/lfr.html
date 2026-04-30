@@ -790,9 +790,10 @@ window.MathJax = {
       NETGEN.retypeset(descEl);
     }
 
-    const controller = NETGEN.wireWalker({
+    const controller = NETGEN.rerollWalker({
       prefix: "g-assign",
       total: 5,
+      totalForCurrent: () => 5,
       onRender: render,
       onRandStep: rerollAssign,
       // In-stage RandAll: bump the assign seed (the most-local for this
@@ -1043,13 +1044,16 @@ window.MathJax = {
     // suffix-reseed of individual rewire ops doesn't have a clean
     // semantic, so we leave those steps unchanged (deterministic
     // walker — random step is a no-op once past pair phase).
+    let cmPairRerollNonce = 0;
     function rollPair(trace, idx) {
       const lay = trace.stubLayout;
       if (idx >= lay.numPairs) return;
       const prefix = [];
       for (let i = 0; i < idx; i++) prefix.push(effectivePair(trace, i));
+      cmPairRerollNonce += 1;
+      const fresh = seededRng(EDGE_SEED * 6271 + cmPairRerollNonce * 41 + idx * 113);
       const newTail = NETGEN.stubPoolReseed({
-        layout: lay, prefix,
+        layout: lay, prefix, rng: fresh,
         classify: (a, b, ctx) => {
           const loop = (a === b);
           const kk = NETGEN.keyOf(a, b);
@@ -1060,9 +1064,10 @@ window.MathJax = {
       });
       newTail.forEach((np, i) => { pairOverride[idx + i] = np; });
     }
-    ctl = NETGEN.wireWalker({
+    ctl = NETGEN.rerollWalker({
       prefix: "g-cm",
       total: totalForCurrent(),
+      totalForCurrent,
       onRender: render,
       getLocked: () => lockBusy,
       onRandStep: (S) => {
@@ -1075,14 +1080,12 @@ window.MathJax = {
       // config-model walker), keeping resample + assign fixed.
       onRandAll: () => { if (!lockBusy) rerollEdges(); },
     });
-    onResampleChanged.push(() => {
+    function reconfigKeep() {
       CACHE_KEY = ""; pairOverride = {};
-      ctl.reconfigureKeep(totalForCurrent(), ctl.idx);
-    });
-    onEdgeChanged.push(() => {
-      CACHE_KEY = ""; pairOverride = {};
-      ctl.reconfigureKeep(totalForCurrent(), ctl.idx);
-    });
+      NETGEN.followCursor(ctl, totalForCurrent());
+    }
+    onResampleChanged.push(reconfigKeep);
+    onEdgeChanged.push(reconfigKeep);
   })();
 
   // ── Generation · per-cluster build-subgraph walker ──
@@ -1334,20 +1337,21 @@ window.MathJax = {
       spokesBs.playMany(removes, adds, clearAllDim);
       lastStep = step;
     }
-    ctl = NETGEN.wireWalker({
+    ctl = NETGEN.rerollWalker({
       prefix: "g-bs",
       total: totalForCurrent(),
+      totalForCurrent,
       onRender: render,
       getLocked: () => lockBusy,
       onRandStep: () => { if (!lockBusy) rerollEdges(); },
       // In-stage RandAll: edge seed only.
       onRandAll: () => { if (!lockBusy) rerollEdges(); },
     });
-    function reconfig() { CACHE_KEY_BS = ""; ctl.reconfigureKeep(totalForCurrent(), ctl.idx); }
-    onResampleChanged.push(reconfig);
-    onAssignChanged.push(reconfig);
-    onEdgeChanged.push(reconfig);
-    document.getElementById("mu-slider").addEventListener("input", reconfig);
+    function reconfigKeep() { CACHE_KEY_BS = ""; NETGEN.followCursor(ctl, totalForCurrent()); }
+    onResampleChanged.push(reconfigKeep);
+    onAssignChanged.push(reconfigKeep);
+    onEdgeChanged.push(reconfigKeep);
+    document.getElementById("mu-slider").addEventListener("input", reconfigKeep);
   })();
 
   // ── Generation · mu rewire histogram ──
@@ -1644,20 +1648,21 @@ window.MathJax = {
       spokesMr.playMany(removes, adds, () => {});
       lastStep = step;
     }
-    ctl = NETGEN.wireWalker({
+    ctl = NETGEN.rerollWalker({
       prefix: "g-mr",
       total: totalForCurrent(),
+      totalForCurrent,
       onRender: render,
       getLocked: () => lockBusy,
       onRandStep: () => { if (!lockBusy) rerollEdges(); },
       // In-stage RandAll: edge seed only.
       onRandAll: () => { if (!lockBusy) rerollEdges(); },
     });
-    function reconfig() { CACHE_KEY = ""; ctl.reconfigureKeep(totalForCurrent(), ctl.idx); }
-    onResampleChanged.push(reconfig);
-    onAssignChanged.push(reconfig);
-    onEdgeChanged.push(reconfig);
-    document.getElementById("mu-slider").addEventListener("input", reconfig);
+    function reconfigKeep() { CACHE_KEY = ""; NETGEN.followCursor(ctl, totalForCurrent()); }
+    onResampleChanged.push(reconfigKeep);
+    onAssignChanged.push(reconfigKeep);
+    onEdgeChanged.push(reconfigKeep);
+    document.getElementById("mu-slider").addEventListener("input", reconfigKeep);
   })();
 
 })();
