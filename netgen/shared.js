@@ -1678,6 +1678,84 @@ function rerollClusterRewireRange(opts) {
   return next;
 }
 
+// ── ABCD cross-cluster final-swap re-roll ────────────────────
+// Page-side replay of the kernel's final-stage rewire loop.
+// Mirrors abcd_kernel.js:687-727 byte-for-byte. Used by abcd +
+// abcd+o pages for local re-roll on the final-swap walker:
+// applies ops [0..lo-1] deterministically using their stored
+// (p2, coin, keep1, keep2), then runs fresh-rng loop from `lo`
+// onward against the same fairness counter.
+//
+// opts:
+//   edgesBefore   [[u,v], ...] from R.finalEdgesBefore
+//   recycleBefore [[u,v], ...] from R.finalRecycleBefore
+//   baseOps       current effective op list (includes any prior override)
+//   lo            re-roll starts at op index `lo`
+//   rng           fresh PRNG for ops [lo..end]
+//
+// Returns the new ops list (length may differ from baseOps if the
+// fresh rng converges in fewer or more iterations).
+function replayFinalSwap(opts) {
+  const baseOps = opts.baseOps || [];
+  const cap = Math.max(0, Math.min(opts.lo | 0, baseOps.length));
+  const rng = opts.rng;
+  const epair = (a, b) => a < b ? [a, b] : [b, a];
+  const ek = (a, b) => a < b ? a + "-" + b : b + "-" + a;
+  const edges = new Set();
+  (opts.edgesBefore || []).forEach(([a, b]) => edges.add(ek(a, b)));
+  const recycle = (opts.recycleBefore || []).map(p => p.slice());
+  const out = [];
+  for (let i = 0; i < cap; i++) {
+    const op = baseOps[i];
+    recycle.pop();
+    edges.delete(ek(op.p2[0], op.p2[1]));
+    [["newp1", "keep1"], ["newp2", "keep2"]].forEach(([nk, kk]) => {
+      const np = op[nk];
+      if (op[kk]) edges.add(ek(np[0], np[1]));
+      else recycle.push(np.slice());
+    });
+    out.push({ p1: op.p1.slice(), p2: op.p2.slice(),
+      newp1: op.newp1.slice(), newp2: op.newp2.slice(),
+      coin: op.coin, keep1: op.keep1, keep2: op.keep2 });
+  }
+  let lr = recycle.length;
+  let rc = lr;
+  while (recycle.length > 0) {
+    rc -= 1;
+    if (rc < 0) {
+      if (recycle.length < lr) { lr = recycle.length; rc = lr; }
+      else break;
+    }
+    const p1 = recycle.pop();
+    const arr = Array.from(edges);
+    if (arr.length === 0) { recycle.push(p1); break; }
+    const pickKey = arr[Math.floor(rng() * arr.length)];
+    const p2 = pickKey.split("-").map(Number);
+    edges.delete(pickKey);
+    const coin = rng();
+    let newp1, newp2;
+    if (coin < 0.5) {
+      newp1 = epair(p1[0], p2[0]);
+      newp2 = epair(p1[1], p2[1]);
+    } else {
+      newp1 = epair(p1[0], p2[1]);
+      newp2 = epair(p1[1], p2[0]);
+    }
+    let keep1, keep2;
+    [newp1, newp2].forEach((np, i) => {
+      const k = ek(np[0], np[1]);
+      const bad = (np[0] === np[1]) || edges.has(k);
+      if (i === 0) keep1 = !bad; else keep2 = !bad;
+      if (bad) recycle.push(np);
+      else edges.add(k);
+    });
+    out.push({ p1: p1.slice(), p2: p2.slice(),
+      newp1: newp1.slice(), newp2: newp2.slice(),
+      coin, keep1, keep2 });
+  }
+  return out;
+}
+
 // ── Cross-figure cursor follow rule ──────────────────────────
 // Convention: when an upstream figure rerolls, downstream walkers
 // reset to step 0 — UNLESS they were parked at the last step, in
@@ -2025,7 +2103,7 @@ global.NETGEN = {
   C1, C2, C3, OUT, INTRA, INTER, OUT_EDGES,
   CORE_NODES, CORE_EDGES, topK, cliqueEdges,
   COLORS, CY, VIZ,
-  makeTooltip, scrubSlider, stepController, walkerRow, wireWalker, rerollWalker, makePageBus, makeRewireStateAtStep, makeRewireRender, clusterPostBackdrop, followCursor, clusterPrePairsByName, globalPrePairsTuples, clusterEdgeEkeys, rerollClusterRewireRange, abcdClusterRewireApplyOp, abcdBgRewireApplyOp, snapOrSync, singletonOpener, defaultSingletonClusters, bindPanelToggle, mountGxPanel, walkerMarkPlaced, walkerMarkJust, reseedSuffix, stubPoolReseed, keyOf, toggle,
+  makeTooltip, scrubSlider, stepController, walkerRow, wireWalker, rerollWalker, makePageBus, makeRewireStateAtStep, makeRewireRender, clusterPostBackdrop, followCursor, clusterPrePairsByName, globalPrePairsTuples, clusterEdgeEkeys, rerollClusterRewireRange, replayFinalSwap, abcdClusterRewireApplyOp, abcdBgRewireApplyOp, snapOrSync, singletonOpener, defaultSingletonClusters, bindPanelToggle, mountGxPanel, walkerMarkPlaced, walkerMarkJust, reseedSuffix, stubPoolReseed, keyOf, toggle,
   SKIP: SKIP_SENTINEL,
   linksRow, kinSection,
   fitViewBoxAttr,

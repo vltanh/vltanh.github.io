@@ -66,6 +66,9 @@
 .profile-table th{ font-family:'Special Elite','Courier New',monospace; font-size:.72rem; letter-spacing:.15em; color:var(--paper-3); width:10%; white-space:nowrap; }
 .profile-table td.val{ font-family:'Special Elite','Courier New',monospace; font-size:1.05rem; color:var(--azure); font-variant-numeric:tabular-nums; width:14%; white-space:nowrap; }
 .profile-table td.desc{ color:var(--paper-2); font-size:.88rem; line-height:1.45; }
+.profile-table.dnc-stats th       { width: 14%; min-width:9rem; white-space:nowrap !important; }
+.profile-table.dnc-stats td.val   { width: 18%; }
+.profile-table.dnc-stats td.desc  { width: auto !important; }
 .readout{
   display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:.8rem;
   font-family:'Special Elite','Courier New',monospace; font-size:.78rem;
@@ -131,7 +134,8 @@
   transition: opacity .15s ease, background .15s ease;
 }
 .cluster-nav:hover{ background:rgba(243,236,215,1); }
-.cluster-nav:disabled{ opacity:.25; cursor:default; }
+.cluster-nav:disabled{ opacity:.4; cursor:default; }
+.cluster-nav:disabled:hover{ background:rgba(243,236,215,.8); }
 .cluster-nav-prev{ left:.4rem; }
 .cluster-nav-next{ right:.4rem; }
 /* Panel wrapper is click-transparent except for the collapse toggle.
@@ -444,18 +448,25 @@
 <!-- ─────────── Generation · degree preservation ─────────── -->
 <section class="stage">
   <div class="stage-num">generation · degree preservation</div>
-  <h2>Output degrees match input almost exactly.</h2>
-  <p>The rewire loop is the part of ABCD most often misread as "best-effort". On our 20-node synthetic, across 10 seeds of the real Julia sampler, the output's sorted-degree-desc multiset <em>exactly matches</em> the input's in 9 of 10 runs; the remaining run loses a single edge (a handful of stubs that the rewire could not swap cleanly).</p>
-  <p>The bars below overlay the two sequences per node: azure = input, mint = this realisation's output, both sorted by input \(d_u\) desc. On a match the mint bar sits exactly on top of the azure. Re-roll at the top to see the distribution of outcomes.</p>
+  <h2>Output degree multiset almost matches input.</h2>
+  <p>Stubs only truly leave the model at the cross-cluster final swap's drop-stale step. Cluster-rewire residue forwards to the bg pool; bg-rewire residue forwards to the cross-cluster final swap; only what the final swap cannot resolve is dropped.</p>
   <div class="disk-panel">
     <svg id="deg-cmp" viewBox="0 0 640 320" preserveAspectRatio="xMidYMid meet"></svg>
     <div class="step-desc">
-      <span class="st">reading the chart</span> &middot; nodes sorted by input \(d_u\) desc; each slot has an azure bar for input degree and a mint bar for output degree from this sampler run. A match shows as one colour; a mismatch shows a mint stub below the azure. The readout below reports the seed-to-seed total-absolute-difference.
+      <span class="st">reading the chart</span> &middot; nodes sorted by input \(d_u\) descending. Azure bar = input degree, mint bar = output degree from the current realisation. Red-dashed rectangle fills the gap between the two when they differ.
     </div>
     <div class="readout" style="justify-content:center">
       <span class="item">total abs diff (this seed) <b id="deg-diff">&middot;</b></span>
       <span class="item target">matches exactly <b id="deg-match">&middot;</b></span>
-      <span class="item">summary over 10 seeds <b id="deg-seed-summary">9 of 10 zero-diff; worst seed loses 1 edge</b></span>
+    </div>
+    <svg id="xi-realised" viewBox="0 0 640 70" preserveAspectRatio="xMidYMid meet" style="margin-top:.6rem"></svg>
+    <div class="step-desc">
+      <span class="st">mixing parameter</span> &middot; mint dashed = target \(\xi\) from the profile; azure tick = realised \(\xi = E_{\text{out}}/|E|\) on the current output. \(E_{\text{out}}\) counts edges whose endpoints sit in different LIVE clusters (singletons count as their own cluster).
+    </div>
+    <div class="readout" style="justify-content:center">
+      <span class="item target">target \(\xi\) <b id="xi-target-bar">&middot;</b></span>
+      <span class="item">realised \(\xi\) <b id="xi-realised-bar">&middot;</b></span>
+      <span class="item diff">drift <b id="xi-drift">&middot;</b></span>
     </div>
   </div>
 </section>
@@ -464,20 +475,22 @@
 <section class="stage">
   <div class="stage-num">case study · dnc</div>
   <h2>What you get on the shipped example.</h2>
-  <p>Default run on <code>dnc</code> + <code>sbm-flat-best+cc</code> at <code>--seed 1</code>:</p>
-  <table class="profile-table">
+  <p>Default run on <code>dnc</code> + <code>sbm-flat-best+cc</code> at <code>--seed 1</code>, every input outlier wrapped as its own singleton cluster:</p>
+  <table class="profile-table dnc-stats">
     <thead>
       <tr><th>stat</th><th>input</th><th>abcd output</th><th>note</th></tr>
     </thead>
     <tbody>
-      <tr><th>N</th><td class="val">906</td><td class="val">906</td><td class="desc">Every node appears in <code>edge.csv</code>; singleton outliers participate too.</td></tr>
-      <tr><th>edges</th><td class="val">10,429</td><td class="val">10,150</td><td class="desc">Within 2.7%. Most edges are preserved; rewire fails to resolve a few and drops them.</td></tr>
-      <tr><th>mean degree</th><td class="val">23.02</td><td class="val">22.41</td><td class="desc">Follows the edge count; per-node degrees match the input multiset except for rewire attrition.</td></tr>
+      <tr><th># nodes</th><td class="val">906</td><td class="val">906</td><td class="desc">Every node appears in <code>edge.csv</code>; singleton outliers participate too.</td></tr>
+      <tr><th># clusters</th><td class="val">87</td><td class="val">87</td><td class="desc">Preserved after <code>drop_singleton_clusters</code> strips the 355 outlier singletons.</td></tr>
+      <tr><th># edges</th><td class="val">10,429</td><td class="val">10,150</td><td class="desc">Within 2.7%. Most edges are preserved; the cross-cluster final swap drops what no rewire stage could resolve.</td></tr>
       <tr><th>global \(\xi\)</th><td class="val">0.718</td><td class="val">0.715</td><td class="desc">Hits the target within a stub. The target is high because 355 of 906 input nodes are outliers and each sits in its own 1-node pseudo-cluster, so every outlier-incident edge is inter by definition.</td></tr>
       <tr><th>global cc</th><td class="val">0.548</td><td class="val">0.307</td><td class="desc">Not targeted. Configuration-model pairing inside a cluster distributes intra-edges uniformly across admissible pairs; triangles happen only by coincidence.</td></tr>
-      <tr><th>clusters</th><td class="val">87</td><td class="val">87</td><td class="desc">Preserved after <code>drop_singleton_clusters</code> strips the 355 outlier singletons.</td></tr>
+      <tr><th>char. time</th><td class="val">40.41</td><td class="val">1.95</td><td class="desc">Random-walk mixing time. Background pairing wires the high-degree hubs across the whole vertex set, so the output mixes in roughly 1/20 of the input rate.</td></tr>
+      <tr><th>pseudo-diameter</th><td class="val">8</td><td class="val">5</td><td class="desc">Same hub effect: bg edges shortcut walks across cluster boundaries, so most pairs are within five hops.</td></tr>
     </tbody>
   </table>
+  <p>The degree multiset and the cluster-size multiset pass through verbatim (modulo a handful of dropped edges in the cross-cluster final swap). Triangle-driven structure does not: \(cc\) lands at 0.307 against the 0.548 input. Random-walk dynamics shift in the same direction as <a href="./sbm.html">SBM</a>'s top-up phase, but more sharply: bg pairing alone funds about \(\xi |E|\) cross-cluster edges, all drawn between high-degree hubs by stub probability, so the output is far better connected than the input even before any rewire.</p>
   <div class="disk-panel">
     <div class="step-desc" style="margin-bottom:.6rem"><span class="st">input degree distribution, log-log</span> &middot; <code>dnc</code> has a heavy tail: max degree 368, next 312, 256, 225, 202; median 4. ABCD reuses this sequence verbatim, so the output's degree histogram is visually indistinguishable from the input's.</div>
     <svg id="deg-hist" viewBox="0 0 640 260" preserveAspectRatio="xMidYMid meet"></svg>
@@ -561,6 +574,8 @@ window.MathJax = {
         diff: "Adds a model-level outlier count \\(s_0\\). The sampler picks \\(s_0\\) nodes uniformly from admissibility and pins them to \\(\\hat y = 0\\); all their degree funds the background graph." },
       { gen: "lfr", label: "LFR",
         diff: "Similar recipe (configuration model per cluster + rewire), but LFR fits and resamples the degree sequence from a power law and the cluster sizes from a second power law, then targets the mixing parameter \\(\\mu\\) (node-mean, not stub-weighted)." },
+      { gen: "sbm", label: "SBM",
+        diff: "Also draws edges via configuration-model stub matching, but cluster-aware: stubs are pooled per block-pair \\((r,s)\\) and matched to hit each cell's edge count \\(e_{rs}\\). ABCD pools per-cluster and per-global-bg, with no \\(e_{rs}\\) target." },
     ],
   });
 
@@ -571,16 +586,12 @@ window.MathJax = {
   const NODES = NETGEN.NODES;
   const C1 = NETGEN.C1, C2 = NETGEN.C2, C3 = NETGEN.C3, OUT_N = NETGEN.OUT;
 
-  // Singleton-as-cluster palette, shared with the cpair / bgpair walkers
-  // and matching nPSO's neutral palette. Each singleton gets a distinct
-  // hue rather than the site-wide outlier red.
-  const OUTLIER_CLUSTER_PALETTE = ["#9e7ec4", "#6fa6b0", "#c49a6c", "#78a06f"];
   const BLOCK_NAMES  = ["C1", "C2", "C3", "S19", "S20"];
   const BLOCK_NODES  = { "C1": C1, "C2": C2, "C3": C3, "S19": [19], "S20": [20] };
   const BLOCK_COLOR  = {
     "C1": COL.C1, "C2": COL.C2, "C3": COL.C3,
-    "S19": OUTLIER_CLUSTER_PALETTE[0],
-    "S20": OUTLIER_CLUSTER_PALETTE[1],
+    "S19": COL.outlier_palette[0],
+    "S20": COL.outlier_palette[1],
   };
   const BLOCK_SIZE   = { "C1": C1.length, "C2": C2.length, "C3": C3.length, "S19": 1, "S20": 1 };
   const BLOCK_IS_SINGLETON = { "C1": false, "C2": false, "C3": false, "S19": true, "S20": true };
@@ -605,10 +616,7 @@ window.MathJax = {
     outlier_mode: "singleton",
     drop_oo: false,
   });
-  const PROF_DEGREES = PROF_KERNEL_OUT.files["degree.csv"].trim().split("\n").map(Number);
-  const PROF_CLUSTER_SIZES = PROF_KERNEL_OUT.files["cluster_sizes.csv"].trim().split("\n").map(Number);
   const SYNTHETIC_XI = parseFloat(PROF_KERNEL_OUT.files["mixing_parameter.txt"]);
-  const TOTAL_EDGES = EDGES.length;
 
   // Run LFR's full profile and read μ from the same file LFR's profiler
   // writes. Going through runProfile keeps abcd in lockstep with any
@@ -715,8 +723,9 @@ window.MathJax = {
     // overrideEpoch; bumping the epoch invalidates every cached entry
     // so the next buildRealization call picks up the new clusters.
     for (let i = 0; i < NODES.length; i++) {
-      KERNEL_CLUSTERS[i] = KERNEL_CID_FROM_BLOCK[LIVE_BLOCK_OF[NODES[i]]] || 1;
+      KERNEL_CLUSTERS[i] = KERNEL_CID_FROM_BLOCK[LIVE_BLOCK_OF[NODES[i]]];
     }
+    REAL_CACHE.clear();
     overrideEpoch++;
     recolorDownstreamVizNodes();
   }
@@ -1167,13 +1176,18 @@ window.MathJax = {
   //    Weight-split only depends on U_SEED. Step-through + deg-cmp
   //    depend on both. The top-level "random" buttons per panel advance
   //    one seed and fire its cascade.
-  // Seed pair chosen for the demo: U=53 / S=72, evaluated against the
-  // canonical assignment trace at ASSIGN_SEED=1, leaves 2 dropped intra
-  // edges in cluster-rewire, 3 bg-rewire drop-stale edges, and runs 3
-  // ops in the cross-cluster final stage with 4 residues left over. All
-  // four rewire-related stages have visible activity on first load.
-  let U_SEED = 53;
-  let STUB_SEED = 72;
+  // Seed pair chosen for the demo: U=78 / S=80 against the canonical
+  // assignment trace at ASSIGN_SEED=1. Missing-degree across stages:
+  //   cluster-pair       21
+  //   cluster-rewire     12 (fixes 9)
+  //   bg-pair             6 (forwards residue + pairs new edges)
+  //   bg-rewire           3 (fixes 3)
+  //   cross-cluster final 1 (fixes 2, drops 1)
+  // Every stage materially reduces missing degree; the final stage
+  // clearly helps but does not get all the way to zero, so the
+  // walker shows a real drop-stale at the end.
+  let U_SEED = 78;
+  let STUB_SEED = 80;
   const onUChanged = [];
   const onStubChanged = [];
   function rerollU() {
@@ -1387,18 +1401,7 @@ window.MathJax = {
   const keyOf = NETGEN.keyOf;
   // Page-side cluster id mapping for ABCDKernel: 1=C1, 2=C2, 3=C3, 4=outlier-19,
   // 5=outlier-20. Singletons (4 and 5) inherit from outlier_mode=singleton.
-  const KERNEL_CLUSTER_BY_NODE = {};
-  C1.forEach(n => { KERNEL_CLUSTER_BY_NODE[n] = 1; });
-  C2.forEach(n => { KERNEL_CLUSTER_BY_NODE[n] = 2; });
-  C3.forEach(n => { KERNEL_CLUSTER_BY_NODE[n] = 3; });
-  KERNEL_CLUSTER_BY_NODE[19] = 4;
-  KERNEL_CLUSTER_BY_NODE[20] = 5;
   const KERNEL_S = [C1.length, C2.length, C3.length, 1, 1];
-  // ABCD's outlier_mode=singleton turns each outlier into its own real
-  // cluster, exactly as nPSO does. OUTLIER_CLUSTER_PALETTE is defined
-  // up where BLOCK_COLOR uses it; the rest of this block reuses those
-  // colours so the input graph, profile views, and the four walker
-  // panels all agree on each singleton's hue.
   const SINGLETON_KIDS = [4, 5];
   const SINGLETON_NODE_BY_KID = { 4: 19, 5: 20 };
   const NAMED_CLUSTER_OF_KERNEL = { 1: "C1", 2: "C2", 3: "C3" };
@@ -1410,7 +1413,7 @@ window.MathJax = {
   };
   SINGLETON_KIDS.forEach((kid, i) => {
     CLUSTER_COLOR_OF["S" + SINGLETON_NODE_BY_KID[kid]] =
-      OUTLIER_CLUSTER_PALETTE[i % OUTLIER_CLUSTER_PALETTE.length];
+      COL.outlier_palette[i % COL.outlier_palette.length];
   });
   // Per-node colour lookup. Reads the live (assignment-driven) block
   // map so downstream walkers reflect a node's currently-assigned
@@ -1434,12 +1437,12 @@ window.MathJax = {
   // Source from LIVE_BLOCK_OF (already populated by the assignment
   // IIFE's initial canonical trace) so kernel groupings honour the
   // canonical assignment from first paint, not the input fixture.
-  const KERNEL_CLUSTERS = NODES.map(n =>
-    KERNEL_CID_FROM_BLOCK[LIVE_BLOCK_OF[n]] || KERNEL_CLUSTER_BY_NODE[n]);
+  const KERNEL_CLUSTERS = NODES.map(n => KERNEL_CID_FROM_BLOCK[LIVE_BLOCK_OF[n]]);
   let pairOverride = {};
   let overrideEpoch = 0;
   const onClusterPreChanged = [];
   function fireClusterPreChanged() {
+    REAL_CACHE.clear();
     overrideEpoch++;
     onClusterPreChanged.forEach(fn => fn());
   }
@@ -1463,6 +1466,16 @@ window.MathJax = {
   function fireBgRewireChanged() {
     onBgRewireChanged.forEach(fn => fn());
   }
+  // Final-swap reroll bus: deg-cmp depends on post-final edges so it
+  // listens here too.
+  const onFinalSwapChanged = [];
+  function fireFinalSwapChanged() {
+    onFinalSwapChanged.forEach(fn => fn());
+  }
+  // Module-scoped accessor to the finalswap walker's effective ops list,
+  // populated by the finalswap IIFE. Lets effectiveFinalEdges apply the
+  // final-stage swaps + drop residue when computing post-pipeline edges.
+  let finalSwapEffectiveOps = null;
   // Walker stateAtStep handles, exposed at module scope after walker
   // IIFEs construct them. Lets the degree-preservation panel (and any
   // future cross-walker consumer) compute effective final edges with
@@ -1485,6 +1498,30 @@ window.MathJax = {
       });
     } else {
       (R.bgPost || []).forEach(e => out.push({ u: e.u, v: e.v }));
+    }
+    // Apply final-stage swaps on top of the walker-effective union. Each
+    // op cuts p2 + adds newp1/newp2 (those that kept). Skip ops whose p2
+    // is missing from the effective union (means a crewire/bgrewire local
+    // reroll diverged from the kernel baseline op trace; the kernel-
+    // recorded p2 no longer exists). Residue items were never in the union
+    // so dropping them is a no-op for degree.
+    const ops = finalSwapEffectiveOps || R.finalRewireOps || [];
+    if (ops.length > 0) {
+      const edgeSet = new Set();
+      out.forEach(e => edgeSet.add(keyOf(e.u, e.v)));
+      ops.forEach(op => {
+        const pk = keyOf(op.p2[0], op.p2[1]);
+        if (!edgeSet.has(pk)) return;
+        edgeSet.delete(pk);
+        if (op.keep1) edgeSet.add(keyOf(op.newp1[0], op.newp1[1]));
+        if (op.keep2) edgeSet.add(keyOf(op.newp2[0], op.newp2[1]));
+      });
+      const out2 = [];
+      edgeSet.forEach(k => {
+        const [u, v] = k.split("|").map(Number);
+        out2.push({ u, v });
+      });
+      return out2;
     }
     return out;
   }
@@ -2051,6 +2088,7 @@ window.MathJax = {
     });
     function reTotalReset() {
       pairOverride = {};
+      REAL_CACHE.clear();
       overrideEpoch++;
       const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
       ctl.reconfigure(totalFromR(R));
@@ -2261,6 +2299,7 @@ window.MathJax = {
         const xi = SYNTHETIC_XI;
         const R = buildRealization(U_SEED, STUB_SEED, xi);
         const beforeList = stateAtStep(R, idx);
+        const oldOp = effectiveOps(R)[idx - 1];
         rerollClusterRewireRange(idx - 1, effectiveOps(R).length);
         const afterList = stateAtStep(R, idx);
         const op = R.clusterRewireOps[idx - 1] && effectiveOps(R)[idx - 1];
@@ -2270,14 +2309,20 @@ window.MathJax = {
           const tag = op.success
             ? (op.src === "valid" ? "swap with valid edge" : "swap with recycled pair")
             : "no legal swap; p1 requeued";
-          labelEl.textContent = "op " + idx + " · " + tag;
-          const desc = op.success
-            ? "Cut <code>" + op.p1.join("–") + "</code> + <code>" + (op.p2 ? op.p2.join("–") : "?") +
-              "</code>; place <code>" + op.newp1.join("–") + "</code> + <code>" + op.newp2.join("–") +
-              "</code>. Highlighted nodes = the 4 endpoints involved."
-            : "Outer iteration could not find a legal partner for <code>" + op.p1.join("–") +
+          labelEl.textContent = "op " + idx + " · re-rolled · " + tag;
+          const undoBit = oldOp && oldOp.success
+            ? "Undo prior swap (cut <code>" + oldOp.newp1.join("–") + "</code> + <code>" +
+              oldOp.newp2.join("–") + "</code>, restore <code>" + oldOp.p1.join("–") + "</code> + <code>" +
+              (oldOp.p2 ? oldOp.p2.join("–") : "?") + "</code>); then "
+            : oldOp
+              ? "Undo prior no-op; then "
+              : "";
+          const newBit = op.success
+            ? "cut <code>" + op.p1.join("–") + "</code> + <code>" + (op.p2 ? op.p2.join("–") : "?") +
+              "</code>; place <code>" + op.newp1.join("–") + "</code> + <code>" + op.newp2.join("–") + "</code>."
+            : "no legal partner for <code>" + op.p1.join("–") +
               "</code>; pushed back onto the recycle queue.";
-          descEl.innerHTML = '<span class="st">op ' + idx + '</span> &middot; ' + desc;
+          descEl.innerHTML = '<span class="st">op ' + idx + '</span> &middot; ' + undoBit + newBit;
         }
         clearDimPick(viz);
         // Diff by id AND (u,v): rand-step keeps op-indexed ids stable
@@ -2610,11 +2655,11 @@ window.MathJax = {
           (ops.length === 1 ? "" : "s") +
           " ahead. Solid red = self-loop, parallel, or cluster duplicate.";
       } else if (isDropStale) {
-        labelEl.textContent = "drop stale";
-        descEl.innerHTML = '<span class="st">drop stale</span> &middot; ' +
-          "Recycle-queue leftovers (bad edges that never got rewired " +
-          "before the canonical loop's fairness counter expired) are " +
-          "dropped from the bg-pool output.";
+        labelEl.textContent = "forward to final";
+        descEl.innerHTML = '<span class="st">forward to final</span> &middot; ' +
+          "Recycle-queue leftovers (bad edges the loop could not swap " +
+          "before its fairness counter expired) are forwarded to the " +
+          "cross-cluster final swap stage. Nothing is dropped here.";
       } else {
         const code = (s) => "<code>" + s + "</code>";
         const placedNames = [];
@@ -2685,19 +2730,54 @@ window.MathJax = {
         if (idx <= 0) return;
         const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
         const beforeList = stateAtStep(R, idx);
+        const oldOp = effectiveOps(R)[idx - 1];
         rerollGlobalRewireRange(idx - 1, effectiveOps(R).length);
         const afterList = stateAtStep(R, idx);
         paintLabelDesc(idx, effectiveOps(R));
+        const labelEl = document.getElementById("g-bgrewire-stage");
+        const descEl = document.getElementById("g-bgrewire-desc");
+        if (labelEl && descEl && oldOp) {
+          labelEl.textContent = labelEl.textContent.replace(/^op (\d+) · /, "op $1 · re-rolled · ");
+          const oldNew = [];
+          if (oldOp.newp1 && oldOp.placedNewp1) oldNew.push(oldOp.newp1.join("–"));
+          if (oldOp.newp2 && oldOp.placedNewp2) oldNew.push(oldOp.newp2.join("–"));
+          const oldCut = oldOp.p1.join("–") + (oldOp.p2 ? " + " + oldOp.p2.join("–") : "");
+          const undoBit = oldNew.length
+            ? "Undo prior swap (cut " + oldNew.map(s => "<code>" + s + "</code>").join(" + ") +
+              ", restore <code>" + oldCut + "</code>); then "
+            : "Undo prior no-op; then ";
+          const sep = " · ";
+          const parts = descEl.innerHTML.split(sep);
+          if (parts.length >= 2) {
+            descEl.innerHTML = parts[0] + sep + undoBit + parts.slice(1).join(sep);
+          }
+        }
         clearDimPick(viz);
-        const beforeIds = new Set(beforeList.map(e => e.id));
-        const afterIds = new Set(afterList.map(e => e.id));
         const toEntry = (e) => ({
           u: e.u, v: e.v, id: e.id, bad: !!e.bad,
           color: e.bad ? COL.edge_drop : COL.edge_inter,
           badColor: COL.edge_drop,
         });
-        const removes = beforeList.filter(e => !afterIds.has(e.id)).map(toEntry);
-        const adds = afterList.filter(e => !beforeIds.has(e.id)).map(toEntry);
+        // Diff by id AND (u,v): rand-step keeps op-indexed ids stable
+        // (br-op<i>-1 / -2) but the underlying endpoints can change
+        // (e.g. coin flip swaps newp1/newp2 within the same id slot).
+        // An id-only diff would emit empty removes/adds and the swap
+        // would land as an invisible no-op.
+        const beforeById = new Map(beforeList.map(e => [e.id, e]));
+        const afterById = new Map(afterList.map(e => [e.id, e]));
+        const removes = [], adds = [];
+        beforeById.forEach((be, id) => {
+          const ae = afterById.get(id);
+          if (!ae) {
+            removes.push(toEntry(be));
+          } else if (ae.u !== be.u || ae.v !== be.v) {
+            removes.push(toEntry(be));
+            adds.push(toEntry(ae));
+          }
+        });
+        afterById.forEach((ae, id) => {
+          if (!beforeById.has(id)) adds.push(toEntry(ae));
+        });
         const byNode = byNodeFromList(afterList);
         spokes.playMany(removes, adds, () => {}, { byNode });
         lastStep = idx;
@@ -2758,7 +2838,6 @@ window.MathJax = {
       nodeColor: (id) => nodeColorOf(parseInt(id, 10)),
     });
     const spokes = NETGEN.spokeLayer.attach(viz, {});
-    function ekey(a, b) { return a < b ? a + "-" + b : b + "-" + a; }
     function pickEdgeColor(u, v) {
       const bu = LIVE_BLOCK_OF[u], bv = LIVE_BLOCK_OF[v];
       if (bu === bv && CLUSTER_COLOR_OF[bu]) return CLUSTER_COLOR_OF[bu];
@@ -2778,13 +2857,13 @@ window.MathJax = {
       const edgeIdByKey = new Map();
       (R.finalEdgesBefore || []).forEach(([a, b], i) => {
         const e = makeEntry(a, b, "fs-pre-" + i, false);
-        list.push(e); edgeIdByKey.set(ekey(a, b), e.id);
+        list.push(e); edgeIdByKey.set(keyOf(a, b), e.id);
       });
       const recycleEntries = (R.finalRecycleBefore || []).map(([a, b], i) => {
         const e = makeEntry(a, b, "fs-rec-" + i, true);
         list.push(e); return e;
       });
-      const ops = R.finalRewireOps || [];
+      const ops = effectiveFinalOps(R);
       // Drop-stale step at k > ops.length: filter bad entries (the
       // truly-unresolvable residue actually drops here).
       if (k > ops.length) {
@@ -2796,7 +2875,7 @@ window.MathJax = {
             if ((e.u === op.p1[0] && e.v === op.p1[1])
                 || (e.u === op.p1[1] && e.v === op.p1[0])) { list.splice(j, 1); break; }
           }
-          const p2k = ekey(op.p2[0], op.p2[1]);
+          const p2k = keyOf(op.p2[0], op.p2[1]);
           const p2id = edgeIdByKey.get(p2k);
           if (p2id != null) {
             for (let j = list.length - 1; j >= 0; j--) {
@@ -2808,13 +2887,12 @@ window.MathJax = {
           const id2 = "fs-op" + i + "-2";
           list.push(makeEntry(op.newp1[0], op.newp1[1], id1, !op.keep1));
           list.push(makeEntry(op.newp2[0], op.newp2[1], id2, !op.keep2));
-          if (op.keep1) edgeIdByKey.set(ekey(op.newp1[0], op.newp1[1]), id1);
-          if (op.keep2) edgeIdByKey.set(ekey(op.newp2[0], op.newp2[1]), id2);
+          if (op.keep1) edgeIdByKey.set(keyOf(op.newp1[0], op.newp1[1]), id1);
+          if (op.keep2) edgeIdByKey.set(keyOf(op.newp2[0], op.newp2[1]), id2);
         });
         return list.filter(e => !e.bad);
       }
       const cap = Math.min(k, ops.length);
-      let opSeq = 0;
       for (let i = 0; i < cap; i++) {
         const op = ops[i];
         // Remove p1 entry (last bad-flagged entry matching its endpoints).
@@ -2827,7 +2905,7 @@ window.MathJax = {
           }
         }
         // Remove p2 entry (a real edge from the union).
-        const p2k = ekey(op.p2[0], op.p2[1]);
+        const p2k = keyOf(op.p2[0], op.p2[1]);
         const p2id = edgeIdByKey.get(p2k);
         if (p2id != null) {
           for (let j = list.length - 1; j >= 0; j--) {
@@ -2836,14 +2914,13 @@ window.MathJax = {
           edgeIdByKey.delete(p2k);
         }
         // Add newp1 / newp2.
-        opSeq++;
         const id1 = "fs-op" + i + "-1";
         const id2 = "fs-op" + i + "-2";
         const e1 = makeEntry(op.newp1[0], op.newp1[1], id1, !op.keep1);
         const e2 = makeEntry(op.newp2[0], op.newp2[1], id2, !op.keep2);
         list.push(e1); list.push(e2);
-        if (op.keep1) edgeIdByKey.set(ekey(op.newp1[0], op.newp1[1]), id1);
-        if (op.keep2) edgeIdByKey.set(ekey(op.newp2[0], op.newp2[1]), id2);
+        if (op.keep1) edgeIdByKey.set(keyOf(op.newp1[0], op.newp1[1]), id1);
+        if (op.keep2) edgeIdByKey.set(keyOf(op.newp2[0], op.newp2[1]), id2);
       }
       return list;
     }
@@ -2859,10 +2936,33 @@ window.MathJax = {
       });
       return out;
     }
+    // Local re-roll override + nonce. Mirrors crewire / bgrewire patterns.
+    let finalSwapOpsOverride = null;
+    let finalRerollNonce = 0;
+    function effectiveFinalOps(R) {
+      return finalSwapOpsOverride || R.finalRewireOps || [];
+    }
+    function syncFinalOpsForDegCmp() {
+      const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
+      finalSwapEffectiveOps = effectiveFinalOps(R);
+    }
+    function replayFinalSwap(lo) {
+      const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
+      finalRerollNonce += 1;
+      finalSwapOpsOverride = NETGEN.replayFinalSwap({
+        edgesBefore: R.finalEdgesBefore,
+        recycleBefore: R.finalRecycleBefore,
+        baseOps: effectiveFinalOps(R),
+        lo,
+        rng: seededRng(STUB_SEED * 6151 + finalRerollNonce * 53 + (lo | 0) * 17),
+      });
+      syncFinalOpsForDegCmp();
+      fireFinalSwapChanged();
+    }
     let lastStep = 0;
     function render(step, snap) {
       const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
-      const ops = R.finalRewireOps || [];
+      const ops = effectiveFinalOps(R);
       const totalOps = ops.length;
       // pre + ops + drop-stale
       const total = totalOps + 2;
@@ -2938,21 +3038,83 @@ window.MathJax = {
     }
     function totalForCurrent() {
       const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
-      const opsLen = R.finalRewireOps ? R.finalRewireOps.length : 0;
+      const opsLen = effectiveFinalOps(R).length;
       // pre + ops + drop-stale = opsLen + 2
       return opsLen + 2;
     }
+    const toEntry = (e) => ({
+      u: e.u, v: e.v, id: e.id, bad: !!e.bad,
+      color: e.bad ? COL.edge_drop : pickEdgeColor(e.u, e.v),
+      badColor: COL.edge_drop,
+    });
     let ctl = NETGEN.rerollWalker({
       prefix: "g-finalswap",
       total: totalForCurrent(),
       totalForCurrent,
       onRender: render,
-      onRandStep: () => { rerollStub(); },
-      onRandAll: () => { rerollAll(); },
+      randStepDisabledAt: (idx) => idx >= totalForCurrent() - 1,
+      onRandStep: idx => {
+        if (idx <= 0) return;
+        const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
+        const beforeList = stateAtStep(R, idx);
+        const oldOp = effectiveFinalOps(R)[idx - 1];
+        replayFinalSwap(idx - 1);
+        const newTotal = totalForCurrent();
+        if (idx > newTotal - 2) {
+          // Re-roll left fewer ops than current step; clamp to last op.
+          ctl.reconfigureKeep(newTotal, Math.max(0, newTotal - 2));
+          return;
+        }
+        const afterList = stateAtStep(R, idx);
+        // Refresh label + desc with the new op + undo/replay note.
+        const labelEl = document.getElementById("g-finalswap-stage");
+        const descEl = document.getElementById("g-finalswap-desc");
+        const newOp = effectiveFinalOps(R)[idx - 1];
+        if (labelEl && descEl && newOp) {
+          const status = (newOp.keep1 && newOp.keep2)
+            ? "both swap halves placed"
+            : (newOp.keep1 || newOp.keep2)
+              ? "one half placed, the other recycled"
+              : "both halves recycled (no progress this op)";
+          const undoBit = oldOp ? "Undo prior swap, then " : "";
+          labelEl.textContent = "op " + idx + " · re-rolled · " + status;
+          descEl.innerHTML = '<span class="st">op ' + idx + '</span> &middot; ' +
+            undoBit + "pop <code>" + newOp.p1.join("–") +
+            "</code> from recycle, draw partner <code>" + newOp.p2.join("–") +
+            "</code> from the union; place <code>" + newOp.newp1.join("–") +
+            "</code> + <code>" + newOp.newp2.join("–") + "</code>. " + status + ".";
+        }
+        clearDimPick(viz);
+        const beforeById = new Map(beforeList.map(e => [e.id, e]));
+        const afterById = new Map(afterList.map(e => [e.id, e]));
+        const removes = [], adds = [];
+        beforeById.forEach((be, id) => {
+          const ae = afterById.get(id);
+          if (!ae) removes.push(toEntry(be));
+          else if (ae.u !== be.u || ae.v !== be.v) {
+            removes.push(toEntry(be)); adds.push(toEntry(ae));
+          }
+        });
+        afterById.forEach((ae, id) => {
+          if (!beforeById.has(id)) adds.push(toEntry(ae));
+        });
+        const byNode = byNodeFromList(afterList);
+        spokes.playMany(removes, adds, () => {}, { byNode });
+        lastStep = idx;
+        ctl.setTotalIdxSilent(newTotal, idx);
+        return NETGEN.SKIP;
+      },
+      onRandAll: () => {
+        replayFinalSwap(0);
+        ctl.reconfigureKeep(totalForCurrent(), 0);
+      },
     });
     function reconfigReset() {
       lastStep = 0;
+      finalSwapOpsOverride = null;
+      syncFinalOpsForDegCmp();
       ctl.reconfigure(totalForCurrent());
+      fireFinalSwapChanged();
     }
     onStubChanged.push(reconfigReset);
     onUChanged.push(reconfigReset);
@@ -2995,50 +3157,53 @@ window.MathJax = {
       .style("font-size", "10px").text("degree");
 
     // Legend
-    const legend = svg.append("g").attr("transform", `translate(${W - 230},${PAD.top - 6})`);
-    legend.append("rect").attr("x", 0).attr("y", 0).attr("width", 14).attr("height", 10).attr("fill", COL.azure).attr("opacity", 0.85);
+    const legend = svg.append("g").attr("transform", `translate(${W - 250},${PAD.top - 6})`);
+    legend.append("rect").attr("x", 0).attr("y", 0).attr("width", 14).attr("height", 10)
+      .attr("fill", COL.azure).attr("opacity", 0.55);
     {
       const t = legend.append("text").attr("x", 18).attr("y", 9).style("fill", "#2f3a54")
         .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px");
       t.append("tspan").text("input d");
       t.append("tspan").attr("baseline-shift", "sub").style("font-size", "80%").text("u");
     }
-    legend.append("rect").attr("x", 86).attr("y", 0).attr("width", 14).attr("height", 10).attr("fill", COL.mint).attr("opacity", 0.9);
-    legend.append("text").attr("x", 104).attr("y", 9).style("fill", "#2f3a54")
+    legend.append("rect").attr("x", 92).attr("y", 0).attr("width", 14).attr("height", 10).attr("fill", COL.mint).attr("opacity", 0.7);
+    legend.append("text").attr("x", 110).attr("y", 9).style("fill", "#2f3a54")
       .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px")
       .text("output");
-    legend.append("rect").attr("x", 142).attr("y", 0).attr("width", 14).attr("height", 10)
-      .attr("fill", COL.edge_drop || "#c33").attr("opacity", 0.5)
+    legend.append("rect").attr("x", 168).attr("y", 0).attr("width", 14).attr("height", 10)
+      .attr("fill", COL.edge_drop || "#c33").attr("opacity", 0.45)
       .attr("stroke", COL.edge_drop || "#c33").attr("stroke-width", 1).attr("stroke-dasharray", "3 2");
-    legend.append("text").attr("x", 160).attr("y", 9).style("fill", "#2f3a54")
+    legend.append("text").attr("x", 186).attr("y", 9).style("fill", "#2f3a54")
       .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px")
       .text("missing");
 
-    const halfW = x.bandwidth() * 0.45;
+    // Stacked layout: per node, single column of width=bandwidth.
+    //   in  : azure backdrop, full height = win
+    //   out : mint on top, height = wout (always ≤ win; output degrees
+    //         can only stay or shrink relative to input)
+    //   miss: red-dashed highlight on the gap (mint top to in top)
+    const colW = x.bandwidth();
     const rows = g.selectAll(".cmp").data(NODES_SORTED).join("g")
       .attr("class", "cmp")
       .attr("transform", d => `translate(${x(String(d))},0)`);
     rows.append("rect").attr("class", "in")
-      .attr("x", 0).attr("y", y(0)).attr("width", halfW).attr("height", 0)
-      .attr("fill", COL.azure).attr("opacity", 0.85);
+      .attr("x", 0).attr("y", y(0)).attr("width", colW).attr("height", 0)
+      .attr("fill", COL.azure).attr("opacity", 0.55);
     rows.append("rect").attr("class", "out")
-      .attr("x", halfW + 2).attr("y", y(0)).attr("width", halfW).attr("height", 0)
-      .attr("fill", COL.mint).attr("opacity", 0.9);
-    // Missing-degree overlay: when wout < win, draw a red-dashed rect
-    // on the output column spanning [wout..win]. Visualises drop-stale
-    // residue + partial-success op losses node-by-node.
+      .attr("x", 0).attr("y", y(0)).attr("width", colW).attr("height", 0)
+      .attr("fill", COL.mint).attr("opacity", 0.7);
     rows.append("rect").attr("class", "miss")
-      .attr("x", halfW + 2).attr("y", y(0)).attr("width", halfW).attr("height", 0)
-      .attr("fill", COL.edge_drop || "#c33").attr("opacity", 0.5)
-      .attr("stroke", COL.edge_drop || "#c33").attr("stroke-width", 1)
+      .attr("x", 0).attr("y", y(0)).attr("width", colW).attr("height", 0)
+      .attr("fill", COL.edge_drop || "#c33").attr("opacity", 0.55)
+      .attr("stroke", COL.edge_drop || "#c33").attr("stroke-width", 1.2)
       .attr("stroke-dasharray", "3 2");
 
     function render() {
       const xi = SYNTHETIC_XI;
       const R = buildRealization(U_SEED, STUB_SEED, xi);
-      // effectiveOutDeg threads cluster-rewire + bg-rewire walker
-      // overrides through the final-edge tally so the panel tracks the
-      // walker viz instead of just the kernel baseline.
+      // effectiveOutDeg threads cluster-rewire + bg-rewire + final-swap
+      // walker overrides through the final-edge tally so the panel
+      // tracks the walker viz instead of just the kernel baseline.
       const effDeg = effectiveOutDeg(R);
       let diff = 0, match = 0;
       rows.each(function (nid) {
@@ -3046,9 +3211,7 @@ window.MathJax = {
         const wout = effDeg[nid] || 0;
         diff += Math.abs(win - wout);
         if (win === wout) match++;
-        const missTop = Math.min(win, wout);   // bottom of missing band
-        const missBot = Math.max(win, wout);   // top of missing band
-        const missing = missBot - missTop;
+        const missH = Math.max(0, win - wout);
         d3.select(this).select(".in")
           .transition().duration(250)
           .attr("y", y(win)).attr("height", ih - y(win));
@@ -3057,11 +3220,72 @@ window.MathJax = {
           .attr("y", y(wout)).attr("height", ih - y(wout));
         d3.select(this).select(".miss")
           .transition().duration(250)
-          .attr("y", y(missBot))
-          .attr("height", missing > 0 ? y(missTop) - y(missBot) : 0);
+          .attr("y", y(wout + missH))
+          .attr("height", missH > 0 ? y(wout) - y(wout + missH) : 0);
       });
       document.getElementById("deg-diff").textContent = diff;
       document.getElementById("deg-match").textContent = match + "/" + NODES.length;
+      renderXi(R);
+    }
+
+    // ── Mixing-parameter bar: target ξ vs realised ξ on output ──
+    const xiSvg = d3.select("#xi-realised");
+    xiSvg.selectAll("*").remove();
+    const XW = 640, XH = 70;
+    const XPAD = { top: 16, right: 24, bottom: 26, left: 24 };
+    const xiInnerW = XW - XPAD.left - XPAD.right;
+    const xiAxisY = XH - XPAD.bottom + 4;
+    const xiBarY = XPAD.top + 8;
+    const xiBarH = 14;
+    const xig = xiSvg.append("g").attr("transform", `translate(${XPAD.left},0)`);
+    const xiX = d3.scaleLinear().domain([0, 1]).range([0, xiInnerW]);
+    xig.append("rect").attr("class", "lane")
+      .attr("x", 0).attr("y", xiBarY).attr("width", xiInnerW).attr("height", xiBarH)
+      .attr("fill", COL.azure).attr("opacity", 0.12)
+      .attr("stroke", "#cdbf8d").attr("stroke-width", 1);
+    [0, 0.25, 0.5, 0.75, 1].forEach(t => {
+      xig.append("line")
+        .attr("x1", xiX(t)).attr("x2", xiX(t))
+        .attr("y1", xiBarY + xiBarH).attr("y2", xiBarY + xiBarH + 4)
+        .attr("stroke", "#9a947a").attr("stroke-width", 1);
+      xig.append("text")
+        .attr("x", xiX(t)).attr("y", xiAxisY)
+        .attr("text-anchor", "middle")
+        .style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace")
+        .style("font-size", "9.5px")
+        .text(t.toFixed(2));
+    });
+    const xiTargetLine = xig.append("line")
+      .attr("y1", xiBarY - 4).attr("y2", xiBarY + xiBarH + 4)
+      .attr("stroke", COL.mint).attr("stroke-width", 2)
+      .attr("stroke-dasharray", "4 3");
+    const xiTargetLabel = xig.append("text")
+      .attr("y", xiBarY - 6).attr("text-anchor", "middle")
+      .style("fill", COL.mint)
+      .style("font-family", "Special Elite, Courier New, monospace")
+      .style("font-size", "10px")
+      .text("target");
+    const xiRealisedTick = xig.append("line")
+      .attr("y1", xiBarY).attr("y2", xiBarY + xiBarH)
+      .attr("stroke", COL.azure).attr("stroke-width", 4);
+
+    function renderXi(R) {
+      const edges = effectiveFinalEdges(R);
+      let inter = 0;
+      edges.forEach(e => {
+        if (LIVE_BLOCK_OF[e.u] !== LIVE_BLOCK_OF[e.v]) inter++;
+      });
+      const total = edges.length;
+      const realised = total > 0 ? inter / total : 0;
+      const target = SYNTHETIC_XI;
+      xiTargetLine.transition().duration(250).attr("x1", xiX(target)).attr("x2", xiX(target));
+      xiTargetLabel.transition().duration(250).attr("x", xiX(target));
+      xiRealisedTick.transition().duration(250).attr("x1", xiX(realised)).attr("x2", xiX(realised));
+      document.getElementById("xi-target-bar").textContent = target.toFixed(3);
+      document.getElementById("xi-realised-bar").textContent = realised.toFixed(3);
+      const drift = realised - target;
+      document.getElementById("xi-drift").textContent = (drift >= 0 ? "+" : "") + drift.toFixed(3);
     }
     onStubChanged.push(render);
     onUChanged.push(render);
@@ -3069,6 +3293,7 @@ window.MathJax = {
     onClusterRewireChanged.push(render);
     onBgPairChanged.push(render);
     onBgRewireChanged.push(render);
+    onFinalSwapChanged.push(render);
     render();
   })();
 
@@ -3104,7 +3329,9 @@ window.MathJax = {
       .attr("text-anchor", "middle").style("fill", "#6b6a54")
       .style("font-family", "Special Elite, Courier New, monospace")
       .style("font-size", "10.5px").text("degree (log)");
-    svg.append("text").attr("x", 14).attr("y", PAD.top)
+    svg.append("text")
+      .attr("transform", `translate(12,${PAD.top + ih / 2}) rotate(-90)`)
+      .attr("text-anchor", "middle")
       .style("fill", "#6b6a54")
       .style("font-family", "Special Elite, Courier New, monospace")
       .style("font-size", "10px").text("count (log)");
@@ -3142,7 +3369,9 @@ window.MathJax = {
       .attr("text-anchor", "middle").style("fill", "#6b6a54")
       .style("font-family", "Special Elite, Courier New, monospace")
       .style("font-size", "10.5px").text("cluster size (log)");
-    svg.append("text").attr("x", 14).attr("y", PAD.top)
+    svg.append("text")
+      .attr("transform", `translate(12,${PAD.top + ih / 2}) rotate(-90)`)
+      .attr("text-anchor", "middle")
       .style("fill", "#6b6a54")
       .style("font-family", "Special Elite, Courier New, monospace")
       .style("font-size", "10px").text("count (log)");
