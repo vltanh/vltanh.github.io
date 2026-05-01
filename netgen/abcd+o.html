@@ -726,6 +726,22 @@ window.MathJax = {
   const onOutlierChanged = [];
   const onUChanged = [];
   const onStubChanged = [];
+  // Single ξ-slider bus. Each walker subscribes via onXiChanged instead
+  // of attaching its own slider listener; the listener fires only when
+  // the parsed ξ value actually moves, coalescing 4-5 redundant
+  // reconfigure cascades per drag tick into one.
+  const onXiChanged = [];
+  (function () {
+    const slider = document.getElementById("xi-slider");
+    if (!slider) return;
+    let last = parseFloat(slider.value);
+    slider.addEventListener("input", () => {
+      const v = parseFloat(slider.value);
+      if (v === last) return;
+      last = v;
+      onXiChanged.forEach(fn => fn());
+    });
+  })();
   function rerollOutlier() {
     OUTLIER_SEED += 1;
     onOutlierChanged.forEach(fn => fn());
@@ -2116,7 +2132,7 @@ window.MathJax = {
     onStubChanged.push(reTotalReset);
     onUChanged.push(reTotalReset);
     onOutlierChanged.push(reTotalReset);
-    document.getElementById("xi-slider").addEventListener("input", reTotalReset);
+    onXiChanged.push(reTotalReset);
 
     attachClusterNav({
       ctl,
@@ -2156,11 +2172,9 @@ window.MathJax = {
       const cfg = NETGEN.spokeLayer.byNodeFromEdges(viz, list,
         n => nodeColorOf(parseInt(n.id, 10)));
       crewireDropStaleResidue.forEach(e => {
-        const uk = String(e.u), vk = String(e.v);
-        if (cfg[uk]) cfg[uk].count = (cfg[uk].count || 0) + 1;
-        else if (cfg[e.u]) cfg[e.u].count = (cfg[e.u].count || 0) + 1;
-        if (cfg[vk]) cfg[vk].count = (cfg[vk].count || 0) + 1;
-        else if (cfg[e.v]) cfg[e.v].count = (cfg[e.v].count || 0) + 1;
+        const bump = (k) => { if (cfg[k]) cfg[k].count = (cfg[k].count || 0) + 1; };
+        bump(String(e.u));
+        bump(String(e.v));
       });
       return cfg;
     };
@@ -2269,7 +2283,7 @@ window.MathJax = {
     onUChanged.push(reconfigKeep);
     onOutlierChanged.push(reconfigKeep);
     onClusterPreChanged.push(reconfigKeep);
-    document.getElementById("xi-slider").addEventListener("input", reconfigKeep);
+    onXiChanged.push(reconfigKeep);
 
     attachClusterNav({
       ctl,
@@ -2438,7 +2452,7 @@ window.MathJax = {
     onOutlierChanged.push(reTotalReset);
     onClusterPreChanged.push(reTotalKeep);
     onClusterRewireChanged.push(reTotalKeep);
-    document.getElementById("xi-slider").addEventListener("input", reTotalReset);
+    onXiChanged.push(reTotalReset);
   })();
 
   // ── Panel 4 / 4: bg rewire walker ──
@@ -2603,7 +2617,7 @@ window.MathJax = {
     // crewire RandAll changes clusterPost (bg-rewire's backdrop +
     // clusterEdgeKeys for crossDup gating). Apply follow rule.
     onClusterRewireChanged.push(reconfigKeep);
-    document.getElementById("xi-slider").addEventListener("input", reconfigReset);
+    onXiChanged.push(reconfigReset);
   })();
 
   // ── Cross-cluster final swap walker ──
@@ -2628,7 +2642,7 @@ window.MathJax = {
       stubSeedFn: () => STUB_SEED,
       busSubscriptions: [onStubChanged, onUChanged, onOutlierChanged, onBgPairChanged, onBgRewireChanged],
     });
-    if (fs) document.getElementById("xi-slider").addEventListener("input", fs.reconfigReset);
+    if (fs) onXiChanged.push(fs.reconfigReset);
   })();
 
   // ── Degree preservation ──
