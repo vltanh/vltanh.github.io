@@ -445,6 +445,41 @@ const VIZ = {
     // simulation cannot push nodes off their home. Drag temporarily
     // frees them; drag-end animates the snap back to home.
     const pinned = !!opts.pinned;
+    // animated: enter/exit fades for nodes + edges; node fill/r updates
+    // tween instead of snap; pair with handle.animateNodesToHome for
+    // tweened position changes when caller mutates homeX/homeY.
+    // The first draw runs without animation so the initial state lands
+    // instantly (useful when callers immediately set classes like .future
+    // that would otherwise fight the enter fade).
+    const animated = !!opts.animated;
+    const animDur  = (typeof opts.animDur === "number") ? opts.animDur : 320;
+    // animateInitial: include the very first draw in the animation gate.
+    // Off by default so callers that synchronously stamp .future (or
+    // similar hide-classes) right after init don't flicker through a
+    // visible enter ramp before the class lands.
+    const animateFirst = !!opts.animateInitial;
+    let drewOnce = false;
+    // Per-call enter pacing for the next draw triggered by setEdges /
+    // addEdges. setEdges({ enterDelay, enterStagger, enterFromId }) lets
+    // a caller hold newly-entering edges off for a beat, stagger them,
+    // and grow each one as a stroke from a specified endpoint instead of
+    // a flat opacity fade. enterFromId picks which endpoint anchors the
+    // grow: edges where source.id === enterFromId grow forward (from
+    // path start), edges where target.id === enterFromId grow reversed
+    // (from path end). Other edges fall back to opacity fade.
+    let nextEnterDelay = 0;
+    let nextEnterStagger = 0;
+    let nextEnterFromId = null;
+    // Mirror knobs for exits: edges leaving the link set can retract
+    // their stroke toward a designated endpoint instead of fading. Pair
+    // exitFromId with the same id as enterFromId on a reroll to get the
+    // "old picks pull back into the arrival, then new picks sprout out"
+    // sequence. exitStagger lets the retract march one edge at a time.
+    let nextExitDelay = 0;
+    let nextExitStagger = 0;
+    let nextExitFromId = null;
+    let nextEnterDur = 0;
+    let nextExitDur = 0;
 
     const nodesData = NODES
       .filter(n => includeOutliers || CLUSTER_OF[n] !== "OUT")
@@ -462,7 +497,7 @@ const VIZ = {
           y: hy,
           fx: pinned ? hx : null,
           fy: pinned ? hy : null,
-          cls: "",
+          cls: opts.nodeClass ? (opts.nodeClass(id) || "") : "",
         };
       });
     const nodeById = {};
@@ -482,6 +517,13 @@ const VIZ = {
         w: (e.w == null ? 1.6 : e.w),
         kind: e.kind || null,
         cls: e.classes || "",
+        // Per-edge anchor for grow/retract animations. When set, both
+        // enter (grow) and exit (retract) collapse the far endpoint
+        // toward this id. Lets a single setEdges call animate many
+        // edges concurrently, each anchored to a different node — e.g.
+        // a multi-arrival "To End" jump in impl3 where every new
+        // arrival's m edges sprout from its own arrival end.
+        anchorId: e.anchorId != null ? String(e.anchorId) : null,
       };
     }
 
@@ -525,21 +567,115 @@ const VIZ = {
         }
       }
     }
-    const sim = d3.forceSimulation(nodesData)
-      .force("link",    d3.forceLink([]).id(d => d.id).distance(55).strength(0.12))
-      .force("charge",  d3.forceManyBody().strength(-45))
-      .force("collide", d3.forceCollide(16))
-      .force("x",       d3.forceX(d => d.homeX).strength(0.22))
-      .force("y",       d3.forceY(d => d.homeY).strength(0.22))
-      .force("clusterRepel", clusterRepel)
-      .alpha(0.35).alphaDecay(0.04);
+    // Pinned layouts (every nPSO disk, every gen page that snaps nodes
+    // to a fixed POSITIONS map) override fx/fy so charge / collide /
+    // clusterRepel produce zero motion — running them costs O(n²) per
+    // tick for nothing. Drop them entirely and keep the sim parked at
+    // alpha 0; we drive paint manually via paint() and a one-shot
+    // sim.tick() / direct attr writes.
+    const sim = d3.forceSimulation(nodesData);
+    if (pinned) {
+      sim.alpha(0).alphaDecay(1).alphaMin(1).stop();
+    } else {
+      sim
+        .force("link",    d3.forceLink([]).id(d => d.id).distance(55).strength(0.12))
+        .force("charge",  d3.forceManyBody().strength(-45))
+        .force("collide", d3.forceCollide(16))
+        .force("x",       d3.forceX(d => d.homeX).strength(0.22))
+        .force("y",       d3.forceY(d => d.homeY).strength(0.22))
+        .force("clusterRepel", clusterRepel)
+        .alpha(0.35).alphaDecay(0.04);
+    }
+    function bumpSim(a) {
+      // Wakes the sim only when there are actual forces to run; pinned
+      // sims paint manually via paint() instead.
+      if (!pinned) sim.alpha(a == null ? 0.3 : a).restart();
+    }
 
     function classStr(base, extra) { return extra ? (base + " " + extra).trim() : base; }
 
+    function deferUntilVisible(fn) {
+      if (!host || typeof IntersectionObserver === "undefined") { fn(); return; }
+      // Fire only once the host is comfortably within the viewport (top
+      // edge has crossed past 20% from the top). At page load every disk
+      // below the fold is off-screen, so the animation waits for the
+      // user to actually scroll near it; a partially visible panel still
+      // gets held off so the user catches the start of the fade.
+      const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+      const rect = host.getBoundingClientRect();
+      const enterMargin = vh * 0.2;
+      if (rect.top < vh - enterMargin && rect.bottom > enterMargin && rect.width > 0) {
+        requestAnimationFrame(fn);
+        return;
+      }
+      const obs = new IntersectionObserver((es) => {
+        if (es.some(e => e.isIntersecting)) { obs.disconnect(); fn(); }
+      }, { threshold: 0.35 });
+      obs.observe(host);
+    }
+
     function draw() {
       computeDupIndices();
+      const isFirstDraw = !drewOnce;
+      const useAnim = animated && (drewOnce || animateFirst);
+      drewOnce = true;
+      const enterRunners = [];
       const linkSel = gLinks.selectAll("path.viz-edge").data(links, d => d.id);
-      linkSel.exit().remove();
+      const linkExit = linkSel.exit();
+      if (useAnim) {
+        const xd = nextExitDelay, xs = nextExitStagger, xFromIdFallback = nextExitFromId;
+        const xDur = nextExitDur > 0 ? nextExitDur : animDur;
+        linkExit.style("pointer-events", "none");
+        linkExit.each(function (d, i) {
+          const node = this;
+          let fromSrc = null;
+          // Per-edge anchorId wins over the call-wide fallback so a
+          // single setEdges call can retract many edges, each toward
+          // its own anchor.
+          const xFromId = d.anchorId != null ? d.anchorId : xFromIdFallback;
+          if (xFromId != null) {
+            if (String(d.source.id) === String(xFromId)) fromSrc = true;
+            else if (String(d.target.id) === String(xFromId)) fromSrc = false;
+          }
+          const sel = d3.select(node);
+          const tr = sel.transition("vizLinkExit")
+            .delay(xd + xs * i)
+            .duration(xDur)
+            .ease(d3.easeCubicInOut);
+          if (fromSrc === null) {
+            tr.style("opacity", 0).remove();
+          } else {
+            // Path-shrink retract: collapse the far endpoint toward
+            // fromId. Endpoints are clipped to the node circle borders
+            // via clampedBoundaryEdge so the stroke never crosses the
+            // node interior — that's what made edges visible inside
+            // low-opacity (.future) nodes mid-retract. The clamp scales
+            // r1, r2 down by Lraw / (r1+r2) when the lerped distance
+            // is shorter than r1+r2 so the offsets never invert.
+            tr.attrTween("d", function () {
+              const sx0 = d.source.x, sy0 = d.source.y;
+              const ex0 = d.target.x, ey0 = d.target.y;
+              const r1 = (d.source && d.source.r) || nodeR;
+              const r2 = (d.target && d.target.r) || nodeR;
+              return function (k) {
+                let sx, sy, ex, ey;
+                if (fromSrc) {
+                  sx = sx0; sy = sy0;
+                  ex = sx0 + (ex0 - sx0) * (1 - k);
+                  ey = sy0 + (ey0 - sy0) * (1 - k);
+                } else {
+                  ex = ex0; ey = ey0;
+                  sx = ex0 + (sx0 - ex0) * (1 - k);
+                  sy = ey0 + (sy0 - ey0) * (1 - k);
+                }
+                return clampedBoundaryEdge(sx, sy, ex, ey, r1, r2);
+              };
+            }).remove();
+          }
+        });
+      } else {
+        linkExit.remove();
+      }
       const linkEnter = linkSel.enter().append("path")
         .attr("class", d => classStr("viz-edge", d.cls))
         .attr("fill", "none")
@@ -549,26 +685,119 @@ const VIZ = {
         .on("click",      function (ev, d) { if (onEdgeTap) onEdgeTap(d, ev); })
         .on("mouseenter", function (ev, d) { if (onEdgeEnter) onEdgeEnter(d, ev); })
         .on("mouseleave", function (ev, d) { if (onEdgeLeave) onEdgeLeave(d, ev); });
+      if (useAnim) {
+        linkEnter.style("opacity", 0);
+        const ed = nextEnterDelay, es = nextEnterStagger, fromIdFallback = nextEnterFromId;
+        const eDur = nextEnterDur > 0 ? nextEnterDur : animDur;
+        enterRunners.push(() => {
+          linkEnter.each(function (d, i) {
+            const node = this;
+            let fromSrc = null;
+            const fromId = d.anchorId != null ? d.anchorId : fromIdFallback;
+            if (fromId != null) {
+              if (String(d.source.id) === String(fromId)) fromSrc = true;
+              else if (String(d.target.id) === String(fromId)) fromSrc = false;
+            }
+            const sel = d3.select(node);
+            const tr = sel.transition("vizLinkEnter")
+              .delay(ed + es * i)
+              .duration(eDur)
+              .ease(d3.easeCubicOut);
+            if (fromSrc === null) {
+              tr.style("opacity", 1)
+                .on("end", function () { d3.select(this).style("opacity", null); });
+            } else {
+              // Path-extend grow, mirror of the path-shrink retract.
+              // Endpoints clipped to node circle borders via
+              // clampedBoundaryEdge — same reason as the retract path:
+              // a raw centre-to-centre stroke shows through low-opacity
+              // (.future) nodes during the grow.
+              tr.attrTween("d", function () {
+                const sx0 = d.source.x, sy0 = d.source.y;
+                const ex0 = d.target.x, ey0 = d.target.y;
+                const r1 = (d.source && d.source.r) || nodeR;
+                const r2 = (d.target && d.target.r) || nodeR;
+                d3.select(node).style("opacity", null);
+                return function (k) {
+                  let sx, sy, ex, ey;
+                  if (fromSrc) {
+                    sx = sx0; sy = sy0;
+                    ex = sx0 + (ex0 - sx0) * k;
+                    ey = sy0 + (ey0 - sy0) * k;
+                  } else {
+                    ex = ex0; ey = ey0;
+                    sx = ex0 + (sx0 - ex0) * k;
+                    sy = ey0 + (sy0 - ey0) * k;
+                  }
+                  return clampedBoundaryEdge(sx, sy, ex, ey, r1, r2);
+                };
+              })
+              .on("end", function () {
+                this.setAttribute("d", edgePath(d));
+                d3.select(this).style("opacity", null);
+              });
+            }
+          });
+        });
+      }
       linkEnter.merge(linkSel)
         .attr("class", d => classStr("viz-edge", d.cls))
         .attr("stroke", d => d.color)
         .attr("stroke-width", d => d.w);
 
       const groupSel = gNodes.selectAll("g.viz-node-group").data(nodesData, d => d.id);
-      groupSel.exit().remove();
-      const groupEnter = groupSel.enter().append("g").attr("class", "viz-node-group");
+      const groupExit = groupSel.exit();
+      if (useAnim) {
+        groupExit.style("pointer-events", "none")
+          .transition("vizGroupExit").duration(animDur)
+          .style("opacity", 0)
+          .remove();
+      } else {
+        groupExit.remove();
+      }
+      // Set the initial inline opacity at element-creation time so the
+      // CSS `transition: opacity` rule on `.viz-node-group` does NOT
+      // fire on first mount: setting style.opacity = "0" *after*
+      // append + class assignment counts as a property change and the
+      // browser tweens 1 → 0 (visible flash-then-fade-back). Pre-setting
+      // it inside the append factory locks the initial computed value
+      // to 0 and the CSS transition stays silent.
+      // Initial opacity is governed by a class set at element-creation
+      // time (`.viz-hidden`). Setting via class — not inline style —
+      // means the very first computed opacity is 0 from the first paint;
+      // when we later remove the class the CSS transition rule fires
+      // cleanly from 0 → 1. Pre-setting via inline style instead led to
+      // a perceptible 1→0 flash on first mount in some browsers.
+      const groupEnter = groupSel.enter().append(useAnim
+        ? function () {
+            const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+            g.setAttribute("class", "viz-node-group viz-hidden");
+            return g;
+          }
+        : function () {
+            const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+            g.setAttribute("class", "viz-node-group");
+            return g;
+          });
       groupEnter.append("circle")
         .attr("class", d => classStr("viz-node", d.cls))
-        .attr("r", d => d.r)
+        .attr("r", d => useAnim ? 0 : d.r)
         .attr("fill", d => d.color)
         .attr("stroke", "#1b2033")
         .attr("stroke-width", 1.5)
         .style("cursor", "grab")
         .call(d3.drag()
-          .on("start", function (ev, d) { if (!ev.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; d3.select(this).interrupt("snapback"); d3.select(this).style("cursor", "grabbing"); })
-          .on("drag",  function (ev, d) { d.fx = ev.x; d.fy = ev.y; })
+          .on("start", function (ev, d) {
+            if (!ev.active && !pinned) sim.alphaTarget(0.3).restart();
+            d.fx = d.x; d.fy = d.y;
+            d3.select(this).interrupt("snapback").style("cursor", "grabbing");
+          })
+          .on("drag",  function (ev, d) {
+            d.fx = ev.x; d.fy = ev.y;
+            if (pinned) { d.x = ev.x; d.y = ev.y; paint(); }
+          })
           .on("end",   function (ev, d) {
-            if (!ev.active) sim.alphaTarget(0);
+            if (!ev.active && !pinned) sim.alphaTarget(0);
             d3.select(this).style("cursor", "grab");
             if (pinned) {
               const sx = d.fx, sy = d.fy, ex = d.homeX, ey = d.homeY;
@@ -577,7 +806,8 @@ const VIZ = {
                 .tween("snap", () => (t) => {
                   d.fx = sx + (ex - sx) * t;
                   d.fy = sy + (ey - sy) * t;
-                  sim.alpha(0.1);
+                  d.x  = d.fx; d.y = d.fy;
+                  paint();
                 })
                 .on("end.snap", () => { d.fx = d.homeX; d.fy = d.homeY; });
             } else {
@@ -595,16 +825,64 @@ const VIZ = {
           .attr("pointer-events", "none");
       }
       const groups = groupEnter.merge(groupSel);
-      groups.select("circle.viz-node")
-        .attr("class", d => classStr("viz-node", d.cls))
-        .attr("fill", d => d.color)
-        .attr("r", d => d.r);
+      const circles = groups.select("circle.viz-node")
+        .attr("class", d => classStr("viz-node", d.cls));
+      // Cache DOM refs on each datum so paint() can iterate without
+      // repeated selectAll queries. Rebuilt on every draw so enter/exit
+      // refs stay in sync.
+      groups.each(function (d) {
+        d.__group = this;
+        d.__circle = this.firstChild && this.firstChild.tagName === "circle"
+          ? this.firstChild
+          : this.querySelector("circle.viz-node");
+        if (showLabels) d.__label = this.querySelector("text.viz-label");
+      });
+      linkEnter.merge(linkSel).each(function (d) { d.__path = this; });
+      if (useAnim) {
+        // Fade-in is CSS-driven: removing .viz-hidden lets the
+        // .viz-node-group transition rule tween opacity 0 → 1 over its
+        // own duration. The circle radius tween is also delegated to the
+        // CSS `transition: r .22s ease` rule on .viz-node — setting r
+        // via attr triggers the CSS transition automatically.
+        enterRunners.push(() => {
+          groupEnter.each(function () { this.classList.remove("viz-hidden"); });
+          circles.attr("fill", d => d.color).attr("r", d => d.r);
+        });
+      } else {
+        circles
+          .attr("fill", d => d.color)
+          .attr("r", d => d.r);
+      }
       if (showLabels) {
         groups.select("text.viz-label").text(labelTextFn);
       }
 
-      sim.force("link").links(links);
-      sim.alpha(0.3).restart();
+      if (!pinned) {
+        sim.force("link").links(links);
+        sim.alpha(0.3).restart();
+      } else {
+        // Pinned layouts repaint exactly once per draw — no force ticks
+        // are running so the path/circle attrs would otherwise stay stale
+        // after a setEdges or class change.
+        paint();
+      }
+      // Paint order is set by initial DOM append: decorations (added by
+      // page before VIZ.init) → gLinks → gNodes → page overlays. We do
+      // NOT lower/raise here — that would move gLinks before any layers
+      // the page appended (e.g. fd-heat's heat-cell layer) and bury
+      // edges under them.
+
+      // First-draw enters fire only when host enters the viewport. Page
+      // load runs every disk's draw synchronously, so without this the
+      // 320 ms transitions on below-the-fold disks complete before the
+      // user scrolls to them.
+      if (enterRunners.length) {
+        if (isFirstDraw && animateFirst) {
+          deferUntilVisible(() => enterRunners.forEach(fn => fn()));
+        } else {
+          enterRunners.forEach(fn => fn());
+        }
+      }
     }
 
     function computeDupIndices() {
@@ -621,6 +899,24 @@ const VIZ = {
         const arr = groups[k];
         arr.forEach((l, i) => { l.dupIdx = i; l.dupTotal = arr.length; });
       });
+    }
+    // Straight edge clipped to node circle borders, with offsets that
+    // shrink proportionally when the raw distance is shorter than
+    // r1+r2. The plain makeEdge formula (sx = p1 + r1·û, ex = p2 − r2·û)
+    // inverts in that regime — start ends up past target, end ends up
+    // before source — which the user sees as a tiny mis-oriented stub
+    // stuck inside the anchor node during retract / grow tweens.
+    function clampedBoundaryEdge(sx, sy, ex, ey, r1, r2) {
+      const dx = ex - sx, dy = ey - sy;
+      const Lraw = Math.hypot(dx, dy);
+      if (Lraw < 1e-3) return "M" + sx + "," + sy;
+      const ux = dx / Lraw, uy = dy / Lraw;
+      const totalR = r1 + r2;
+      const k = totalR > 0 && Lraw < totalR ? Lraw / totalR : 1;
+      const off1 = r1 * k, off2 = r2 * k;
+      const psx = sx + ux * off1, psy = sy + uy * off1;
+      const pex = ex - ux * off2, pey = ey - uy * off2;
+      return "M" + psx + "," + psy + " L" + pex + "," + pey;
     }
     function edgePath(d) {
       const r1 = (d.source && d.source.r) || nodeR;
@@ -641,16 +937,35 @@ const VIZ = {
       const hir = hi === d.source ? r1 : r2;
       return EdgePaths.makeParallelEdgeCentered(lo, hi, centered, lor, hir);
     }
-    sim.on("tick", () => {
-      // Skip paths mid-fanTween so a viz-edge tween (e.g. parallel
-      // re-fan after a swap) is not clobbered by tick's blanket .attr.
-      gLinks.selectAll("path.viz-edge").each(function (d) {
-        if (d3.active(this, "fanTween")) return;
-        d3.select(this).attr("d", edgePath(d));
-      });
-      gNodes.selectAll("g.viz-node-group > circle.viz-node").attr("cx", d => d.x).attr("cy", d => d.y);
-      if (showLabels) gNodes.selectAll("g.viz-node-group > text.viz-label").attr("x", d => d.x).attr("y", d => d.y);
-    });
+    // Hot path: paint() is called every animation frame by
+    // animateNodesToHome's rAF loop, with up to four disks running
+    // concurrently. Direct iteration over the cached link / node data
+    // arrays + DOM refs (populated in draw()) avoids the per-frame
+    // selectAll + each + multi-name d3.active overhead. The transition
+    // skip uses d3's internal `__transition` map: any pending/running
+    // schedule on a path means a tween already owns the `d` attribute,
+    // so paint defers.
+    function paint() {
+      for (let i = 0; i < links.length; i++) {
+        const l = links[i];
+        const path = l.__path;
+        if (!path) continue;
+        if (path.__transition) continue;
+        path.setAttribute("d", edgePath(l));
+      }
+      for (let i = 0; i < nodesData.length; i++) {
+        const n = nodesData[i];
+        if (n.__circle) {
+          n.__circle.setAttribute("cx", n.x);
+          n.__circle.setAttribute("cy", n.y);
+        }
+        if (showLabels && n.__label) {
+          n.__label.setAttribute("x", n.x);
+          n.__label.setAttribute("y", n.y);
+        }
+      }
+    }
+    sim.on("tick", paint);
 
     // Initial edges
     (opts.edges || []).forEach((e, i) => {
@@ -662,14 +977,67 @@ const VIZ = {
     const handle = {
       svg, sim, nodesData, links, nodeById,
 
-      setEdges(edges) {
+      // Force a draw without piping data through setEdges. Used by
+      // callers that mutated cls/r in-place via eachNode and need the
+      // circle/edge attrs to flush.
+      redraw() { draw(); },
+
+      setEdges(edges, edgeOpts) {
+        const onSettled = edgeOpts && edgeOpts.onSettled;
+        if (edgeOpts) {
+          nextEnterDelay    = edgeOpts.enterDelay    || 0;
+          nextEnterStagger  = edgeOpts.enterStagger  || 0;
+          nextEnterFromId   = edgeOpts.enterFromId   != null ? edgeOpts.enterFromId : null;
+          nextEnterDur      = edgeOpts.enterDur      || 0;
+          nextExitDelay     = edgeOpts.exitDelay     || 0;
+          nextExitStagger   = edgeOpts.exitStagger   || 0;
+          nextExitFromId    = edgeOpts.exitFromId    != null ? edgeOpts.exitFromId : null;
+          nextExitDur       = edgeOpts.exitDur       || 0;
+        }
         links.length = 0;
         (edges || []).forEach((e, i) => { const l = normEdge(e, i); if (l) links.push(l); });
         draw();
+        nextEnterDelay = 0;
+        nextEnterStagger = 0;
+        nextEnterFromId = null;
+        nextEnterDur = 0;
+        nextExitDelay = 0;
+        nextExitStagger = 0;
+        nextExitFromId = null;
+        nextExitDur = 0;
+        if (onSettled) {
+          // rAF-poll d3's per-element __transition map: empty on every
+          // path means every queued enter / exit transition has finished
+          // (or was never scheduled). Fires the callback exactly when
+          // the edge layer is settled, so callers can chain "A then B
+          // then C" without computing hand-rolled timing budgets.
+          const start = (typeof performance !== "undefined" ? performance.now() : Date.now());
+          const tick = () => {
+            const paths = gLinks.selectAll("path.viz-edge").nodes();
+            let pending = false;
+            for (let i = 0; i < paths.length; i++) {
+              if (paths[i].__transition) { pending = true; break; }
+            }
+            if (!pending) { onSettled(); return; }
+            // Safety fuse: 30 s of un-cleared __transition is broken.
+            const now = (typeof performance !== "undefined" ? performance.now() : Date.now());
+            if (now - start > 30000) { onSettled(); return; }
+            requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
+        }
       },
-      addEdges(edges) {
+      addEdges(edges, edgeOpts) {
+        if (edgeOpts) {
+          nextEnterDelay    = edgeOpts.enterDelay    || 0;
+          nextEnterStagger  = edgeOpts.enterStagger  || 0;
+          nextEnterFromId   = edgeOpts.enterFromId   != null ? edgeOpts.enterFromId : null;
+        }
         (edges || []).forEach((e, i) => { const l = normEdge(e, links.length + i); if (l) links.push(l); });
         draw();
+        nextEnterDelay = 0;
+        nextEnterStagger = 0;
+        nextEnterFromId = null;
       },
       addEdge(edge) { handle.addEdges([edge]); },
       removeEdges(pred) {
@@ -727,6 +1095,127 @@ const VIZ = {
           .style("opacity", target);
       },
 
+      // Snap fx/fy/x/y to (homeX, homeY) for every node. For first mount
+      // and on jumps (e.g., re-embedding) where a tween isn't meaningful.
+      snapNodesToHome() {
+        nodesData.forEach(n => {
+          if (n.fx != null) n.fx = n.homeX;
+          if (n.fy != null) n.fy = n.homeY;
+          n.x = n.homeX; n.y = n.homeY;
+        });
+        if (pinned) paint();
+        else sim.alpha(0.05);
+      },
+
+      // Tween fx/fy from current to (homeX, homeY) for every node whose
+      // home was repointed by the caller. Pair with edits like
+      //   nodesData.forEach(n => { n.homeX = ...; n.homeY = ...; });
+      //   viz.animateNodesToHome();
+      // For pinned layouts; for free-running sims this still tweens the
+      // pin but the sim will release fx/fy on its own forces afterwards.
+      // opts.polar = true: interpolate in (r, θ) about the origin instead
+      // of cartesian, so a same-radius move orbits at constant r rather
+      // than cutting a chord through the disk centre.
+      animateNodesToHome(arg) {
+        let dur = animDur, polar = false, onEnd = null;
+        if (typeof arg === "number") dur = arg;
+        else if (arg && typeof arg === "object") {
+          if (typeof arg.durMs === "number") dur = arg.durMs;
+          polar = !!arg.polar;
+          if (typeof arg.onEnd === "function") onEnd = arg.onEnd;
+        }
+        const targets = [];
+        nodesData.forEach(n => {
+          const sx = n.fx != null ? n.fx : n.x;
+          const sy = n.fy != null ? n.fy : n.y;
+          const dx = n.homeX - sx, dy = n.homeY - sy;
+          if (dx * dx + dy * dy < 0.25) {
+            if (n.fx != null) n.fx = n.homeX;
+            if (n.fy != null) n.fy = n.homeY;
+            n.x = n.homeX; n.y = n.homeY;
+            return;
+          }
+          const tgt = { n, sx, sy, ex: n.homeX, ey: n.homeY };
+          if (polar) {
+            tgt.sr = Math.hypot(sx, sy);
+            tgt.er = Math.hypot(n.homeX, n.homeY);
+            // atan2 collapses to 0 at the origin, which would spiral the
+            // path when one endpoint sits at r ≈ 0. Pin the degenerate
+            // angle to the other endpoint's angle so the move is a clean
+            // radial slide along a single ray.
+            const EPS = 1e-3;
+            const sAtO = tgt.sr < EPS, eAtO = tgt.er < EPS;
+            let sa = sAtO ? null : Math.atan2(sy, sx);
+            let ea = eAtO ? null : Math.atan2(n.homeY, n.homeX);
+            if (sa == null && ea == null) { sa = 0; ea = 0; }
+            else if (sa == null) sa = ea;
+            else if (ea == null) ea = sa;
+            tgt.sa = sa;
+            // Shortest-arc unwrap: keep |ea − sa| ≤ π.
+            let da = ea - sa;
+            while (da >  Math.PI) da -= 2 * Math.PI;
+            while (da < -Math.PI) da += 2 * Math.PI;
+            tgt.da = da;
+          }
+          targets.push(tgt);
+        });
+        if (!targets.length) { if (onEnd) onEnd(); return; }
+        // Off-screen hosts snap directly: rAF tweening on disks the user
+        // can't see is pure cost. Re-check visibility cheaply via a
+        // bounding-rect intersection.
+        if (host && typeof window !== "undefined") {
+          const rect = host.getBoundingClientRect();
+          const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+          if (rect.bottom < 0 || rect.top > vh) {
+            targets.forEach(({ n, ex, ey }) => {
+              if (n.fx != null) n.fx = ex;
+              if (n.fy != null) n.fy = ey;
+              n.x = ex; n.y = ey;
+            });
+            if (pinned) paint();
+            if (onEnd) onEnd();
+            return;
+          }
+        }
+        const ease = (typeof d3 !== "undefined" && d3.easeCubicInOut) || ((t) => t);
+        const start = (typeof performance !== "undefined" ? performance.now() : Date.now());
+        function step() {
+          const now = (typeof performance !== "undefined" ? performance.now() : Date.now());
+          const t = Math.min(1, (now - start) / dur);
+          const e = ease(t);
+          targets.forEach((tgt) => {
+            let nx, ny;
+            if (polar) {
+              const r = tgt.sr + (tgt.er - tgt.sr) * e;
+              const a = tgt.sa + tgt.da * e;
+              nx = r * Math.cos(a);
+              ny = r * Math.sin(a);
+            } else {
+              nx = tgt.sx + (tgt.ex - tgt.sx) * e;
+              ny = tgt.sy + (tgt.ey - tgt.sy) * e;
+            }
+            const n = tgt.n;
+            if (n.fx != null) n.fx = nx;
+            if (n.fy != null) n.fy = ny;
+            n.x = nx; n.y = ny;
+          });
+          if (pinned) paint();
+          else sim.alpha(0.2);
+          if (t < 1) requestAnimationFrame(step);
+          else {
+            targets.forEach(({ n, ex, ey }) => {
+              if (n.fx != null) n.fx = ex;
+              if (n.fy != null) n.fy = ey;
+              n.x = ex; n.y = ey;
+            });
+            if (pinned) paint();
+            if (onEnd) onEnd();
+          }
+        }
+        if (!pinned) sim.alpha(0.3).restart();
+        requestAnimationFrame(step);
+      },
+
       onEdgeTap(fn)     { onEdgeTap   = fn; },
       onNodeTap(fn)     { onNodeTap   = fn; },
       onNodeHoverEnter(fn) { onNodeEnter = fn; },
@@ -751,7 +1240,8 @@ const VIZ = {
       setPadRight(padRightUnits) {
         fitOpts.padRight = padRightUnits;
         svg.attr("viewBox", fitViewBoxAttr(fitOpts));
-        sim.alpha(0.3).restart();
+        if (pinned) paint();
+        else sim.alpha(0.3).restart();
       },
     };
 

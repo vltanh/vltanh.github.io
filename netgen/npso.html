@@ -51,11 +51,17 @@
   aspect-ratio: 640 / 680;
   max-height: 520px;
 }
-/* Step semantics: future arrivals (rank > τ) are not yet drawn, so they
-   are hidden entirely instead of ghosted in. Class set in JS (applyTau /
-   updateDisk2Layout / disk-3 render). */
-g.viz-node-group:has(.viz-node.future) { display: none; }
-.viz-edge.future { display: none; }
+/* Group-opacity transition drives both the initial mount fade-in
+   (.viz-hidden class set at element creation, removed when the disk
+   enters the viewport) and the per-step .future class fade for τ
+   stepping. The class-set-at-creation trick locks the initial computed
+   opacity to 0 from the first paint, which is the only reliable way
+   to keep the CSS transition from firing a 1→0 mount flash regardless
+   of browser SVG quirks. */
+g.viz-node-group.viz-hidden { opacity: 0; pointer-events: none; }
+g.viz-node-group { transition: opacity .32s ease; }
+g.viz-node-group:has(.viz-node.future) { opacity: 0; pointer-events: none; }
+.viz-edge.future { opacity: 0; pointer-events: none; }
 /* .profile-table thead th + .widget-row.tight live in shared.css. */
 </style>
 </head>
@@ -714,8 +720,16 @@ window.MathJax = {
     };
   }
 
-  let SHARED = computeEmbedding(1);
-  let embedSeed = 1;
+  // Initial seed picked offline by tools/viz_check/npso/seed_sweep.mjs.
+  // Hard targets: the two singleton-target clusters split as {1, 2},
+  // every non-singleton cluster lands in [5, 7] (sums to 17, plus the
+  // 3 from singletons = N=20). Score among survivors: w_intra·avg_intra
+  // + w_inter·avg_inter. Lands on seed 18692 with cluster counts
+  // [5, 7, 5, 2, 1] vs expected [8, 6, 4, 1, 1] and intra/inter avg
+  // hyperbolic distances 6.81 / 9.20.
+  const INITIAL_EMBED_SEED = 18692;
+  let SHARED = computeEmbedding(INITIAL_EMBED_SEED);
+  let embedSeed = INITIAL_EMBED_SEED;
   let partialNonce = 0;
   const rerollListeners = [];
   function onEmbeddingReroll(fn) { rerollListeners.push(fn); }
@@ -803,6 +817,9 @@ window.MathJax = {
   // r_hyp = 2β·ln(t) + 2(1−β)·ln(τ) for arrived ranks (t ≤ τ); future
   // ranks park at birth radius 2·ln(t). Caller owns the .future / .dim
   // class semantics; this helper only writes positions.
+  // Writes homeX/homeY only and leaves fx/fy/x/y for viz.animateNodesToHome
+  // (or viz.snapNodesToHome on the very first mount/reroll). Pair every
+  // applyTauPositions call with one of those.
   function applyTauPositions(viz, tau, emb) {
     viz.nodesData.forEach(n => {
       const nid   = parseInt(n.id, 10);
@@ -817,7 +834,7 @@ window.MathJax = {
       // positions and heat geometry agree.
       const r_vis = R_MAX * Math.max(0, r_hyp) / R_HYP_MAX;
       const x = r_vis * Math.cos(theta), y = r_vis * Math.sin(theta);
-      n.homeX = x; n.homeY = y; n.fx = x; n.fy = y; n.x = x; n.y = y;
+      n.homeX = x; n.homeY = y;
     });
   }
   function setNodeClassFlag(d, cls, on) {
@@ -987,9 +1004,15 @@ window.MathJax = {
       positions: SHARED.POS_POLAR,
       nodeR: 10,
       pinned: true,
+      animated: true,
       showLabels: true,
       labelText: (d) => String(rankOf[parseInt(d.id, 10)] + 1),
       nodeColor: (id) => CLUSTER_COLOR_BY_ID[SHARED.ASSIGNED[rankOf[parseInt(id, 10)]]] || COL.paper_3,
+      // Set .future on the first-paint cls for ranks > τ so future
+      // nodes are invisible from the very first frame instead of
+      // flashing in at full opacity then fading out under the JS
+      // applyTau pass that runs immediately after.
+      nodeClass: (id) => idToRank(parseInt(id, 10)) > GLOBAL_TAU ? "future" : "",
       edges: [],
     });
 
@@ -1042,8 +1065,8 @@ window.MathJax = {
         n.color = CLUSTER_COLOR_BY_ID[emb.ASSIGNED[rank - 1]] || COL.paper_3;
         setNodeClassFlag(n, "future", rank > tau);
       });
-      viz.clearAllNodeClass("_refresh_");
-      viz.sim.alpha(0.3).restart();
+      viz.redraw();
+      viz.animateNodesToHome({ polar: true });
     }
     function renderDisk1(tau) {
       tauOut.textContent = String(tau);
@@ -1330,6 +1353,8 @@ window.MathJax = {
       positions: SHARED.POS_POLAR,
       nodeR: 10,
       pinned: true,
+      animated: true,
+      animateInitial: true,
       showLabels: true,
       labelText: (d) => String(rankOf[parseInt(d.id, 10)] + 1),
       nodeColor: (id) => CLUSTER_COLOR_BY_ID[SHARED.ASSIGNED[rankOf[parseInt(id, 10)]]] || COL.paper_3,
@@ -1400,11 +1425,10 @@ window.MathJax = {
         const p = SHARED.POS_POLAR[nid];
         if (!p) return;
         n.homeX = p.x; n.homeY = p.y;
-        n.fx = p.x; n.fy = p.y;
-        n.x = p.x;   n.y = p.y;
         n.color = CLUSTER_COLOR_BY_ID[SHARED.ASSIGNED[rankOf[nid]]] || COL.paper_3;
       });
-      viz.sim.alpha(0.3).restart();
+      viz.redraw();
+      viz.animateNodesToHome({ polar: true });
     });
   })();
 
@@ -1427,6 +1451,8 @@ window.MathJax = {
       positions: SHARED.POS_POLAR,
       nodeR: 10,
       pinned: true,
+      animated: true,
+      animateInitial: true,
       showLabels: true,
       labelText: (d) => String(rankOf[parseInt(d.id, 10)] + 1),
       nodeColor: (id) => CLUSTER_COLOR_BY_ID[SHARED.ASSIGNED[rankOf[parseInt(id, 10)]]] || COL.paper_3,
@@ -1593,9 +1619,16 @@ window.MathJax = {
       positions: SHARED.POS_POLAR,
       nodeR: 10,
       pinned: true,
+      animated: true,
+      animateInitial: true,
+      animDur: 360,
       showLabels: true,
       labelText: (d) => String(rankOf[parseInt(d.id, 10)] + 1),
       nodeColor: (id) => CLUSTER_COLOR_BY_ID[SHARED.ASSIGNED[rankOf[parseInt(id, 10)]]] || COL.paper_3,
+      nodeClass: (id) => {
+        const tau = SELECTED_ID == null ? N_NODES : (rankOf[SELECTED_ID] + 1);
+        return idToRank(parseInt(id, 10)) > tau ? "future" : "";
+      },
       edges: [],
     });
     // Custom hover: source node → r_i; other node → h(source, j) + p(source, j).
@@ -1656,6 +1689,16 @@ window.MathJax = {
       .style("cursor", "pointer");
     haloLayer = svg.append("g").attr("class", "fd-heat-halo")
       .attr("pointer-events", "none");
+    // Halo layer sits behind viz nodes so the ring reads as a glow
+    // emerging from under the source/target circle, not as a separate
+    // disc floating on top. SVG paint order = DOM order, so we move
+    // haloLayer before the .viz-nodes group.
+    {
+      const vnRoot = svg.select("g.viz-nodes").node();
+      if (vnRoot && vnRoot.parentNode === svg.node()) {
+        svg.node().insertBefore(haloLayer.node(), vnRoot);
+      }
+    }
 
     // ── τ locked to source rank ──
     // The heat math + visible nodes are drawn at τ = t_source so the
@@ -1677,8 +1720,20 @@ window.MathJax = {
         n.color = CLUSTER_COLOR_BY_ID[emb.ASSIGNED[rank - 1]] || COL.paper_3;
         setNodeClassFlag(n, "future", rank > tau);
       });
-      viz.clearAllNodeClass("_refresh_");
-      viz.sim.alpha(0.3).restart();
+      viz.redraw();
+      // Mark the slide in flight so the local heat redraw (called below
+      // and by the selection/target listeners) knows to skip the halo
+      // paint until nodes have settled. animateNodesToHome.onEnd clears
+      // the flag and fires another redraw that grows the halo cleanly.
+      pendingSlide = true;
+      redraw();
+      viz.animateNodesToHome({
+        polar: true,
+        onEnd: () => {
+          pendingSlide = false;
+          redraw();
+        },
+      });
       // Step-button state + readout:
       const r = SELECTED_ID == null ? null : (rankOf[SELECTED_ID] + 1);
       srcOut.textContent = r == null ? "—" : String(r);
@@ -1760,6 +1815,19 @@ window.MathJax = {
     const rTarget = document.getElementById("heat-r-target");
     const rHint   = document.getElementById("heat-r-hint");
 
+    // Cache the last source/target so the ring/halo animation only
+    // triggers when the selection itself changes; T slider drags shouldn't
+    // re-grow the ring on every tick.
+    let lastSourceId = null, lastTargetId = null;
+    // While a node-slide animation is in flight (source change → τ
+    // changed → applyTauPositions wrote new homes), redraw() skips the
+    // halo paint so the purple ring doesn't expand mid-slide on top of
+    // a node that's still moving. The slide's onEnd clears the flag and
+    // calls redraw() once more, at which point the halos grow normally.
+    let pendingSlide = false;
+    const HALO_R = 14;
+    const HALO_GROW_MS = 380;
+
     function redraw() {
       const T = currentT();
       const currentId = SELECTED_ID;
@@ -1769,10 +1837,22 @@ window.MathJax = {
              .attr("opacity", heatOn() ? 0.55 : 0);
         contourLayer.selectAll("*").remove();
         haloLayer.selectAll("*").remove();
+        lastSourceId = null;
+        lastTargetId = null;
           rSource.textContent = "click any node to set source";
         rTarget.innerHTML = "";
         rHint.textContent = "";
         return;
+      }
+      const sourceChanged = (currentId !== lastSourceId);
+      const targetChanged = (secondId  !== lastTargetId);
+      // Only commit the "last seen" cache when halos actually paint.
+      // While pendingSlide=true we skip the halo block, so leave the
+      // cache untouched — the post-slide redraw still sees the change
+      // and grows the ring instead of snapping.
+      if (!pendingSlide) {
+        lastSourceId = currentId;
+        lastTargetId = secondId;
       }
       const t_u = rankOf[currentId] + 1;
       const R = FD_R_at(t_u, T);
@@ -1816,15 +1896,27 @@ window.MathJax = {
       }
       // Halos drawn on the top layer so they sit above heat cells AND
       // viz nodes. Halo positions match the τ-aware visible node positions
-      // (same R_MAX·r_hyp/R_HYP_MAX scaling as applyTauPositions).
-      const haloR_source = R_MAX * Math.max(0, r_hyp_source) / R_HYP_MAX;
+      // (same R_MAX·r_hyp/R_HYP_MAX scaling as applyTauPositions). When a
+      // node-slide is in flight, skip the halo paint — the slide's onEnd
+      // will fire a second redraw() with pendingSlide cleared, and the
+      // halo grows then. The readouts below still update immediately so
+      // the source/target text reflects the new selection right away.
       haloLayer.selectAll("*").remove();
-      haloLayer.append("circle")
-        .attr("cx", haloR_source * Math.cos(theta_source))
-        .attr("cy", haloR_source * Math.sin(theta_source))
-        .attr("r", 14).attr("fill", "none")
-        .attr("stroke", COL.orchid).attr("stroke-width", 2.4)
-        .attr("opacity", 0.95);
+      if (!pendingSlide) {
+        const haloR_source = R_MAX * Math.max(0, r_hyp_source) / R_HYP_MAX;
+        const srcHalo = haloLayer.append("circle")
+          .attr("cx", haloR_source * Math.cos(theta_source))
+          .attr("cy", haloR_source * Math.sin(theta_source))
+          .attr("r", sourceChanged ? 0 : HALO_R)
+          .attr("fill", "none")
+          .attr("stroke", COL.paper).attr("stroke-width", 2.4)
+          .attr("opacity", 0.95);
+        if (sourceChanged) {
+          srcHalo.transition("srcHalo").duration(HALO_GROW_MS)
+            .ease(d3.easeCubicOut)
+            .attr("r", HALO_R);
+        }
+      }
       const Rstr = t_u < 2
         ? "undefined"
         : !isFinite(R) ? "—"
@@ -1843,27 +1935,53 @@ window.MathJax = {
         const p_ij = 1 / (1 + Math.exp((h_ij - R) / (2 * T)));
         rTarget.innerHTML = `&middot; target ${t_j} &middot; h = ${h_ij.toFixed(2)} &middot; p = ${p_ij.toFixed(3)}`;
         rHint.textContent = "click outside to clear";
-        // Geodesic path from source to target at τ = t_source.
-        const pts = FD_geodesic(r_hyp_source, theta_source, r_hyp_target, theta_target);
-        if (pts.length) {
-          let dG = "M" + pts[0][0].toFixed(2) + "," + pts[0][1].toFixed(2);
-          for (let k = 1; k < pts.length; k++) {
-            dG += "L" + pts[k][0].toFixed(2) + "," + pts[k][1].toFixed(2);
+        if (!pendingSlide) {
+          // Geodesic path from source to target at τ = t_source. On target
+          // change the line draws itself out from source to target via
+          // attrTween over the polyline's points; on T-slider drag (same
+          // target) the path snaps to its new geometry without redrawing.
+          const pts = FD_geodesic(r_hyp_source, theta_source, r_hyp_target, theta_target);
+          if (pts.length) {
+            const buildD = (n) => {
+              let dG = "M" + pts[0][0].toFixed(2) + "," + pts[0][1].toFixed(2);
+              for (let k = 1; k < n; k++) {
+                dG += "L" + pts[k][0].toFixed(2) + "," + pts[k][1].toFixed(2);
+              }
+              return dG;
+            };
+            const geoPath = contourLayer.append("path")
+              .attr("fill", "none")
+              .attr("stroke", COL.azure).attr("stroke-width", 2.6)
+              .attr("opacity", 0.95);
+            if (targetChanged) {
+              geoPath.attr("d", buildD(2));
+              geoPath.transition("geoDraw").duration(460)
+                .ease(d3.easeCubicOut)
+                .attrTween("d", () => (k) => {
+                  const n = Math.max(2, Math.ceil(k * pts.length));
+                  return buildD(n);
+                });
+            } else {
+              geoPath.attr("d", buildD(pts.length));
+            }
           }
-          contourLayer.append("path")
-            .attr("d", dG)
+          // Target halo: same deep-ink stroke as source but dashed so the
+          // two are distinguishable without a second hue.
+          const haloR_target = R_MAX * Math.max(0, r_hyp_target) / R_HYP_MAX;
+          const tgtHalo = haloLayer.append("circle")
+            .attr("cx", haloR_target * Math.cos(theta_target))
+            .attr("cy", haloR_target * Math.sin(theta_target))
+            .attr("r", targetChanged ? 0 : HALO_R)
             .attr("fill", "none")
-            .attr("stroke", COL.mint).attr("stroke-width", 2.6)
-            .attr("opacity", 0.95);
+            .attr("stroke", COL.paper).attr("stroke-width", 2.0)
+            .attr("stroke-dasharray", "4 3")
+            .attr("opacity", 0.9);
+          if (targetChanged) {
+            tgtHalo.transition("tgtHalo").duration(HALO_GROW_MS)
+              .ease(d3.easeCubicOut)
+              .attr("r", HALO_R);
+          }
         }
-        // Target halo on top layer (amber), at τ-aware position.
-        const haloR_target = R_MAX * Math.max(0, r_hyp_target) / R_HYP_MAX;
-        haloLayer.append("circle")
-          .attr("cx", haloR_target * Math.cos(theta_target))
-          .attr("cy", haloR_target * Math.sin(theta_target))
-          .attr("r", 14).attr("fill", "none")
-          .attr("stroke", COL.amber).attr("stroke-width", 2.4)
-          .attr("opacity", 0.95);
       } else {
         rTarget.innerHTML = "";
         rHint.textContent = "click another node for p(i, j)";
@@ -1878,8 +1996,6 @@ window.MathJax = {
       };
       raiseNode(currentId);
       raiseNode(secondId);
-      // Halo layer always last among svg children.
-      haloLayer.raise();
     }
     // Source is the current step (= GLOBAL_TAU). Clicks on disk-2 only
     // toggle the target; the source is no longer user-clickable.
@@ -1888,7 +2004,7 @@ window.MathJax = {
       if (id === SELECTED_ID) { setSelectedTarget(null); return; }
       setSelectedTarget(SELECTED_TARGET_ID === id ? null : id);
     });
-    onSelectionChange(() => { updateLayout(SHARED); redraw(); });
+    onSelectionChange(() => updateLayout(SHARED));
     onTargetChange(() => redraw());
     // Click outside any node clears the target only.
     svg.on("click", function (event) {
@@ -1897,21 +2013,23 @@ window.MathJax = {
       if (SELECTED_TARGET_ID == null) return;
       setSelectedTarget(null);
     });
+    let pendingHeatFrame = false;
+    function scheduleRedraw() {
+      if (pendingHeatFrame) return;
+      pendingHeatFrame = true;
+      requestAnimationFrame(() => { pendingHeatFrame = false; redraw(); });
+    }
     slider.addEventListener("input", () => {
       sliderOut.value = currentT().toFixed(2);
-      redraw();
+      scheduleRedraw();
     });
     if (heatToggle) heatToggle.addEventListener("change", redraw);
     sliderOut.value = currentT().toFixed(2);
     updateLayout(SHARED);
-    redraw();
 
     // Follow the global embedding reroll: re-pin node positions at the
     // current τ, recolour by the fresh ASSIGNED, redraw heat.
-    onEmbeddingReroll((emb) => {
-      updateLayout(emb);
-      redraw();
-    });
+    onEmbeddingReroll((emb) => updateLayout(emb));
   })();
 
   // ── Impl-3 step-through: one arrival per step ──
@@ -1930,9 +2048,12 @@ window.MathJax = {
       positions: SHARED.POS_POLAR,
       nodeR: 10,
       pinned: true,
+      animated: true,
+      animDur: 220,
       showLabels: true,
       labelText: (d) => String(rankOf[parseInt(d.id, 10)] + 1),
       nodeColor: (id) => CLUSTER_COLOR_BY_ID[SHARED.ASSIGNED[rankOf[parseInt(id, 10)]]] || COL.paper_3,
+      nodeClass: (id) => idToRank(parseInt(id, 10)) > GLOBAL_TAU ? "future" : "",
       edges: [],
     });
     // Custom hover: arrival node → r_i; predecessor → h + p at current T.
@@ -2055,6 +2176,50 @@ window.MathJax = {
     let edgeNonce = 0;
     let step = 0;
     let arrivals = [];
+    // Track step delta so a single forward arrival can hold its m new
+    // edges off until the arrival node has finished sliding into place.
+    // T-slider drags + rerolls (same step, edge ids change) skip the
+    // delay so the picture reacts immediately.
+    let prevStep = -1;
+    // Per-arrival nonce mixed into edge ids so a Random Step swaps the
+    // step's m edge ids (exit + enter fires, animated retract/regrow).
+    // Random All leaves the nonces unchanged so its render path silently
+    // mutates u/v under stable ids — the on-tick path update gives the
+    // requested snap behaviour.
+    const arrivalNonce = new Array(N_NODES).fill(0);
+    let pendingRerollStep = false;
+    let pendingRerollAll = false;
+    // Track last applied per-group opacity so a render that doesn't
+    // change a node's α (T-slider drag mostly does this) skips the d3
+    // transition setup for that node.
+    const lastAlphaByGroupId = new Map();
+    // Forward-step animation lock. Mash-clicking next/prev or rerolls
+    // mid-anim races the onEnd setEdges callback against fresh render()
+    // calls; lock every interactive control until the arrival node has
+    // settled and the m edges have finished sprouting, then unlock.
+    let animLocked = false;
+    const LOCKED_BTN_IDS = [
+      "impl3-start", "impl3-prev", "impl3-next", "impl3-end",
+      "impl3-reroll-step", "impl3-reroll-all",
+      "disk-tau-start", "disk-tau-prev", "disk-tau-next", "disk-tau-end",
+      "reroll-step-btn", "reroll-all-btn",
+      "heat-src-start", "heat-src-prev", "heat-src-next", "heat-src-end",
+    ];
+    function applyAnimLock(on) {
+      LOCKED_BTN_IDS.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (on) {
+          if (!el.dataset.preLockDisabled) {
+            el.dataset.preLockDisabled = el.disabled ? "1" : "0";
+          }
+          el.disabled = true;
+        } else if (el.dataset.preLockDisabled != null) {
+          el.disabled = el.dataset.preLockDisabled === "1";
+          delete el.dataset.preLockDisabled;
+        }
+      });
+    }
 
     // Field-name shim around NPSOKernel.computeArrival so distances are
     // evaluated at arrival time t = i+1 (matching MATLAB's per-iter
@@ -2078,16 +2243,33 @@ window.MathJax = {
       const T = parseFloat(slider.value);
       tval.textContent = T.toFixed(3);
       const atStart = (step <= 0), atEnd = (step >= LAST_ARRIVAL);
-      document.getElementById("impl3-start").disabled = atStart;
-      document.getElementById("impl3-prev") .disabled = atStart;
-      document.getElementById("impl3-next") .disabled = atEnd;
-      document.getElementById("impl3-end")  .disabled = atEnd;
-      // Both rerolls are no-ops during the K_{m+1} bootstrap: every
-      // arrival up to rank m+1 (step ≤ m) goes through autoAll, which
-      // never reads U_NODE.
       const inBootstrap = (step <= M_PROF);
-      document.getElementById("impl3-reroll-step").disabled = inBootstrap;
-      document.getElementById("impl3-reroll-all") .disabled = inBootstrap;
+      // While animLocked, the lock owns disabled state — don't fight it
+      // with the boundary/bootstrap rules. Pre-lock state is tracked per
+      // button so the right defaults restore on unlock.
+      if (!animLocked) {
+        document.getElementById("impl3-start").disabled = atStart;
+        document.getElementById("impl3-prev") .disabled = atStart;
+        document.getElementById("impl3-next") .disabled = atEnd;
+        document.getElementById("impl3-end")  .disabled = atEnd;
+        // Both rerolls are no-ops during the K_{m+1} bootstrap: every
+        // arrival up to rank m+1 (step ≤ m) goes through autoAll, which
+        // never reads U_NODE.
+        document.getElementById("impl3-reroll-step").disabled = inBootstrap;
+        document.getElementById("impl3-reroll-all") .disabled = inBootstrap;
+      } else {
+        // Persist the would-be defaults so unlock can restore them.
+        const setPre = (id, v) => {
+          const el = document.getElementById(id);
+          if (el) el.dataset.preLockDisabled = v ? "1" : "0";
+        };
+        setPre("impl3-start", atStart);
+        setPre("impl3-prev",  atStart);
+        setPre("impl3-next",  atEnd);
+        setPre("impl3-end",   atEnd);
+        setPre("impl3-reroll-step", inBootstrap);
+        setPre("impl3-reroll-all",  inBootstrap);
+      }
       const edges = [];
       const arrivedSet = new Set();
       for (let i = 0; i <= step; i++) {
@@ -2095,22 +2277,33 @@ window.MathJax = {
         const isLast = (i === step);
         // arrivals[i].placed entries are [rank_a, rank_b, p]; convert to
         // page ids for NETGEN.VIZ (whose node identifiers are page ids).
+        // anchorId = the arrival's page id. Carries the grow/retract
+        // direction with the edge so multi-arrival jumps can animate
+        // every new arrival's m edges concurrently — each anchored to
+        // its own arrival end — in a single setEdges call.
+        const anchorId = String(sorted[i]);
         arrivals[i].placed.forEach((e, k) => {
           edges.push({
             u: sorted[e[0] - 1], v: sorted[e[1] - 1],
             color: isLast ? COL.signal : COL.edge_stage2,
             w: isLast ? 2.4 : 1.1,
-            id: `i3-${i}-${k}`,
+            id: `i3-${i}-${k}-${arrivalNonce[i]}`,
+            anchorId,
           });
         });
       }
-      viz.setEdges(edges);
-      // Position nodes at τ = current step (= rank of most-recent arrival).
-      // Future ranks (rank > τ) hide via the .future class so the disk
-      // visibly grows arrival by arrival, matching the per-arrival r_i(t)
-      // the connection-probability formula evaluates at.
+      // On a forward step we wait until the new arrival has finished its
+      // slide+fade before sprouting its m edges; otherwise edges sprout
+      // immediately so T-slider drags and rerolls stay reactive.
+      const isForward = (step > prevStep);
+      const isSingleBack = (prevStep > 0) && (step === prevStep - 1);
+      const arrivalId = String(sorted[step]);
+      const formerArrivalId = isSingleBack ? String(sorted[prevStep]) : null;
+      const FORWARD_ENTER_DUR = 240;
+      const REROLL_RETRACT_DUR = 380;
+      const REROLL_GROW_DUR = 360;
+      const BACK_RETRACT_DUR = 320;
       const tauStep = Math.max(1, step + 1);
-      applyTauPositions(viz, tauStep, localEmb);
       // Per-predecessor pick-weight encoded as node opacity: opaque =
       // high pick probability, faint = low. Skipped during the K_{m+1}
       // bootstrap (no probabilistic picks).
@@ -2139,28 +2332,182 @@ window.MathJax = {
           weights = null;
         }
       }
-      viz.clearAllNodeClass("dim");
-      viz.nodesData.forEach(n => {
-        const rank = idToRank(parseInt(n.id, 10));
-        setNodeClassFlag(n, "future", rank > tauStep);
-        n.r = 10;
-      });
-      viz.clearAllNodeClass("_refresh_");
-      viz.sim.alpha(0.3).restart();
-      // Opacity per node, applied to the rendered SVG elements after
-      // VIZ's draw runs. Sqrt stretch keeps low-weight nodes visible.
-      const baseAlpha = 0.18, maxAlpha = 1;
-      svg.selectAll("g.viz-node-group").each(function (d) {
-        if (!d) return;
-        const rank = idToRank(parseInt(d.id, 10));
-        let alpha = 1;
-        if (rank < tauStep && weights && maxP > 0) {
-          const pn = weights[rank] || 0;
-          const t = Math.sqrt(pn / maxP);
-          alpha = baseAlpha + (maxAlpha - baseAlpha) * t;
+      // Strict A→B→C orchestration. Every transition between phases
+      // chains via a completion callback (animateNodesToHome.onEnd /
+      // setEdges.onSettled) instead of a hand-rolled setTimeout based on
+      // animDur — durations drift over edits and "delay = previous-anim
+      // duration" misses interrupt / variable-frame-rate completions.
+      const isSingleForward = isForward && (step === prevStep + 1);
+      const isMultiJump = !pendingRerollStep && !pendingRerollAll
+                          && !isSingleForward && !isSingleBack
+                          && (step !== prevStep);
+
+      function applyClassAndPos() {
+        viz.nodesData.forEach(n => {
+          const rank = idToRank(parseInt(n.id, 10));
+          setNodeClassFlag(n, "future", rank > tauStep);
+          n.r = 10;
+        });
+        applyTauPositions(viz, tauStep, localEmb);
+      }
+
+      function flushPerGroupOpacity() {
+        const baseAlpha = 0.18, maxAlpha = 1;
+        for (let i = 0; i < viz.nodesData.length; i++) {
+          const d = viz.nodesData[i];
+          if (!d || !d.__group) continue;
+          const rank = idToRank(parseInt(d.id, 10));
+          let alpha;
+          if (rank > tauStep) alpha = 0;
+          else if (rank < tauStep && weights && maxP > 0) {
+            const pn = weights[rank] || 0;
+            const t = Math.sqrt(pn / maxP);
+            alpha = baseAlpha + (maxAlpha - baseAlpha) * t;
+          } else alpha = 1;
+          const prev = lastAlphaByGroupId.get(d.id);
+          if (prev != null && Math.abs(prev - alpha) < 0.01) continue;
+          lastAlphaByGroupId.set(d.id, alpha);
+          d3.select(d.__group)
+            .transition("groupOp").duration(280)
+            .style("opacity", alpha);
         }
-        d3.select(this).style("opacity", alpha);
-      });
+      }
+
+      function unlockNow() {
+        animLocked = false;
+        applyAnimLock(false);
+      }
+
+      function lockNow() {
+        animLocked = true;
+        applyAnimLock(true);
+      }
+
+      if (pendingRerollAll) {
+        // Every edge's id changed (all nonces bumped) so a single
+        // setEdges([]) call sends every current edge into linkExit; each
+        // retracts toward its own anchorId. Once the retract settles, a
+        // second setEdges call brings the freshly sampled edges in via
+        // concurrent grow from each arrival.
+        lockNow();
+        applyClassAndPos();
+        flushPerGroupOpacity();
+        pendingRerollAll = false;
+        viz.setEdges([], {
+          exitDur: 420,
+          onSettled: () => {
+            viz.setEdges(edges, {
+              enterDur: 420,
+              onSettled: unlockNow,
+            });
+          },
+        });
+      } else if (pendingRerollStep) {
+        // A: retract the m old edges toward arrival.
+        // B: grow the m new edges out from arrival.
+        // C: unlock.
+        lockNow();
+        applyClassAndPos();
+        flushPerGroupOpacity();
+        const edgesWithoutArrival = edges.filter(e =>
+          !e.id.startsWith(`i3-${step}-`));
+        viz.setEdges(edgesWithoutArrival, {
+          exitFromId: arrivalId,
+          exitDur: REROLL_RETRACT_DUR,
+          onSettled: () => {
+            viz.setEdges(edges, {
+              enterFromId: arrivalId,
+              enterDur: REROLL_GROW_DUR,
+              onSettled: unlockNow,
+            });
+          },
+        });
+        pendingRerollStep = false;
+      } else if (isSingleBack) {
+        // A: retract former arrival's m edges (node + class untouched).
+        // B: apply class/position, fade former arrival via CSS,
+        //    slide surviving nodes inward.
+        // C: unlock when the slide ends.
+        lockNow();
+        viz.setEdges(edges, {
+          exitFromId: formerArrivalId,
+          exitDur: BACK_RETRACT_DUR,
+          onSettled: () => {
+            applyClassAndPos();
+            viz.redraw();
+            flushPerGroupOpacity();
+            viz.animateNodesToHome({ polar: true, onEnd: unlockNow });
+          },
+        });
+      } else if (isSingleForward) {
+        // A: apply class/position; new arrival fades in via CSS while
+        //    surviving nodes slide outward to their new r_hyp.
+        // B: grow new arrival's m edges out from arrival.
+        // C: unlock.
+        lockNow();
+        applyClassAndPos();
+        viz.redraw();
+        flushPerGroupOpacity();
+        viz.animateNodesToHome({
+          polar: true,
+          onEnd: () => {
+            viz.setEdges(edges, {
+              enterFromId: arrivalId,
+              enterDur: FORWARD_ENTER_DUR,
+              onSettled: unlockNow,
+            });
+          },
+        });
+      } else if (isMultiJump) {
+        lockNow();
+        const isMultiForward = step > prevStep;
+        if (isMultiForward) {
+          // A: apply class + position so the future ranks for the new
+          //    step start fading in (CSS) and homes are repointed.
+          //    animateNodesToHome slides surviving + new-arrival nodes
+          //    to their new r_hyp positions concurrently.
+          // B: once every node has settled, fan out every new edge
+          //    from its anchor (each grows from its own arrival end).
+          // C: unlock when the edge layer has settled.
+          applyClassAndPos();
+          viz.redraw();
+          flushPerGroupOpacity();
+          viz.animateNodesToHome({
+            polar: true,
+            onEnd: () => {
+              viz.setEdges(edges, {
+                enterDur: 420,
+                onSettled: unlockNow,
+              });
+            },
+          });
+        } else {
+          // Back jump.
+          // A: retract every edge concurrently toward its anchor (the
+          //    arrival that placed it). Nodes stay where they are — we
+          //    don't want them fading out underneath edges still
+          //    threaded between them.
+          // B: once edges have settled, apply class + position so the
+          //    now-orphaned arrivals pick up .future and fade out via
+          //    CSS, and surviving nodes slide inward to smaller r_hyp.
+          // C: unlock when the slide ends.
+          viz.setEdges(edges, {
+            exitDur: 420,
+            onSettled: () => {
+              applyClassAndPos();
+              viz.redraw();
+              flushPerGroupOpacity();
+              viz.animateNodesToHome({ polar: true, onEnd: unlockNow });
+            },
+          });
+        }
+      } else {
+        // Same step (T-slider drag). No node movement, no edge swap.
+        applyClassAndPos();
+        viz.setEdges(edges);
+        flushPerGroupOpacity();
+      }
+      prevStep = step;
       curEl.textContent = String(step + 1);
 
       // Caption refers to nodes by rank (the label shown on the disk).
@@ -2202,6 +2549,8 @@ window.MathJax = {
       for (let c = 0; c < M_PROF; c++) fresh.push(rngEdge());
       U_NODE[step] = fresh;
       localEmb = { ...localEmb, U_NODE };
+      arrivalNonce[step] += 1;
+      pendingRerollStep = true;
       recomputeAll();
       render();
     }
@@ -2215,11 +2564,27 @@ window.MathJax = {
         U_NODE[i] = fresh;
       }
       localEmb = { ...localEmb, U_NODE };
+      // Bump every arrival's nonce so the rebuilt edges land with new
+      // ids → all current edges go to linkExit (retract toward their
+      // anchors) and the fresh sample's edges enter (grow from their
+      // anchors), choreographed by the pendingRerollAll branch.
+      for (let i = 0; i < arrivalNonce.length; i++) arrivalNonce[i] += 1;
+      pendingRerollAll = true;
       recomputeAll();
       render();
     }
 
-    slider.addEventListener("input", () => { recomputeAll(); render(); });
+    let pendingImpl3Frame = false;
+    function scheduleImpl3Render() {
+      if (pendingImpl3Frame) return;
+      pendingImpl3Frame = true;
+      requestAnimationFrame(() => {
+        pendingImpl3Frame = false;
+        recomputeAll();
+        render();
+      });
+    }
+    slider.addEventListener("input", scheduleImpl3Render);
     document.getElementById("impl3-reroll-step").addEventListener("click", rerollEdgesStep);
     document.getElementById("impl3-reroll-all") .addEventListener("click", rerollEdgesAll);
     document.getElementById("impl3-start").addEventListener("click", () => setGlobalTau(1));
@@ -2244,11 +2609,10 @@ window.MathJax = {
         const p = emb.POS_POLAR[nid];
         if (!p) return;
         n.homeX = p.x; n.homeY = p.y;
-        n.fx = p.x; n.fy = p.y;
-        n.x = p.x;   n.y = p.y;
         n.color = CLUSTER_COLOR_BY_ID[emb.ASSIGNED[rankOf[nid]]] || COL.paper_3;
       });
-      viz.sim.alpha(0.3).restart();
+      viz.redraw();
+      viz.animateNodesToHome({ polar: true });
       recomputeAll();
       render();
     });
