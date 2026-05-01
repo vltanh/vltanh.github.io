@@ -1689,11 +1689,19 @@ window.MathJax = {
     function syncLiveBlocks() {
       // Outliers stay tagged via currentOutlierSet (read at downstream
       // call sites); only update the real-cluster mapping for the
-      // non-outliers the trace covered.
-      TRACE.forEach(t => { LIVE_REAL_CLUSTER_OF[t.v] = t.picked; });
-      // After the assignment changes, every cached realisation is stale.
-      REAL_CACHE.clear();
-      overrideEpoch++;
+      // non-outliers the trace covered. Skip cache invalidation when
+      // the new mapping matches the old — assignment rerolls that
+      // happen to land each node in its prior cluster don't need a
+      // full kernel re-run.
+      let changed = false;
+      TRACE.forEach(t => {
+        if (LIVE_REAL_CLUSTER_OF[t.v] !== t.picked) changed = true;
+        LIVE_REAL_CLUSTER_OF[t.v] = t.picked;
+      });
+      if (changed) {
+        REAL_CACHE.clear();
+        overrideEpoch++;
+      }
     }
 
     function render(step) {
