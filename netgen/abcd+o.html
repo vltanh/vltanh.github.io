@@ -102,6 +102,38 @@
 .xi-panel .xi-result{ font-size:1.2rem; color:var(--azure); letter-spacing:.04em; }
 .widget-row.row-top{ padding:.7rem 0 0; border:none; }
 .widget-row.row-mid{ padding:.5rem 0 0; border:none; }
+.assign-scalar-panel{
+  padding:.55rem .65rem;
+  font-family:'Special Elite','Courier New',monospace;
+  color:#2f3a54;
+}
+.assign-scalar-panel .row{ display:grid; grid-template-columns:1.2rem .9rem 1fr; gap:.35rem; align-items:center; padding:.15rem 0; }
+.assign-scalar-panel .lhs{ font-size:1.05rem; color:var(--azure); text-align:right; }
+.assign-scalar-panel .eq{ color:#6b6a54; }
+.assign-scalar-panel .val{ font-size:1rem; color:var(--azure); }
+.assign-scalar-panel .hint{ margin-top:.4rem; padding-top:.4rem; border-top:1px dashed rgba(139,117,65,.45); color:#6b6a54; font-size:.8rem; }
+.assign-scalar-panel .scalar-line{ font-size:.85rem; padding:.1rem 0; }
+.assign-scalar-panel .scalar-line.dim{ color:#6b6a54; font-size:.78rem; }
+.assign-scalar-panel .next-block{ margin-top:.4rem; padding-top:.4rem; border-top:1px dashed rgba(139,117,65,.45); }
+.assign-scalar-panel .next-head{ font-size:.88rem; color:#2f3a54; margin-bottom:.25rem; }
+.assign-scalar-panel .cluster-row{ font-size:.76rem; padding:.04rem 0; }
+.cluster-nav{
+  position:absolute; top:50%; transform:translateY(-50%);
+  width:2rem; height:2.4rem; z-index:6;
+  border:1px solid rgba(107,106,84,.45); border-radius:.4rem;
+  background:rgba(243,236,215,.8); color:#2f3a54;
+  font-family:'Special Elite','Courier New',monospace;
+  font-size:1.5rem; line-height:1; cursor:pointer;
+  display:flex; align-items:center; justify-content:center;
+  transition: opacity .15s ease, background .15s ease;
+}
+.cluster-nav:hover{ background:rgba(243,236,215,1); }
+.cluster-nav:disabled{ opacity:.4; cursor:default; }
+.cluster-nav:disabled:hover{ background:rgba(243,236,215,.8); }
+.cluster-nav-prev{ left:.4rem; }
+.cluster-nav-next{ right:.4rem; }
+#g-assign-scalars-panel{ pointer-events:none; }
+#g-assign-scalars-toggle{ pointer-events:auto; }
 </style>
 </head>
 <body>
@@ -229,6 +261,41 @@
     </div>
     <div class="graph-canvas" id="g-outlier-cy" style="max-height:520px"></div>
     <div class="outlier-info" id="outlier-info">&middot;</div>
+  </div>
+</section>
+
+<!-- ─────────── Generation · assigning vertices to clusters ─────────── -->
+<section class="stage">
+  <div class="stage-num">generation · assigning vertices to clusters</div>
+  <h2>Big nodes to big clusters; small nodes fill the rest.</h2>
+  <p>With the outlier block fixed, the sampler assigns each remaining vertex to one of the real clusters before any edges are drawn. The Julia code walks the non-outlier vertices in descending \(d_u\) and at each step samples one cluster from the admissible set with probability proportional to its remaining capacity. A vertex \(u\) is admissible for cluster \(j\) iff \(x_u \le s_j - 1\), where \(x_u\) is the per-vertex bound below: the expected number of neighbours of \(u\) that will end up in \(u\)'s own cluster.</p>
+  \[
+    x_u \;=\; \bigl\lceil (1 - \xi \phi) \, w_u \bigr\rceil, \qquad
+    \phi \;=\; 1 - \sum_{j=0}^{k} \left(\frac{s_j}{n}\right)^{\!2}.
+  \]
+  <p>The outlier mega-cluster (\(s_0\)) enters \(\phi\) like any other cluster, since outliers are real members of the partition for the purposes of the bound. The walker on the right shows the canonical-stochastic procedure: each vertex flies into a placeholder slot in its sampled cluster bin. The outlier block is pre-filled from the previous stage.</p>
+  <div class="graph" id="g-assign">
+    <div class="graph-chrome">
+      <span></span>
+      <span class="right step-label">step <b id="g-assign-cur">0</b> / <span id="g-assign-total">0</span></span>
+    </div>
+    <div class="graph-canvas" id="g-assign-cy"></div>
+    <div class="widget-row row-top">
+      <button class="btn" id="g-assign-rand-step" type="button">random step</button>
+      <button class="btn" id="g-assign-rand-all" type="button">random all</button>
+      <span class="step-label"><em>step</em>: reroll the cluster pick at this step &middot; <em>all</em>: reroll the whole permutation</span>
+    </div>
+    <div class="widget-row row-mid">
+      <button class="btn" id="g-assign-start">to start</button>
+      <button class="btn" id="g-assign-prev">back</button>
+      <button class="btn primary" id="g-assign-next">next</button>
+      <button class="btn" id="g-assign-end">to end</button>
+    </div>
+    <div class="step-desc" id="g-assign-desc"></div>
+  </div>
+  <div class="callout">
+    <div class="tag">node identity is not preserved across the assignment</div>
+    <p>The walker treats each cluster's slot list as anonymous: vertex 5 may land in C1 on one seed and C2 on the next. The cluster <em>sizes</em> are exact (the kernel guarantees \(\sum_j s_j = n\)); the per-node mapping is uniform over admissible permutations. Re-roll changes which nodes sit where; the outlier block (top stage) does not change unless that stage's seed re-rolls.</p>
   </div>
 </section>
 
@@ -733,21 +800,61 @@ window.MathJax = {
     return new Set(ABCDKernel.sampleWithoutReplacement(eligible, N_OUTLIERS, rng));
   }
 
-  // Page pins non-outlier vertices to a real cluster: original CLUSTER_OF
-  // for clustered nodes; 19 → C1 and 20 → C3 (their dominant edge sides) for
-  // input-outlier nodes when they are NOT picked as model outliers. This
-  // way KERNEL_S = [n_picked, |C1|, |C2|, |C3|] matches the canonical stage-2
-  // cluster_sizes prepend, and configModel zeros wInternalRaw only for the
-  // truly picked outliers.
-  const KERNEL_REAL_CLUSTER_BY_NODE = {};
-  C1.forEach(n => { KERNEL_REAL_CLUSTER_BY_NODE[n] = 2; });
-  C2.forEach(n => { KERNEL_REAL_CLUSTER_BY_NODE[n] = 3; });
-  C3.forEach(n => { KERNEL_REAL_CLUSTER_BY_NODE[n] = 4; });
-  KERNEL_REAL_CLUSTER_BY_NODE[19] = 2;  // OUT → fallback to C1
-  KERNEL_REAL_CLUSTER_BY_NODE[20] = 4;  // OUT → fallback to C3
+  // Block names used by the assignment walker + the bin viz. Outlier
+  // mega-cluster comes first to mirror the kernel's KERNEL_S = [s_0,
+  // |C1|, |C2|, |C3|] prepend; assignment iterates only over the real
+  // clusters since outliers have already been picked upstream.
+  const BLOCK_NAMES = ["MEGA", "C1", "C2", "C3"];
+  const REAL_BLOCK_NAMES = ["C1", "C2", "C3"];
+  const BLOCK_NODES = { "MEGA": [], "C1": C1, "C2": C2, "C3": C3 };
+  const BLOCK_COLOR = {
+    "MEGA": COL.signal, "C1": COL.C1, "C2": COL.C2, "C3": COL.C3,
+  };
+  const BLOCK_SIZE = {
+    "MEGA": N_OUTLIERS, "C1": C1.length, "C2": C2.length, "C3": C3.length,
+  };
+  const KERNEL_CID_FROM_BLOCK = { MEGA: 1, C1: 2, C2: 3, C3: 4 };
   const NAMED_CLUSTER_OF_KERNEL = { 2: "C1", 3: "C2", 4: "C3" };
   const PAGE_NODE_BY_KIDX = NODES.slice();
   const KERNEL_W = NODES.map(n => DEG_KEPT[n]);
+
+  // Live (assignment-driven) real-cluster mapping. The assignment walker
+  // writes into LIVE_REAL_CLUSTER_OF on each reroll. buildRealization
+  // reads from this when the node is not in the current outlier pick;
+  // outliers always map to MEGA (cluster_id=1) regardless. Initial value
+  // mirrors the input fixture so first paint matches the historical
+  // behaviour where non-outliers stayed pinned to their input cluster.
+  const LIVE_REAL_CLUSTER_OF = {};
+  C1.forEach(n => { LIVE_REAL_CLUSTER_OF[n] = "C1"; });
+  C2.forEach(n => { LIVE_REAL_CLUSTER_OF[n] = "C2"; });
+  C3.forEach(n => { LIVE_REAL_CLUSTER_OF[n] = "C3"; });
+  LIVE_REAL_CLUSTER_OF[19] = "C1";  // input outlier — fallback if not picked
+  LIVE_REAL_CLUSTER_OF[20] = "C3";
+
+  // Per-node colour lookup. Sampler-picked outliers paint via COL.signal
+  // so the visual cue lives on the node fill instead of a dashed frame
+  // drawn on top. Other nodes follow LIVE_REAL_CLUSTER_OF, which the
+  // assignment walker drives.
+  function nodeColorOf(n) {
+    if (currentOutlierSet().has(n)) return COL.signal;
+    return BLOCK_COLOR[LIVE_REAL_CLUSTER_OF[n]] || COL.paper_3;
+  }
+  // Outliers cache. computed lazily from OUTLIER_SEED + SYNTHETIC_XI.
+  // Invalidated whenever OUTLIER_SEED changes (rerollOutlier bumps).
+  let _outlierCache = null;
+  let _outlierCacheKey = null;
+  function currentOutlierSet() {
+    const key = OUTLIER_SEED;
+    if (_outlierCacheKey === key && _outlierCache) return _outlierCache;
+    const { eligible } = computeEligible(SYNTHETIC_XI);
+    _outlierCache = pickOutliers(eligible, OUTLIER_SEED);
+    _outlierCacheKey = key;
+    return _outlierCache;
+  }
+  function invalidateOutlierCache() {
+    _outlierCache = null;
+    _outlierCacheKey = null;
+  }
 
   // Full realisation cache, keyed by (o_seed, u_seed, stub_seed, xi, overrideEpoch).
   const REAL_CACHE = new Map();
@@ -756,9 +863,11 @@ window.MathJax = {
     if (REAL_CACHE.has(key)) return REAL_CACHE.get(key);
     const { eligible, threshold } = computeEligible(xi);
     const outliers = pickOutliers(eligible, o_seed);
-    // Build kernel cluster ids: cluster 1 = picked outliers ∪ {19, 20};
-    // cluster 2..4 = real clusters per CLUSTER_OF for everyone else.
-    const clusters = NODES.map(n => outliers.has(n) ? 1 : KERNEL_REAL_CLUSTER_BY_NODE[n]);
+    // Outliers map to cluster_id = 1 (MEGA); non-outliers follow the
+    // assignment walker's LIVE_REAL_CLUSTER_OF, which on first paint
+    // matches the input fixture.
+    const clusters = NODES.map(n =>
+      outliers.has(n) ? 1 : KERNEL_CID_FROM_BLOCK[LIVE_REAL_CLUSTER_OF[n]]);
     const KERNEL_S = [N_OUTLIERS, C1.length, C2.length, C3.length];
     const seedInt = ((u_seed * 1009 + 17) ^ (stub_seed * 131 + 7)) >>> 0;
     // First pass: kernel without overrides — needed to learn cluster
@@ -1257,9 +1366,404 @@ window.MathJax = {
       const descEl = document.getElementById("outlier-info");
       NETGEN.retypeset(descEl);
     }
-    onOutlierChanged.push(render);
+    onOutlierChanged.push(() => { invalidateOutlierCache(); render(); });
     render();
     document.getElementById("outlier-reroll").addEventListener("click", rerollOutlier);
+  })();
+
+  // ── Generation · assigning vertices to clusters ──
+  // Walker viz: non-outlier vertices wait in a queue (sorted by d_u
+  // desc). Each step "flies" the next vertex into an empty placeholder
+  // slot inside its sampled cluster bin. The MEGA bin sits to the side
+  // pre-filled with sampler-picked outliers from the previous stage;
+  // it does not participate in admissibility or sampling.
+  (function () {
+    const host = document.getElementById("g-assign-cy");
+    if (!host) return;
+    host.innerHTML = "";
+
+    const POS_SCALE = 0.72;
+    const POS = {};
+    NODES.forEach(n => {
+      const p = NETGEN.POSITIONS[n];
+      POS[n] = { x: p.x * POS_SCALE, y: p.y * POS_SCALE };
+    });
+
+    const PAD = 24, QUEUE_BAND_L = 90, PANEL_R = 220;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    NODES.forEach(n => {
+      const p = NETGEN.POSITIONS[n];
+      if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+    });
+    const vbX = minX - PAD - QUEUE_BAND_L;
+    const vbY = minY - PAD;
+    const vbW = (maxX - minX) + 2 * PAD + QUEUE_BAND_L + PANEL_R;
+    const vbH = (maxY - minY) + 2 * PAD;
+    host.style.aspectRatio = `${vbW} / ${vbH}`;
+
+    const svg = d3.select(host).append("svg")
+      .attr("class", "viz-svg")
+      .attr("viewBox", `${vbX} ${vbY} ${vbW} ${vbH}`)
+      .attr("preserveAspectRatio", "xMidYMid meet");
+
+    host.style.position = "relative";
+    const tip = document.createElement("div");
+    tip.className = "cy-tooltip";
+    host.appendChild(tip);
+    function placeTip(ev) {
+      const rect = host.getBoundingClientRect();
+      let x = ev.clientX - rect.left + 14;
+      let y = ev.clientY - rect.top + 14;
+      const tw = tip.offsetWidth, th = tip.offsetHeight;
+      if (x + tw > rect.width - 8)  x = ev.clientX - rect.left - tw - 12;
+      if (y + th > rect.height - 8) y = ev.clientY - rect.top - th - 8;
+      tip.style.left = x + "px";
+      tip.style.top = y + "px";
+    }
+    function showTip(id, ev) {
+      const placedIdx = TRACE.findIndex(tt => tt.v === id);
+      if (placedIdx < 0) {
+        // outlier (not in queue) — show MEGA badge
+        tip.innerHTML = '<div class="hd">node ' + id + '</div>'
+          + '<div>d<sub>u</sub> <b>' + DEG_KEPT[id] + '</b></div>'
+          + '<div>placed in <b style="color:' + COL.signal + '">MEGA</b> by outlier pick</div>';
+        tip.classList.add("on");
+        placeTip(ev);
+        return;
+      }
+      const t = TRACE[placedIdx];
+      const isPlaced = placedIdx < currentStep;
+      const isNext = placedIdx === currentStep;
+      let status;
+      if (isPlaced) {
+        status = '<div>placed in <b style="color:' + BLOCK_COLOR[t.picked] + '">'
+          + t.picked + '</b>'
+          + (t.fallback ? ' <span class="dim">(fallback)</span>' : '')
+          + '</div>';
+      } else if (isNext) {
+        status = '<div class="dim">next up &middot; see top-right panel</div>';
+      } else {
+        status = '<div class="dim">queued &middot; still waiting</div>';
+      }
+      tip.innerHTML = '<div class="hd">node ' + id + '</div>'
+        + '<div>d<sub>u</sub> <b>' + t.w + '</b></div>'
+        + '<div>x<sub>u</sub> <b>' + t.xu + '</b></div>'
+        + status;
+      tip.classList.add("on");
+      placeTip(ev);
+    }
+    function hideTip() { tip.classList.remove("on"); }
+    let currentStep = 0;
+
+    const ASSIGN_N = NODES.length;
+    const ASSIGN_PHI = 1 - BLOCK_NAMES.reduce((s, b) =>
+      s + Math.pow(BLOCK_SIZE[b] / ASSIGN_N, 2), 0);
+    NETGEN.mountGxPanel({
+      hostId: "g-assign-cy", prefix: "g-assign-scalars",
+      title: "next vertex", maxWidth: "13rem",
+      bodyHTML:
+        '<div class="assign-scalar-panel">'
+        + '<div class="scalar-line">ξ = ' + SYNTHETIC_XI.toFixed(3)
+        +   ' &middot; φ = ' + ASSIGN_PHI.toFixed(3) + '</div>'
+        + '<div class="scalar-line dim">x<sub>u</sub> = ⌈(1−ξφ)w<sub>u</sub>⌉</div>'
+        + '<div class="next-block" id="g-assign-next-info"></div>'
+        + '</div>',
+    });
+
+    function updateNextPanel(step) {
+      const host = document.getElementById("g-assign-next-info");
+      if (!host) return;
+      if (step >= TRACE.length) {
+        host.innerHTML = '<div class="dim">all non-outliers placed.</div>';
+        return;
+      }
+      const t = TRACE[step];
+      const rem = t.remainingBefore || {};
+      const poolTotal = t.admissible.reduce((s, b) => s + (rem[b] || 0), 0);
+      const rows = REAL_BLOCK_NAMES.map(b => {
+        const ok = t.admissible.indexOf(b) >= 0;
+        const cap = BLOCK_SIZE[b];
+        const r = rem[b] != null ? rem[b] : cap;
+        const filled = r === 0;
+        let tag;
+        if (filled) tag = '(filled)';
+        else {
+          const cmp = ok ? '≤' : '>';
+          tag = 'x<sub>u</sub> ' + cmp + ' ' + (cap - 1);
+        }
+        let probHtml = '';
+        if (ok && poolTotal > 0) {
+          const p = r / poolTotal;
+          probHtml = ' <span class="dim">p = ' + p.toFixed(2) + '</span>';
+        }
+        return '<div class="cluster-row" style="opacity:' + (ok ? 1 : 0.35) + '">'
+          + '<b style="color:' + BLOCK_COLOR[b] + '">' + b + '</b> '
+          + '<span class="dim">' + tag + '</span>' + probHtml + '</div>';
+      }).join("");
+      host.innerHTML =
+        '<div class="next-head">node <b>' + t.v + '</b> '
+        +   '<span class="dim">d<sub>u</sub> = ' + t.w + ', x<sub>u</sub> = ' + t.xu + '</span></div>'
+        + rows
+        + (t.fallback ? '<div class="dim">no admissible — fallback</div>' : '');
+    }
+
+    // Cluster bins: real clusters get full bin treatment; the MEGA
+    // mega-cluster sits in the same canvas but is pre-filled by the
+    // outlier-pick stage (no walker action consumes it).
+    const binByName = {};
+    BLOCK_NAMES.forEach(name => {
+      const ids = BLOCK_NODES[name];
+      if (!ids.length) return;
+      const xs = ids.map(i => POS[i].x);
+      const ys = ids.map(i => POS[i].y);
+      const bx = Math.min.apply(null, xs) - 20;
+      const by = Math.min.apply(null, ys) - 20;
+      const bw = Math.max.apply(null, xs) - Math.min.apply(null, xs) + 40;
+      const bh = Math.max.apply(null, ys) - Math.min.apply(null, ys) + 40;
+      const rect = svg.append("rect")
+        .attr("x", bx).attr("y", by).attr("width", bw).attr("height", bh)
+        .attr("rx", 8).attr("ry", 8)
+        .attr("fill", BLOCK_COLOR[name]).attr("fill-opacity", 0.06)
+        .attr("stroke", BLOCK_COLOR[name]).attr("stroke-width", 1.2)
+        .attr("stroke-dasharray", "6 4");
+      const label = svg.append("text")
+        .attr("x", bx + 6).attr("y", by - 4)
+        .attr("font-family", "Caveat Brush, cursive")
+        .attr("font-size", 13).attr("fill", BLOCK_COLOR[name])
+        .text(name);
+      binByName[name] = { rect, label };
+    });
+
+    const BIN_FADE_MS = 320;
+    function scaleBinsByProb(t) {
+      const rem = (t && t.remainingBefore) || {};
+      const poolTotal = t
+        ? t.admissible.reduce((s, b) => s + (rem[b] || 0), 0)
+        : 0;
+      BLOCK_NAMES.forEach(name => {
+        const bin = binByName[name];
+        if (!bin) return;
+        let op, fillOp, labelOp;
+        if (name === "MEGA") {
+          // MEGA always faded; not a candidate for assignment.
+          op = 0.5; fillOp = 0.04; labelOp = 0.7;
+        } else if (!t || poolTotal <= 0) {
+          op = 1; fillOp = 0.06; labelOp = 1;
+        } else if (t.admissible.indexOf(name) < 0) {
+          op = 0.18; fillOp = 0.02; labelOp = 0.3;
+        } else {
+          const p = (rem[name] || 0) / poolTotal;
+          op = 0.35 + 0.65 * p;
+          fillOp = 0.06 + 0.18 * p;
+          labelOp = op;
+        }
+        bin.rect.transition().duration(BIN_FADE_MS)
+          .attr("opacity", op).attr("fill-opacity", fillOp);
+        bin.label.transition().duration(BIN_FADE_MS).attr("opacity", labelOp);
+      });
+    }
+
+    NODES.forEach(n => {
+      const p = POS[n];
+      svg.append("circle").attr("class", "assign-slot")
+        .attr("data-pos-id", n)
+        .attr("cx", p.x).attr("cy", p.y).attr("r", 13)
+        .attr("fill", "none").attr("stroke", "#9a947a")
+        .attr("stroke-width", 0.9).attr("stroke-dasharray", "3 3")
+        .attr("opacity", 0.55);
+    });
+
+    let queueRanks = [];
+    let queueY0, queueY1, queueDY, queueX;
+    function recomputeQueue() {
+      const outliers = currentOutlierSet();
+      queueRanks = NODES.filter(n => !outliers.has(n))
+        .sort((a, b) => DEG_KEPT[b] - DEG_KEPT[a] || a - b);
+      queueX = vbX + QUEUE_BAND_L / 2;
+      queueY0 = vbY + 36;
+      queueY1 = vbY + vbH - 18;
+      queueDY = queueRanks.length > 1 ? (queueY1 - queueY0) / (queueRanks.length - 1) : 0;
+    }
+    recomputeQueue();
+
+    const vertG = svg.append("g").attr("class", "assign-verts");
+
+    let ASSIGN_SEED = 1;
+
+    // computeTrace iterates non-outlier nodes only; admissibility is
+    // checked against REAL_BLOCK_NAMES (the outlier mega is kept out
+    // since the outlier-pick stage already filled it).
+    function computeTrace(seed, startRank, prefix) {
+      startRank = startRank || 0;
+      prefix = prefix || [];
+      const rng = seededRng(seed);
+      const n = NODES.length;
+      const phi = 1 - BLOCK_NAMES.reduce((s, b) =>
+        s + Math.pow(BLOCK_SIZE[b] / n, 2), 0);
+      const xi = SYNTHETIC_XI;
+      const remaining = {};
+      const slotsAvail = {};
+      REAL_BLOCK_NAMES.forEach(b => {
+        remaining[b] = BLOCK_SIZE[b];
+        slotsAvail[b] = BLOCK_NODES[b].slice();
+      });
+      const trace = [];
+      for (let r = 0; r < startRank && r < prefix.length; r++) {
+        const t = prefix[r];
+        if (queueRanks.indexOf(t.v) < 0) continue;
+        trace.push(t);
+        if (remaining[t.picked] != null) remaining[t.picked]--;
+        const sIdx = slotsAvail[t.picked].indexOf(t.slot);
+        if (sIdx >= 0) slotsAvail[t.picked].splice(sIdx, 1);
+      }
+      for (let r = trace.length; r < queueRanks.length; r++) {
+        const v = queueRanks[r];
+        const w = DEG_KEPT[v];
+        const xu = Math.ceil((1 - xi * phi) * w);
+        const remainingBefore = Object.assign({}, remaining);
+        let admissible = REAL_BLOCK_NAMES.filter(b =>
+          remaining[b] > 0 && BLOCK_SIZE[b] - 1 >= xu);
+        let fallback = false;
+        if (admissible.length === 0) {
+          admissible = REAL_BLOCK_NAMES.filter(b => remaining[b] > 0);
+          fallback = true;
+        }
+        const totalRem = admissible.reduce((s, b) => s + remaining[b], 0);
+        const u = rng() * totalRem;
+        let acc = 0, picked = admissible[0];
+        for (const b of admissible) {
+          acc += remaining[b];
+          if (u < acc) { picked = b; break; }
+        }
+        const pool = slotsAvail[picked];
+        const slotIdx = Math.floor(rng() * pool.length);
+        const slot = pool.splice(slotIdx, 1)[0];
+        remaining[picked]--;
+        trace.push({ v, w, xu, admissible: admissible.slice(), picked, slot, fallback, remainingBefore });
+      }
+      return trace;
+    }
+    let TRACE = computeTrace(ASSIGN_SEED, 0, []);
+    syncLiveBlocks();
+
+    function syncLiveBlocks() {
+      // Outliers stay tagged via currentOutlierSet (read at downstream
+      // call sites); only update the real-cluster mapping for the
+      // non-outliers the trace covered.
+      TRACE.forEach(t => { LIVE_REAL_CLUSTER_OF[t.v] = t.picked; });
+      // After the assignment changes, every cached realisation is stale.
+      REAL_CACHE.clear();
+      overrideEpoch++;
+    }
+
+    function render(step) {
+      currentStep = step;
+      const candidate = step < TRACE.length ? TRACE[step] : null;
+      scaleBinsByProb(candidate);
+      updateNextPanel(step);
+      const outliers = currentOutlierSet();
+      // Render every node: outliers slotted into MEGA bin (their
+      // original POSITIONS); non-outliers either queued or placed.
+      const sel = vertG.selectAll("g.vert").data(NODES, d => d);
+      const enter = sel.enter().append("g").attr("class", "vert");
+      enter.append("circle").attr("r", 12).attr("stroke-width", 1.1);
+      enter.append("text")
+        .attr("class", "viz-label")
+        .attr("dy", "0.32em").attr("text-anchor", "middle")
+        .attr("font-size", "9px");
+      enter
+        .on("mouseenter", (ev, id) => showTip(id, ev))
+        .on("mousemove", (ev) => placeTip(ev))
+        .on("mouseleave", () => hideTip());
+      const all = enter.merge(sel);
+      all.each(function (id) {
+        const g = d3.select(this);
+        if (outliers.has(id)) {
+          // Outliers always sit at their own POSITIONS (MEGA bin);
+          // not part of the queue, painted in signal red.
+          const p = POS[id];
+          g.transition().duration(380).attr("transform", `translate(${p.x},${p.y})`);
+          g.select("circle")
+            .attr("fill", COL.signal).attr("stroke", "#1b2033")
+            .attr("stroke-width", 1.4).attr("opacity", 0.95);
+          g.select("text").text(id);
+          return;
+        }
+        const placedIdx = TRACE.findIndex(t => t.v === id);
+        const isPlaced = placedIdx >= 0 && placedIdx < step;
+        if (isPlaced) {
+          const t = TRACE[placedIdx];
+          const p = POS[t.slot];
+          g.transition().duration(380).attr("transform", `translate(${p.x},${p.y})`);
+          g.select("circle")
+            .attr("fill", BLOCK_COLOR[t.picked])
+            .attr("stroke", "#1b2033").attr("opacity", 0.95)
+            .attr("stroke-width", 1.1);
+        } else {
+          const qIdx = queueRanks.indexOf(id);
+          const y = queueY0 + qIdx * queueDY;
+          const isNext = qIdx === step;
+          g.transition().duration(280).attr("transform", `translate(${queueX},${y})`);
+          g.select("circle")
+            .attr("fill", isNext ? COL.hl_yellow : "#ede4c9")
+            .attr("stroke", isNext ? "#c7801e" : "#6b6a54")
+            .attr("stroke-width", isNext ? 2.0 : 1.2)
+            .attr("opacity", isNext ? 1.0 : 0.75);
+        }
+        g.select("text").text(id);
+      });
+
+      const desc = document.getElementById("g-assign-desc");
+      if (step <= 0) {
+        desc.innerHTML = '<span class="st">step 0</span> &middot; '
+          + queueRanks.length + ' non-outlier vertices queued by \\(d_u\\) desc; real-cluster bins empty.';
+      } else if (step > TRACE.length) {
+        desc.innerHTML = '<span class="st">done</span> &middot; every non-outlier placed.';
+      } else {
+        const t = TRACE[step - 1];
+        const adm = t.admissible.join(", ");
+        const tag = t.fallback ? " <em>(fallback: no admissible cluster, took leftover slot)</em>" : "";
+        desc.innerHTML = '<span class="st">step ' + step + '</span> &middot; '
+          + 'rank ' + step + ' &middot; \\(w_u = ' + t.w + ', x_u = ' + t.xu + '\\); '
+          + 'admissible {' + adm + '}; sampled <b>' + t.picked + '</b>' + tag + '.';
+      }
+      NETGEN.retypeset(desc);
+    }
+
+    let ctl;
+    ctl = NETGEN.rerollWalker({
+      prefix: "g-assign",
+      total: queueRanks.length + 1,
+      totalForCurrent: () => queueRanks.length + 1,
+      onRender: render,
+      onRandStep: idx => {
+        if (idx <= 0) return false;
+        ASSIGN_SEED = (ASSIGN_SEED * 1103515245 + 12345 + idx * 1009) >>> 0;
+        TRACE = computeTrace(ASSIGN_SEED, idx - 1, TRACE);
+        syncLiveBlocks();
+        // Cascade: the whole pipeline re-derives off the new mapping.
+        onUChanged.forEach(fn => fn());
+        onStubChanged.forEach(fn => fn());
+        return false;
+      },
+      onRandAll: () => {
+        ASSIGN_SEED = (ASSIGN_SEED * 1103515245 + 12345) >>> 0;
+        TRACE = computeTrace(ASSIGN_SEED, 0, []);
+        syncLiveBlocks();
+        onUChanged.forEach(fn => fn());
+        onStubChanged.forEach(fn => fn());
+      },
+    });
+
+    // Outlier reroll changes the non-outlier set; recompute the queue
+    // and run a fresh trace from rank 0.
+    onOutlierChanged.push(() => {
+      recomputeQueue();
+      TRACE = computeTrace(ASSIGN_SEED, 0, []);
+      syncLiveBlocks();
+      ctl.reconfigure(queueRanks.length + 1);
+    });
   })();
 
   // ── Generation · weight split ──
@@ -2291,8 +2795,8 @@ window.MathJax = {
       .attr("stroke", COL.azure).attr("stroke-width", 4);
 
     function clusterIdFor(nid, R) {
-      if (R.outliers.has(nid)) return 1;
-      return CLUSTER_OF[nid];
+      if (R.outliers.has(nid)) return "MEGA";
+      return LIVE_REAL_CLUSTER_OF[nid];
     }
     function renderXi(R) {
       let inter = 0, total = 0;
