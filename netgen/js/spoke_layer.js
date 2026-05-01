@@ -320,6 +320,11 @@ NETGEN.spokeLayer = (function () {
         assigned[nid] = {
           count: count,
           color: cfg.color,
+          // Optional per-slot colors (length must equal count). When
+          // provided, each rendered spoke uses colors[slot] instead
+          // of the node's base color. Falls back to base color on
+          // missing entries / index overflow.
+          colors: Array.isArray(cfg.colors) ? cfg.colors.slice(0, count) : null,
           angles: evenAngles(count),
           free: new Array(count).fill(true),
           partnerOf: new Array(count).fill(null),
@@ -777,9 +782,10 @@ NETGEN.spokeLayer = (function () {
           const isJust = !!(a.justSlots && a.justSlots.some(function (js) { return js.slot === i; }));
           const isConsumed = !a.free[i] && !isJust;
           if (isConsumed) continue;
+          const slotColor = (a.colors && a.colors[i]) ? a.colors[i] : a.color;
           data.push({
             id: nid + ":" + i, nid: nid, slot: i,
-            color: a.color, isJust: isJust, consumed: false,
+            color: slotColor, isJust: isJust, consumed: false,
           });
         }
       });
@@ -1411,11 +1417,128 @@ NETGEN.spokeLayer = (function () {
       });
     }
 
+    // Reverse of simplify: re-introduce previously-dropped entries by
+    // committing them into state.placed at the start (rendered dashed
+    // and transparent), then fading opacity 0 → 1 over fade ms while
+    // re-fanning survivors at affected keys, then un-dashifying solid
+    // over dashify ms. Mirrors simplify's three phases in reverse.
+    function unsimplify(adds, onDone, opts) {
+      const myToken = ++token;
+      interruptAll();
+      clearPhaseTimers();
+      if (opts && opts.byNode) state = Object.assign({}, state, { byNode: opts.byNode });
+      const addsList = (adds || []).slice();
+      addsList.forEach(function (a, i) {
+        if (a.id == null) a.id = "uns" + i + "_" + a.u + "_" + a.v;
+      });
+      if (addsList.length === 0) {
+        if (onDone) onDone();
+        return;
+      }
+      const addIds = new Set(addsList.map(function (a) { return a.id; }));
+      // Affected pair-keys (those gaining >=1 entry) drive the
+      // survivor fan-out tween scope.
+      const affectedKeys = {};
+      addsList.forEach(function (a) {
+        const k = pairKey(a.u, a.v);
+        affectedKeys[k] = (affectedKeys[k] || 0) + 1;
+      });
+      // Snapshot the "without adds" dup layout: each existing entry's
+      // _dupIdx as it sits right now.
+      const dupInfoFrom = {};
+      Object.keys(dupInfo).forEach(function (k) {
+        dupInfoFrom[k] = { total: dupInfo[k].total };
+      });
+      const survivorDupIdxFrom = {};
+      (state.placed || []).forEach(function (p) {
+        survivorDupIdxFrom[p.id] = p._dupIdx != null ? p._dupIdx : 0;
+      });
+      // Compute the "with adds" dup layout: walk current placed +
+      // adds, assigning each a _dupIdxTo.
+      const dupInfoTo = {};
+      const newPlaced = (state.placed || []).concat(addsList);
+      newPlaced.forEach(function (p) {
+        const k = pairKey(p.u, p.v);
+        if (!dupInfoTo[k]) dupInfoTo[k] = { total: 0 };
+        p._dupIdxTo = dupInfoTo[k].total;
+        dupInfoTo[k].total += 1;
+      });
+      const survivorIdSet = new Set((state.placed || []).map(function (p) { return p.id; }));
+
+      state = Object.assign({}, state, { placed: newPlaced, justs: [] });
+      lastKey = ""; lastSeq = state.justSeq;
+      recompute();
+      render(false);
+
+      const T = { dashify: 220, fade: 320, idle: 80 };
+      const total = T.fade + T.dashify + T.idle;
+      lockFor(total, addsList);
+
+      // Newly-added entries start dashed + invisible.
+      const addSel = placedLayer.selectAll("path.sp-placed-edge").filter(function (d) {
+        return addIds.has(d.id);
+      });
+      addSel.attr("stroke-dasharray", "4 4").attr("opacity", 0);
+
+      // Phase 1: fade in opacity 0 → 1; survivors at affected keys
+      // fan OUT from with-removes layout to with-adds layout in the
+      // same window (mirror of simplify's fan-in).
+      addSel.transition("undedupFade").duration(T.fade).ease(d3.easeCubicInOut)
+        .attr("opacity", 1);
+      placedLayer.selectAll("path.sp-placed-edge")
+        .filter(function (d) {
+          const k = pairKey(d.u, d.v);
+          return survivorIdSet.has(d.id) && affectedKeys[k];
+        })
+        .transition("undedupFanOut").duration(T.fade).ease(d3.easeCubicInOut)
+        .attrTween("d", function (d) {
+          if (d.u === d.v) {
+            const fixed = placedPath(d);
+            return function () { return fixed; };
+          }
+          const nu = viz.nodeById[String(d.u)];
+          const nv = viz.nodeById[String(d.v)];
+          if (!nu || !nv) return function () { return ""; };
+          const swap = String(d.u) > String(d.v);
+          const a = swap ? nv : nu, b = swap ? nu : nv;
+          const ra = swap ? nodeR(d.v) : nodeR(d.u), rb = swap ? nodeR(d.u) : nodeR(d.v);
+          const k = pairKey(d.u, d.v);
+          const grpFrom = dupInfoFrom[k] || { total: 1 };
+          const grpTo = dupInfoTo[k] || { total: 1 };
+          const idxFrom = survivorDupIdxFrom[d.id] != null ? survivorDupIdxFrom[d.id] : 0;
+          const idxTo = d._dupIdxTo != null ? d._dupIdxTo : 0;
+          const cFrom = grpFrom.total <= 1 ? 0 : (idxFrom - (grpFrom.total - 1) / 2);
+          const cTo   = grpTo.total   <= 1 ? 0 : (idxTo   - (grpTo.total   - 1) / 2);
+          const ax = a.x, ay = a.y, bx = b.x, by = b.y;
+          return function (kk) {
+            const c = cFrom + (cTo - cFrom) * kk;
+            return fanPathCentered({ x: ax, y: ay }, { x: bx, y: by }, c, ra, rb);
+          };
+        });
+
+      // Phase 2 (after fade): un-dashify dashed → solid.
+      schedulePhase(T.fade, function () {
+        if (myToken !== token) return;
+        addSel.transition("undedupSolid").duration(T.dashify).ease(d3.easeCubicInOut)
+          .attr("stroke-dasharray", "");
+      });
+
+      // Phase 3 (commit): final snap so dupInfo and stroke render
+      // settle on the canonical "with-adds" layout.
+      schedulePhase(T.fade + T.dashify, function () {
+        if (myToken !== token) return;
+        recompute();
+        render(false);
+        if (onDone) onDone();
+      });
+    }
+
     return {
       syncState: syncState,
       snapToState: snapToState,
       playMany: playMany,
       simplify: simplify,
+      unsimplify: unsimplify,
       markReroll: function () { pendingReroll = true; },
       rerender: function () { recompute(); render(false); },
       isAnimating: function () { return animating; },

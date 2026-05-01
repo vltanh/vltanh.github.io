@@ -1410,7 +1410,13 @@ function makeRewireStateAtStep(opts) {
     for (let i = 0; i < opsToApply; i++) {
       applyOp(list, ops[i], i, idPrefix);
     }
-    if (k > ops.length) return list.filter(function (e) { return !e.bad; });
+    // Drop-stale filter: opts.keepBadAtDropStale=true tells the
+    // walker to leave bad entries on screen at the drop-stale step
+    // (used when those entries don't actually disappear from the
+    // pipeline — they get forwarded to a later stage).
+    if (k > ops.length && !opts.keepBadAtDropStale) {
+      return list.filter(function (e) { return !e.bad; });
+    }
     return list;
   };
 }
@@ -1485,7 +1491,7 @@ function makeRewireRender(opts) {
     const removes = beforeList.filter(function (e) { return !afterIds.has(e.id); }).map(placedEntry);
     const adds    = afterList.filter(function (e) { return !beforeIds.has(e.id); }).map(placedEntry);
 
-    if (removes.length > 0 && adds.length === 0) {
+    if (removes.length > 0 && adds.length === 0 && !opts.forcePlayManyOnRemovesOnly) {
       spokes.simplify(removes, noopFn, { byNode });
     } else {
       spokes.playMany(removes, adds, noopFn, { byNode });

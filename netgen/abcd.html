@@ -273,17 +273,17 @@
 <!-- ─────────── Generation · degree split ─────────── -->
 <section class="stage">
   <div class="stage-num">generation · the degree split</div>
-  <h2>Each node's degree splits intra vs background.</h2>
-  <p>With the cluster assignment fixed, the sampler splits each vertex's degree:</p>
+  <h2>Spend part of each degree on intra-cluster edges.</h2>
+  <p>With the cluster assignment fixed, each vertex sets aside a portion of its degree for intra-cluster edges. The target portion is</p>
   \[
-    y_u \;=\; (1 - \xi) \, d_u, \qquad z_u \;=\; \xi \, d_u.
+    y_u \;=\; (1 - \xi) \, d_u,
   \]
-  <p>\(y_u\) funds the cluster graph \(G_{c(u)}\); \(z_u\) funds the background graph \(G_0\). Both subgraphs are sampled by the configuration model (our default), which pairs integer stub counts exactly, rather than Chung-Lu, which only matches the degree sequence in expectation. Configuration-model pairing requires integer \(\hat y_u\), so each cluster member rounds \(y_u\) to its floor and adds a Bernoulli bump that fires with probability equal to the fractional part:</p>
+  <p>and \(y_u\) funds the cluster graph \(G_{c(u)}\). Both that cluster graph and the later background graph are sampled by the configuration model (our default), which pairs integer stub counts exactly, rather than Chung-Lu, which only matches the degree sequence in expectation. Configuration-model pairing requires an integer \(\hat y_u\), so each cluster member rounds \(y_u\) to its floor and adds a Bernoulli bump with probability equal to the fractional part:</p>
   \[
     \hat y_u \;=\; \lfloor y_u \rfloor + \mathbb{1}\{U_u < y_u - \lfloor y_u \rfloor\}, \qquad U_u \sim \text{Uniform}(0, 1).
   \]
-  <p>The expectation matches: \(\mathbb{E}[\hat y_u] = y_u\). Whatever the rounding leaves over goes to the background pool: \(\hat z_u = d_u - \hat y_u\).</p>
   <p>The leader (the cluster's largest-degree member, lowest vertex id on ties) is handled separately. It takes the deterministic floor \(\lfloor y_\ell \rfloor\) and adds 0 or 1 by parity: the bump fires when the sum of non-leader \(\hat y_u\) is odd and the floor is even, or vice versa, so the cluster's total internal stub count ends up even. Without that fixup, the cluster's configuration model would be one stub short of a clean pairing.</p>
+  <p>The leftover degree, \(\hat z_u = d_u - \hat y_u\), is the portion routed to the background graph. The background pool inherits any rewire residue from the cluster phase too, but that comes later; here it is enough to read \(\hat z_u\) off as the complement of \(\hat y_u\).</p>
   <div class="disk-panel">
     <div class="widget-row tight">
       <button class="btn primary" id="u-reroll">random</button>
@@ -331,8 +331,8 @@
 <section class="stage">
   <div class="stage-num">generation · cluster rewire</div>
   <h2>Cut the collisions, swap into valid edges.</h2>
-  <p>Cluster-graph collisions (self-loops and parallels) move to a recycle list. Each is paired with a random other cluster edge \((p_2)\); the four endpoints get re-stitched as \((p_1[0], p_2[0]), (p_1[1], p_2[1])\) (or the swapped variant) and accepted if both new edges are simple. The rewire loop runs until the cluster graph is collision-free or runs out of moves.</p>
-  <p>The viz below shows the before/after diff in two sub-steps: <span class="st">cut</span> (the going-to-be-removed pre-rewire edges go ghosted, kept ones stay) and <span class="st">place</span> (cuts disappear, replacement edges appear fresh).</p>
+  <p>Cluster-graph collisions (self-loops and parallels) move to a recycle list. Each recycle edge \(\{u_1, v_1\}\) is paired with a random other cluster edge \(\{u_2, v_2\}\) to make the swap (into \(\{u_1, u_2\}\) and \(\{v_1, v_2\}\), or \(\{u_1, v_2\}\) and \(\{v_1, u_2\}\)) and accepted if both new edges are simple. The rewire loop runs until the cluster graph is collision-free or runs out of moves; whatever is still on the recycle list at the end is dropped as an intra edge.</p>
+  <p>The dropped edges are not gone for good. For each leftover collision \(\{u, v\}\), one stub at each endpoint never paired inside the cluster. Those stubs are forwarded to the background pool, joining whatever the bg-split already allocated, and re-pair anonymously in the next stage. The specific intra edge is gone; the stubs survive and may form new bg edges with anyone.</p>
   <div class="graph" id="g-crewire">
     <div class="graph-chrome">
       <span id="g-crewire-stage">pre-rewire (collisions visible)</span>
@@ -357,9 +357,8 @@
 <!-- ─────────── Generation · background pairing ─────────── -->
 <section class="stage">
   <div class="stage-num">generation · background pairing</div>
-  <h2>Pair \(\hat z_u\) stubs across the whole vertex set.</h2>
-  <p>The background graph \(G_0\) is one global pool: every node drops its \(\hat z_u\) stubs into the same urn and the configuration model pairs them without regard for cluster membership. Two members of the same cluster can pair; the resulting edge counts as intra-cluster on the output even though it came from the background. A bg edge that duplicates an existing cluster edge flags for rewire alongside the usual self-loops and parallels.</p>
-  <p>The walker steps one pair per <em>next</em>: 2 stub endpoints highlight, the bridge fills, the edge settles.</p>
+  <h2>Pair background stubs across the whole vertex set.</h2>
+  <p>The background graph \(G_0\) is one global pool: every node drops its background stubs into the same urn and the configuration model pairs them without regard for cluster membership. Two members of the same cluster can pair; the resulting edge counts as intra-cluster on the output even though it came from the background. A bg edge that duplicates an existing cluster edge flags for rewire alongside the usual self-loops and parallels.</p>
   <div class="graph" id="g-bgpair">
     <div class="graph-chrome">
       <span id="g-bgpair-stage">background stubs ready</span>
@@ -385,7 +384,7 @@
 <section class="stage">
   <div class="stage-num">generation · background rewire</div>
   <h2>Same swap, global pool now.</h2>
-  <p>Same recycle-and-rewire loop as the cluster phase, but the swap partners are drawn from every bg edge instead of one cluster's edges. The forbidden set is wider too: bg rewire avoids every kept cluster edge, so any bg swap that would duplicate an intra-cluster pair gets rejected. Cut → place shows the before/after diff.</p>
+  <p>Same recycle-and-rewire loop as the cluster phase, but the swap partners are drawn from every bg edge instead of one cluster's edges. Each new half is checked against the existing bg edges and the cluster output: if it would land as a self-loop or duplicate either set, it stays on the recycle list and remains visible as a solid-red bad edge until a later op clears it. Anything still on the recycle list when the loop stops is forwarded to the cross-cluster final swap stage; nothing is dropped here.</p>
   <div class="graph" id="g-bgrewire">
     <div class="graph-chrome">
       <span id="g-bgrewire-stage">pre-rewire (collisions visible)</span>
@@ -407,11 +406,38 @@
   </div>
   <div class="callout">
     <div class="tag">intra-cluster edges can come from either graph</div>
-    <p>The cluster graph \(G_j\) sees only its members' \(\hat y_u\) stubs, so every edge of \(G_j\) is intra-cluster by construction. But \(G_0\) pairs \(\hat z_u\) stubs across the whole vertex set, and sometimes pairs two members of the same cluster. Those extra intra-cluster edges count toward the cluster's internal density; they are why the paper shows, for the global variant, a small upward drift of intra-cluster density with cluster size.</p>
+    <p>The cluster graph \(G_j\) sees only its members' intra stubs, so every edge of \(G_j\) is intra-cluster by construction. But \(G_0\) pairs background stubs across the whole vertex set, and sometimes pairs two members of the same cluster. Those extra intra-cluster edges count toward the cluster's internal density; they are why the paper shows, for the global variant, a small upward drift of intra-cluster density with cluster size.</p>
   </div>
   <div class="callout warn">
     <div class="tag">caveat: \(\xi\) is the only structural dial</div>
-    <p>ABCD does not target an edge-count matrix. If the input has a block pair \((r, s)\) with 200 crossing edges and \((r, t)\) with 20, the sampler only sees each node's \(\hat z_u\) and pools them globally; \((r, s)\) and \((r, t)\) end up with the count dictated by random pairing weighted by endpoint degrees, not the empirical figures. <a href="./sbm.html">SBM</a> and the <a href="./ec-sbm-v1.html">EC-SBM</a> family honour per-pair block counts; ABCD does not.</p>
+    <p>ABCD does not target an edge-count matrix. If the input has a block pair \((r, s)\) with 200 crossing edges and \((r, t)\) with 20, the sampler only sees each node's background stubs and pools them globally; \((r, s)\) and \((r, t)\) end up with the count dictated by random pairing weighted by endpoint degrees, not the empirical figures. <a href="./sbm.html">SBM</a> and the <a href="./ec-sbm-v1.html">EC-SBM</a> family honour per-pair block counts; ABCD does not.</p>
+  </div>
+</section>
+
+<!-- ─────────── Generation · cross-cluster final swap ─────────── -->
+<section class="stage">
+  <div class="stage-num">generation · cross-cluster final swap</div>
+  <h2>One last swap pass over the union.</h2>
+  <p>If the background rewire loop finishes with a non-empty recycle list, a final fallback stage runs. It pulls each leftover bad edge \(\{u_1, v_1\}\) and tries to swap it against a partner \(\{u_2, v_2\}\) drawn uniformly from the union of cluster output and background output (intra + inter pooled together). The same two swap variants apply (\(\{u_1, u_2\} + \{v_1, v_2\}\) or \(\{u_1, v_2\} + \{v_1, u_2\}\)). Each new half is checked: if it is a self-loop or duplicates an existing edge in the union, that half goes back on the recycle list; otherwise it is added to the union and the original partner is removed. The loop runs until the recycle list is empty or stops shrinking.</p>
+  <p>Whatever bad edges remain after the loop are dropped from the output. This is the only place in the pipeline where a residue actually leaves the model.</p>
+  <div class="graph" id="g-finalswap">
+    <div class="graph-chrome">
+      <span id="g-finalswap-stage">pre-final (carrying recycle from bg)</span>
+      <span class="right step-label">step <b id="g-finalswap-cur">0</b> / <span id="g-finalswap-total">0</span></span>
+    </div>
+    <div class="graph-canvas" id="g-finalswap-cy"></div>
+    <div class="widget-row row-top">
+      <button class="btn" id="g-finalswap-rand-step" type="button">random step</button>
+      <button class="btn" id="g-finalswap-rand-all" type="button">random all</button>
+      <span class="step-label"><em>step</em>: re-spin from this op forward &middot; <em>all</em>: re-spin U + stubs</span>
+    </div>
+    <div class="widget-row row-mid">
+      <button class="btn" id="g-finalswap-start">to start</button>
+      <button class="btn" id="g-finalswap-prev">back</button>
+      <button class="btn primary" id="g-finalswap-next">next</button>
+      <button class="btn" id="g-finalswap-end">to end</button>
+    </div>
+    <div class="step-desc" id="g-finalswap-desc"></div>
   </div>
 </section>
 
@@ -1141,13 +1167,13 @@ window.MathJax = {
   //    Weight-split only depends on U_SEED. Step-through + deg-cmp
   //    depend on both. The top-level "random" buttons per panel advance
   //    one seed and fire its cascade.
-  // Seed pair chosen for the demo: U=6 / S=1 yields 13 cluster-rewire
-  // ops + 5 bg-rewire ops + 2 drop-stale residue (recycle leftovers
-  // that survived canonical rewire). Every walker has enough steps to
-  // walk through, and bg-rewire shows the drop-stale story on first
-  // load instead of needing rerolls to find a good seed.
-  let U_SEED = 6;
-  let STUB_SEED = 1;
+  // Seed pair chosen for the demo: U=53 / S=72, evaluated against the
+  // canonical assignment trace at ASSIGN_SEED=1, leaves 2 dropped intra
+  // edges in cluster-rewire, 3 bg-rewire drop-stale edges, and runs 3
+  // ops in the cross-cluster final stage with 4 residues left over. All
+  // four rewire-related stages have visible activity on first load.
+  let U_SEED = 53;
+  let STUB_SEED = 72;
   const onUChanged = [];
   const onStubChanged = [];
   function rerollU() {
@@ -1610,16 +1636,33 @@ window.MathJax = {
       return [PAGE_NODE_BY_KIDX[p[0] - 1], PAGE_NODE_BY_KIDX[p[1] - 1]];
     }
     const clusterRewireOps = [];
+    // Per-node count of cluster-rewire residue stubs forwarded to bg
+    // pool. Each leftover collision {a,b} contributes 1 stub to node a
+    // and 1 stub to node b.
+    const clusterResidueByNode = {};
+    NODES.forEach(n => { clusterResidueByNode[n] = 0; });
+    const clusterResidueColorByNode = {};
     cm.stages.perCluster.forEach(stage => {
       const cname = NAMED_CLUSTER_OF_KERNEL[stage.cluster];
-      if (!cname || !stage.rewireOps) return;
-      stage.rewireOps.forEach(op => {
-        clusterRewireOps.push({
-          cluster: cname,
-          p1: mapPair(op.p1), p2: mapPair(op.p2),
-          newp1: mapPair(op.newp1), newp2: mapPair(op.newp2),
-          src: op.src, success: !!op.success,
+      if (!cname) return;
+      if (stage.rewireOps) {
+        stage.rewireOps.forEach(op => {
+          clusterRewireOps.push({
+            cluster: cname,
+            p1: mapPair(op.p1), p2: mapPair(op.p2),
+            newp1: mapPair(op.newp1), newp2: mapPair(op.newp2),
+            src: op.src, success: !!op.success,
+          });
         });
+      }
+      (stage.residueEntries || []).forEach(([a, b]) => {
+        const u = PAGE_NODE_BY_KIDX[a - 1];
+        const v = PAGE_NODE_BY_KIDX[b - 1];
+        clusterResidueByNode[u] = (clusterResidueByNode[u] || 0) + 1;
+        clusterResidueByNode[v] = (clusterResidueByNode[v] || 0) + 1;
+        const col = CLUSTER_COLOR_OF[cname] || COL.edge_stage2;
+        clusterResidueColorByNode[u] = col;
+        clusterResidueColorByNode[v] = col;
       });
     });
     const globalRewireOps = (g.rewireOps || []).map(op => ({
@@ -1648,9 +1691,30 @@ window.MathJax = {
     const outDeg = {};
     NODES.forEach(n => { outDeg[n] = 0; });
     finalEdges.forEach(e => { outDeg[e.u]++; outDeg[e.v]++; });
+    // Cross-cluster final-stage trace: edges/recycle snapshots taken
+    // before the final loop, then per-op records mapped from kernel
+    // 1-based vertex ids back to page node ids. Exposed for the
+    // final-swap walker.
+    const finalStage = cm.stages && cm.stages.final;
+    let finalRewireOps = null, finalEdgesBefore = null, finalRecycleBefore = null, finalResidueLeft = null;
+    if (finalStage) {
+      finalEdgesBefore = (finalStage.edgesBefore || [])
+        .map(([a, b]) => [PAGE_NODE_BY_KIDX[a - 1], PAGE_NODE_BY_KIDX[b - 1]]);
+      finalRecycleBefore = (finalStage.recycleBefore || [])
+        .map(([a, b]) => [PAGE_NODE_BY_KIDX[a - 1], PAGE_NODE_BY_KIDX[b - 1]]);
+      finalResidueLeft = (finalStage.residueLeft || [])
+        .map(([a, b]) => [PAGE_NODE_BY_KIDX[a - 1], PAGE_NODE_BY_KIDX[b - 1]]);
+      finalRewireOps = (finalStage.rewireOps || []).map(op => ({
+        p1: mapPair(op.p1), p2: mapPair(op.p2),
+        newp1: mapPair(op.newp1), newp2: mapPair(op.newp2),
+        coin: op.coin, keep1: !!op.keep1, keep2: !!op.keep2,
+      }));
+    }
     const RR = {
       split, clusterPre, clusterPost, bgPre, bgPost, finalEdges, outDeg,
       clusterRewireOps, globalRewireOps,
+      finalRewireOps, finalEdgesBefore, finalRecycleBefore, finalResidueLeft,
+      clusterResidueByNode, clusterResidueColorByNode,
       clusterStubLayouts, bgStubLayout,
       seed: stub_seed, residueCount: cm.residueAfter,
     };
@@ -2028,8 +2092,24 @@ window.MathJax = {
       if (ctl) ctl.refreshButtons();
     }
     const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setLock });
-    const byNodeFromList = (list) =>
-      NETGEN.spokeLayer.byNodeFromEdges(viz, list, n => nodeColorOf(parseInt(n.id, 10)));
+    const byNodeFromList = (list) => {
+      // Base count: every entry's two endpoints contribute 1 stub each.
+      const cfg = NETGEN.spokeLayer.byNodeFromEdges(viz, list,
+        n => nodeColorOf(parseInt(n.id, 10)));
+      // At the drop-stale step, the residue's edge has been removed
+      // from `list` (so it doesn't draw as a red edge anymore), but
+      // its 2 stubs need to remain visible as unpaired spokes around
+      // each endpoint — the cluster-rewire residue stubs that the
+      // kernel forwards into the bg pool.
+      crewireDropStaleResidue.forEach(e => {
+        const uk = String(e.u), vk = String(e.v);
+        if (cfg[uk]) cfg[uk].count = (cfg[uk].count || 0) + 1;
+        else if (cfg[e.u]) cfg[e.u].count = (cfg[e.u].count || 0) + 1;
+        if (cfg[vk]) cfg[vk].count = (cfg[vk].count || 0) + 1;
+        else if (cfg[e.v]) cfg[e.v].count = (cfg[e.v].count || 0) + 1;
+      });
+      return cfg;
+    };
     function placedEntry(e) {
       return {
         u: e.u, v: e.v, id: e.id, bad: !!e.bad,
@@ -2093,13 +2173,31 @@ window.MathJax = {
     // cluster-rewire: failed ops are no-ops (kernel inner loop tries
     // every candidate; if none clears, p1 is requeued without cutting).
     // The list is therefore untouched on failure.
-    const stateAtStep = NETGEN.makeRewireStateAtStep({
+    const stateAtStepRaw = NETGEN.makeRewireStateAtStep({
       prePairsOf: R => R.clusterPre,
       opsOf: R => effectiveOps(R),
       idPrefix: "cr",
       entryDecorator: (entry, e) => Object.assign(entry, { cluster: e.cluster }),
       applyOp: NETGEN.abcdClusterRewireApplyOp,
+      // Keep bad entries through drop-stale so we can compute the
+      // residue stub counts. The wrapper below filters them out of the
+      // placed list and bumps byNode counts so the spoke layer draws
+      // unpaired stubs at the affected endpoints (the residue is
+      // forwarded to the bg pool, not dropped from the model).
+      keepBadAtDropStale: true,
     });
+    let crewireDropStaleResidue = [];
+    function stateAtStep(R, k) {
+      const ops = effectiveOps(R);
+      const isDropStale = k > ops.length;
+      const list = stateAtStepRaw(R, k);
+      if (isDropStale) {
+        crewireDropStaleResidue = list.filter(e => e.bad).slice();
+        return list.filter(e => !e.bad);
+      }
+      crewireDropStaleResidue = [];
+      return list;
+    }
     crewireStateAtStep = stateAtStep;
     function paintLabelDesc(step, ops, isDropStale) {
       clearDimPick(viz);
@@ -2113,10 +2211,9 @@ window.MathJax = {
           opsCount + " collision op" + (opsCount === 1 ? "" : "s") +
           " ahead. Solid red = self-loop or parallel.";
       } else if (isDropStale) {
-        labelEl.textContent = "drop stale";
-        descEl.innerHTML = '<span class="st">drop stale</span> &middot; ' +
-          "Bad edges that survived every rewire attempt (no legal swap " +
-          "ever found) are dropped from the cluster output.";
+        labelEl.textContent = "cut to stubs";
+        descEl.innerHTML = '<span class="st">cut to stubs</span> &middot; ' +
+          "Bad edges that survived every rewire attempt are cut from the cluster output, but their endpoints' stubs remain as unpaired spokes. Those stubs flow into the background pool in the next stage.";
       } else {
         const tag = op.success
           ? (op.src === "valid" ? "swap with valid edge" : "swap with recycled pair")
@@ -2135,6 +2232,11 @@ window.MathJax = {
       R: () => buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI),
       opsOf: R => effectiveOps(R),
       stateAtStep, placedEntry, paintLabelDesc, byNodeFromList,
+      // Force playMany on the drop-stale step (removes-only) so the
+      // bad edges run the normal "cut" bridge-retract animation,
+      // leaving spokes at the endpoints — the residue stubs the kernel
+      // forwards to the bg pool.
+      forcePlayManyOnRemovesOnly: true,
       getLastStep: () => lastStep,
       setLastStep: (s) => { lastStep = s; },
     });
@@ -2303,7 +2405,28 @@ window.MathJax = {
       // cluster-pair). split[n].z is the pre-parity target; the
       // sampled pool may drop a stub or two to even out and we
       // don't want orphan spokes hanging off the last walker frame.
-      const cfg = NETGEN.spokeLayer.byNodeFromEdges(viz, R.bgPre, COL.edge_inter);
+      // Per-slot colours: residue stubs forwarded from cluster-rewire
+      // wear that cluster's colour; the rest (genuine z_u stubs) wear
+      // the dark "ink" colour to read as plain bg-split stubs.
+      const BG_DEFAULT_COLOR = COL.paper || "#1b2033";
+      const cfg = NETGEN.spokeLayer.byNodeFromEdges(viz, R.bgPre, BG_DEFAULT_COLOR);
+      const residueByNode = R.clusterResidueByNode || {};
+      const residueColorByNode = R.clusterResidueColorByNode || {};
+      Object.keys(cfg).forEach(nidStr => {
+        const slot = cfg[nidStr]; if (!slot) return;
+        const nidNum = parseInt(nidStr, 10);
+        const resCount = residueByNode[nidNum] || 0;
+        if (resCount <= 0) return;
+        const resColor = residueColorByNode[nidNum] || slot.color;
+        const colors = new Array(slot.count).fill(slot.color);
+        // Place residue stubs in the trailing slots so they sit at
+        // adjacent angles and read as a contiguous "block" of
+        // cluster-coloured spokes around the node.
+        for (let i = 0; i < resCount && i < slot.count; i++) {
+          colors[slot.count - 1 - i] = resColor;
+        }
+        slot.colors = colors;
+      });
       // Cluster-post keys = duplicate-detection set for crossDup colour.
       const clusterKeys = {};
       R.clusterPost.forEach(e => { clusterKeys[keyOf(e.u, e.v)] = true; });
@@ -2338,7 +2461,7 @@ window.MathJax = {
       let label, desc;
       if (step === 0) {
         label = "background stubs ready";
-        desc = "Every node sprouts \\(\\hat z_u\\) bg-pool stubs (cobalt). Faded edges in the back are the cluster phase's output.";
+        desc = "Every node sprouts its background stubs (cobalt). Faded edges in the back are the cluster phase's output.";
       } else {
         const cur = j.e;
         const tag = cur.loop ? " (self-loop)"
@@ -2453,6 +2576,10 @@ window.MathJax = {
       opsOf: R => effectiveOps(R),
       idPrefix: "br",
       applyOp: NETGEN.abcdBgRewireApplyOp(),
+      // Bg-rewire residue passes to the cross-cluster final swap; the
+      // bad edges aren't dropped here. Leave them on screen so the
+      // cross-cluster walker can pick them up as recycle entries.
+      keepBadAtDropStale: true,
     });
     bgrewireStateAtStep = stateAtStep;
     function placedFromList(list) {
@@ -2616,6 +2743,222 @@ window.MathJax = {
     // crewire RandAll changes clusterPost (bg-rewire's backdrop +
     // clusterEdgeKeys for crossDup gating). Apply follow rule.
     onClusterRewireChanged.push(reconfigKeep);
+  })();
+
+  // ── Generation · cross-cluster final swap walker ──
+  // Animated via spokeLayer + per-step playMany diff. Each rendered
+  // entry is one edge in the running union; ops mutate the entry list
+  // by removing p2 and adding newp1/newp2 (or pushing them as bad).
+  (function () {
+    const host = document.getElementById("g-finalswap-cy");
+    if (!host) return;
+    const viz = NETGEN.VIZ.init("g-finalswap-cy", {
+      showLabels: true, edges: [], pinned: true,
+      positions: LIVE_POS_OF,
+      nodeColor: (id) => nodeColorOf(parseInt(id, 10)),
+    });
+    const spokes = NETGEN.spokeLayer.attach(viz, {});
+    function ekey(a, b) { return a < b ? a + "-" + b : b + "-" + a; }
+    function pickEdgeColor(u, v) {
+      const bu = LIVE_BLOCK_OF[u], bv = LIVE_BLOCK_OF[v];
+      if (bu === bv && CLUSTER_COLOR_OF[bu]) return CLUSTER_COLOR_OF[bu];
+      return COL.edge_inter;
+    }
+    function makeEntry(u, v, id, bad) {
+      return {
+        u, v, id, bad,
+        color: bad ? COL.edge_drop : pickEdgeColor(u, v),
+        badColor: COL.edge_drop,
+      };
+    }
+    // State at step k = entries (each {u, v, id, bad}) reflecting the
+    // edges + bad recycle items in play after ops [0..k-1] applied.
+    function stateAtStep(R, k) {
+      const list = [];
+      const edgeIdByKey = new Map();
+      (R.finalEdgesBefore || []).forEach(([a, b], i) => {
+        const e = makeEntry(a, b, "fs-pre-" + i, false);
+        list.push(e); edgeIdByKey.set(ekey(a, b), e.id);
+      });
+      const recycleEntries = (R.finalRecycleBefore || []).map(([a, b], i) => {
+        const e = makeEntry(a, b, "fs-rec-" + i, true);
+        list.push(e); return e;
+      });
+      const ops = R.finalRewireOps || [];
+      // Drop-stale step at k > ops.length: filter bad entries (the
+      // truly-unresolvable residue actually drops here).
+      if (k > ops.length) {
+        ops.forEach((op, i) => {
+          // apply every op then filter bad below.
+          for (let j = list.length - 1; j >= 0; j--) {
+            const e = list[j];
+            if (!e.bad) continue;
+            if ((e.u === op.p1[0] && e.v === op.p1[1])
+                || (e.u === op.p1[1] && e.v === op.p1[0])) { list.splice(j, 1); break; }
+          }
+          const p2k = ekey(op.p2[0], op.p2[1]);
+          const p2id = edgeIdByKey.get(p2k);
+          if (p2id != null) {
+            for (let j = list.length - 1; j >= 0; j--) {
+              if (list[j].id === p2id) { list.splice(j, 1); break; }
+            }
+            edgeIdByKey.delete(p2k);
+          }
+          const id1 = "fs-op" + i + "-1";
+          const id2 = "fs-op" + i + "-2";
+          list.push(makeEntry(op.newp1[0], op.newp1[1], id1, !op.keep1));
+          list.push(makeEntry(op.newp2[0], op.newp2[1], id2, !op.keep2));
+          if (op.keep1) edgeIdByKey.set(ekey(op.newp1[0], op.newp1[1]), id1);
+          if (op.keep2) edgeIdByKey.set(ekey(op.newp2[0], op.newp2[1]), id2);
+        });
+        return list.filter(e => !e.bad);
+      }
+      const cap = Math.min(k, ops.length);
+      let opSeq = 0;
+      for (let i = 0; i < cap; i++) {
+        const op = ops[i];
+        // Remove p1 entry (last bad-flagged entry matching its endpoints).
+        for (let j = list.length - 1; j >= 0; j--) {
+          const e = list[j];
+          if (!e.bad) continue;
+          if ((e.u === op.p1[0] && e.v === op.p1[1])
+              || (e.u === op.p1[1] && e.v === op.p1[0])) {
+            list.splice(j, 1); break;
+          }
+        }
+        // Remove p2 entry (a real edge from the union).
+        const p2k = ekey(op.p2[0], op.p2[1]);
+        const p2id = edgeIdByKey.get(p2k);
+        if (p2id != null) {
+          for (let j = list.length - 1; j >= 0; j--) {
+            if (list[j].id === p2id) { list.splice(j, 1); break; }
+          }
+          edgeIdByKey.delete(p2k);
+        }
+        // Add newp1 / newp2.
+        opSeq++;
+        const id1 = "fs-op" + i + "-1";
+        const id2 = "fs-op" + i + "-2";
+        const e1 = makeEntry(op.newp1[0], op.newp1[1], id1, !op.keep1);
+        const e2 = makeEntry(op.newp2[0], op.newp2[1], id2, !op.keep2);
+        list.push(e1); list.push(e2);
+        if (op.keep1) edgeIdByKey.set(ekey(op.newp1[0], op.newp1[1]), id1);
+        if (op.keep2) edgeIdByKey.set(ekey(op.newp2[0], op.newp2[1]), id2);
+      }
+      return list;
+    }
+    function byNodeFromList(list) {
+      const cnt = {};
+      list.forEach(e => {
+        cnt[e.u] = (cnt[e.u] || 0) + 1;
+        cnt[e.v] = (cnt[e.v] || 0) + 1;
+      });
+      const out = {};
+      viz.eachNode(n => {
+        out[n.id] = { count: cnt[n.id] || 0, color: nodeColorOf(parseInt(n.id, 10)) };
+      });
+      return out;
+    }
+    let lastStep = 0;
+    function render(step, snap) {
+      const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
+      const ops = R.finalRewireOps || [];
+      const totalOps = ops.length;
+      // pre + ops + drop-stale
+      const total = totalOps + 2;
+      if (step >= total) step = total - 1;
+      document.getElementById("g-finalswap-cur").textContent = String(step);
+      document.getElementById("g-finalswap-total").textContent = String(total - 1);
+
+      const labelEl = document.getElementById("g-finalswap-stage");
+      const descEl = document.getElementById("g-finalswap-desc");
+
+      if (totalOps === 0) {
+        spokes.snapToState({ byNode: {}, placed: [], just: null, justSeq: 0 });
+        labelEl.textContent = "no final-stage activity";
+        descEl.innerHTML = '<span class="st">empty</span> &middot; the bg-rewire loop emptied its recycle list, so this stage never fired.';
+        lastStep = step;
+        return;
+      }
+      const after = stateAtStep(R, step);
+      const byNode = byNodeFromList(after);
+      const adjacent = step === lastStep + 1 || step === lastStep - 1;
+      if (!adjacent || snap) {
+        spokes.snapToState({ byNode, placed: after, just: null, justSeq: step });
+      } else {
+        const before = stateAtStep(R, lastStep);
+        const beforeIds = new Set(before.map(e => e.id));
+        const afterIds = new Set(after.map(e => e.id));
+        const removes = before.filter(e => !afterIds.has(e.id));
+        const adds = after.filter(e => !beforeIds.has(e.id));
+        if (removes.length === 0 && adds.length === 0) {
+          spokes.snapToState({ byNode, placed: after, just: null, justSeq: step });
+        } else if (removes.length > 0 && adds.length === 0) {
+          // Drop-stale at the final step: SBM-style simplify animation
+          // (solid red → dashed → fade → survivors fan in).
+          spokes.simplify(removes, () => {}, { byNode });
+        } else if (removes.length === 0 && adds.length > 0
+                   && lastStep === total - 1 && step === total - 2
+                   && spokes.unsimplify) {
+          // Back from drop-stale: reverse-simplify (faded-in dashed →
+          // un-dashify to solid red). Falls through to playMany when
+          // the spoke layer doesn't expose unsimplify.
+          spokes.unsimplify(adds, () => {}, { byNode });
+        } else {
+          spokes.playMany(removes, adds, () => {}, { byNode });
+        }
+      }
+      lastStep = step;
+
+      const isDropStale = step > totalOps;
+      if (step === 0) {
+        const recBefore = (R.finalRecycleBefore || []).length;
+        labelEl.textContent = "pre-final · " + recBefore + " bad edges in recycle";
+        descEl.innerHTML = '<span class="st">pre-final</span> &middot; ' + totalOps +
+          " op" + (totalOps === 1 ? "" : "s") + " ahead. Solid red = recycle entries the bg-rewire loop could not resolve.";
+      } else if (isDropStale) {
+        const dropped = (R.finalResidueLeft || []).length;
+        labelEl.textContent = "drop stale · " + dropped + " edge" + (dropped === 1 ? "" : "s") + " dropped";
+        descEl.innerHTML = '<span class="st">drop stale</span> &middot; ' +
+          "Bad edges that survived every final-stage attempt are dropped from the output. This is the only place in the pipeline where a residue actually leaves the model.";
+      } else {
+        const op = ops[step - 1];
+        const status = (op.keep1 && op.keep2)
+          ? "both swap halves placed"
+          : (op.keep1 || op.keep2)
+            ? "one half placed, the other recycled"
+            : "both halves recycled (no progress this op)";
+        const recNow = after.filter(e => e.bad).length;
+        labelEl.textContent = "op " + step + " / " + totalOps;
+        descEl.innerHTML = '<span class="st">op ' + step + '</span> &middot; ' +
+          "Pop <code>" + op.p1.join("–") + "</code> from recycle, draw partner <code>" + op.p2.join("–") +
+          "</code> from the union; place <code>" + op.newp1.join("–") + "</code> + <code>" + op.newp2.join("–") +
+          "</code>. " + status + ". Recycle now has " + recNow + " entries.";
+      }
+    }
+    function totalForCurrent() {
+      const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
+      const opsLen = R.finalRewireOps ? R.finalRewireOps.length : 0;
+      // pre + ops + drop-stale = opsLen + 2
+      return opsLen + 2;
+    }
+    let ctl = NETGEN.rerollWalker({
+      prefix: "g-finalswap",
+      total: totalForCurrent(),
+      totalForCurrent,
+      onRender: render,
+      onRandStep: () => { rerollStub(); },
+      onRandAll: () => { rerollAll(); },
+    });
+    function reconfigReset() {
+      lastStep = 0;
+      ctl.reconfigure(totalForCurrent());
+    }
+    onStubChanged.push(reconfigReset);
+    onUChanged.push(reconfigReset);
+    onBgPairChanged.push(reconfigReset);
+    onBgRewireChanged.push(reconfigReset);
+    reconfigReset();
   })();
 
 

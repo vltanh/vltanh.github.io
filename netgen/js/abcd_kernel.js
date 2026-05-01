@@ -565,6 +565,7 @@
       const rewireOps = stages ? loopOps : null;
       for (const k of localEdges) edges.add(k);
       let residueForwarded = 0;
+      const residueEntries = stages ? recycle.map(p => p.slice()) : null;
       for (const [a, b] of recycle) {
         wInternal[a - 1] -= 1;
         wInternal[b - 1] -= 1;
@@ -579,6 +580,7 @@
         rewireOps,
         postEdges: Array.from(localEdges).map(k => k.split("-").map(Number)),
         residueForwarded,
+        residueEntries,
       });
     }
 
@@ -679,6 +681,9 @@
     }
 
     // Final stage: any persistent residue rewires against the union edges.
+    const finalEdgesSnap = stages ? Array.from(edges).map(k => k.split("-").map(Number)) : null;
+    const finalRecycleSnap = stages ? recycle.map(p => p.slice()) : null;
+    const finalRewireOps = stages ? [] : null;
     if (recycle.length > 0) {
       let lr = recycle.length;
       let rc = lr;
@@ -703,10 +708,21 @@
           newp1 = epair(p1[0], p2[1]);
           newp2 = epair(p1[1], p2[0]);
         }
+        let keep1, keep2;
         for (const np of [newp1, newp2]) {
           const k = ekey(np[0], np[1]);
-          if (np[0] === np[1] || edges.has(k)) recycle.push(np);
+          const bad = (np[0] === np[1]) || edges.has(k);
+          if (np === newp1) keep1 = !bad;
+          else keep2 = !bad;
+          if (bad) recycle.push(np);
           else edges.add(k);
+        }
+        if (finalRewireOps) {
+          finalRewireOps.push({
+            p1: p1.slice(), p2: p2.slice(),
+            newp1: newp1.slice(), newp2: newp2.slice(),
+            coin, keep1, keep2,
+          });
         }
       }
     }
@@ -714,7 +730,13 @@
     const edgeArr = Array.from(edges).map(k => k.split("-").map(Number))
       .sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
     if (stages) {
-      stages.final = { residueAfter: recycle.length };
+      stages.final = {
+        edgesBefore: finalEdgesSnap,
+        recycleBefore: finalRecycleSnap,
+        rewireOps: finalRewireOps,
+        residueAfter: recycle.length,
+        residueLeft: recycle.map(p => p.slice()),
+      };
     }
     return {
       edges: edgeArr,

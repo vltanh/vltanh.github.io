@@ -1148,7 +1148,24 @@ window.MathJax = {
       renderDegBars(sample);
     });
     if (playBtn) playBtn.addEventListener("click", () => playSimplify(SAMPLE));
-    if (resetBtn) resetBtn.addEventListener("click", () => render(SAMPLE));
+    if (resetBtn) resetBtn.addEventListener("click", () => {
+      if (lockBusy) return;
+      const sample = SAMPLE;
+      // If not currently simplified, snap to the pre-simplify state.
+      if (!simplified) { render(sample); return; }
+      // Reverse the simplify animation: bring the dropped bad edges
+      // back via unsimplify (faded-in dashed → un-dashify to solid).
+      const adds = placedFor(sample).filter(e => e.bad);
+      if (adds.length === 0 || !spokes.unsimplify) {
+        render(sample);
+        return;
+      }
+      spokes.unsimplify(adds, () => {
+        simplified = false;
+        preLabel(sample);
+        if (playBtn) playBtn.disabled = false;
+      }, { byNode: byNodeFor(sample, false) });
+    });
 
     // Target-vs-achieved degree bars, horizontal, one row per node.
     // Stacked: mint segment = achieved, faint red tail = dropped
