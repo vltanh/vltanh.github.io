@@ -32,10 +32,9 @@
   .graph.g-with-side .side-body{ grid-template-columns: 1fr; align-items: start; }
 }
 .viz-node.ringed{ stroke:#c7801e; stroke-width:3.4; }
+/* outlier-mark: profiling-panel input-outlier ring; sampler-picked
+   outliers in walker panels are signalled via node fill (COL.signal). */
 .viz-node.outlier-mark{ stroke:#c92a2a; stroke-width:3.4; stroke-dasharray:3 3; }
-/* outlier-mark is reserved for the profiling panels (input outliers
-   that drop_oo strips before stage 2). Walker panels signal sampler-
-   picked outliers via node fill (COL.signal) instead. */
 /* .deg-bar-row + .cs-bar-row hover/dim/hot styles live in shared.css. */
 .block-ring-label{ font-family:'Caveat Brush', cursive; font-size:20px; letter-spacing:.04em; }
 .disk-panel{
@@ -110,11 +109,6 @@
   font-family:'Special Elite','Courier New',monospace;
   color:#2f3a54;
 }
-.assign-scalar-panel .row{ display:grid; grid-template-columns:1.2rem .9rem 1fr; gap:.35rem; align-items:center; padding:.15rem 0; }
-.assign-scalar-panel .lhs{ font-size:1.05rem; color:var(--azure); text-align:right; }
-.assign-scalar-panel .eq{ color:#6b6a54; }
-.assign-scalar-panel .val{ font-size:1rem; color:var(--azure); }
-.assign-scalar-panel .hint{ margin-top:.4rem; padding-top:.4rem; border-top:1px dashed rgba(139,117,65,.45); color:#6b6a54; font-size:.8rem; }
 .assign-scalar-panel .scalar-line{ font-size:.85rem; padding:.1rem 0; }
 .assign-scalar-panel .scalar-line.dim{ color:#6b6a54; font-size:.78rem; }
 .assign-scalar-panel .next-block{ margin-top:.4rem; padding-top:.4rem; border-top:1px dashed rgba(139,117,65,.45); }
@@ -807,14 +801,15 @@ window.MathJax = {
   // mega-cluster comes first to mirror the kernel's KERNEL_S = [s_0,
   // |C1|, |C2|, |C3|] prepend; assignment iterates only over the real
   // clusters since outliers have already been picked upstream.
-  const BLOCK_NAMES = ["MEGA", "C1", "C2", "C3"];
+  const BLOCK_MEGA = "MEGA";
+  const BLOCK_NAMES = [BLOCK_MEGA, "C1", "C2", "C3"];
   const REAL_BLOCK_NAMES = ["C1", "C2", "C3"];
-  const BLOCK_NODES = { "MEGA": [], "C1": C1, "C2": C2, "C3": C3 };
+  const BLOCK_NODES = { [BLOCK_MEGA]: [], "C1": C1, "C2": C2, "C3": C3 };
   const BLOCK_COLOR = {
-    "MEGA": COL.signal, "C1": COL.C1, "C2": COL.C2, "C3": COL.C3,
+    [BLOCK_MEGA]: COL.signal, "C1": COL.C1, "C2": COL.C2, "C3": COL.C3,
   };
   const BLOCK_SIZE = {
-    "MEGA": N_OUTLIERS, "C1": C1.length, "C2": C2.length, "C3": C3.length,
+    [BLOCK_MEGA]: N_OUTLIERS, "C1": C1.length, "C2": C2.length, "C3": C3.length,
   };
   const KERNEL_CID_FROM_BLOCK = { MEGA: 1, C1: 2, C2: 3, C3: 4 };
   const NAMED_CLUSTER_OF_KERNEL = { 2: "C1", 3: "C2", 4: "C3" };
@@ -1573,7 +1568,7 @@ window.MathJax = {
         const bin = binByName[name];
         if (!bin) return;
         let op, fillOp, labelOp;
-        if (name === "MEGA") {
+        if (name === BLOCK_MEGA) {
           // MEGA always faded; not a candidate for assignment.
           op = 0.5; fillOp = 0.04; labelOp = 0.7;
         } else if (!t || poolTotal <= 0) {
@@ -1972,45 +1967,9 @@ window.MathJax = {
     next.addEventListener("click", () => jump(true));
     const curEl = document.getElementById(curElId);
     if (curEl && typeof MutationObserver !== "undefined") {
-      new MutationObserver(refresh)
-        .observe(curEl, { childList: true, characterData: true, subtree: true });
+      new MutationObserver(refresh).observe(curEl, { childList: true, characterData: true });
     }
     refresh();
-  }
-  // clusterStateAfter feeds the bg-pair / bg-rewire backdrops only;
-  // the rewire walkers themselves construct state through
-  // makeRewireStateAtStep + applyOp on a list of ids.
-  function clusterStateAfter(R, k) {
-    const map = new Map();
-    R.clusterPre.forEach(e => {
-      const kk = keyOf(e.u, e.v);
-      if (!map.has(kk)) map.set(kk, { u: e.u, v: e.v, cluster: e.cluster, bad: e.loop || e.multi });
-    });
-    const ops = effectiveClusterRewireOps(R);
-    for (let i = 0; i < k; i++) {
-      const op = ops[i];
-      if (!op) break;
-      map.delete(keyOf(op.p1[0], op.p1[1]));
-      if (op.success) {
-        if (op.p2) map.delete(keyOf(op.p2[0], op.p2[1]));
-        [op.newp1, op.newp2].forEach(np => {
-          if (!np) return;
-          map.set(keyOf(np[0], np[1]),
-            { u: np[0], v: np[1], cluster: op.cluster, bad: false });
-        });
-      }
-    }
-    return map;
-  }
-  function bgEdgeColor(e) {
-    if (e.bad) return COL.edge_drop;
-    return e.isOO ? COL.signal : (e.isCO ? COL.orchid : COL.edge_inter);
-  }
-  function applyOutlierColors(viz, R) {
-    viz.nodesData.forEach(n => {
-      const nid = parseInt(n.id, 10);
-      n.color = nodeColorOf(nid);
-    });
   }
   function getCurrentR() {
     const xi = parseFloat(document.getElementById("xi-slider").value);
@@ -2509,13 +2468,6 @@ window.MathJax = {
       applyOp: NETGEN.abcdBgRewireApplyOp(),
       keepBadAtDropStale: true,
     });
-    function placedFromList(list) {
-      return list.map(e => ({
-        u: e.u, v: e.v, id: e.id, bad: !!e.bad,
-        color: e.bad ? COL.edge_drop : COL.edge_inter,
-        badColor: COL.edge_drop,
-      }));
-    }
     const byNodeFromList = (list) =>
       NETGEN.spokeLayer.byNodeFromEdges(viz, list, n => nodeColorOf(parseInt(n.id, 10)));
     function paintLabelDesc(step, ops, isDropStale) {
@@ -2789,7 +2741,7 @@ window.MathJax = {
       .attr("stroke", COL.azure).attr("stroke-width", 4);
 
     function clusterIdFor(nid, R) {
-      if (R.outliers.has(nid)) return "MEGA";
+      if (R.outliers.has(nid)) return BLOCK_MEGA;
       return LIVE_REAL_CLUSTER_OF[nid];
     }
     function renderXi(R) {
