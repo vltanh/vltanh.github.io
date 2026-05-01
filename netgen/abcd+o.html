@@ -511,6 +511,7 @@ window.MathJax = {
 <script src="./js/spoke_layer.js"></script>
 <script src="./js/profile_kernel.js"></script>
 <script src="./js/abcd_kernel.js"></script>
+<script src="./js/abcd_walkers.js"></script>
 <script>
 (function () {
   document.getElementById("links").innerHTML = NETGEN.linksRow({gen: "abcd+o"});
@@ -1948,14 +1949,31 @@ window.MathJax = {
   })();
 
   // ── Cross-cluster final swap walker ──
-  // Per-op walker over R.finalRewireOps. Step 0 = pre-final snapshot;
-  // step k in [1..ops] applies op (k-1); step ops+1 = drop-stale.
-  // Edge color uses sampler-side cluster id: model-picked outliers form
-  // their own block (cluster_id=1), non-outliers keep their input
-  // cluster, so an edge is intra iff both endpoints share that id.
-  // Animator: spokeLayer's playMany / simplify / unsimplify diff between
-  // adjacent step states. RandStep replays from idx-1 with a fresh rng;
-  // RandAll replays from 0.
+  // Same shared mountFinalSwapWalker as abcd. abcd+o's only divergence
+  // is the node-color rule (sampler-picked outliers paint via COL.signal)
+  // + the edge intra/inter classifier reading R.outliers as a separate
+  // block alongside the input clusters. xi-slider subscribes via the
+  // returned reconfigReset since xi is a per-page dial that abcd does
+  // not have.
+  (function () {
+    const fs = NETGEN.mountFinalSwapWalker({
+      hostId: "g-finalswap",
+      getR: () => getCurrentR(),
+      nodeColorOf: (id, R) => R.outliers.has(id) ? COL.signal : COL[CLUSTER_OF[id]],
+      edgeColorOf: (u, v, R) => {
+        const cu = R.outliers.has(u) ? "OUT" : CLUSTER_OF[u];
+        const cv = R.outliers.has(v) ? "OUT" : CLUSTER_OF[v];
+        if (cu === cv && COL.edge_intra[cu]) return COL.edge_intra[cu];
+        return COL.edge_inter;
+      },
+      dropColor: COL.edge_drop,
+      stubSeedFn: () => STUB_SEED,
+      busSubscriptions: [onStubChanged, onUChanged, onOutlierChanged, onBgPairChanged, onBgRewireChanged],
+    });
+    if (fs) document.getElementById("xi-slider").addEventListener("input", fs.reconfigReset);
+  })();
+  /* legacy bespoke abcd+o walker; replaced by mountFinalSwapWalker above.
+     Block-comment kept for one transition.
   (function () {
     const host = document.getElementById("g-finalswap-cy");
     if (!host) return;
@@ -2172,6 +2190,7 @@ window.MathJax = {
     document.getElementById("xi-slider").addEventListener("input", reconfigReset);
     reconfigReset();
   })();
+  */
 
   // ── Degree preservation ──
   (function () {

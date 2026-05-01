@@ -528,6 +528,7 @@ window.MathJax = {
 <script src="./js/spoke_layer.js"></script>
 <script src="./js/profile_kernel.js"></script>
 <script src="./js/abcd_kernel.js"></script>
+<script src="./js/abcd_walkers.js"></script>
 <script>
 (function () {
   document.getElementById("links").innerHTML = NETGEN.linksRow({gen: "abcd"});
@@ -2821,9 +2822,27 @@ window.MathJax = {
   })();
 
   // ── Generation · cross-cluster final swap walker ──
-  // Animated via spokeLayer + per-step playMany diff. Each rendered
-  // entry is one edge in the running union; ops mutate the entry list
-  // by removing p2 and adding newp1/newp2 (or pushing them as bad).
+  // Spoke-animated walker over R.finalRewireOps. Body lives in the
+  // shared abcd_walkers.js so abcd+o shares the exact same code path.
+  NETGEN.mountFinalSwapWalker({
+    hostId: "g-finalswap",
+    getR: () => buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI),
+    positions: LIVE_POS_OF,
+    nodeColorOf: (id) => nodeColorOf(id),
+    edgeColorOf: (u, v) => {
+      const bu = LIVE_BLOCK_OF[u], bv = LIVE_BLOCK_OF[v];
+      if (bu === bv && CLUSTER_COLOR_OF[bu]) return CLUSTER_COLOR_OF[bu];
+      return COL.edge_inter;
+    },
+    dropColor: COL.edge_drop,
+    stubSeedFn: () => STUB_SEED,
+    busSubscriptions: [onStubChanged, onUChanged, onBgPairChanged, onBgRewireChanged],
+    syncOverride: (ops) => { finalSwapEffectiveOps = ops; },
+    notifyChanged: () => fireFinalSwapChanged(),
+  });
+  /* legacy IIFE replaced by mountFinalSwapWalker above. Kept in a
+     block-comment for one transition so reviewers can confirm
+     parameter parity; the next commit deletes this block.
   (function () {
     const host = document.getElementById("g-finalswap-cy");
     if (!host) return;
@@ -3117,6 +3136,7 @@ window.MathJax = {
     onBgRewireChanged.push(reconfigReset);
     reconfigReset();
   })();
+  */
 
 
   // ── Generation · degree preservation (overlay bars) ──
