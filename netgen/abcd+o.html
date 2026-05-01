@@ -1988,164 +1988,35 @@ window.MathJax = {
   }
 
   // ── Panel 1 / 4: cluster pre-pair walker ──
-  // Spoke-based per-pair walker, byte-cloned from abcd with the
-  // realization accessor + nodeColorOf shimmed for outlier handling.
-  // Outlier mega-cluster (cluster_id=1) has y_u=0 for all members so
-  // R.clusterPre never contains an outlier-incident pair; the spoke
-  // layer naturally shows zero spokes around outlier nodes here.
-  (function () {
-    const viz = NETGEN.VIZ.init("g-cpair-cy", {
-      showLabels: true, edges: [], pinned: true,
-      positions: LIVE_POS_OF,
-      nodeColor: (id) => nodeColorOf(parseInt(id, 10)),
-    });
-    let lockOverride = false;
-    let ctl = null;
-    function setRandLock(locked) {
-      lockOverride = locked;
-      if (ctl) ctl.refreshButtons();
-    }
-    const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setRandLock });
-    function totalFromR(R) { return 1 + R.clusterPre.length; }
-    let cpairRerollNonce = 0;
-
-    function rollPair(R, idx) {
-      let lay = null, l = 0;
-      for (const c of R.clusterStubLayouts) {
-        if (idx >= c.startInClusterPre && idx < c.startInClusterPre + c.numPairs) {
-          lay = c; l = idx - c.startInClusterPre; break;
-        }
-      }
-      if (!lay) return { snap: false };
-      const prefix = R.clusterPre.slice(lay.startInClusterPre, lay.startInClusterPre + l);
-      cpairRerollNonce += 1;
-      const fresh = seededRng(STUB_SEED * 8191 + cpairRerollNonce * 41 + idx * 113);
-      const newTail = NETGEN.stubPoolReseed({
-        layout: lay, prefix, rng: fresh,
-        classify: (a, b, ctx) => {
-          const loop = (a === b);
-          const k = keyOf(a, b);
-          const multi = !loop && ctx.localEdges.has(k);
-          if (!loop && !multi) ctx.add(k);
-          return { u: a, v: b, cluster: lay.cname, loop, multi };
-        },
-      });
-      newTail.forEach((np, i) => { pairOverride[lay.startInClusterPre + l + i] = np; });
-      fireClusterPreChanged();
-      spokes.markReroll();
-      return { snap: false };
-    }
-
-    function rollAllPairs() {
-      pairOverride = {};
-      cpairRerollNonce += 1;
-      const Rfresh = getCurrentR();
-      Rfresh.clusterStubLayouts.forEach((lay, i) => {
-        const fresh = seededRng(STUB_SEED * 8191 + cpairRerollNonce * 41 + i * 113);
-        const newTail = NETGEN.stubPoolReseed({
-          layout: lay, prefix: [], rng: fresh,
-          classify: (a, b, ctx) => {
-            const loop = (a === b);
-            const k = keyOf(a, b);
-            const multi = !loop && ctx.localEdges.has(k);
-            if (!loop && !multi) ctx.add(k);
-            return { u: a, v: b, cluster: lay.cname, loop, multi };
-          },
-        });
-        newTail.forEach((np, i) => { pairOverride[lay.startInClusterPre + i] = np; });
-      });
-      fireClusterPreChanged();
-      spokes.markReroll();
-    }
-
-    function render(step, snap) {
+  // Mounted via the shared mountClusterPairWalker factory. abcd+o-only
+  // bits live in the cfg: nodeColorOf returns OUTLIER_RED for picked
+  // outliers and the introDesc mentions the outlier-zero-stub rule.
+  NETGEN.mountClusterPairWalker({
+    hostId: "g-cpair",
+    getR: () => getCurrentR(),
+    positions: LIVE_POS_OF,
+    nodeColorOf: (id) => nodeColorOf(id),
+    clusterColorOf: (cname) => CLUSTER_COLOR_OF[cname],
+    stage2Color: COL.edge_stage2,
+    dropColor: COL.edge_drop,
+    mintColor: COL.mint || "#4e7a3a",
+    stubSeedFn: () => STUB_SEED,
+    pairOverride,
+    fireClusterPreChanged,
+    resetEpoch: () => { overrideEpoch++; },
+    busSubscriptions: [onStubChanged, onUChanged, onOutlierChanged, onXiChanged],
+    introDesc: "Each non-outlier sprouts \\(\\hat y_u\\) cluster-graph stubs in its home-cluster colour. Outliers carry zero cluster stubs; their spokes appear in the bg-pair stage.",
+    stepDescFn: (cur, j) => {
+      const tag = cur.loop ? " (self-loop)" : (j.bad ? " (parallel)" : "");
+      return "Stubs of <b>" + cur.u + "</b> and <b>" + cur.v + "</b> pair up inside <code>" + cur.cluster + "</code>" + tag + ".";
+    },
+    navBoundariesFn: () => {
       const R = getCurrentR();
-      const total = 1 + R.clusterPre.length;
-      if (step >= total) step = total - 1;
-      viz.setEdges([]);
-      const cfg = NETGEN.spokeLayer.byNodeFromEdges(viz, R.clusterPre,
-        n => nodeColorOf(parseInt(n.id, 10)));
-      // Outliers carry zero cluster stubs (ŷ_u = 0); zero out their
-      // counts in case any clusterPre entry slipped through.
-      R.outliers.forEach(nid => { if (cfg[nid]) cfg[nid].count = 0; });
-      const placed = NETGEN.walkerMarkPlaced(R.clusterPre.slice(0, Math.max(0, step - 1)), {
-        idPrefix: "cp-",
-        goodColor: (e) => CLUSTER_COLOR_OF[e.cluster] || COL.edge_stage2,
-        badColor: COL.edge_drop,
-        keyOf,
-      });
-      let just = null;
-      let bridgeColor = COL.mint || "#4e7a3a";
-      const j = NETGEN.walkerMarkJust(R.clusterPre, step, { keyOf });
-      if (j) {
-        bridgeColor = CLUSTER_COLOR_OF[j.e.cluster] || COL.edge_stage2;
-        just = {
-          u: j.e.u, v: j.e.v, color: bridgeColor, bad: j.bad,
-          badColor: j.bad ? COL.edge_drop : null,
-        };
-      }
-      NETGEN.snapOrSync(spokes, { byNode: cfg, placed, just, justSeq: step, bridgeColor }, snap);
-
-      const totEl = document.getElementById("g-cpair-total");
-      const curEl = document.getElementById("g-cpair-cur");
-      if (totEl) totEl.textContent = String(total - 1);
-      if (curEl) curEl.textContent = String(step);
-      let label, desc;
-      if (step === 0) {
-        label = "stubs ready";
-        desc = "Each non-outlier sprouts ŷ_u cluster-graph stubs in its home-cluster colour. Outliers (purple) carry zero cluster stubs; their spokes appear in the bg-pair stage.";
-      } else {
-        const cur = j.e;
-        const tag = cur.loop ? " (self-loop)" : (j.bad ? " (parallel)" : "");
-        label = "cluster pair " + step + " / " + R.clusterPre.length;
-        desc = "Stubs of <b>" + cur.u + "</b> and <b>" + cur.v + "</b> pair up inside <code>" + cur.cluster + "</code>" + tag + ".";
-      }
-      document.getElementById("g-cpair-stage").textContent = label;
-      const descEl = document.getElementById("g-cpair-desc");
-      descEl.innerHTML = '<span class="st">' + label + "</span> &middot; " + desc;
-      NETGEN.retypeset(descEl);
-    }
-
-    const R0 = getCurrentR();
-    ctl = NETGEN.rerollWalker({
-      prefix: "g-cpair",
-      total: totalFromR(R0),
-      totalForCurrent: () => totalFromR(getCurrentR()),
-      getLocked: () => lockOverride,
-      onRender: render,
-      onRandStep: idx => {
-        if (idx <= 0) return false;
-        return rollPair(getCurrentR(), idx - 1).snap;
-      },
-      onRandAll: idx => {
-        if (idx <= 0) return;
-        rollAllPairs();
-      },
-    });
-    function reTotalReset() {
-      pairOverride = {};
-      overrideEpoch++;
-      ctl.reconfigure(totalFromR(getCurrentR()));
-    }
-    onStubChanged.push(reTotalReset);
-    onUChanged.push(reTotalReset);
-    onOutlierChanged.push(reTotalReset);
-    onXiChanged.push(reTotalReset);
-
-    attachClusterNav({
-      ctl,
-      hostId: "g-cpair-cy",
-      prefix: "g-cpair",
-      curElId: "g-cpair-cur",
-      getLocked: () => lockOverride,
-      boundariesFn: () => {
-        const R = getCurrentR();
-        return R.clusterStubLayouts
-          .filter(c => c.numPairs > 0)
-          .map(c => c.startInClusterPre + c.numPairs);
-      },
-    });
-  })();
+      return R.clusterStubLayouts
+        .filter(c => c.numPairs > 0)
+        .map(c => c.startInClusterPre + c.numPairs);
+    },
+  });
 
   // ── Panel 2 / 4: cluster rewire walker ──
   // Per-op walker, byte-cloned from abcd. Step 0 = pre-rewire snapshot,

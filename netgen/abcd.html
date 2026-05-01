@@ -1933,179 +1933,33 @@ window.MathJax = {
   }
 
 
-  // Stage 1: cluster pairing (per-pair walker, single-step-per-pair)
-  (function () {
-    const viz = NETGEN.VIZ.init("g-cpair-cy", {
-      showLabels: true, edges: [], pinned: true,
-      positions: LIVE_POS_OF,
-      nodeColor: (id) => nodeColorOf(parseInt(id, 10)),
-    });
-    let lockOverride = false;
-    let ctl = null;
-    function setRandLock(locked) {
-      lockOverride = locked;
-      if (ctl) ctl.refreshButtons();
-    }
-    const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setRandLock });
-    function totalFromR(R) { return 1 + R.clusterPre.length; }
-    let cpairRerollNonce = 0;
-
-    // Cluster-pair reroll: writes module-scoped pairOverride and fires
-    // onClusterPreChanged so every downstream walker re-derives from
-    // the overridden realization. The kernel re-runs with override
-    // stubs, so clusterPost / bgPre / bgPost / finalEdges all reflect
-    // the new prePairs.
-    function rollPair(R, idx) {
-      let lay = null, l = 0;
-      for (const c of R.clusterStubLayouts) {
-        if (idx >= c.startInClusterPre && idx < c.startInClusterPre + c.numPairs) {
-          lay = c; l = idx - c.startInClusterPre; break;
-        }
-      }
-      if (!lay) return { snap: false };
-      const prefix = R.clusterPre.slice(lay.startInClusterPre, lay.startInClusterPre + l);
-      cpairRerollNonce += 1;
-      const fresh = seededRng(STUB_SEED * 8191 + cpairRerollNonce * 41 + idx * 113);
-      const newTail = NETGEN.stubPoolReseed({
-        layout: lay, prefix, rng: fresh,
-        classify: (a, b, ctx) => {
-          const loop = (a === b);
-          const k = keyOf(a, b);
-          const multi = !loop && ctx.localEdges.has(k);
-          if (!loop && !multi) ctx.add(k);
-          return { u: a, v: b, cluster: lay.cname, loop, multi };
-        },
-      });
-      newTail.forEach((np, i) => { pairOverride[lay.startInClusterPre + l + i] = np; });
-      fireClusterPreChanged();
-      spokes.markReroll();
-      return { snap: false };
-    }
-
-    // Full cluster-pair reseed: drop overrides, then redraw every cluster
-    // bucket from position 0. Single fireClusterPreChanged at the end so
-    // downstream listeners re-derive once instead of per-bucket.
-    function rollAllPairs() {
-      pairOverride = {};
-      cpairRerollNonce += 1;
-      const xi = SYNTHETIC_XI;
-      const Rfresh = buildRealization(U_SEED, STUB_SEED, xi);
-      Rfresh.clusterStubLayouts.forEach((lay, i) => {
-        const fresh = seededRng(STUB_SEED * 8191 + cpairRerollNonce * 41 + i * 113);
-        const newTail = NETGEN.stubPoolReseed({
-          layout: lay, prefix: [], rng: fresh,
-          classify: (a, b, ctx) => {
-            const loop = (a === b);
-            const k = keyOf(a, b);
-            const multi = !loop && ctx.localEdges.has(k);
-            if (!loop && !multi) ctx.add(k);
-            return { u: a, v: b, cluster: lay.cname, loop, multi };
-          },
-        });
-        newTail.forEach((np, i) => { pairOverride[lay.startInClusterPre + i] = np; });
-      });
-      fireClusterPreChanged();
-      spokes.markReroll();
-    }
-
-    function render(step, snap) {
-      const xi = SYNTHETIC_XI;
-      const R = buildRealization(U_SEED, STUB_SEED, xi);
-      const total = 1 + R.clusterPre.length;
-      if (step >= total) step = total - 1;
-      // Spoke layer owns every pair edge; viz.setEdges stays empty.
-      viz.setEdges([]);
-      // Spoke count per node = number of cluster-pair stubs that will
-      // actually consume that node. Derive from clusterPre so every
-      // stub corresponds to an emitted pair (post leader-bump): no
-      // orphan spokes that never pair.
-      const cfg = NETGEN.spokeLayer.byNodeFromEdges(viz, R.clusterPre,
-        n => nodeColorOf(parseInt(n.id, 10)));
-      // R.clusterPre already includes any pairOverride (the kernel re-runs
-      // with override stubs). Walker just slices it. Math.max guards
-      // step=0: bare slice(0, -1) would drop only the last element.
-      const placed = NETGEN.walkerMarkPlaced(R.clusterPre.slice(0, Math.max(0, step - 1)), {
-        idPrefix: "cp-",
-        goodColor: (e) => CLUSTER_COLOR_OF[e.cluster] || COL.edge_stage2,
-        badColor: COL.edge_drop,
-        keyOf,
-      });
-      let just = null;
-      let bridgeColor = COL.mint || "#4e7a3a";
-      const j = NETGEN.walkerMarkJust(R.clusterPre, step, { keyOf });
-      if (j) {
-        bridgeColor = CLUSTER_COLOR_OF[j.e.cluster] || COL.edge_stage2;
-        just = {
-          u: j.e.u, v: j.e.v, color: bridgeColor, bad: j.bad,
-          badColor: j.bad ? COL.edge_drop : null,
-        };
-      }
-      NETGEN.snapOrSync(spokes, { byNode: cfg, placed, just, justSeq: step, bridgeColor }, snap);
-
-      const totEl = document.getElementById("g-cpair-total");
-      const curEl = document.getElementById("g-cpair-cur");
-      if (totEl) totEl.textContent = String(total - 1);
-      if (curEl) curEl.textContent = String(step);
-      let label, desc;
-      if (step === 0) {
-        label = "stubs ready";
-        desc = "Each node sprouts \\(\\hat y_u\\) intra-cluster stubs in its cluster's colour (current \\(\\xi = " + xi.toFixed(3) + "\\)). The kernel shuffles each cluster's stubs and pairs them adjacent in shuffled order.";
-      } else {
-        const cur = j.e;
-        const tag = cur.loop ? " (self-loop)" : j.bad ? " (parallel of an existing edge)" : "";
-        label = "pair " + step + " / " + R.clusterPre.length + " · cluster " + cur.cluster;
-        desc = "Cluster " + cur.cluster + ": stubs of <b>" + cur.u + "</b> and <b>" + cur.v + "</b> pair up" + tag + ". The 2 mint spokes are the stubs just consumed; remaining stubs around each node await later pairs.";
-      }
-      document.getElementById("g-cpair-stage").textContent = label;
-      const descEl = document.getElementById("g-cpair-desc");
-      descEl.innerHTML = '<span class="st">' + label + "</span> &middot; " + desc;
-      NETGEN.retypeset(descEl);
-    }
-
-    const xi0 = SYNTHETIC_XI;
-    const R0 = buildRealization(U_SEED, STUB_SEED, xi0);
-    // RandStep: swap the active pair with another same-cluster pair.
-    // RandAll: in-stage full reseed of every cluster bucket.
-    ctl = NETGEN.rerollWalker({
-      prefix: "g-cpair",
-      total: totalFromR(R0),
-      totalForCurrent: () => totalFromR(buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI)),
-      onRender: render,
-      getLocked: () => lockOverride,
-      onRandStep: idx => {
-        if (idx <= 0) return false;
-        const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
-        return rollPair(R, idx - 1).snap;
-      },
-      onRandAll: idx => {
-        if (idx <= 0) return;
-        rollAllPairs();
-      },
-    });
-    function reTotalReset() {
-      pairOverride = {};
-      REAL_CACHE.clear();
-      overrideEpoch++;
+  // Stage 1: cluster pairing — mounted via shared factory.
+  NETGEN.mountClusterPairWalker({
+    hostId: "g-cpair",
+    getR: () => buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI),
+    positions: LIVE_POS_OF,
+    nodeColorOf: (id) => nodeColorOf(id),
+    clusterColorOf: (cname) => CLUSTER_COLOR_OF[cname],
+    stage2Color: COL.edge_stage2,
+    dropColor: COL.edge_drop,
+    mintColor: COL.mint || "#4e7a3a",
+    stubSeedFn: () => STUB_SEED,
+    pairOverride,
+    fireClusterPreChanged,
+    resetEpoch: () => { REAL_CACHE.clear(); overrideEpoch++; },
+    busSubscriptions: [onStubChanged, onUChanged],
+    introDesc: "Each node sprouts \\(\\hat y_u\\) intra-cluster stubs in its cluster's colour (current \\(\\xi = " + SYNTHETIC_XI.toFixed(3) + "\\)). The kernel shuffles each cluster's stubs and pairs them adjacent in shuffled order.",
+    stepDescFn: (cur, j, _len, tag) => {
+      const tag2 = cur.loop ? " (self-loop)" : j.bad ? " (parallel of an existing edge)" : "";
+      return "Cluster " + cur.cluster + ": stubs of <b>" + cur.u + "</b> and <b>" + cur.v + "</b> pair up" + tag2 + ". The 2 mint spokes are the stubs just consumed; remaining stubs around each node await later pairs.";
+    },
+    navBoundariesFn: () => {
       const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
-      ctl.reconfigure(totalFromR(R));
-    }
-    onStubChanged.push(reTotalReset);
-    onUChanged.push(reTotalReset);
-
-    attachClusterNav({
-      ctl,
-      hostId: "g-cpair-cy",
-      prefix: "g-cpair",
-      curElId: "g-cpair-cur",
-      getLocked: () => lockOverride,
-      boundariesFn: () => {
-        const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
-        return R.clusterStubLayouts
-          .filter(c => c.numPairs > 0)
-          .map(c => c.startInClusterPre + c.numPairs);
-      },
-    });
-  })();
+      return R.clusterStubLayouts
+        .filter(c => c.numPairs > 0)
+        .map(c => c.startInClusterPre + c.numPairs);
+    },
+  });
 
   // Stage 2: cluster rewire — per-op walker. Each step is one outer
   // iteration of the recycle loop: cuts p1 + p2 (solid red flash), then

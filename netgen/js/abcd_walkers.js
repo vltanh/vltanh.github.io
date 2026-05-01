@@ -296,4 +296,230 @@
       effectiveFinalOps: () => effectiveFinalOps(getR()),
     };
   };
+
+  // mountClusterPairWalker — per-pair cluster spoke walker.
+  // cfg fields:
+  //   hostId            "g-cpair"
+  //   getR              () => realization with clusterPre + clusterStubLayouts
+  //   positions         optional positions map
+  //   nodeColorOf       (id) => color for node fill + spoke colour
+  //   clusterColorOf    (cname) => intra-edge colour
+  //   stage2Color, dropColor, mintColor : palette
+  //   stubSeedFn        () => integer driving rng seeds
+  //   pairOverride      module-scope object the factory mutates per-key
+  //   fireClusterPreChanged ()
+  //   resetEpoch        ()  (typically `overrideEpoch++` cache buster)
+  //   busSubscriptions  array of bus arrays for reTotalReset listener
+  //   navBoundariesFn   optional () => [boundary indices]
+  //   introDesc         string for step 0
+  //   stepDescFn        (cur, j, totalLen) => string for steps > 0
+  NS.mountClusterPairWalker = function (cfg) {
+    const {
+      hostId, getR, positions, nodeColorOf, clusterColorOf,
+      stage2Color, dropColor, mintColor,
+      stubSeedFn, pairOverride, fireClusterPreChanged, resetEpoch,
+      busSubscriptions = [],
+      navBoundariesFn,
+      introDesc,
+      stepDescFn,
+    } = cfg;
+    const keyOf = NS.keyOf;
+    const viz = NS.VIZ.init(hostId + "-cy", {
+      showLabels: true, edges: [], pinned: true,
+      positions,
+      nodeColor: (id) => nodeColorOf(parseInt(id, 10)),
+    });
+    let lockOverride = false;
+    let ctl = null;
+    function setRandLock(locked) {
+      lockOverride = locked;
+      if (ctl) ctl.refreshButtons();
+    }
+    const spokes = NS.spokeLayer.attach(viz, { onLockChange: setRandLock });
+    function totalFromR(R) { return 1 + R.clusterPre.length; }
+    let cpairRerollNonce = 0;
+
+    function rollPair(R, idx) {
+      let lay = null, l = 0;
+      for (const c of R.clusterStubLayouts) {
+        if (idx >= c.startInClusterPre && idx < c.startInClusterPre + c.numPairs) {
+          lay = c; l = idx - c.startInClusterPre; break;
+        }
+      }
+      if (!lay) return { snap: false };
+      const prefix = R.clusterPre.slice(lay.startInClusterPre, lay.startInClusterPre + l);
+      cpairRerollNonce += 1;
+      const fresh = d3.randomLcg(stubSeedFn() * 8191 + cpairRerollNonce * 41 + idx * 113);
+      const newTail = NS.stubPoolReseed({
+        layout: lay, prefix, rng: fresh,
+        classify: (a, b, ctx) => {
+          const loop = (a === b);
+          const k = keyOf(a, b);
+          const multi = !loop && ctx.localEdges.has(k);
+          if (!loop && !multi) ctx.add(k);
+          return { u: a, v: b, cluster: lay.cname, loop, multi };
+        },
+      });
+      newTail.forEach((np, i) => { pairOverride[lay.startInClusterPre + l + i] = np; });
+      fireClusterPreChanged();
+      spokes.markReroll();
+      return { snap: false };
+    }
+
+    function rollAllPairs() {
+      for (const k in pairOverride) delete pairOverride[k];
+      cpairRerollNonce += 1;
+      const Rfresh = getR();
+      Rfresh.clusterStubLayouts.forEach((lay, i) => {
+        const fresh = d3.randomLcg(stubSeedFn() * 8191 + cpairRerollNonce * 41 + i * 113);
+        const newTail = NS.stubPoolReseed({
+          layout: lay, prefix: [], rng: fresh,
+          classify: (a, b, ctx) => {
+            const loop = (a === b);
+            const k = keyOf(a, b);
+            const multi = !loop && ctx.localEdges.has(k);
+            if (!loop && !multi) ctx.add(k);
+            return { u: a, v: b, cluster: lay.cname, loop, multi };
+          },
+        });
+        newTail.forEach((np, i) => { pairOverride[lay.startInClusterPre + i] = np; });
+      });
+      fireClusterPreChanged();
+      spokes.markReroll();
+    }
+
+    function render(step, snap) {
+      const R = getR();
+      const total = 1 + R.clusterPre.length;
+      if (step >= total) step = total - 1;
+      viz.setEdges([]);
+      const cfgByNode = NS.spokeLayer.byNodeFromEdges(viz, R.clusterPre,
+        n => nodeColorOf(parseInt(n.id, 10)));
+      // Outliers carry zero cluster stubs; defensively zero their counts.
+      if (R.outliers) {
+        R.outliers.forEach(nid => { if (cfgByNode[nid]) cfgByNode[nid].count = 0; });
+      }
+      const placed = NS.walkerMarkPlaced(R.clusterPre.slice(0, Math.max(0, step - 1)), {
+        idPrefix: "cp-",
+        goodColor: (e) => clusterColorOf(e.cluster) || stage2Color,
+        badColor: dropColor,
+        keyOf,
+      });
+      let just = null;
+      let bridgeColor = mintColor;
+      const j = NS.walkerMarkJust(R.clusterPre, step, { keyOf });
+      if (j) {
+        bridgeColor = clusterColorOf(j.e.cluster) || stage2Color;
+        just = {
+          u: j.e.u, v: j.e.v, color: bridgeColor, bad: j.bad,
+          badColor: j.bad ? dropColor : null,
+        };
+      }
+      NS.snapOrSync(spokes, { byNode: cfgByNode, placed, just, justSeq: step, bridgeColor }, snap);
+
+      const totEl = document.getElementById(hostId + "-total");
+      const curEl = document.getElementById(hostId + "-cur");
+      if (totEl) totEl.textContent = String(total - 1);
+      if (curEl) curEl.textContent = String(step);
+      let label, desc;
+      if (step === 0) {
+        label = "stubs ready";
+        desc = introDesc;
+      } else {
+        const cur = j.e;
+        const tag = cur.loop ? " (self-loop)" : (j.bad ? " (parallel)" : "");
+        label = "cluster pair " + step + " / " + R.clusterPre.length;
+        desc = (stepDescFn ? stepDescFn(cur, j, R.clusterPre.length, tag) :
+                "Stubs of <b>" + cur.u + "</b> and <b>" + cur.v + "</b> pair up inside <code>" + cur.cluster + "</code>" + tag + ".");
+      }
+      document.getElementById(hostId + "-stage").textContent = label;
+      const descEl = document.getElementById(hostId + "-desc");
+      descEl.innerHTML = '<span class="st">' + label + "</span> &middot; " + desc;
+      NS.retypeset(descEl);
+    }
+
+    const R0 = getR();
+    ctl = NS.rerollWalker({
+      prefix: hostId,
+      total: totalFromR(R0),
+      totalForCurrent: () => totalFromR(getR()),
+      getLocked: () => lockOverride,
+      onRender: render,
+      onRandStep: idx => {
+        if (idx <= 0) return false;
+        return rollPair(getR(), idx - 1).snap;
+      },
+      onRandAll: idx => {
+        if (idx <= 0) return;
+        rollAllPairs();
+      },
+    });
+
+    function reTotalReset() {
+      for (const k in pairOverride) delete pairOverride[k];
+      if (resetEpoch) resetEpoch();
+      ctl.reconfigure(totalFromR(getR()));
+    }
+    busSubscriptions.forEach(bus => bus.push(reTotalReset));
+
+    if (navBoundariesFn) {
+      attachNav({
+        ctl, hostId, prefix: hostId,
+        curElId: hostId + "-cur",
+        getLocked: () => lockOverride,
+        boundariesFn: navBoundariesFn,
+      });
+    }
+    return { ctl, reTotalReset };
+  };
+
+  // Shared cluster-nav (‹/› arrows). Identical logic in both abcd and
+  // abcd+o; lifted here so factories can wire it without each page
+  // redefining it.
+  function attachNav(opts) {
+    const { ctl, hostId, prefix, getLocked, boundariesFn, curElId } = opts;
+    const host = document.getElementById(hostId + "-cy");
+    if (!host) return;
+    function mkBtn(side, label, aria) {
+      const b = document.createElement("button");
+      b.className = "cluster-nav cluster-nav-" + side;
+      b.id = prefix + "-cluster-" + side;
+      b.type = "button";
+      b.setAttribute("aria-label", aria);
+      b.textContent = label;
+      return b;
+    }
+    const prev = mkBtn("prev", "‹", "previous cluster");
+    const next = mkBtn("next", "›", "next cluster");
+    host.appendChild(prev);
+    host.appendChild(next);
+    function refresh() {
+      prev.disabled = ctl.idx <= 0;
+      next.disabled = ctl.idx >= ctl.total - 1;
+    }
+    function jump(forward) {
+      if (getLocked && getLocked()) return;
+      const starts = boundariesFn();
+      if (!starts.length) return;
+      const cur = ctl.idx;
+      let target;
+      if (forward) {
+        target = starts.find(s => s > cur);
+        if (target == null) target = ctl.total - 1;
+      } else {
+        const earlier = starts.filter(s => s < cur);
+        target = earlier.length ? earlier[earlier.length - 1] : 0;
+      }
+      ctl.set(target);
+      refresh();
+    }
+    prev.addEventListener("click", () => jump(false));
+    next.addEventListener("click", () => jump(true));
+    const curEl = document.getElementById(curElId);
+    if (curEl && typeof MutationObserver !== "undefined") {
+      new MutationObserver(refresh).observe(curEl, { childList: true, characterData: true });
+    }
+    refresh();
+  }
+  NS.attachClusterNav = attachNav;
 })();
