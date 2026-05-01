@@ -154,7 +154,7 @@
   <p>Plain <a href="./abcd.html">ABCD</a> has no outlier concept. Our wrapper's <code>outlier_mode=singleton</code> wraps each unclustered input node in its own 1-node pseudo-cluster, and the sampler accepts them through admissibility fallback. ABCD+o is the paper-level fix: a single integer parameter \(s_0\) so the Julia pseudo-code treats those \(s_0\) nodes as noise without pretending they form a community.</p>
   <p>The sampler's outlier block sits at cluster_id = 1. Its members are drawn uniformly at random from every node satisfying an upper-degree bound the paper derives; once drawn, their weight split is pinned (\(\hat y_u = 0\), \(\hat z_u = w_u\)). All their stubs fund the background graph \(G_0\); none fund any cluster graph.</p>
   <p>Across seeds the set of chosen outliers rotates, so two runs with the same inputs typically produce different outlier picks. The 233 input nodes that our profile marked as outliers need not show up at cluster_id = 1 in the output.</p>
-  <p>Two things the model does <em>not</em> do, despite a casual reading. First, it does <em>not</em> forbid outlier-outlier edges: two outliers' \(z\)-stubs can pair in the background graph. Second, the identity of input outliers does <em>not</em> survive; our wrapper's profile drops their OO edges at input time only to make the target \(\xi\) reachable, not to tell the sampler which specific nodes to label as outliers.</p>
+  <p>Two things the model does <em>not</em> do. It does not forbid outlier-outlier edges: two outliers' \(z\)-stubs can pair in the background graph. And the identity of input outliers does not survive; the wrapper's profile drops their OO edges at input time only to make the target \(\xi\) reachable, not to tell the sampler which specific nodes to label as outliers.</p>
 </section>
 
 <!-- ─────────── Profiling · the shared fixture ─────────── -->
@@ -175,7 +175,7 @@
 <section class="stage">
   <div class="stage-num">profiling · degree sequence</div>
   <h2>Drop OO edges first, then read per-node degrees.</h2>
-  <p>ABCD+o is the one generator in the repo that flips <code>drop_outlier_outlier_edges</code> to <code>true</code> by default. The reason is target-stability: the background graph's uniform pairing produces OO edges at a rate of roughly \((s_0 / n)^2\), well below what an OO-dense input would have. If profile kept those OO edges, the target \(\xi\) would assume a density of intra-outlier edges the sampler cannot reproduce, and realised \(\xi\) would drift low. Dropping OO at profile time gives the sampler a target it can hit.</p>
+  <p>ABCD+o is the only generator in the repo that flips <code>drop_outlier_outlier_edges</code> on by default. Target-stability is the reason: the background graph's uniform pairing produces OO edges at a rate of roughly \((s_0 / n)^2\), well below what an OO-dense input would have. Keeping those OO edges in profile would set a target \(\xi\) the sampler cannot reach, and the realised \(\xi\) would drift low. Dropping OO at profile time gives the sampler a target it can hit.</p>
   <p>On our synthetic, the edge \((19, 20)\) is the only OO edge. Dropping it reduces \(w_{19}\) and \(w_{20}\) by one each. On <code>dnc</code> the drop is more aggressive: 233 input outliers had all their edges inside the outlier pool; drop_oo zeroes their degrees and they drop out of <code>edge.csv</code> entirely.</p>
   <div class="graph" id="g-deg">
     <div class="graph-chrome">
@@ -437,7 +437,7 @@
   <div class="stage-num">generation · cross-cluster final swap</div>
   <h2>One last swap pass over the union.</h2>
   <p>If the background rewire loop finishes with a non-empty recycle list, a final fallback stage runs. It pulls each leftover bad edge \(\{u_1, v_1\}\) and tries to swap it against a partner \(\{u_2, v_2\}\) drawn uniformly from the union of cluster output and background output (intra + inter pooled together, outliers' bg edges included). The same two swap variants apply (\(\{u_1, u_2\} + \{v_1, v_2\}\) or \(\{u_1, v_2\} + \{v_1, u_2\}\)). Each new half is checked: if it is a self-loop or duplicates an existing edge in the union, that half goes back on the recycle list; otherwise it is added to the union and the original partner is removed. The loop runs until the recycle list is empty or stops shrinking.</p>
-  <p>Whatever bad edges remain after the loop are dropped from the output. This is the only place in the pipeline where a residue actually leaves the model.</p>
+  <p>Bad edges still on the recycle list when the loop stops are dropped from the output. The cross-cluster final swap is the only stage that actually drops edges; every earlier rewire either succeeds or forwards its residue.</p>
   <div class="graph" id="g-finalswap">
     <div class="graph-chrome">
       <span id="g-finalswap-stage">pre-final (carrying recycle from bg)</span>
