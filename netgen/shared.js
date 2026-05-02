@@ -832,9 +832,11 @@ const VIZ = {
       // refs stay in sync.
       groups.each(function (d) {
         d.__group = this;
-        d.__circle = this.firstChild && this.firstChild.tagName === "circle"
-          ? this.firstChild
-          : this.querySelector("circle.viz-node");
+        // Always select by class — pages may insert halo circles as the
+        // group's first child (fd-heat does this), so a firstChild
+        // shortcut would cache the halo as the viz-node circle and
+        // paint() would write cx/cy to the wrong element.
+        d.__circle = this.querySelector("circle.viz-node");
         if (showLabels) d.__label = this.querySelector("text.viz-label");
       });
       linkEnter.merge(linkSel).each(function (d) { d.__path = this; });
