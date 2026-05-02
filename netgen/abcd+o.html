@@ -151,7 +151,7 @@
 </header>
 
 <section class="hook">
-  <p>Plain <a href="./abcd.html">ABCD</a> has no outlier concept. Our wrapper's <code>outlier_mode=singleton</code> wraps each unclustered input node in its own 1-node pseudo-cluster, and the sampler accepts them through admissibility fallback. ABCD+o is the paper-level fix: a single integer parameter \(s_0\) so the Julia pseudo-code treats those \(s_0\) nodes as noise without pretending they form a community.</p>
+  <p>Plain <a href="./abcd.html">ABCD</a> has no outlier concept. Our wrapper wraps each unclustered input node in its own 1-node pseudo-cluster (the singleton outlier mode), and the sampler accepts them through admissibility fallback. ABCD+o is the paper-level fix: a single integer parameter \(s_0\) so the Julia pseudo-code treats those \(s_0\) nodes as noise without pretending they form a community.</p>
   <p>The sampler's outlier block sits at cluster_id = 1. Its members are drawn uniformly at random from every node satisfying an upper-degree bound the paper derives; once drawn, their weight split is pinned (\(\hat y_u = 0\), \(\hat z_u = d_u\)). All their stubs fund the background graph \(G_0\); none fund any cluster graph.</p>
   <p>Across seeds the set of chosen outliers rotates, so two runs with the same inputs typically produce different outlier picks. The 233 input nodes that our profile marked as outliers need not show up at cluster_id = 1 in the output.</p>
   <p>Two things the model does <em>not</em> do. It does not forbid outlier-outlier edges: two outliers' \(z\)-stubs can pair in the background graph. And the identity of input outliers does not survive; the wrapper's profile drops their OO edges at input time only to make the target \(\xi\) reachable, not to tell the sampler which specific nodes to label as outliers.</p>
@@ -161,7 +161,7 @@
 <section class="stage">
   <div class="stage-num">profiling · outliers as singletons</div>
   <h2>Shared input graph: 18 clustered + 2 outliers in one combined block (with the OO edge dashed).</h2>
-  <p>The 20-node synthetic this page builds on: C1 (8), C2 (6), C3 (4), plus a 2-node outlier block (light red). ABCD+o's profile flips <code>drop_outlier_outlier_edges</code> on, so the (19, 20) edge below is dashed-red as a visual cue: it disappears before stage 2 sees the input. The sampler then picks its own \(s_0\) outliers in stage 2; this view shows the input partition only.</p>
+  <p>The 20-node synthetic this page builds on: C1 (8), C2 (6), C3 (4), plus a 2-node outlier block (light red). ABCD+o's profile drops the OO edges by default, so the (19, 20) edge below is dashed-red as a visual cue: it disappears before stage 2 sees the input. The sampler then picks its own \(s_0\) outliers in stage 2; this view shows the input partition only.</p>
   <div class="graph" id="g-shared-input">
     <div class="graph-chrome">
       <span>input G &middot; combined mode &middot; 4 clusters &middot; OO dashed</span>
@@ -175,7 +175,7 @@
 <section class="stage">
   <div class="stage-num">profiling · degree sequence</div>
   <h2>Drop OO edges first, then read per-node degrees.</h2>
-  <p>ABCD+o is the only generator in the repo that flips <code>drop_outlier_outlier_edges</code> on by default. Target-stability is the reason: the background graph's uniform pairing produces OO edges at a rate of roughly \((s_0 / n)^2\), well below what an OO-dense input would have. Keeping those OO edges in profile would set a target \(\xi\) the sampler cannot reach, and the realised \(\xi\) would drift low. Dropping OO at profile time gives the sampler a target it can hit.</p>
+  <p>ABCD+o is the only generator in the repo that drops OO edges by default. Target-stability is the reason: the background graph's uniform pairing produces OO edges at a rate of roughly \((s_0 / n)^2\), well below what an OO-dense input would have. Keeping those OO edges in profile would set a target \(\xi\) the sampler cannot reach, and the realised \(\xi\) would drift low. Dropping OO at profile time gives the sampler a target it can hit.</p>
   <p>On our synthetic, the edge \((19, 20)\) is the only OO edge. Dropping it reduces \(w_{19}\) and \(w_{20}\) by one each. On <code>dnc</code> the drop is more aggressive: 233 input outliers had all their edges inside the outlier pool; drop_oo zeroes their degrees and they drop out of <code>edge.csv</code> entirely.</p>
   <div class="graph" id="g-deg">
     <div class="graph-chrome">
@@ -469,7 +469,7 @@
   \[
     2 \sum_{u \,:\, \mathrm{outlier}(u)} d_u \;>\; \sum_u \hat z_u,
   \]
-  <p>outlier stubs are more than half the external pool, so two random stubs pair outlier-with-outlier more often than outlier-with-non-outlier. The Julia sampler flags this with stderr message <code>"outlier nodes form a community"</code>. The Python wrapper greps stderr and branches: if the warning fires, keep cluster_id = 1 rows in <code>com.csv</code>; otherwise strip them.</p>
+  <p>outlier stubs are more than half the external pool, so two random stubs pair outlier-with-outlier more often than outlier-with-non-outlier. The Julia sampler flags this with the stderr message <em>outlier nodes form a community</em>. The Python wrapper greps stderr and branches: if the warning fires, keep the cluster_id = 1 rows in <code>com.csv</code>; otherwise strip them.</p>
   <div class="disk-panel">
     <svg id="warn-bar" viewBox="0 0 640 140" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:auto"></svg>
     <div class="warn-banner silent" id="warn-banner">
@@ -520,7 +520,7 @@
   </div>
   <div class="callout warn">
     <div class="tag">caveat 3: the "community" warning is a heuristic</div>
-    <p>The stderr message <code>"outlier nodes form a community"</code> fires on a stub-count ratio, not any detector output. The wrapper's <code>com.csv</code> semantics change based on that substring match. On <code>dnc</code> the message is silent; <code>com.csv</code> has 551 rows and no cluster_id = 1. Always read <code>run.log</code> alongside <code>com.csv</code>.</p>
+    <p>The stderr message <em>outlier nodes form a community</em> fires on a stub-count ratio, not any detector output. The wrapper's <code>com.csv</code> semantics change based on that substring match. On <code>dnc</code> the message is silent; <code>com.csv</code> has 551 rows and no cluster_id = 1. Always read <code>run.log</code> alongside <code>com.csv</code>.</p>
   </div>
 </section>
 
