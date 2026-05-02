@@ -152,7 +152,7 @@
 
 <section class="hook">
   <p>Plain <a href="./abcd.html">ABCD</a> has no outlier concept. Our wrapper's <code>outlier_mode=singleton</code> wraps each unclustered input node in its own 1-node pseudo-cluster, and the sampler accepts them through admissibility fallback. ABCD+o is the paper-level fix: a single integer parameter \(s_0\) so the Julia pseudo-code treats those \(s_0\) nodes as noise without pretending they form a community.</p>
-  <p>The sampler's outlier block sits at cluster_id = 1. Its members are drawn uniformly at random from every node satisfying an upper-degree bound the paper derives; once drawn, their weight split is pinned (\(\hat y_u = 0\), \(\hat z_u = w_u\)). All their stubs fund the background graph \(G_0\); none fund any cluster graph.</p>
+  <p>The sampler's outlier block sits at cluster_id = 1. Its members are drawn uniformly at random from every node satisfying an upper-degree bound the paper derives; once drawn, their weight split is pinned (\(\hat y_u = 0\), \(\hat z_u = d_u\)). All their stubs fund the background graph \(G_0\); none fund any cluster graph.</p>
   <p>Across seeds the set of chosen outliers rotates, so two runs with the same inputs typically produce different outlier picks. The 233 input nodes that our profile marked as outliers need not show up at cluster_id = 1 in the output.</p>
   <p>Two things the model does <em>not</em> do. It does not forbid outlier-outlier edges: two outliers' \(z\)-stubs can pair in the background graph. And the identity of input outliers does not survive; the wrapper's profile drops their OO edges at input time only to make the target \(\xi\) reachable, not to tell the sampler which specific nodes to label as outliers.</p>
 </section>
@@ -213,7 +213,7 @@
   \[
     \xi \;=\; \frac{|E^+_{\text{out}}|}{|E^+|}.
   \]
-  <p>Sampler-side, \(\xi\) is still the paper's weight-split parameter: each non-outlier gets \(\hat y_u = (1-\xi) w_u\) cluster-graph stubs and \(\hat z_u = \xi w_u\) background stubs; outliers pin to \(\hat y_u = 0\). The realised inter-cluster fraction in output depends on which \(s_0\) nodes the sampler picks as outliers (hub-heavy picks lift it; low-degree picks depress it).</p>
+  <p>Sampler-side, \(\xi\) is still the paper's weight-split parameter: each non-outlier gets \(\hat y_u = (1-\xi) d_u\) cluster-graph stubs and \(\hat z_u = \xi d_u\) background stubs; outliers pin to \(\hat y_u = 0\). The realised inter-cluster fraction in output depends on which \(s_0\) nodes the sampler picks as outliers (hub-heavy picks lift it; low-degree picks depress it).</p>
   <div class="graph" id="g-xi">
     <div class="graph-chrome">
       <span>input G &middot; red edges cross cluster boundaries (\(E^+_{\text{out}}\)) on the post-drop_oo graph; OO edge faded</span>
@@ -231,37 +231,16 @@
   </div>
 </section>
 
-<!-- ─────────── Generation · outlier selection ─────────── -->
-<section class="stage">
-  <div class="stage-num">generation · outlier selection</div>
-  <h2>\(s_0\) nodes, drawn uniformly from eligibility.</h2>
-  <p>The sampler picks the outlier block itself. A node of degree \(w_u\) is <em>eligible</em> if</p>
-  \[
-    w_u \;\le\; \bar L + s_0 - \frac{\bar L \, s_0}{n} - 1, \qquad
-    \bar L \;=\; \sum_{u \in V} \min(1, \xi w_u).
-  \]
-  <p>where \(\bar L\) is a lower bound on the expected count of nodes with at least one background-graph stub. The eligibility threshold keeps hubs out of the mega-cluster only when their degree would exceed the residual cluster graph's graphic bound. On most inputs the threshold is large enough that every node is eligible. On our synthetic, the threshold is about 16 and every node with \(w_u \le 8\) passes. From the eligible set, the sampler draws \(s_0\) uniformly at random without replacement; those become cluster_id = 1.</p>
-  <p>Press <em>re-roll outliers</em> below to sample fresh members; the mega-cluster label lands on different input nodes each time.</p>
-  <div class="disk-panel">
-    <div class="widget-row tight">
-      <button class="btn primary" id="outlier-reroll" type="button">re-roll outliers</button>
-      <span class="step-label">propagates downstream; upstream stays fixed</span>
-    </div>
-    <div class="graph-canvas" id="g-outlier-cy" style="max-height:520px"></div>
-    <div class="outlier-info" id="outlier-info">&middot;</div>
-  </div>
-</section>
-
 <!-- ─────────── Generation · assigning vertices to clusters ─────────── -->
 <section class="stage">
   <div class="stage-num">generation · assigning vertices to clusters</div>
-  <h2>Big nodes to big clusters; small nodes fill the rest.</h2>
-  <p>With the outlier block fixed, the sampler assigns each remaining vertex to one of the real clusters before any edges are drawn. The Julia code walks the non-outlier vertices in descending \(d_u\) and at each step samples one cluster from the admissible set with probability proportional to its remaining capacity. A vertex \(u\) is admissible for cluster \(j\) iff \(x_u \le s_j - 1\), where \(x_u\) is the per-vertex bound below: the expected number of neighbours of \(u\) that will end up in \(u\)'s own cluster.</p>
+  <h2>Every node walks into a block; outliers are nodes the walker drops into the outlier block.</h2>
+  <p>The sampler assigns each vertex to one of \(k+1\) blocks: \(k\) real clusters plus the <em>outlier</em> block (\(s_0\) slots, kernel cluster_id = 1). Walk vertices in descending \(d_u\); at each step sample a block from the admissible set with probability proportional to its remaining capacity. A vertex \(u\) is admissible for cluster \(j\) iff \(x_u \le s_j - 1\), where \(x_u\) is the per-vertex bound below; the outlier block has no \(x_u\) gate and stays admissible until its \(s_0\) slots are full.</p>
   \[
-    x_u \;=\; \bigl\lceil (1 - \xi \phi) \, w_u \bigr\rceil, \qquad
+    x_u \;=\; \bigl\lceil (1 - \xi \phi) \, d_u \bigr\rceil, \qquad
     \phi \;=\; 1 - \sum_{j=0}^{k} \left(\frac{s_j}{n}\right)^{\!2}.
   \]
-  <p>The outlier mega-cluster (\(s_0\)) enters \(\phi\) like any other cluster, since outliers are real members of the partition for the purposes of the bound. The walker on the right shows the canonical-stochastic procedure: each vertex flies into a placeholder slot in its sampled cluster bin. The outlier block is pre-filled from the previous stage.</p>
+  <p>The outlier block enters \(\phi\) like any other block, since outliers are real members of the partition for the bound. Re-roll the walker to land different nodes in the outlier block; downstream stages cascade off the new partition.</p>
   <div class="graph" id="g-assign">
     <div class="graph-chrome">
       <span></span>
@@ -291,14 +270,14 @@
 <section class="stage">
   <div class="stage-num">generation · the weight split</div>
   <h2>Outliers pin to \(\hat y = 0\). Non-outliers split and round like ABCD.</h2>
-  <p>Fix the outlier pick from the previous stage. For non-outliers, \(y_u = (1 - \xi) w_u\) continuous and \(z_u = \xi w_u\); each non-outlier's \(\hat y_u\) is stochastically rounded to an integer, and the leader of each real cluster takes the deterministic floor plus a 0-or-1 parity bump so the cluster's \(\sum \hat y_u\) is even. For outliers, the sampler overrides: \(\hat y_u = 0\) and \(\hat z_u = w_u\).</p>
+  <p>Fix the outlier pick from the previous stage. For non-outliers, \(y_u = (1 - \xi) d_u\) continuous and \(z_u = \xi d_u\); each non-outlier's \(\hat y_u\) is stochastically rounded to an integer, and the leader of each real cluster takes the deterministic floor plus a 0-or-1 parity bump so the cluster's \(\sum \hat y_u\) is even. For outliers, the sampler overrides: \(\hat y_u = 0\) and \(\hat z_u = d_u\).</p>
   <div class="disk-panel">
     <div class="widget-row tight">
       <button class="btn primary" id="u-reroll">random</button>
       <span class="step-label">resamples the stochastic rounding at the profile-fixed \(\xi = <span id="xi-fixed">&middot;</span>\)</span>
     </div>
     <svg id="xi-bars" viewBox="0 0 640 460" preserveAspectRatio="xMidYMid meet"></svg>
-    <div class="step-desc"><span class="st">reading the chart</span> &middot; one column per node, cluster-order on the x-axis. Cluster-coloured stack is \(\hat y_u\); red on top is \(\hat z_u\); dashed tick is the pre-rounding intra target \(y_u = (1 - \xi) w_u\); <span style="color:#c7801e">★</span> marks the cluster's leader (deterministic floor + parity bump). Nodes picked as outliers stay solid red end-to-end and never carry the leader star.</div>
+    <div class="step-desc"><span class="st">reading the chart</span> &middot; one column per node, cluster-order on the x-axis. Cluster-coloured stack is \(\hat y_u\); red on top is \(\hat z_u\); dashed tick is the pre-rounding intra target \(y_u = (1 - \xi) d_u\); <span style="color:#c7801e">★</span> marks the cluster's leader (deterministic floor + parity bump). Nodes picked as outliers stay solid red end-to-end and never carry the leader star.</div>
     <div class="readout" style="justify-content:center">
       <span class="item">background weight <b id="ext-tot">&middot;</b></span>
       <span class="item">total weight <b id="deg-tot">&middot;</b></span>
@@ -365,7 +344,7 @@
 <section class="stage">
   <div class="stage-num">generation · background pairing</div>
   <h2>Pair background stubs across the whole vertex set, outliers included.</h2>
-  <p>The background graph \(G_0\) is one global pool: every node drops its \(\hat z_u\) stubs into the same urn and the configuration model pairs them without regard for cluster membership. Outlier stubs (\(\hat z_u = w_u\)) and non-outlier stubs (\(\hat z_u = \xi w_u\)) mix freely. A bg edge that duplicates an existing cluster edge flags for rewire alongside the usual self-loops and parallels.</p>
+  <p>The background graph \(G_0\) is one global pool: every node drops its \(\hat z_u\) stubs into the same urn and the configuration model pairs them without regard for cluster membership. Outlier stubs (\(\hat z_u = d_u\)) and non-outlier stubs (\(\hat z_u = \xi d_u\)) mix freely. A bg edge that duplicates an existing cluster edge flags for rewire alongside the usual self-loops and parallels.</p>
   <div class="graph" id="g-bgpair">
     <div class="graph-chrome">
       <span id="g-bgpair-stage">stubs ready</span>
@@ -448,11 +427,11 @@
 <section class="stage">
   <div class="stage-num">generation · degree preservation</div>
   <h2>Output degree multiset almost matches input, outlier pin and all.</h2>
-  <p>Stubs only truly leave the model at the cross-cluster final swap's drop-stale step. Cluster-rewire residue forwards to the bg pool; bg-rewire residue forwards to the cross-cluster final swap; only what the final swap cannot resolve is dropped. Outliers spend all their weight on the bg pool, so their output degree should still match \(w_u\) within the same residue tolerance as any other node.</p>
+  <p>Stubs only truly leave the model at the cross-cluster final swap's drop-stale step. Cluster-rewire residue forwards to the bg pool; bg-rewire residue forwards to the cross-cluster final swap; only what the final swap cannot resolve is dropped. Outliers spend all their weight on the bg pool, so their output degree should still match \(d_u\) within the same residue tolerance as any other node.</p>
   <div class="disk-panel">
     <svg id="deg-cmp" viewBox="0 0 640 320" preserveAspectRatio="xMidYMid meet"></svg>
     <div class="step-desc">
-      <span class="st">reading the chart</span> &middot; nodes sorted by input \(w_u\) desc. Azure bar = input degree, mint bar = output degree from the current realisation. Red-dashed rectangle fills the gap between the two when they differ.
+      <span class="st">reading the chart</span> &middot; nodes sorted by input \(d_u\) desc. Azure bar = input degree, mint bar = output degree from the current realisation. Red-dashed rectangle fills the gap between the two when they differ.
     </div>
     <div class="readout" style="justify-content:center">
       <span class="item">total abs diff (this realisation) <b id="deg-diff">&middot;</b></span>
@@ -474,9 +453,9 @@
 <section class="stage">
   <div class="stage-num">generation · the warning branch</div>
   <h2>The sampler warns when outlier stubs dominate the external pool.</h2>
-  <p>At low \(\xi\) with a large outlier block, non-outliers contribute \(\sum_u \xi w_u\) background stubs while outliers contribute \(\sum_u w_u\) (the full outlier degree). When</p>
+  <p>At low \(\xi\) with a large outlier block, non-outliers contribute \(\sum_u \xi d_u\) background stubs while outliers contribute \(\sum_u d_u\) (the full outlier degree). When</p>
   \[
-    2 \sum_{u \,:\, \mathrm{outlier}(u)} w_u \;>\; \sum_u \hat z_u,
+    2 \sum_{u \,:\, \mathrm{outlier}(u)} d_u \;>\; \sum_u \hat z_u,
   \]
   <p>outlier stubs are more than half the external pool, so two random stubs pair outlier-with-outlier more often than outlier-with-non-outlier. The Julia sampler flags this with stderr message <code>"outlier nodes form a community"</code>. The Python wrapper greps stderr and branches: if the warning fires, keep cluster_id = 1 rows in <code>com.csv</code>; otherwise strip them.</p>
   <div class="disk-panel">
@@ -685,24 +664,17 @@ window.MathJax = {
   }
 
   // ── Per-panel reroll bus ──
-  // Three seeds:
-  //   OUTLIER_SEED : which nodes become cluster_id = 1
+  // Two seeds (outlier identity now lives on the assignment trace):
   //   U_SEED       : stochastic rounding of y/z for non-outliers
   //   STUB_SEED    : stub shuffles / rewire
   // Cascades:
-  //   rerollOutlier() -> changes which nodes are outliers. Affects
-  //     outlier panel, weight-split (pinning), step-through,
-  //     deg-cmp.
   //   rerollU() -> changes non-outlier y/z split. Affects weight-
-  //     split, step-through, deg-cmp. Does not touch outlier panel.
+  //     split, step-through, deg-cmp.
   //   rerollStub() -> shuffles stubs. Affects step-through + deg-cmp
-  //     only. Does not touch outlier pick or weight split.
-  // Demo seed picked from a sweep over (OUTLIER, U) for non-trivial
-  // walks across every panel + drop-stale residue on both rewire
-  // walkers. (1, 5, 1) yields 23 cluster-pair + 7 cluster-rewire + 19
-  // bg-pair + 7 bg-rewire walker steps, with 1 drop-stale residue on
-  // each rewire walker. The drop-stale story is visible on first load.
-  let OUTLIER_SEED = 1, U_SEED = 5, STUB_SEED = 1;
+  //     only.
+  //   the assignment walker fires onOutlierChanged whenever its trace
+  //   moves a node into or out of the outlier block.
+  let U_SEED = 5, STUB_SEED = 1;
   const onOutlierChanged = [];
   const onUChanged = [];
   const onStubChanged = [];
@@ -715,12 +687,6 @@ window.MathJax = {
     // ξ is fixed by the profile; no slider. The bus is kept as a no-op
     // hook so any future xi-driver (e.g. step-plot click) can fire it.
   })();
-  function rerollOutlier() {
-    OUTLIER_SEED += 1;
-    onOutlierChanged.forEach(fn => fn());
-    onUChanged.forEach(fn => fn());
-    onStubChanged.forEach(fn => fn());
-  }
   function rerollU() {
     U_SEED += 1;
     onUChanged.forEach(fn => fn());
@@ -769,38 +735,24 @@ window.MathJax = {
   function seededRng(seed) { return d3.randomLcg(seed); }
   const keyOf = NETGEN.keyOf;
 
-  // Eligibility for outlier pick: mirrors graph_sampler.jl::populate_clusters
-  // hasoutliers branch. Threshold = L + n_out - L*n_out/n - 1, where L is
-  // sum of min(1, xi*w_u). Eligible = nodes with w_u <= threshold.
-  function computeEligible(xi) {
-    const n = NODES.length;
-    let L = 0;
-    NODES.forEach(u => L += Math.min(1, xi * DEG_KEPT[u]));
-    const threshold = L + N_OUTLIERS - L * N_OUTLIERS / n - 1;
-    return { eligible: NODES.filter(u => DEG_KEPT[u] <= threshold), threshold };
-  }
-  function pickOutliers(eligible, seed) {
-    // sampleWithoutReplacement uses Fisher-Yates; matches Julia's
-    // StatsBase.sample(items, k; replace=false) up to RNG byte-equality.
-    const rng = seededRng(seed * 2017 + 11);
-    return new Set(ABCDKernel.sampleWithoutReplacement(eligible, N_OUTLIERS, rng));
-  }
-
-  // Block names used by the assignment walker + the bin viz. Outlier
-  // mega-cluster comes first to mirror the kernel's KERNEL_S = [s_0,
-  // |C1|, |C2|, |C3|] prepend; assignment iterates only over the real
-  // clusters since outliers have already been picked upstream.
-  const BLOCK_MEGA = "MEGA";
-  const BLOCK_NAMES = [BLOCK_MEGA, "C1", "C2", "C3"];
+  // Block names used by the assignment walker + the bin viz. The outlier
+  // block comes first to mirror the kernel's KERNEL_S = [s_0, |C1|,
+  // |C2|, |C3|] prepend; the walker iterates over every node and the
+  // outlier block participates in admissibility just like real clusters.
+  const BLOCK_OUT = "outlier";
+  const BLOCK_NAMES = [BLOCK_OUT, "C1", "C2", "C3"];
   const REAL_BLOCK_NAMES = ["C1", "C2", "C3"];
-  const BLOCK_NODES = { [BLOCK_MEGA]: [], "C1": C1, "C2": C2, "C3": C3 };
+  // BLOCK_NODES[name] are the slot ids whose POSITIONS form the bin
+  // region. OUT_N = canonical outlier slot positions (the "outlier"
+  // bin region); C1/C2/C3 reuse original cluster member positions.
+  const BLOCK_NODES = { [BLOCK_OUT]: OUT_N.slice(), "C1": C1, "C2": C2, "C3": C3 };
   const BLOCK_COLOR = {
-    [BLOCK_MEGA]: OUTLIER_RED, "C1": COL.C1, "C2": COL.C2, "C3": COL.C3,
+    [BLOCK_OUT]: OUTLIER_RED, "C1": COL.C1, "C2": COL.C2, "C3": COL.C3,
   };
   const BLOCK_SIZE = {
-    [BLOCK_MEGA]: N_OUTLIERS, "C1": C1.length, "C2": C2.length, "C3": C3.length,
+    [BLOCK_OUT]: N_OUTLIERS, "C1": C1.length, "C2": C2.length, "C3": C3.length,
   };
-  const KERNEL_CID_FROM_BLOCK = { MEGA: 1, C1: 2, C2: 3, C3: 4 };
+  const KERNEL_CID_FROM_BLOCK = { [BLOCK_OUT]: 1, C1: 2, C2: 3, C3: 4 };
   const NAMED_CLUSTER_OF_KERNEL = { 2: "C1", 3: "C2", 4: "C3" };
   const PAGE_NODE_BY_KIDX = NODES.slice();
   const KERNEL_W = NODES.map(n => DEG_KEPT[n]);
@@ -839,35 +791,112 @@ window.MathJax = {
     if (currentOutlierSet().has(n)) return OUTLIER_RED;
     return BLOCK_COLOR[LIVE_REAL_CLUSTER_OF[n]] || COL.paper_3;
   }
-  // Outliers cache. computed lazily from OUTLIER_SEED + SYNTHETIC_XI.
-  // Invalidated whenever OUTLIER_SEED changes (rerollOutlier bumps).
-  let _outlierCache = null;
-  let _outlierCacheKey = null;
-  function currentOutlierSet() {
-    const key = OUTLIER_SEED;
-    if (_outlierCacheKey === key && _outlierCache) return _outlierCache;
-    const { eligible } = computeEligible(SYNTHETIC_XI);
-    _outlierCache = pickOutliers(eligible, OUTLIER_SEED);
-    _outlierCacheKey = key;
-    return _outlierCache;
-  }
-  function invalidateOutlierCache() {
-    _outlierCache = null;
-    _outlierCacheKey = null;
+  // Outlier set lives on the assignment trace. Initialised below from
+  // ASSIGN_INITIAL_SEED; the assignment walker mutates it on re-roll
+  // and fires onOutlierChanged subscribers whenever the membership
+  // delta is non-empty.
+  let _moduleOutlierSet = new Set();
+  function currentOutlierSet() { return _moduleOutlierSet; }
+  function setOutlierSet(s) {
+    let changed = s.size !== _moduleOutlierSet.size;
+    if (!changed) for (const v of s) { if (!_moduleOutlierSet.has(v)) { changed = true; break; } }
+    _moduleOutlierSet = s;
+    if (changed) onOutlierChanged.forEach(fn => fn());
   }
 
-  // Full realisation cache, keyed by (o_seed, u_seed, stub_seed, xi, overrideEpoch).
+  // ── Assignment trace (module level) ──
+  // Single canonical-stochastic walk: every node by d_u desc, picks a
+  // block (outlier | C1 | C2 | C3) with probability ∝ remaining capacity
+  // among admissible blocks. The outlier block is always admissible
+  // (no x_u check); real clusters use the standard x_u ≤ s_j - 1 gate.
+  // Whichever nodes end up in the outlier block become the realisation's
+  // outlier set, replacing the standalone uniform-random outlier draw.
+  let ASSIGN_SEED = 1;
+  let TRACE = [];
+  let QUEUE_RANKS = NODES.slice().sort((a, b) => DEG_KEPT[b] - DEG_KEPT[a] || a - b);
+  function computeAssignTrace(seed, startRank, prefix) {
+    startRank = startRank || 0;
+    prefix = prefix || [];
+    const rng = seededRng(seed);
+    const n = NODES.length;
+    const phi = 1 - BLOCK_NAMES.reduce((s, b) =>
+      s + Math.pow(BLOCK_SIZE[b] / n, 2), 0);
+    const xi = SYNTHETIC_XI;
+    const remaining = {};
+    const slotsAvail = {};
+    BLOCK_NAMES.forEach(b => {
+      remaining[b] = BLOCK_SIZE[b];
+      slotsAvail[b] = BLOCK_NODES[b].slice();
+    });
+    const trace = [];
+    for (let r = 0; r < startRank && r < prefix.length; r++) {
+      const t = prefix[r];
+      trace.push(t);
+      if (remaining[t.picked] != null) remaining[t.picked]--;
+      const sIdx = slotsAvail[t.picked].indexOf(t.slot);
+      if (sIdx >= 0) slotsAvail[t.picked].splice(sIdx, 1);
+    }
+    for (let r = trace.length; r < QUEUE_RANKS.length; r++) {
+      const v = QUEUE_RANKS[r];
+      const w = DEG_KEPT[v];
+      const xu = Math.ceil((1 - xi * phi) * w);
+      const remainingBefore = Object.assign({}, remaining);
+      // Outlier block: always admissible regardless of x_u (matches the
+      // canonical sampler treating outliers as a no-degree-constraint
+      // mega-cluster). Real clusters: x_u ≤ s_j − 1.
+      let admissible = BLOCK_NAMES.filter(b => {
+        if (remaining[b] <= 0) return false;
+        if (b === BLOCK_OUT) return true;
+        return BLOCK_SIZE[b] - 1 >= xu;
+      });
+      let fallback = false;
+      if (admissible.length === 0) {
+        admissible = BLOCK_NAMES.filter(b => remaining[b] > 0);
+        fallback = true;
+      }
+      const totalRem = admissible.reduce((s, b) => s + remaining[b], 0);
+      const u = rng() * totalRem;
+      let acc = 0, picked = admissible[0];
+      for (const b of admissible) {
+        acc += remaining[b];
+        if (u < acc) { picked = b; break; }
+      }
+      const pool = slotsAvail[picked];
+      const slotIdx = Math.floor(rng() * pool.length);
+      const slot = pool.splice(slotIdx, 1)[0];
+      remaining[picked]--;
+      trace.push({ v, w, xu, admissible: admissible.slice(), picked, slot, fallback, remainingBefore });
+    }
+    return trace;
+  }
+  function deriveOutlierSetFromTrace(trace) {
+    const s = new Set();
+    trace.forEach(t => { if (t.picked === BLOCK_OUT) s.add(t.v); });
+    return s;
+  }
+  // Live (assignment-driven) block mapping. buildRealization reads this
+  // when constructing the kernel `clusters` vector. Outliers map to
+  // BLOCK_OUT (kernel cluster_id = 1).
+  function applyAssignTrace(trace) {
+    TRACE = trace;
+    trace.forEach(t => { LIVE_REAL_CLUSTER_OF[t.v] = t.picked; });
+    setOutlierSet(deriveOutlierSetFromTrace(trace));
+  }
+  // Seed initial trace so downstream IIFEs (outlier-driven panels,
+  // weight split, walkers) read a coherent state on first paint.
+  applyAssignTrace(computeAssignTrace(ASSIGN_SEED, 0, []));
+
+  // Full realisation cache, keyed by (outlierKey, u_seed, stub_seed, xi, overrideEpoch).
   const REAL_CACHE = new Map();
-  function buildRealization(o_seed, u_seed, stub_seed, xi) {
-    const key = o_seed + "|" + u_seed + "|" + stub_seed + "|" + xi.toFixed(4) + "|" + overrideEpoch;
+  function buildRealization(u_seed, stub_seed, xi) {
+    const outliers = currentOutlierSet();
+    const oKey = Array.from(outliers).sort((a, b) => a - b).join(",");
+    const key = oKey + "|" + u_seed + "|" + stub_seed + "|" + xi.toFixed(4) + "|" + overrideEpoch;
     if (REAL_CACHE.has(key)) return REAL_CACHE.get(key);
-    const { eligible, threshold } = computeEligible(xi);
-    const outliers = pickOutliers(eligible, o_seed);
-    // Outliers map to cluster_id = 1 (MEGA); non-outliers follow the
-    // assignment walker's LIVE_REAL_CLUSTER_OF, which on first paint
-    // matches the input fixture.
-    const clusters = NODES.map(n =>
-      outliers.has(n) ? 1 : KERNEL_CID_FROM_BLOCK[LIVE_REAL_CLUSTER_OF[n]]);
+    // Every node maps via LIVE_REAL_CLUSTER_OF (which the assignment
+    // trace populates with "outlier"|C1|C2|C3); KERNEL_CID_FROM_BLOCK
+    // routes the outlier block to kernel cluster_id = 1.
+    const clusters = NODES.map(n => KERNEL_CID_FROM_BLOCK[LIVE_REAL_CLUSTER_OF[n]]);
     const KERNEL_S = [N_OUTLIERS, C1.length, C2.length, C3.length];
     const seedInt = ((u_seed * 1009 + 17) ^ (stub_seed * 131 + 7)) >>> 0;
     // First pass: kernel without overrides, needed to learn cluster
@@ -1055,7 +1084,7 @@ window.MathJax = {
       }));
     }
     const RR = {
-      split, outliers, eligible, threshold,
+      split, outliers,
       clusterPre, clusterPost, bgPre, bgPost, finalEdges, outDeg,
       clusterRewireOps, globalRewireOps,
       clusterResidueByNode, clusterResidueColorByNode,
@@ -1111,7 +1140,7 @@ window.MathJax = {
     svg.append("text").attr("x", W / 2).attr("y", H - 4)
       .attr("text-anchor", "middle").style("fill", "#6b6a54")
       .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px")
-      .text("w_u (after drop_oo)");
+      .text("d_u (after drop_oo)");
 
     const gBars = g.append("g");
     ordered.forEach(n => {
@@ -1372,45 +1401,11 @@ window.MathJax = {
     document.getElementById("xi-vs-mu-mu").textContent = SYNTHETIC_MU.toFixed(3);
   })();
 
-  // ── Generation · outlier selection ──
-  (function () {
-    const viz = NETGEN.VIZ.init("g-outlier-cy", {
-      showLabels: true,
-      // No edges at this stage. The wrapper has handed the sampler a
-      // degree sequence + cluster sizes + ξ; no edge list. The panel
-      // only needs the node layout to highlight which nodes the
-      // sampler picks for cluster_id=1.
-      edges: [],
-      nodeColor: id => COL[CLUSTER_OF[id]],
-    });
-    NETGEN.makeTooltip(viz, document.getElementById("g-outlier-cy").parentElement);
-    function render() {
-      const xi = SYNTHETIC_XI;
-      const { eligible, threshold } = computeEligible(xi);
-      const outliers = pickOutliers(eligible, OUTLIER_SEED);
-      viz.nodesData.forEach(n => {
-        const nid = parseInt(n.id, 10);
-        n.color = outliers.has(nid) ? OUTLIER_RED : COL[CLUSTER_OF[nid]];
-      });
-      d3.select("#g-outlier-cy").selectAll("g.viz-node-group > circle.viz-node")
-        .attr("fill", d => d.color);
-      document.getElementById("outlier-info").innerHTML =
-        "outlier pick: <b>{" + [...outliers].sort((a,b) => a-b).join(", ") + "}</b> &middot; threshold ≈ "
-        + threshold.toFixed(2) + " &middot; every node with \\(w_u \\le\\) threshold is eligible &middot; outlier-seed " + OUTLIER_SEED;
-      const descEl = document.getElementById("outlier-info");
-      NETGEN.retypeset(descEl);
-    }
-    onOutlierChanged.push(() => { invalidateOutlierCache(); render(); });
-    render();
-    document.getElementById("outlier-reroll").addEventListener("click", rerollOutlier);
-  })();
-
   // ── Generation · assigning vertices to clusters ──
-  // Walker viz: non-outlier vertices wait in a queue (sorted by d_u
-  // desc). Each step "flies" the next vertex into an empty placeholder
-  // slot inside its sampled cluster bin. The MEGA bin sits to the side
-  // pre-filled with sampler-picked outliers from the previous stage;
-  // it does not participate in admissibility or sampling.
+  // Walker viz: every vertex queues by d_u desc. Each step "flies" the
+  // next vertex into a placeholder slot of its sampled block. The
+  // outlier block participates like any cluster — whichever nodes the
+  // walker drops into it become the realisation's outliers.
   (function () {
     const host = document.getElementById("g-assign-cy");
     if (!host) return;
@@ -1458,10 +1453,9 @@ window.MathJax = {
     function showTip(id, ev) {
       const placedIdx = TRACE.findIndex(tt => tt.v === id);
       if (placedIdx < 0) {
-        // outlier (not in queue); show MEGA badge
         tip.innerHTML = '<div class="hd">node ' + id + '</div>'
           + '<div>d<sub>u</sub> <b>' + DEG_KEPT[id] + '</b></div>'
-          + '<div>placed in <b style="color:' + OUTLIER_RED + '">MEGA</b> by outlier pick</div>';
+          + '<div class="dim">not in current trace</div>';
         tip.classList.add("on");
         placeTip(ev);
         return;
@@ -1500,7 +1494,7 @@ window.MathJax = {
         '<div class="assign-scalar-panel">'
         + '<div class="scalar-line">ξ = ' + SYNTHETIC_XI.toFixed(3)
         +   ' &middot; φ = ' + ASSIGN_PHI.toFixed(3) + '</div>'
-        + '<div class="scalar-line dim">x<sub>u</sub> = ⌈(1−ξφ)w<sub>u</sub>⌉</div>'
+        + '<div class="scalar-line dim">x<sub>u</sub> = ⌈(1−ξφ)d<sub>u</sub>⌉</div>'
         + '<div class="next-block" id="g-assign-next-info"></div>'
         + '</div>',
     });
@@ -1509,19 +1503,20 @@ window.MathJax = {
       const host = document.getElementById("g-assign-next-info");
       if (!host) return;
       if (step >= TRACE.length) {
-        host.innerHTML = '<div class="dim">all non-outliers placed.</div>';
+        host.innerHTML = '<div class="dim">all vertices placed.</div>';
         return;
       }
       const t = TRACE[step];
       const rem = t.remainingBefore || {};
       const poolTotal = t.admissible.reduce((s, b) => s + (rem[b] || 0), 0);
-      const rows = REAL_BLOCK_NAMES.map(b => {
+      const rows = BLOCK_NAMES.map(b => {
         const ok = t.admissible.indexOf(b) >= 0;
         const cap = BLOCK_SIZE[b];
         const r = rem[b] != null ? rem[b] : cap;
         const filled = r === 0;
         let tag;
         if (filled) tag = '(filled)';
+        else if (b === BLOCK_OUT) tag = 'no x<sub>u</sub> gate';
         else {
           const cmp = ok ? '≤' : '>';
           tag = 'x<sub>u</sub> ' + cmp + ' ' + (cap - 1);
@@ -1542,9 +1537,9 @@ window.MathJax = {
         + (t.fallback ? '<div class="dim">no admissible, fallback</div>' : '');
     }
 
-    // Cluster bins: real clusters get full bin treatment; the MEGA
-    // mega-cluster sits in the same canvas but is pre-filled by the
-    // outlier-pick stage (no walker action consumes it).
+    // Block bins: every block (outlier + real) gets a dashed rect +
+    // label spanning its slot ids' POSITIONS. The outlier bin sits
+    // wherever the OUT_N positions lie in the canvas fixture.
     const binByName = {};
     BLOCK_NAMES.forEach(name => {
       const ids = BLOCK_NODES[name];
@@ -1579,10 +1574,7 @@ window.MathJax = {
         const bin = binByName[name];
         if (!bin) return;
         let op, fillOp, labelOp;
-        if (name === BLOCK_MEGA) {
-          // MEGA always faded; not a candidate for assignment.
-          op = 0.5; fillOp = 0.04; labelOp = 0.7;
-        } else if (!t || poolTotal <= 0) {
+        if (!t || poolTotal <= 0) {
           op = 1; fillOp = 0.06; labelOp = 1;
         } else if (t.admissible.indexOf(name) < 0) {
           op = 0.18; fillOp = 0.02; labelOp = 0.3;
@@ -1598,117 +1590,49 @@ window.MathJax = {
       });
     }
 
-    NODES.forEach(n => {
-      const p = POS[n];
-      svg.append("circle").attr("class", "assign-slot")
-        .attr("data-pos-id", n)
-        .attr("cx", p.x).attr("cy", p.y).attr("r", 13)
-        .attr("fill", "none").attr("stroke", "#9a947a")
-        .attr("stroke-width", 0.9).attr("stroke-dasharray", "3 3")
-        .attr("opacity", 0.55);
+    // Slot circles: one per block-slot position so empty slots stay
+    // visible as dashed targets. Slot ids come from BLOCK_NODES so the
+    // outlier bin's two slots paint at OUT_N positions.
+    BLOCK_NAMES.forEach(name => {
+      BLOCK_NODES[name].forEach(n => {
+        const p = POS[n];
+        svg.append("circle").attr("class", "assign-slot")
+          .attr("data-pos-id", n)
+          .attr("cx", p.x).attr("cy", p.y).attr("r", 13)
+          .attr("fill", "none").attr("stroke", "#9a947a")
+          .attr("stroke-width", 0.9).attr("stroke-dasharray", "3 3")
+          .attr("opacity", 0.55);
+      });
     });
 
-    let queueRanks = [];
     let queueY0, queueY1, queueDY, queueX;
     function recomputeQueue() {
-      const outliers = currentOutlierSet();
-      queueRanks = NODES.filter(n => !outliers.has(n))
-        .sort((a, b) => DEG_KEPT[b] - DEG_KEPT[a] || a - b);
+      QUEUE_RANKS = NODES.slice().sort((a, b) => DEG_KEPT[b] - DEG_KEPT[a] || a - b);
       queueX = vbX + QUEUE_BAND_L / 2;
       queueY0 = vbY + 36;
       queueY1 = vbY + vbH - 18;
-      queueDY = queueRanks.length > 1 ? (queueY1 - queueY0) / (queueRanks.length - 1) : 0;
+      queueDY = QUEUE_RANKS.length > 1 ? (queueY1 - queueY0) / (queueRanks().length - 1) : 0;
     }
+    function queueRanks() { return QUEUE_RANKS; }
     recomputeQueue();
 
     const vertG = svg.append("g").attr("class", "assign-verts");
 
-    let ASSIGN_SEED = 1;
-
-    // computeTrace iterates non-outlier nodes only; admissibility is
-    // checked against REAL_BLOCK_NAMES (the outlier mega is kept out
-    // since the outlier-pick stage already filled it).
-    function computeTrace(seed, startRank, prefix) {
-      startRank = startRank || 0;
-      prefix = prefix || [];
-      const rng = seededRng(seed);
-      const n = NODES.length;
-      const phi = 1 - BLOCK_NAMES.reduce((s, b) =>
-        s + Math.pow(BLOCK_SIZE[b] / n, 2), 0);
-      const xi = SYNTHETIC_XI;
-      const remaining = {};
-      const slotsAvail = {};
-      REAL_BLOCK_NAMES.forEach(b => {
-        remaining[b] = BLOCK_SIZE[b];
-        slotsAvail[b] = BLOCK_NODES[b].slice();
-      });
-      const trace = [];
-      for (let r = 0; r < startRank && r < prefix.length; r++) {
-        const t = prefix[r];
-        if (queueRanks.indexOf(t.v) < 0) continue;
-        trace.push(t);
-        if (remaining[t.picked] != null) remaining[t.picked]--;
-        const sIdx = slotsAvail[t.picked].indexOf(t.slot);
-        if (sIdx >= 0) slotsAvail[t.picked].splice(sIdx, 1);
-      }
-      for (let r = trace.length; r < queueRanks.length; r++) {
-        const v = queueRanks[r];
-        const w = DEG_KEPT[v];
-        const xu = Math.ceil((1 - xi * phi) * w);
-        const remainingBefore = Object.assign({}, remaining);
-        let admissible = REAL_BLOCK_NAMES.filter(b =>
-          remaining[b] > 0 && BLOCK_SIZE[b] - 1 >= xu);
-        let fallback = false;
-        if (admissible.length === 0) {
-          admissible = REAL_BLOCK_NAMES.filter(b => remaining[b] > 0);
-          fallback = true;
-        }
-        const totalRem = admissible.reduce((s, b) => s + remaining[b], 0);
-        const u = rng() * totalRem;
-        let acc = 0, picked = admissible[0];
-        for (const b of admissible) {
-          acc += remaining[b];
-          if (u < acc) { picked = b; break; }
-        }
-        const pool = slotsAvail[picked];
-        const slotIdx = Math.floor(rng() * pool.length);
-        const slot = pool.splice(slotIdx, 1)[0];
-        remaining[picked]--;
-        trace.push({ v, w, xu, admissible: admissible.slice(), picked, slot, fallback, remainingBefore });
-      }
-      return trace;
-    }
-    let TRACE = computeTrace(ASSIGN_SEED, 0, []);
-    syncLiveBlocks();
-
-    function syncLiveBlocks() {
-      // Outliers stay tagged via currentOutlierSet (read at downstream
-      // call sites); only update the real-cluster mapping for the
-      // non-outliers the trace covered. Skip cache invalidation when
-      // the new mapping matches the old. Assignment rerolls that
-      // happen to land each node in its prior cluster don't need a
-      // full kernel re-run.
-      let changed = false;
-      TRACE.forEach(t => {
-        if (LIVE_REAL_CLUSTER_OF[t.v] !== t.picked) changed = true;
-        LIVE_REAL_CLUSTER_OF[t.v] = t.picked;
-      });
-      if (changed) {
-        REAL_CACHE.clear();
-        overrideEpoch++;
-      }
-    }
-
+    let lastAssignStep = 0;
     function render(step) {
+      const prevStep = lastAssignStep;
+      lastAssignStep = step;
       currentStep = step;
       const candidate = step < TRACE.length ? TRACE[step] : null;
       scaleBinsByProb(candidate);
       updateNextPanel(step);
-      const outliers = currentOutlierSet();
-      // Render every node: outliers slotted into MEGA bin (their
-      // original POSITIONS); non-outliers either queued or placed.
       const sel = vertG.selectAll("g.vert").data(NODES, d => d);
-      const enter = sel.enter().append("g").attr("class", "vert");
+      const enter = sel.enter().append("g").attr("class", "vert")
+        .attr("transform", id => {
+          const qIdx = queueRanks().indexOf(id);
+          const y = queueY0 + qIdx * queueDY;
+          return `translate(${queueX},${y})`;
+        });
       enter.append("circle").attr("r", 12).attr("stroke-width", 1.1);
       enter.append("text")
         .attr("class", "viz-label")
@@ -1719,34 +1643,42 @@ window.MathJax = {
         .on("mousemove", (ev) => placeTip(ev))
         .on("mouseleave", () => hideTip());
       const all = enter.merge(sel);
+      // Multi-step jumps stagger transitions by trace order so the
+      // sequence reads as a queue draining (ToEnd) or refilling
+      // (ToStart) instead of every vertex moving at once.
+      const stepDelta = step - prevStep;
+      const isJump = Math.abs(stepDelta) > 1;
+      const jumpRange = Math.abs(stepDelta);
+      const STAGGER_MS = 60;
+      const STAGGER_CAP = 1200;
+      const perStep = isJump ? Math.min(STAGGER_MS, STAGGER_CAP / Math.max(1, jumpRange)) : 0;
       all.each(function (id) {
-        const g = d3.select(this);
-        if (outliers.has(id)) {
-          // Outliers always sit at their own POSITIONS (MEGA bin);
-          // not part of the queue, painted in signal red.
-          const p = POS[id];
-          g.transition().duration(380).attr("transform", `translate(${p.x},${p.y})`);
-          g.select("circle")
-            .attr("fill", OUTLIER_RED).attr("stroke", "#1b2033")
-            .attr("stroke-width", 1.4).attr("opacity", 0.95);
-          g.select("text").text(id);
-          return;
-        }
         const placedIdx = TRACE.findIndex(t => t.v === id);
         const isPlaced = placedIdx >= 0 && placedIdx < step;
+        const wasPlaced = placedIdx >= 0 && placedIdx < prevStep;
+        const g = d3.select(this);
+        let delay = 0;
+        if (isJump) {
+          if (stepDelta > 0 && isPlaced && !wasPlaced) {
+            delay = (placedIdx - prevStep) * perStep;
+          } else if (stepDelta < 0 && wasPlaced && !isPlaced) {
+            delay = (prevStep - 1 - placedIdx) * perStep;
+          }
+        }
         if (isPlaced) {
           const t = TRACE[placedIdx];
           const p = POS[t.slot];
-          g.transition().duration(380).attr("transform", `translate(${p.x},${p.y})`);
+          g.transition().delay(delay).duration(380).attr("transform", `translate(${p.x},${p.y})`);
+          const isOutlier = t.picked === BLOCK_OUT;
           g.select("circle")
             .attr("fill", BLOCK_COLOR[t.picked])
             .attr("stroke", "#1b2033").attr("opacity", 0.95)
-            .attr("stroke-width", 1.1);
+            .attr("stroke-width", isOutlier ? 1.4 : 1.1);
         } else {
-          const qIdx = queueRanks.indexOf(id);
+          const qIdx = queueRanks().indexOf(id);
           const y = queueY0 + qIdx * queueDY;
           const isNext = qIdx === step;
-          g.transition().duration(280).attr("transform", `translate(${queueX},${y})`);
+          g.transition().delay(delay).duration(280).attr("transform", `translate(${queueX},${y})`);
           g.select("circle")
             .attr("fill", isNext ? COL.hl_yellow : "#ede4c9")
             .attr("stroke", isNext ? "#c7801e" : "#6b6a54")
@@ -1759,59 +1691,51 @@ window.MathJax = {
       const desc = document.getElementById("g-assign-desc");
       if (step <= 0) {
         desc.innerHTML = '<span class="st">step 0</span> &middot; '
-          + queueRanks.length + ' non-outlier vertices queued by \\(d_u\\) desc; real-cluster bins empty.';
+          + queueRanks().length + ' vertices queued by \\(d_u\\) desc; every block bin empty.';
       } else if (step > TRACE.length) {
-        desc.innerHTML = '<span class="st">done</span> &middot; every non-outlier placed.';
+        desc.innerHTML = '<span class="st">done</span> &middot; every vertex placed.';
       } else {
         const t = TRACE[step - 1];
         const adm = t.admissible.join(", ");
-        const tag = t.fallback ? " <em>(fallback: no admissible cluster, took leftover slot)</em>" : "";
+        const tag = t.fallback ? " <em>(fallback: no admissible block, took leftover slot)</em>" : "";
         desc.innerHTML = '<span class="st">step ' + step + '</span> &middot; '
-          + 'rank ' + step + ' &middot; \\(w_u = ' + t.w + ', x_u = ' + t.xu + '\\); '
+          + 'rank ' + step + ' &middot; \\(d_u = ' + t.w + ', x_u = ' + t.xu + '\\); '
           + 'admissible {' + adm + '}; sampled <b>' + t.picked + '</b>' + tag + '.';
       }
       NETGEN.retypeset(desc);
     }
 
+    function applyAndCascade(trace) {
+      applyAssignTrace(trace);
+      REAL_CACHE.clear();
+      overrideEpoch++;
+      onUChanged.forEach(fn => fn());
+      onStubChanged.forEach(fn => fn());
+    }
+
     let ctl;
     ctl = NETGEN.rerollWalker({
       prefix: "g-assign",
-      total: queueRanks.length + 1,
-      totalForCurrent: () => queueRanks.length + 1,
+      total: queueRanks().length + 1,
+      totalForCurrent: () => queueRanks().length + 1,
       onRender: render,
       onRandStep: idx => {
         if (idx <= 0) return false;
         ASSIGN_SEED = (ASSIGN_SEED * 1103515245 + 12345 + idx * 1009) >>> 0;
-        TRACE = computeTrace(ASSIGN_SEED, idx - 1, TRACE);
-        syncLiveBlocks();
-        // Cascade: the whole pipeline re-derives off the new mapping.
-        onUChanged.forEach(fn => fn());
-        onStubChanged.forEach(fn => fn());
+        applyAndCascade(computeAssignTrace(ASSIGN_SEED, idx - 1, TRACE));
         return false;
       },
       onRandAll: () => {
         ASSIGN_SEED = (ASSIGN_SEED * 1103515245 + 12345) >>> 0;
-        TRACE = computeTrace(ASSIGN_SEED, 0, []);
-        syncLiveBlocks();
-        onUChanged.forEach(fn => fn());
-        onStubChanged.forEach(fn => fn());
+        applyAndCascade(computeAssignTrace(ASSIGN_SEED, 0, []));
       },
-    });
-
-    // Outlier reroll changes the non-outlier set; recompute the queue
-    // and run a fresh trace from rank 0.
-    onOutlierChanged.push(() => {
-      recomputeQueue();
-      TRACE = computeTrace(ASSIGN_SEED, 0, []);
-      syncLiveBlocks();
-      ctl.reconfigure(queueRanks.length + 1);
     });
   })();
 
   // ── Generation · weight split ──
   // Mirrors abcd's leader-aware bars. Each node's bar stacks ŷ_u
   // (cluster colour) below ẑ_u (red); a dashed tick marks the
-  // pre-rounding intra target y_u = (1 - ξ) w_u; the cluster's
+  // pre-rounding intra target y_u = (1 - ξ) d_u; the cluster's
   // largest-degree non-outlier wears a star (deterministic-floor +
   // parity-bump leader). Outliers pin to ŷ = 0 (kernel handles via
   // hasOutliers=true) so their bar is solid red end-to-end and they
@@ -1873,7 +1797,7 @@ window.MathJax = {
 
     function update() {
       const xi = SYNTHETIC_XI;
-      const R = buildRealization(OUTLIER_SEED, U_SEED, STUB_SEED, xi);
+      const R = buildRealization(U_SEED, STUB_SEED, xi);
       // Per-cluster leader = max-degree non-outlier in the cluster.
       // Outliers pin to ŷ=0 so the leader-bump (parity adjustment)
       // never lands on them.
@@ -1994,7 +1918,7 @@ window.MathJax = {
     refresh();
   }
   function getCurrentR() {
-    return buildRealization(OUTLIER_SEED, U_SEED, STUB_SEED, SYNTHETIC_XI);
+    return buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
   }
 
   // ── Panel 1 / 4: cluster pre-pair walker ──
@@ -2233,6 +2157,8 @@ window.MathJax = {
       return { snap: false };
     }
 
+    let lastTargetList = null;
+    let firstRender = true;
     function render(step, snap) {
       const R = getCurrentR();
       const total = 1 + R.bgPre.length;
@@ -2278,7 +2204,33 @@ window.MathJax = {
         idPrefix: "bp-cluster-",
         colorOf: e => CLUSTER_COLOR_OF[e.cluster] || COL.edge_stage2,
       });
-      NETGEN.snapOrSync(spokes, { byNode: cfg, placed: backdrop.concat(placed), just, justSeq: step, bridgeColor }, snap);
+      // Cumulative target list for the snap-jump diff path: backdrop +
+      // placed entries + just-as-placed-entry with the id it would carry
+      // when settled (bp-${step-1}). Lets multi-step jumps run one
+      // chained playMany so every changed pair animates concurrently.
+      const targetList = backdrop.concat(placed);
+      if (just) {
+        targetList.push({
+          u: just.u, v: just.v, color: bridgeColor,
+          bad: just.bad, badColor: just.badColor,
+          id: "bp-" + (step - 1),
+        });
+      }
+      if (firstRender) {
+        spokes.snapToState({ byNode: cfg, placed: targetList, just: null, justSeq: step });
+        firstRender = false;
+      } else if (snap) {
+        if (lastTargetList) {
+          spokes.snapToState({ byNode: cfg, placed: lastTargetList, just: null, justSeq: -1 });
+        }
+        NETGEN.playManyDiff(spokes, lastTargetList || [], targetList, null, {
+          byNode: cfg,
+          onEmpty: () => spokes.snapToState({ byNode: cfg, placed: targetList, just: null, justSeq: step }),
+        });
+      } else {
+        NETGEN.snapOrSync(spokes, { byNode: cfg, placed: backdrop.concat(placed), just, justSeq: step, bridgeColor }, false);
+      }
+      lastTargetList = targetList;
 
       const totEl = document.getElementById("g-bgpair-total");
       const curEl = document.getElementById("g-bgpair-cur");
@@ -2553,13 +2505,13 @@ window.MathJax = {
     svg.append("text").attr("x", W / 2).attr("y", H - 8)
       .attr("text-anchor", "middle").style("fill", "#6b6a54")
       .style("font-family", "Special Elite, Courier New, monospace")
-      .style("font-size", "10.5px").text("node (sorted by w_u desc)");
+      .style("font-size", "10.5px").text("node (sorted by d_u desc)");
 
     const legend = svg.append("g").attr("transform", `translate(${W - 340},${PAD.top - 6})`);
     legend.append("rect").attr("x", 0).attr("y", 0).attr("width", 14).attr("height", 10)
       .attr("fill", COL.azure).attr("opacity", 0.55);
     legend.append("text").attr("x", 18).attr("y", 9).style("fill", "#2f3a54")
-      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px").text("input w_u");
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px").text("input d_u");
     legend.append("rect").attr("x", 92).attr("y", 0).attr("width", 14).attr("height", 10).attr("fill", COL.mint).attr("opacity", 0.7);
     legend.append("text").attr("x", 110).attr("y", 9).style("fill", "#2f3a54")
       .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px").text("output");
@@ -2650,7 +2602,7 @@ window.MathJax = {
       .attr("stroke", COL.azure).attr("stroke-width", 4);
 
     function clusterIdFor(nid, R) {
-      if (R.outliers.has(nid)) return BLOCK_MEGA;
+      if (R.outliers.has(nid)) return BLOCK_OUT;
       return LIVE_REAL_CLUSTER_OF[nid];
     }
     function renderXi(R) {
@@ -2672,7 +2624,7 @@ window.MathJax = {
 
     function render() {
       const xi = SYNTHETIC_XI;
-      const R = buildRealization(OUTLIER_SEED, U_SEED, STUB_SEED, xi);
+      const R = buildRealization(U_SEED, STUB_SEED, xi);
       let diff = 0, match = 0;
       rows.each(function (nid) {
         const win = DEG_KEPT[nid];
