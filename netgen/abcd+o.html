@@ -477,7 +477,9 @@
         <input type="range" id="xi-warn" min="0" max="1" step="0.005" value="0.308">
         <output id="xi-warn-val">0.31</output>
       </div>
+      <span class="step-label">drag \(\xi\) to see when outlier stubs cross the 50% line</span>
     </div>
+    <svg id="warn-bar" viewBox="0 0 640 240" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:auto"></svg>
     <div class="warn-banner silent" id="warn-banner">
       <span class="tag">stderr heuristic</span>
       <span id="warn-text">warning silent. cluster_id = 1 filtered from com.csv.</span>
@@ -2757,23 +2759,144 @@ window.MathJax = {
   })();
 
   // ── Warning branch ──
+  // Stacked-bar viz of the external (background) stub pool. Outliers
+  // contribute their full degree (red); non-outliers contribute ξ d_u
+  // (cluster gradient). The warning fires when 2 · Σ_outlier d_u > Σ ẑ_u,
+  // i.e. the outlier slice exceeds the 50% mark of the pool. Sliding ξ
+  // shrinks the non-outlier slice and pushes the outlier slice past the
+  // threshold marker.
   (function () {
     const slider = document.getElementById("xi-warn");
     const val = document.getElementById("xi-warn-val");
     const banner = document.getElementById("warn-banner");
     const text = document.getElementById("warn-text");
+    const svg = d3.select("#warn-bar");
+    if (!slider || svg.empty()) return;
+    svg.selectAll("*").remove();
 
-    // Threshold ≈ xi where outlier stubs = half of total z-stubs.
-    // On synthetic: outlier total ≈ 4 (2 outliers × degree 2 each after drop_oo);
-    // non-outlier contribution ≈ xi * 84. Threshold: 4 = xi * 84 / 1 ?
-    // Paper's condition: 2 * sum_outlier(w) > total_z. Solve for xi.
+    // Per-cluster non-outlier degree sum so the non-outlier slice can
+    // paint a cluster gradient instead of one flat colour.
     const W_OUT = OUT_N.reduce((a, n) => a + DEG_KEPT[n], 0);
-    const W_NON = NODES.reduce((a, n) => a + DEG_KEPT[n], 0) - W_OUT;
-    const xiThreshold = W_OUT / (W_OUT + W_NON);  // rough; enough for the viz
+    const W_BY_CLUSTER = { C1: 0, C2: 0, C3: 0 };
+    NODES.forEach(n => {
+      if (INPUT_OUT_SET.has(n)) return;
+      const c = CLUSTER_OF[n];
+      if (W_BY_CLUSTER[c] != null) W_BY_CLUSTER[c] += DEG_KEPT[n];
+    });
+    const W_NON_TOTAL = Object.values(W_BY_CLUSTER).reduce((a, b) => a + b, 0);
+    // Threshold ξ where outlier stubs = half the pool:
+    // 2 W_OUT = W_OUT + ξ W_NON  →  ξ* = W_OUT / W_NON.
+    const xiThreshold = W_NON_TOTAL > 0 ? Math.min(1, W_OUT / W_NON_TOTAL) : 1;
+
+    const W = 640, H = 200;
+    const PAD = { top: 28, right: 16, bottom: 56, left: 16 };
+    const iw = W - PAD.left - PAD.right;
+    const barH = 38;
+    const barY = PAD.top + 8;
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},0)`);
+
+    // X-scale anchored to ξ = 1: at ξ = 1 the pool is exactly W_OUT + W_NON_TOTAL,
+    // so the bar fills `iw`. Lower ξ shrinks the non-outlier slice but the
+    // axis stays put; a faded 50% tick reads the threshold against the
+    // ξ = 1 length so the viewer can see the outlier slice approach it.
+    const POOL_MAX = W_OUT + W_NON_TOTAL;
+    const xPx = (units) => POOL_MAX > 0 ? iw * (units / POOL_MAX) : 0;
+    const halfX = xPx(POOL_MAX / 2);
+
+    // Header labels.
+    g.append("text").attr("x", 0).attr("y", PAD.top - 12)
+      .attr("font-family", "Special Elite, Courier New, monospace")
+      .attr("font-size", "11px").attr("fill", "#6b6a54")
+      .text("background-graph stub pool (post-drop_oo)");
+
+    // Pool track (light backdrop).
+    g.append("rect").attr("x", 0).attr("y", barY)
+      .attr("width", iw).attr("height", barH)
+      .attr("fill", "#e8e0c2").attr("opacity", 0.4)
+      .attr("stroke", "#b9a263").attr("stroke-width", 0.6);
+
+    // Outlier slice (anchored at left).
+    const outRect = g.append("rect").attr("y", barY).attr("x", 0)
+      .attr("height", barH).attr("fill", OUTLIER_RED).attr("opacity", 0.92);
+
+    // Non-outlier slice — split into cluster sub-rects so the gradient
+    // reads which clusters fund the pool. Order matches BLOCK_NAMES desc
+    // by mass for a stable visual.
+    const NON_ORDER = ["C1", "C2", "C3"];
+    const subRects = NON_ORDER.map(name =>
+      g.append("rect").attr("y", barY).attr("height", barH)
+        .attr("fill", COL[name]).attr("opacity", 0.78));
+
+    // 50% threshold tick.
+    g.append("line")
+      .attr("x1", halfX).attr("x2", halfX)
+      .attr("y1", barY - 6).attr("y2", barY + barH + 6)
+      .attr("stroke", "#1b2033").attr("stroke-width", 1.4)
+      .attr("stroke-dasharray", "5 3").attr("opacity", 0.7);
+    g.append("text").attr("x", halfX).attr("y", barY - 10)
+      .attr("text-anchor", "middle")
+      .attr("font-family", "Special Elite, Courier New, monospace")
+      .attr("font-size", "10px").attr("fill", "#1b2033")
+      .text("50% — warning threshold");
+
+    // Numeric labels under the bar.
+    // Legend row under the bar: swatch + name + count per slice. Avoids
+    // anchoring labels to narrow slices where the centred text would
+    // clip the bar's left edge.
+    const LEG_Y = barY + barH + 22;
+    const legendItems = [
+      { name: "outlier", color: OUTLIER_RED, get: (xi) => W_OUT },
+      ...NON_ORDER.map(c => ({
+        name: c, color: COL[c],
+        get: (xi) => xi * W_BY_CLUSTER[c],
+      })),
+    ];
+    const legendG = g.append("g").attr("class", "warn-legend");
+    const items = legendItems.map((item, i) => {
+      const ig = legendG.append("g").attr("transform", `translate(${i * 132},${LEG_Y})`);
+      ig.append("rect").attr("x", 0).attr("y", -10).attr("width", 12).attr("height", 12)
+        .attr("fill", item.color).attr("opacity", 0.88);
+      ig.append("text").attr("x", 18).attr("y", 0)
+        .attr("font-family", "Special Elite, Courier New, monospace")
+        .attr("font-size", "10.5px").attr("fill", "#2f3a54")
+        .text(item.name);
+      const num = ig.append("text").attr("x", 18).attr("y", 14)
+        .attr("font-family", "Special Elite, Courier New, monospace")
+        .attr("font-size", "10.5px").attr("fill", "#6b6a54");
+      return { item, num };
+    });
+    const summary = g.append("text").attr("y", LEG_Y + 44).attr("x", 0)
+      .attr("font-family", "Special Elite, Courier New, monospace")
+      .attr("font-size", "11px").attr("fill", "#1b2033");
 
     function update(xi) {
       val.textContent = xi.toFixed(2);
-      if (xi < xiThreshold) {
+      const wOut = W_OUT;
+      const wNon = xi * W_NON_TOTAL;
+      const total = wOut + wNon;
+      const outShare = total > 0 ? wOut / total : 0;
+      const fired = outShare > 0.5;
+
+      const outW = xPx(wOut);
+      outRect.attr("width", outW);
+      let cursor = outW;
+      NON_ORDER.forEach((name, i) => {
+        const w = xi * W_BY_CLUSTER[name];
+        const px = xPx(w);
+        subRects[i].attr("x", cursor).attr("width", px);
+        cursor += px;
+      });
+
+      items.forEach(({ item, num }) => {
+        num.text(`Σ d_u = ${item.get(xi).toFixed(item.name === "outlier" ? 0 : 1)}`);
+      });
+      summary.text(
+        `ξ_threshold ≈ W_out / W_non = ${xiThreshold.toFixed(3)} · ` +
+        `outlier share at ξ = ${xi.toFixed(2)} is ${(outShare * 100).toFixed(0)}% ` +
+        (fired ? "(over 50% — warning fires)" : "(under 50% — warning silent)")
+      );
+
+      if (fired) {
         banner.classList.remove("silent");
         text.innerHTML = '<b>warning fired.</b> "outlier nodes form a community"; cluster_id = 1 kept in com.csv.';
       } else {
