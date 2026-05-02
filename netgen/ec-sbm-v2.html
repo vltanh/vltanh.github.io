@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>EC-SBM v2 &middot; Edge-connected SBM | Synthetic Network Generators</title>
 <link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐖</text></svg>">
-<meta name="description" content="Edge-connected SBM (v2). Same K_(k+1) core floor as v1, rebuilt around a constructive stage 2 (no overlay), one residual SBM call over all blocks including a combined outlier block, a block-preserving 2-opt rewire, and a true_greedy degree matcher that logs gridlock.">
+<meta name="description" content="Edge-connected SBM (v2). Same K_(k+1) core floor as v1, rebuilt around a constructive stage 2 (no overlay), one residual SBM call over all blocks including a combined outlier block, a block-preserving 2-opt rewire, and a cluster_preserving_true_greedy degree matcher that logs gridlock and gates every accepted edge on a per-block-pair budget.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
@@ -169,13 +169,13 @@
   <div class="kicker">network-generation · ec-sbm-v2</div>
   <h1><em>EC-SBM</em> v2</h1>
   <p class="fullname">Edge-connected SBM, v2</p>
-  <p class="sub">Same per-cluster \(k\)-edge-connectivity floor as v1. Constructive-only core, one residual SBM over all blocks (including a combined outlier block), a block-preserving 2-opt rewire, and a true_greedy degree matcher that logs gridlock instead of silently dropping stubs.</p>
+  <p class="sub">Same per-cluster \(k\)-edge-connectivity floor as v1. Constructive-only core, one residual SBM over all blocks (including a combined outlier block), a block-preserving 2-opt rewire, and a cluster_preserving_true_greedy degree matcher that logs gridlock instead of silently dropping stubs and gates every accepted edge on a per-block-pair budget.</p>
 </header>
 
 <section class="hook">
   <p><a href="./ec-sbm-v1.html">v1</a> gets the right cluster guarantees, but the bookkeeping is messy. Stage 2 builds \(K_{k+1}\) cores <em>and</em> runs an SBM on the decremented probs + degree arrays; the SBM can sample a pair the core already placed, dedup drops one copy, and the block's intra-count leaks below the profile. Outliers get their own separate SBM through stage 3a. Stage 4's heap-greedy matcher silently drops stubs when a hub runs out of valid partners.</p>
   <p>v2 keeps the \(K_{k+1}\) cores and rebuilds the rest. Stage 2 is constructive-only; nothing else samples during the core phase.</p>
-  <p>Stage 3 is a single residual SBM over every block (real clusters plus a combined outlier block). Invalid edges go to a block-preserving 2-opt rewire that holds both block-pair counts and every node's block membership constant. Stage 4 offers ten matcher algorithms — five global plus five <code>cluster_preserving_*</code> counterparts that gate every accepted edge on a per-block-pair budget — with a <code>true_greedy</code> (max-heap dynamic greedy) default that logs gridlock rather than hiding it.</p>
+  <p>Stage 3 is a single residual SBM over every block (real clusters plus a combined outlier block). Invalid edges go to a block-preserving 2-opt rewire that holds both block-pair counts and every node's block membership constant. Stage 4 offers ten matcher algorithms: five global, plus five <code>cluster_preserving_*</code> counterparts that gate every accepted edge on a per-block-pair budget. The pipeline default is <code>cluster_preserving_true_greedy</code> (max-heap dynamic greedy with the per-bp filter), which logs gridlock rather than hiding it.</p>
   <p>Every edge is owned by exactly one stage, and nothing disappears without a log line. The per-cluster edge-connectivity proof is inherited verbatim from v1.</p>
 </section>
 
@@ -377,13 +377,13 @@
   </div>
 </section>
 
-<!-- ─────────── Generation · match_degree (true_greedy default) ─────────── -->
+<!-- ─────────── Generation · match_degree (cluster_preserving_true_greedy default) ─────────── -->
 <section class="stage">
   <div class="stage-num">generation · match the residual degree</div>
-  <h2>true_greedy by default. Logs gridlock; does not silently drop.</h2>
-  <p>After the residual SBM + rewire, some nodes may still be short of their target. v2 hands off to <code>src/match_degree.py --algorithm true_greedy</code>: a max-heap dynamic greedy that pops the highest-residual node, picks a non-neighbor, and re-pushes with updated residuals.</p>
-  <p>Anything still unplaced is logged as a <code>WARN</code> with the exact stub count, never silently dropped the way <a href="./ec-sbm-v1.html">v1's plain greedy</a> does.</p>
-  <p>The viz below runs <code>true_greedy</code> on v2's specific stage-3 residual (the per-node deficit left after rewire). For the broader catalogue (<code>greedy</code>, <code>random_greedy</code>, <code>rewire</code>, <code>hybrid</code>) and the <code>--remap</code> mode used by gens that emit fresh node IDs, see the <a href="./matcher.html">match_degree page</a>.</p>
+  <h2>cluster_preserving_true_greedy by default. Logs gridlock; does not silently drop.</h2>
+  <p>After the residual SBM + rewire, some nodes may still be short of their target. v2 hands off to <code>src/match_degree.py --match-degree-algorithm cluster_preserving_true_greedy --match-degree-mode cluster_preserving</code>: the same max-heap dynamic greedy as plain <code>true_greedy</code>, but every candidate partner is filtered on a per-(min_block, max_block) budget read from the reference clustering, and the budget decrements on accept.</p>
+  <p>Anything still unplaced is logged as a <code>WARN</code> with the exact stub count, never silently dropped the way <a href="./ec-sbm-v1.html">v1's plain greedy</a> does. Stubs whose remaining bp budgets are all empty surface as gridlock instead of leaking across clusters.</p>
+  <p>The viz below runs the global <code>true_greedy</code> sibling on v2's specific stage-3 residual (the per-node deficit left after rewire) so the page can illustrate the heap mechanics without supplying the bp-budget overlay. For all ten matcher algorithms (the global five plus the five <code>cluster_preserving_*</code> variants) and the <code>--remap</code> mode used by gens that emit fresh node IDs, see the <a href="./matcher.html">match_degree page</a>.</p>
   <p>Toggle <code>apply match_degree</code> to watch the per-node deficit pile shrink. Click <code>random</code> for a different realization.</p>
   <div class="graph g-with-side" id="g-match">
     <div class="graph-chrome">
@@ -421,14 +421,14 @@
 <section class="stage">
   <div class="stage-num">case study · dnc</div>
   <h2>What you get on the shipped example.</h2>
-  <p>Default run on <code>dnc</code> + <code>sbm-flat-best+cc</code> at <code>--seed 1</code> with <code>--edge-correction rewire --match-degree-algorithm true_greedy</code>:</p>
+  <p>Default run on <code>dnc</code> + <code>sbm-flat-best+cc</code> at <code>--seed 1</code> with <code>--edge-correction rewire --match-degree-algorithm cluster_preserving_true_greedy --match-degree-mode cluster_preserving</code>:</p>
   <table class="profile-table">
     <thead>
       <tr><th>stat</th><th>input</th><th>v2 output</th><th>note</th></tr>
     </thead>
     <tbody>
       <tr><th>N</th><td class="val">906</td><td class="val">906</td><td class="desc">Exact.</td></tr>
-      <tr><th>edges</th><td class="val">10,429</td><td class="val">10,431</td><td class="desc">Within 0.02%. true_greedy closes the residual budget near-exactly.</td></tr>
+      <tr><th>edges</th><td class="val">10,429</td><td class="val">10,431</td><td class="desc">Within 0.02%. cluster_preserving_true_greedy closes the residual budget near-exactly while the per-bp filter holds the block-pair distribution loyal to the reference.</td></tr>
       <tr><th>mean degree</th><td class="val">23.02</td><td class="val">23.03</td><td class="desc">Follows the edge count.</td></tr>
       <tr><th>global cc</th><td class="val">0.548</td><td class="val">0.513</td><td class="desc">Highest in the SBM family on this input (SBM 0.341, v1 0.424). Cores do most of the work; the overlay-free residual SBM keeps more of the core's triangles intact.</td></tr>
       <tr><th>clusters</th><td class="val">87</td><td class="val">87</td><td class="desc">Profile-stage passthrough.</td></tr>
@@ -445,7 +445,7 @@
   </div>
   <div class="callout warn">
     <div class="tag">caveat: rewire can still strand a handful of edges</div>
-    <p>Rewire is not a complete repair. When no valid partner sits in the same bucket, an invalid edge stays invalid; after 10 retry passes or a stagnation break those unresolved edges are dropped with a <code>WARN</code>. On <code>dnc</code> at this seed the total drop is tens of edges out of ten thousand: invisible in the stats table, present in <code>run.log</code>. Plain <code>--algorithm rewire</code> on stage 4 is lossy in the same way; <code>true_greedy</code> catches what rewire strands.</p>
+    <p>Rewire is not a complete repair. When no valid partner sits in the same bucket, an invalid edge stays invalid; after 10 retry passes or a stagnation break those unresolved edges are dropped with a <code>WARN</code>. On <code>dnc</code> at this seed the total drop is tens of edges out of ten thousand: invisible in the stats table, present in <code>run.log</code>. Plain <code>--match-degree-algorithm rewire</code> on stage 4 is lossy in the same way; <code>cluster_preserving_true_greedy</code> catches what rewire strands as long as an in-budget partner exists.</p>
   </div>
 </section>
 
