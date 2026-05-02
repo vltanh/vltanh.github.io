@@ -471,15 +471,7 @@
   \]
   <p>outlier stubs are more than half the external pool, so two random stubs pair outlier-with-outlier more often than outlier-with-non-outlier. The Julia sampler flags this with stderr message <code>"outlier nodes form a community"</code>. The Python wrapper greps stderr and branches: if the warning fires, keep cluster_id = 1 rows in <code>com.csv</code>; otherwise strip them.</p>
   <div class="disk-panel">
-    <div class="widget-row tight">
-      <div class="scrub">
-        <label>ξ</label>
-        <input type="range" id="xi-warn" min="0" max="1" step="0.005" value="0.308">
-        <output id="xi-warn-val">0.31</output>
-      </div>
-      <span class="step-label">drag \(\xi\) to see when outlier stubs cross the 50% line</span>
-    </div>
-    <svg id="warn-bar" viewBox="0 0 640 240" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:auto"></svg>
+    <svg id="warn-bar" viewBox="0 0 640 140" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:auto"></svg>
     <div class="warn-banner silent" id="warn-banner">
       <span class="tag">stderr heuristic</span>
       <span id="warn-text">warning silent. cluster_id = 1 filtered from com.csv.</span>
@@ -2759,19 +2751,16 @@ window.MathJax = {
   })();
 
   // ── Warning branch ──
-  // Stacked-bar viz of the external (background) stub pool. Outliers
-  // contribute their full degree (red); non-outliers contribute ξ d_u
-  // (cluster gradient). The warning fires when 2 · Σ_outlier d_u > Σ ẑ_u,
-  // i.e. the outlier slice exceeds the 50% mark of the pool. Sliding ξ
-  // shrinks the non-outlier slice and pushes the outlier slice past the
-  // threshold marker.
+  // Static stacked-bar viz at the page's profile ξ. Outliers contribute
+  // their full degree (red); non-outliers contribute ξ d_u (cluster
+  // gradient). Warning fires when 2 · Σ_outlier d_u > Σ ẑ_u, i.e. the
+  // outlier slice exceeds the 50% mark of the pool. The ξ axis below
+  // marks ξ* (where the share crosses 50%) and the page's profile ξ.
   (function () {
-    const slider = document.getElementById("xi-warn");
-    const val = document.getElementById("xi-warn-val");
     const banner = document.getElementById("warn-banner");
     const text = document.getElementById("warn-text");
     const svg = d3.select("#warn-bar");
-    if (!slider || svg.empty()) return;
+    if (svg.empty()) return;
     svg.selectAll("*").remove();
 
     // Per-cluster non-outlier degree sum so the non-outlier slice can
@@ -2788,10 +2777,10 @@ window.MathJax = {
     // 2 W_OUT = W_OUT + ξ W_NON  →  ξ* = W_OUT / W_NON.
     const xiThreshold = W_NON_TOTAL > 0 ? Math.min(1, W_OUT / W_NON_TOTAL) : 1;
 
-    const W = 640, H = 240;
-    const PAD = { top: 36, right: 16, bottom: 60, left: 28 };
+    const W = 640, H = 140;
+    const PAD = { top: 22, right: 16, bottom: 28, left: 28 };
     const iw = W - PAD.left - PAD.right;
-    const barH = 42;
+    const barH = 36;
     const barY = PAD.top + 4;
     const g = svg.append("g").attr("transform", `translate(${PAD.left},0)`);
 
@@ -2799,12 +2788,6 @@ window.MathJax = {
     // its share. The 50% line is the bar midpoint, so "outlier dominates"
     // is literal — red slice past the dashed line.
     const halfX = iw / 2;
-
-    // Header.
-    g.append("text").attr("x", 0).attr("y", PAD.top - 16)
-      .attr("font-family", "Special Elite, Courier New, monospace")
-      .attr("font-size", "11px").attr("fill", "#6b6a54")
-      .text("background-graph stub pool · normalised to 100% of current ξ");
 
     // Track + slices.
     g.append("rect").attr("x", 0).attr("y", barY)
@@ -2873,46 +2856,29 @@ window.MathJax = {
       .attr("font-size", "9.5px").attr("fill", "#3559a0")
       .text(`page ξ = ${SYNTHETIC_XI.toFixed(3)}`);
 
-    const liveTick = g.append("line")
-      .attr("y1", AX_Y - 8).attr("y2", AX_Y + 8)
-      .attr("stroke", "#1b2033").attr("stroke-width", 2);
-    const liveLabel = g.append("text").attr("y", AX_Y - 10)
-      .attr("text-anchor", "middle")
-      .attr("font-family", "Special Elite, Courier New, monospace")
-      .attr("font-size", "9.5px").attr("fill", "#1b2033");
-
-    function update(xi) {
-      val.textContent = xi.toFixed(2);
-      const wOut = W_OUT;
-      const wNon = xi * W_NON_TOTAL;
-      const total = wOut + wNon;
-      const outShare = total > 0 ? wOut / total : 0;
-      const fired = outShare > 0.5;
-
-      const outW = total > 0 ? iw * (wOut / total) : 0;
-      outRect.attr("width", outW);
-      let cursor = outW;
-      NON_ORDER.forEach((name, i) => {
-        const share = total > 0 ? (xi * W_BY_CLUSTER[name]) / total : 0;
-        const px = iw * share;
-        subRects[i].attr("x", cursor).attr("width", px);
-        cursor += px;
-      });
-
-      const tx = xi * iw;
-      liveTick.attr("x1", tx).attr("x2", tx);
-      liveLabel.attr("x", tx).text(`now ξ = ${xi.toFixed(2)}`);
-
-      if (fired) {
-        banner.classList.remove("silent");
-        text.innerHTML = '<b>warning fired.</b> "outlier nodes form a community"; cluster_id = 1 kept in com.csv.';
-      } else {
-        banner.classList.add("silent");
-        text.innerHTML = `warning silent. cluster_id = 1 filtered from com.csv. <span class="dim">(outlier share ${(outShare * 100).toFixed(0)}%)</span>`;
-      }
+    // Static render at the page's profile ξ.
+    const xi = SYNTHETIC_XI;
+    const wOut = W_OUT;
+    const wNon = xi * W_NON_TOTAL;
+    const total = wOut + wNon;
+    const outShare = total > 0 ? wOut / total : 0;
+    const fired = outShare > 0.5;
+    const outW = total > 0 ? iw * (wOut / total) : 0;
+    outRect.attr("width", outW);
+    let cursor = outW;
+    NON_ORDER.forEach((name, i) => {
+      const share = total > 0 ? (xi * W_BY_CLUSTER[name]) / total : 0;
+      const px = iw * share;
+      subRects[i].attr("x", cursor).attr("width", px);
+      cursor += px;
+    });
+    if (fired) {
+      banner.classList.remove("silent");
+      text.innerHTML = '<b>warning fired.</b> "outlier nodes form a community"; cluster_id = 1 kept in com.csv.';
+    } else {
+      banner.classList.add("silent");
+      text.innerHTML = `warning silent. cluster_id = 1 filtered from com.csv. <span class="dim">(outlier share ${(outShare * 100).toFixed(0)}%)</span>`;
     }
-    slider.addEventListener("input", () => update(parseFloat(slider.value)));
-    update(parseFloat(slider.value));
   })();
 
   // ── Case study · degree log-log ──
