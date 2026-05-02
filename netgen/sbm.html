@@ -299,7 +299,7 @@
     <div class="widget-row">
       <button class="btn primary" id="g5-play" type="button">match degrees</button>
       <button class="btn" id="g5-reset" type="button">reset</button>
-      <span class="step-label">amber edges = top-up adds them &middot; degree bars: target vs achieved (mint = achieved, faint red = remaining deficit)</span>
+      <span class="step-label">teal edges = top-up adds them &middot; degree bars: target vs achieved (mint = achieved, faint red = remaining deficit)</span>
     </div>
   </div>
 </section>
@@ -888,6 +888,14 @@ window.MathJax = {
     let trace = [];
     let totalPairs = 0;
     let stepIdx = 0;
+    // Bumped on every full-trace regeneration (initial init, random-all,
+    // reseedFrom edge-case fallback). Placed-edge ids embed the nonce
+    // so render()'s id-diff sees every old-trace entry as a remove and
+    // every new-trace entry as an add, which is what playMany needs to
+    // chain a full rewind+forward across the regen. reseedFrom proper
+    // does NOT bump — its prefix is preserved, so prefix ids stay
+    // stable and the diff only flags the resampled tail.
+    let traceNonce = 0;
 
     function buildPairBudget() {
       return SBMKernel.buildPairBudget(EDGE_COUNTS, blockPairs);
@@ -902,6 +910,7 @@ window.MathJax = {
       });
     }
     function freshTrace(seed) {
+      traceNonce++;
       const urns = buildFreshUrns();
       const budget = buildPairBudget();
       const seen = new Map();
@@ -945,7 +954,6 @@ window.MathJax = {
       });
       trace = trace.slice(0, k).concat(tail);
       totalPairs = trace.length;
-      spokes.markReroll();
       publishSample();
     }
 
@@ -961,35 +969,65 @@ window.MathJax = {
     }
     function spokeColor(n) { return COL[CLUSTER_OF[n]] || COL.OUT; }
 
-    function render(opts) {
-      opts = opts || {};
-      viz.setEdges([]);
+    // Build a placed-style entry for trace[i]. Id embeds traceNonce so
+    // a random-all (which bumps the nonce) yields entries that don't
+    // collide by id with the previous trace's entries — the diff at the
+    // top of render() classifies all old-nonce entries as removes and
+    // all new-nonce entries as adds, which is what the chained rewind+
+    // forward sequence needs.
+    function placedEntryAt(traceArr, i, nonce) {
+      const t = traceArr[i];
+      const bad = !!(t.loop || t.multi);
+      return {
+        u: t.u, v: t.v,
+        color: pairColor(t),
+        id: "ce-" + nonce + "-" + i,
+        bad,
+        badColor: bad ? COL.edge_drop : null,
+      };
+    }
+    function placedListUpTo(traceArr, idx, nonce) {
+      const out = [];
+      for (let i = 0; i < idx; i++) out.push(placedEntryAt(traceArr, i, nonce));
+      return out;
+    }
+    function spokeCfg() {
       const cfg = {};
       NODES.forEach(n => { cfg[n] = { count: TARGET_DEG[n] || 0, color: spokeColor(n) }; });
-      const placed = [];
-      for (let i = 0; i < stepIdx - 1; i++) {
-        const t = trace[i];
-        placed.push({
-          u: t.u, v: t.v,
-          color: pairColor(t), id: "ce-" + i, bad: t.loop || t.multi,
-        });
-      }
-      let just = null;
-      let bridgeColor = COL.edge_inter;
-      if (stepIdx > 0) {
-        const t = trace[stepIdx - 1];
-        const bad = t.loop || t.multi;
-        bridgeColor = pairGoodColor(t);
-        just = {
-          u: t.u, v: t.v,
-          color: bridgeColor, bad,
-          badColor: bad ? COL.edge_drop : null,
-        };
-      }
-      const stateObj = { byNode: cfg, placed, just, justSeq: stepIdx, bridgeColor };
-      NETGEN.snapOrSync(spokes, stateObj, !!opts.snap);
+      return cfg;
+    }
+
+    // Last list committed to spokes (placedLayer + bridgeLayer combined).
+    // render() diffs the new target list against this by edge id; same
+    // id with different (u, v) counts as a remove + add pair (the
+    // random-step case where the active pair gets resampled). Anything
+    // changed goes into one spokes.playMany call so every concurrent
+    // rewind / forward grow shares a single chained sequence.
+    let lastList = [];
+
+    function render() {
+      viz.setEdges([]);
       syncStats();
       renderBudget();
+      const target = placedListUpTo(trace, stepIdx, traceNonce);
+      const byNode = spokeCfg();
+      const beforeById = new Map(lastList.map(e => [e.id, e]));
+      const afterById = new Map(target.map(e => [e.id, e]));
+      const removes = [], adds = [];
+      beforeById.forEach((be, id) => {
+        const ae = afterById.get(id);
+        if (!ae) removes.push(be);
+        else if (ae.u !== be.u || ae.v !== be.v) { removes.push(be); adds.push(ae); }
+      });
+      afterById.forEach((ae, id) => {
+        if (!beforeById.has(id)) adds.push(ae);
+      });
+      lastList = target;
+      if (removes.length === 0 && adds.length === 0) {
+        spokes.snapToState({ byNode, placed: target, just: null, justSeq: stepIdx });
+        return;
+      }
+      spokes.playMany(removes, adds, () => {}, { byNode });
     }
 
     function syncStats() {
@@ -1023,16 +1061,15 @@ window.MathJax = {
       totalForCurrent: () => totalPairs + 1,
       curId: "g3-cur", totId: "g3-total",
       getLocked: () => lockOverride,
-      // snap is provided by stepController on rand-all + start/end nav.
-      onRender: (idx, snap) => { stepIdx = idx; render({ snap }); },
+      // Single render path for every cursor change — single-step nav,
+      // multi-step jumps (to-start / to-end), random-step, random-all.
+      // render() diffs against lastList and dispatches one playMany
+      // call, so a multi-step jump becomes a chained rewind / forward
+      // sequence with every changed pair animating concurrently.
+      onRender: (idx) => { stepIdx = idx; render(); },
       onRandStep: (idx) => {
         if (idx <= 0) return;
         reseedFrom(idx - 1);
-        // stepController re-renders after onRandStep returns; that
-        // render fires syncState which consumes spokes.markReroll()
-        // and triggers the rewind+forward animation. A second render
-        // here (e.g. via reconfigureKeep) would interrupt the
-        // in-flight animation as a non-reroll jump.
       },
       onRandAll: (idx) => {
         if (idx <= 0) return;
@@ -1114,6 +1151,10 @@ window.MathJax = {
       label.textContent = "after simplify";
       edgeCount.textContent = "edges: " + pre + " → " + post + " (" + lostPct + "% lost)";
     }
+    // Bar-anim duration roughly matches the spokes.simplify total
+    // (dashify 220 + fade 320 + idle 80 = 620ms) so the red tail
+    // finishes growing right as the bad edges finish dissolving.
+    const BAR_ANIM_MS_G4 = 620;
     function snapPre(sample) {
       simplified = false;
       spokes.snapToState({
@@ -1134,18 +1175,22 @@ window.MathJax = {
         if (playBtn) playBtn.disabled = true;
         return;
       }
+      // Edge animation = the existing dashify→fade simplify primitive.
+      // Bars animate the red tail growing from 0 to the actual loss in
+      // lockstep with the edge fade, instead of snapping at the end.
       spokes.simplify(removes, () => {
         simplified = true;
         postLabel(sample);
         if (playBtn) playBtn.disabled = true;
       }, { byNode: byNodeFor(sample, true) });
+      renderDegBars(sample, true, { animate: true, duration: BAR_ANIM_MS_G4 });
     }
     function render(sample) { snapPre(sample); }
 
     render(SAMPLE);
     onSampleReroll((sample) => {
       render(sample);
-      renderDegBars(sample);
+      renderDegBars(sample, false);
     });
     if (playBtn) playBtn.addEventListener("click", () => playSimplify(SAMPLE));
     if (resetBtn) resetBtn.addEventListener("click", () => {
@@ -1165,6 +1210,8 @@ window.MathJax = {
         preLabel(sample);
         if (playBtn) playBtn.disabled = false;
       }, { byNode: byNodeFor(sample, false) });
+      // Bars unwind: red tail shrinks back to 0.
+      renderDegBars(sample, false, { animate: true, duration: BAR_ANIM_MS_G4 });
     });
 
     // Target-vs-achieved degree bars, horizontal, one row per node.
@@ -1200,8 +1247,11 @@ window.MathJax = {
 
     const gBars = g.append("g").attr("class", "deg-bars");
 
-    function renderDegBars(sample) {
-      const achOf = (d) => sample.achievedDeg[d];
+    function renderDegBars(sample, post, opts) {
+      opts = opts || {};
+      const animate = !!opts.animate;
+      const dur = opts.duration != null ? opts.duration : BAR_ANIM_MS_G4;
+      const achOf = (d) => post ? sample.achievedDeg[d] : TARGET_DEG[d];
       const lossOf = (d) => Math.max(0, TARGET_DEG[d] - achOf(d));
       // Target desc, id asc — stable across rerolls so the eye can track
       // the same node. The dividerX pivot already makes loss scannable
@@ -1248,18 +1298,43 @@ window.MathJax = {
         .attr("fill", "#2f3a54");
 
       const merged = enter.merge(rows);
-      merged.attr("transform", d => `translate(0,${y(String(d))})`);
-      merged.select(".achieved")
-        .attr("x", d => dividerX - achOf(d) * scale)
-        .attr("width", d => achOf(d) * scale);
-      merged.select(".dropped")
-        .attr("x", dividerX)
-        .attr("width", d => lossOf(d) * scale);
-      merged.select(".dlbl")
-        .attr("x", d => dividerX + lossOf(d) * scale + 5)
-        .text(d => achOf(d) + "/" + TARGET_DEG[d]);
+      const ach = merged.select(".achieved");
+      const drp = merged.select(".dropped");
+      const lbl = merged.select(".dlbl");
+      const tform = d => `translate(0,${y(String(d))})`;
+      const achX = d => dividerX - achOf(d) * scale;
+      const achW = d => achOf(d) * scale;
+      const drpW = d => lossOf(d) * scale;
+      const lblX = d => dividerX + lossOf(d) * scale + 5;
+      const lblTxt = d => achOf(d) + "/" + TARGET_DEG[d];
+
+      if (animate) {
+        const ease = d3.easeCubicInOut;
+        merged.transition("g4-bar").duration(dur).ease(ease).attr("transform", tform);
+        ach.transition("g4-bar").duration(dur).ease(ease)
+          .attr("x", achX).attr("width", achW);
+        drp.transition("g4-bar").duration(dur).ease(ease)
+          .attr("x", dividerX).attr("width", drpW);
+        lbl.transition("g4-bar").duration(dur).ease(ease)
+          .attr("x", lblX)
+          .tween("text", function (d) {
+            const node = this;
+            const startAch = parseInt((node.textContent || "0").split("/")[0], 10) || 0;
+            const endAch = achOf(d);
+            const tgt = TARGET_DEG[d];
+            const i = d3.interpolateNumber(startAch, endAch);
+            return function (k) {
+              node.textContent = Math.round(i(k)) + "/" + tgt;
+            };
+          });
+      } else {
+        merged.attr("transform", tform);
+        ach.attr("x", achX).attr("width", achW);
+        drp.attr("x", dividerX).attr("width", drpW);
+        lbl.attr("x", lblX).text(lblTxt);
+      }
     }
-    renderDegBars(SAMPLE);
+    renderDegBars(SAMPLE, false);
 
     bindFocusLink(viz, gBars);
   })();
@@ -1335,10 +1410,15 @@ window.MathJax = {
         id: "g5-k-" + i,
       }));
     }
+    // Match-edge stroke is a teal that doesn't appear elsewhere in the
+    // page palette — C2 cluster + its intra-edge tone are both amber-
+    // adjacent, so the previous COL.amber match edges read as ordinary
+    // C2 sampler edges on this fixture.
+    const MATCH_EDGE_COLOR = "#1f7a8c";
     function placedMatch(edges) {
       return edges.map(([u, v], i) => ({
         u, v,
-        color: COL.amber,
+        color: MATCH_EDGE_COLOR,
         id: "g5-m-" + i,
       }));
     }
@@ -1381,6 +1461,18 @@ window.MathJax = {
       preLabel(sample);
       if (playBtn) playBtn.disabled = matchEdges.length === 0;
     }
+    const FADE_MS = 480;
+    const KEPT_DIM = 0.22;
+    function matchPathSel() {
+      // Teal match-edge paths in placedLayer, picked by id prefix.
+      return d3.select("#g5-cy").selectAll("path.sp-placed-edge")
+        .filter(function (d) { return d && typeof d.id === "string" && d.id.indexOf("g5-m-") === 0; });
+    }
+    function keptPathSel() {
+      // Kept (sampler) edges in placedLayer.
+      return d3.select("#g5-cy").selectAll("path.sp-placed-edge")
+        .filter(function (d) { return d && typeof d.id === "string" && d.id.indexOf("g5-k-") === 0; });
+    }
     function playMatch(sample) {
       if (matched || lockBusy) return;
       const adds = placedMatch(matchEdges);
@@ -1391,12 +1483,73 @@ window.MathJax = {
         renderDegBars(sample, true);
         return;
       }
-      spokes.playMany([], adds, () => {
-        matched = true;
-        postLabel(sample);
-        if (playBtn) playBtn.disabled = true;
-        renderDegBars(sample, true);
-      }, { byNode: byNodeFor(postAchievedDeg) });
+      // Snap with amber entries already in placedLayer at opacity 0,
+      // then fade-in via d3 transition. Simpler than playMany — no
+      // orbit / grow / fan / colorize phases since match edges have no
+      // build story to tell. Disable buttons manually rather than via
+      // setLock: spokes.snapToState fires onLockChange(false) which
+      // would clobber a setLock(true) called before it.
+      if (playBtn) playBtn.disabled = true;
+      if (resetBtn) resetBtn.disabled = true;
+      spokes.snapToState({
+        byNode: byNodeFor(postAchievedDeg),
+        placed: placedKept(sample).concat(adds.map(e => Object.assign({}, e, { opacity: 0 }))),
+        just: null, justSeq: 0,
+      });
+      if (playBtn) playBtn.disabled = true;
+      if (resetBtn) resetBtn.disabled = true;
+      let fired = false;
+      keptPathSel()
+        .transition("g5-fade").duration(FADE_MS).ease(d3.easeCubicInOut)
+        .attr("opacity", KEPT_DIM);
+      matchPathSel()
+        .attr("opacity", 0)
+        .transition("g5-fade").duration(FADE_MS).ease(d3.easeCubicInOut)
+        .attr("opacity", 1)
+        .on("end", function () {
+          if (fired) return;
+          fired = true;
+          matched = true;
+          postLabel(sample);
+          if (playBtn) playBtn.disabled = true;
+          if (resetBtn) resetBtn.disabled = false;
+        });
+      // Bars animate alongside the edge fade so achieved widens / loss
+      // shrinks continuously rather than snapping at fade end.
+      renderDegBars(sample, true, { animate: true });
+    }
+    function resetFade(sample) {
+      if (lockBusy || !matched) { render(sample); return; }
+      const sel = matchPathSel();
+      if (sel.empty()) { render(sample); return; }
+      if (playBtn) playBtn.disabled = true;
+      if (resetBtn) resetBtn.disabled = true;
+      let fired = false;
+      keptPathSel()
+        .transition("g5-fade").duration(FADE_MS).ease(d3.easeCubicInOut)
+        .attr("opacity", 1);
+      sel.transition("g5-fade").duration(FADE_MS).ease(d3.easeCubicInOut)
+        .attr("opacity", 0)
+        .on("end", function () {
+          if (fired) return;
+          fired = true;
+          // Don't call render() here — it would re-snap the bars. Roll
+          // back state manually so the bar transition (kicked off
+          // below) is the only thing repainting them.
+          matched = false;
+          matchEdges = computeMatch(sample);
+          spokes.snapToState({
+            byNode: byNodeFor(sample.achievedDeg),
+            placed: placedKept(sample),
+            just: null, justSeq: 0,
+          });
+          preLabel(sample);
+          if (playBtn) playBtn.disabled = matchEdges.length === 0;
+          if (resetBtn) resetBtn.disabled = false;
+        });
+      // Bars unwind in lockstep with the fade-out so achieved shrinks
+      // back to pre values while teal edges dissolve.
+      renderDegBars(sample, false, { animate: true });
     }
     function render(sample) { snapPre(sample); renderDegBars(sample, false); }
 
@@ -1422,7 +1575,10 @@ window.MathJax = {
       .text("degree (mint = achieved, red = deficit)");
     const gBars = g.append("g").attr("class", "g5-deg-bars");
 
-    function renderDegBars(sample, post) {
+    function renderDegBars(sample, post, opts) {
+      opts = opts || {};
+      const animate = !!opts.animate;
+      const dur = opts.duration != null ? opts.duration : FADE_MS;
       const achOf = (d) => post ? (postAchievedDeg[d] || 0) : sample.achievedDeg[d];
       const lossOf = (d) => Math.max(0, TARGET_DEG[d] - achOf(d));
       const orderedNodes = NODES.slice().sort((a, b) =>
@@ -1465,22 +1621,54 @@ window.MathJax = {
         .attr("fill", "#2f3a54");
 
       const merged = enter.merge(rows);
-      merged.attr("transform", d => `translate(0,${y(String(d))})`);
-      merged.select(".achieved")
-        .attr("x", d => dividerX - achOf(d) * scale)
-        .attr("width", d => achOf(d) * scale);
-      merged.select(".dropped")
-        .attr("x", dividerX)
-        .attr("width", d => lossOf(d) * scale);
-      merged.select(".dlbl")
-        .attr("x", d => dividerX + lossOf(d) * scale + 5)
-        .text(d => achOf(d) + "/" + TARGET_DEG[d]);
+      // Pick a target (selection or transition) to drive geometry.
+      // Animate path runs the same set of attrs through a d3 transition
+      // so achieved widens, dropped shrinks, divider/label slide
+      // continuously from the pre to post snapshot.
+      const ach = merged.select(".achieved");
+      const drp = merged.select(".dropped");
+      const lbl = merged.select(".dlbl");
+      const tform = d => `translate(0,${y(String(d))})`;
+      const achX = d => dividerX - achOf(d) * scale;
+      const achW = d => achOf(d) * scale;
+      const drpW = d => lossOf(d) * scale;
+      const lblX = d => dividerX + lossOf(d) * scale + 5;
+      const lblTxt = d => achOf(d) + "/" + TARGET_DEG[d];
+
+      if (animate) {
+        const ease = d3.easeCubicInOut;
+        merged.transition("g5-bar").duration(dur).ease(ease).attr("transform", tform);
+        ach.transition("g5-bar").duration(dur).ease(ease)
+          .attr("x", achX).attr("width", achW);
+        drp.transition("g5-bar").duration(dur).ease(ease)
+          .attr("x", dividerX).attr("width", drpW);
+        lbl.transition("g5-bar").duration(dur).ease(ease)
+          .attr("x", lblX)
+          .tween("text", function (d) {
+            // Tween the integer "achieved" between the rendered value
+            // and its target so the label counts up / down with the bar
+            // instead of snapping at transition end.
+            const node = this;
+            const startAch = parseInt((node.textContent || "0").split("/")[0], 10) || 0;
+            const endAch = achOf(d);
+            const tgt = TARGET_DEG[d];
+            const i = d3.interpolateNumber(startAch, endAch);
+            return function (k) {
+              node.textContent = Math.round(i(k)) + "/" + tgt;
+            };
+          });
+      } else {
+        merged.attr("transform", tform);
+        ach.attr("x", achX).attr("width", achW);
+        drp.attr("x", dividerX).attr("width", drpW);
+        lbl.attr("x", lblX).text(lblTxt);
+      }
     }
 
     if (SAMPLE) render(SAMPLE);
     onSampleReroll((sample) => render(sample));
     if (playBtn) playBtn.addEventListener("click", () => playMatch(SAMPLE));
-    if (resetBtn) resetBtn.addEventListener("click", () => render(SAMPLE));
+    if (resetBtn) resetBtn.addEventListener("click", () => resetFade(SAMPLE));
 
     bindFocusLink(viz, gBars);
   })();
