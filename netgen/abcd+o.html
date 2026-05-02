@@ -208,15 +208,16 @@
 <!-- ─────────── Profiling · mixing scalar ─────────── -->
 <section class="stage">
   <div class="stage-num">profiling · the mixing scalar</div>
-  <h2>One number: \(\xi\), computed after every outlier-incident edge is removed.</h2>
-  <p>Same definition as ABCD with one carve-out. Treat the input outliers as a single outlier cluster, drop every outlier-incident edge (OO and OC), and read \(\xi\) off whatever remains. Let \(|E_{\text{real}}|\) be the count of edges with no outlier endpoint and \(|E_{\text{inter}}|\) the count of those that cross between real clusters:</p>
+  <h2>One number: \(\xi\), computed after drop_oo on the combined-outlier partition.</h2>
+  <p>Same definition as ABCD. Treat the input outliers as a single outlier cluster and drop their internal OO edges; OC edges stay and count as inter (they cross outlier ↔ real). Let \(|E^+|\) be the edge count after dropping OO and \(|E^+_{\text{out}}|\) the count of those edges that cross any cluster boundary:</p>
   \[
-    \xi \;=\; \frac{|E_{\text{inter}}|}{|E_{\text{real}}|}.
+    \xi \;=\; \frac{|E^+_{\text{out}}|}{|E^+|}.
   \]
+  <p>Dropping OO is what makes the singletons-and-combined framings agree: every OC edge crosses a boundary either way (singleton-to-real or outlier-to-real), and OO is the only edge type whose intra/inter label depends on the framing. With OO removed, the count is invariant.</p>
   <p>Sampler-side, \(\xi\) is still the paper's weight-split parameter: each non-outlier gets \(\hat y_u = (1-\xi) d_u\) cluster-graph stubs and \(\hat z_u = \xi d_u\) background stubs; outliers pin to \(\hat y_u = 0\). The realised inter-cluster fraction in output depends on which \(s_0\) nodes the sampler picks as outliers (hub-heavy picks lift it; low-degree picks depress it).</p>
   <div class="graph" id="g-xi">
     <div class="graph-chrome">
-      <span>input G &middot; red edges cross real clusters; outlier-incident edges (OO + OC) faded as removed</span>
+      <span>input G &middot; red edges cross cluster boundaries on the post-drop_oo graph; OO edge faded</span>
       <span class="right">mixing_parameter.txt</span>
     </div>
     <div class="graph-canvas" id="g-xi-cy"></div>
@@ -227,7 +228,7 @@
   </div>
   <div class="callout">
     <div class="tag">ABCD+o's \(\xi\) vs LFR's \(\mu\): not the same number</div>
-    <p>Both measure "fraction of edges crossing clusters" on the same input graph, but via different reductions. ABCD+o's \(\xi\) is a global ratio over edges with no outlier endpoint, \(E_{\text{inter}} / |E_{\text{real}}|\). LFR's \(\mu\) is the mean of per-node ratios, \(\text{mean}_u(d^{\text{out}}_u / d_u)\), and LFR does not separate outliers. On this synthetic ABCD+o's \(\xi\) is <b id="xi-vs-mu-xi">&middot;</b> while LFR's \(\mu\) is <b id="xi-vs-mu-mu">&middot;</b>. Do not swap them across models.</p>
+    <p>Both measure "fraction of edges crossing clusters" on the same input graph, but via different reductions. ABCD+o's \(\xi\) is a stub-weighted ratio over post-drop_oo edges, \(E^+_{\text{out}} / |E^+|\). LFR's \(\mu\) is the mean of per-node ratios, \(\text{mean}_u(d^{\text{out}}_u / d_u)\), and LFR does not drop OO edges. On this synthetic ABCD+o's \(\xi\) is <b id="xi-vs-mu-xi">&middot;</b> while LFR's \(\mu\) is <b id="xi-vs-mu-mu">&middot;</b>. Do not swap them across models.</p>
   </div>
 </section>
 
@@ -636,12 +637,15 @@ window.MathJax = {
   const SYNTHETIC_MU = parseFloat(LFR_PROF_OUT.files["mixing_parameter.txt"]);
 
   function pickInputColor(e) {
-    if (INPUT_OUT_SET.has(e.u) || INPUT_OUT_SET.has(e.v)) return COL.edge_drop;
+    if (INPUT_OUT_SET.has(e.u) && INPUT_OUT_SET.has(e.v)) return COL.edge_drop;
+    // OC edges cross outlier-cluster ↔ real-cluster under the combined-
+    // outlier framing the panels use, so they paint as inter.
+    if (INPUT_OUT_SET.has(e.u) || INPUT_OUT_SET.has(e.v)) return COL.edge_inter;
     if (e.kind === "inter") return COL.edge_inter;
     const c = CLUSTER_OF[e.u] || CLUSTER_OF[e.v];
     return COL.edge_intra[c] || COL.edge_inter;
   }
-  const isOutlierEdge = (e) => INPUT_OUT_SET.has(e.u) || INPUT_OUT_SET.has(e.v);
+  const isOO = (e) => INPUT_OUT_SET.has(e.u) && INPUT_OUT_SET.has(e.v);
 
   // Shared input opener · singleton mode (abcd+o's profile default;
   // the input partition has nodes 19 and 20 each as their own size-1
@@ -1143,14 +1147,15 @@ window.MathJax = {
   (function () {
     const host = document.getElementById("g-deg-cy");
     if (!host) return;
-    // Treat the input outliers as a single outlier cluster (light red)
-    // and render every outlier-incident edge (OO + OC) as dashed-fade
-    // so the panel reads as "outlier cluster, edges removed."
+    // Treat the input outliers as one outlier cluster (light red) with
+    // OO edges dropped. OC edges stay visible and paint as inter
+    // (cross outlier ↔ real); no further "outlier carve-out" is needed,
+    // ξ comes out the same as the canonical singletons + drop_oo count.
     const edges = [];
     EDGES.forEach(e => {
-      if (isOutlierEdge(e)) {
-        edges.push({ u: e.u, v: e.v, color: COL.edge_drop, w: 1.2,
-          id: "oe-drop-" + e.u + "-" + e.v, classes: "dashed fade" });
+      if (isOO(e)) {
+        edges.push({ u: e.u, v: e.v, color: COL.edge_drop, w: 1.3,
+          id: "oo-drop-" + e.u + "-" + e.v, classes: "dashed fade" });
       } else {
         edges.push({ u: e.u, v: e.v, color: pickInputColor(e), w: 1.2 });
       }
@@ -1259,9 +1264,9 @@ window.MathJax = {
 
     const edges = [];
     EDGES.forEach(e => {
-      if (isOutlierEdge(e)) {
+      if (isOO(e)) {
         edges.push({ u: e.u, v: e.v, color: COL.edge_drop, w: 1.1,
-          id: "cs-oe-" + e.u + "-" + e.v, classes: "dashed fade" });
+          id: "cs-oo-" + e.u + "-" + e.v, classes: "dashed fade" });
       } else {
         edges.push({ u: e.u, v: e.v, color: pickInputColor(e), w: 1.1 });
       }
@@ -1344,9 +1349,9 @@ window.MathJax = {
       .attr("preserveAspectRatio", "xMidYMid meet");
 
     // Profile-side, the input outliers form one outlier cluster
-    // (light red). Every outlier-incident edge — OO and OC alike —
-    // is dashed-faded as "removed" so ξ counts only edges among the
-    // real clusters.
+    // (light red). OO edges are dropped (drop_oo); OC edges stay and
+    // count as inter (cross outlier ↔ real). With OO removed, the
+    // singletons and combined-outlier framings produce the same ξ.
     const blockColor = {
       C1: COL.C1, C2: COL.C2, C3: COL.C3, OUT: OUTLIER_RED,
     };
@@ -1391,18 +1396,17 @@ window.MathJax = {
       });
     }
 
-    // E^+_out: real-cluster edges that cross cluster boundaries.
-    // Outlier-incident edges (OO + OC) are dropped from both the
-    // numerator and the denominator — that's the "outlier cluster
-    // with edges removed" framing. Among the remaining edges,
-    // kind="inter" crosses real clusters and counts in the numerator.
-    const isEout = (e) => !isOutlierEdge(e) && e.kind === "inter";
+    // E^+_out: edges that cross cluster boundaries on the post-drop_oo
+    // graph, with the outliers grouped into one cluster. OC edges
+    // cross outlier ↔ real, kind="inter" edges cross real ↔ real;
+    // both count. OO edges are dropped first.
+    const isEout = (e) => !isOO(e) && (e.kind === "inter" || e.kind === "outlier");
 
     const edges = [];
     EDGES.forEach(e => {
-      if (isOutlierEdge(e)) {
+      if (isOO(e)) {
         edges.push({ u: e.u, v: e.v, color: COL.edge_drop, w: 1.1,
-          id: "xi-oe-" + e.u + "-" + e.v, classes: "dashed fade" });
+          id: "xi-oo-" + e.u + "-" + e.v, classes: "dashed fade" });
       } else if (isEout(e)) {
         edges.push({ u: e.u, v: e.v, color: COL.signal, w: 2.0 });
       } else {
@@ -1418,22 +1422,21 @@ window.MathJax = {
     syncRects(viz);
     viz.sim.on("tick.blockRects", () => syncRects(viz));
 
-    const realEdges = EDGES.filter(e => !isOutlierEdge(e));
-    const totalE = realEdges.length;
-    const eOut = realEdges.filter(isEout).length;
-    const xiReal = totalE > 0 ? eOut / totalE : 0;
+    const keptEdges = EDGES.filter(e => !isOO(e));
+    const totalE = keptEdges.length;
+    const eOut = keptEdges.filter(isEout).length;
 
     NETGEN.mountGxPanel({
       viz,
       hostId: "g-xi-cy", prefix: "g-xi",
-      title: "global mixing parameter (outlier edges removed)", maxWidth: "16rem",
+      title: "global mixing parameter (post-drop_oo)", maxWidth: "16rem",
       bodyHTML:
         '<div class="xi-panel">'
         + '<div class="xi-grid">'
         +   '<span class="xi-lhs">ξ</span>'
         +   '<span class="xi-eq">=</span>'
-        +   '<span class="xi-rhs"><span class="xi-num">E<sub>inter</sub></span>'
-        +     '<span class="xi-bar"></span><span class="xi-den">|E<sub>real</sub>|</span></span>'
+        +   '<span class="xi-rhs"><span class="xi-num">E<sup>+</sup><sub>out</sub></span>'
+        +     '<span class="xi-bar"></span><span class="xi-den">|E<sup>+</sup>|</span></span>'
         +   '<span></span>'
         +   '<span class="xi-eq">=</span>'
         +   '<span class="xi-rhs"><span class="xi-num">' + eOut + '</span>'
@@ -1441,11 +1444,11 @@ window.MathJax = {
         +   '<span class="xi-sep"></span>'
         +   '<span></span>'
         +   '<span class="xi-eq">=</span>'
-        +   '<span class="xi-result">' + xiReal.toFixed(3) + '</span>'
+        +   '<span class="xi-result">' + SYNTHETIC_XI.toFixed(3) + '</span>'
         + '</div>'
         + '</div>',
     });
-    document.getElementById("xi-vs-mu-xi").textContent = xiReal.toFixed(3);
+    document.getElementById("xi-vs-mu-xi").textContent = SYNTHETIC_XI.toFixed(3);
     document.getElementById("xi-vs-mu-mu").textContent = SYNTHETIC_MU.toFixed(3);
   })();
 
