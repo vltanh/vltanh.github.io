@@ -2788,86 +2788,98 @@ window.MathJax = {
     // 2 W_OUT = W_OUT + ξ W_NON  →  ξ* = W_OUT / W_NON.
     const xiThreshold = W_NON_TOTAL > 0 ? Math.min(1, W_OUT / W_NON_TOTAL) : 1;
 
-    const W = 640, H = 200;
-    const PAD = { top: 28, right: 16, bottom: 56, left: 16 };
+    const W = 640, H = 240;
+    const PAD = { top: 36, right: 16, bottom: 60, left: 28 };
     const iw = W - PAD.left - PAD.right;
-    const barH = 38;
-    const barY = PAD.top + 8;
+    const barH = 42;
+    const barY = PAD.top + 4;
     const g = svg.append("g").attr("transform", `translate(${PAD.left},0)`);
 
-    // X-scale anchored to ξ = 1: at ξ = 1 the pool is exactly W_OUT + W_NON_TOTAL,
-    // so the bar fills `iw`. Lower ξ shrinks the non-outlier slice but the
-    // axis stays put; a faded 50% tick reads the threshold against the
-    // ξ = 1 length so the viewer can see the outlier slice approach it.
-    const POOL_MAX = W_OUT + W_NON_TOTAL;
-    const xPx = (units) => POOL_MAX > 0 ? iw * (units / POOL_MAX) : 0;
-    const halfX = xPx(POOL_MAX / 2);
+    // Bar normalised to 100% of the current pool: each slice's width is
+    // its share. The 50% line is the bar midpoint, so "outlier dominates"
+    // is literal — red slice past the dashed line.
+    const halfX = iw / 2;
 
-    // Header labels.
-    g.append("text").attr("x", 0).attr("y", PAD.top - 12)
+    // Header.
+    g.append("text").attr("x", 0).attr("y", PAD.top - 16)
       .attr("font-family", "Special Elite, Courier New, monospace")
       .attr("font-size", "11px").attr("fill", "#6b6a54")
-      .text("background-graph stub pool (post-drop_oo)");
+      .text("background-graph stub pool · normalised to 100% of current ξ");
 
-    // Pool track (light backdrop).
+    // Track + slices.
     g.append("rect").attr("x", 0).attr("y", barY)
       .attr("width", iw).attr("height", barH)
       .attr("fill", "#e8e0c2").attr("opacity", 0.4)
       .attr("stroke", "#b9a263").attr("stroke-width", 0.6);
-
-    // Outlier slice (anchored at left).
     const outRect = g.append("rect").attr("y", barY).attr("x", 0)
       .attr("height", barH).attr("fill", OUTLIER_RED).attr("opacity", 0.92);
-
-    // Non-outlier slice — split into cluster sub-rects so the gradient
-    // reads which clusters fund the pool. Order matches BLOCK_NAMES desc
-    // by mass for a stable visual.
     const NON_ORDER = ["C1", "C2", "C3"];
     const subRects = NON_ORDER.map(name =>
       g.append("rect").attr("y", barY).attr("height", barH)
-        .attr("fill", COL[name]).attr("opacity", 0.78));
+        .attr("fill", COL[name]).attr("opacity", 0.8));
 
-    // 50% threshold tick.
-    g.append("line")
-      .attr("x1", halfX).attr("x2", halfX)
-      .attr("y1", barY - 6).attr("y2", barY + barH + 6)
+    // 50% line at midpoint.
+    g.append("line").attr("x1", halfX).attr("x2", halfX)
+      .attr("y1", barY - 8).attr("y2", barY + barH + 8)
       .attr("stroke", "#1b2033").attr("stroke-width", 1.4)
       .attr("stroke-dasharray", "5 3").attr("opacity", 0.7);
-    g.append("text").attr("x", halfX).attr("y", barY - 10)
+    g.append("text").attr("x", halfX).attr("y", barY - 12)
       .attr("text-anchor", "middle")
       .attr("font-family", "Special Elite, Courier New, monospace")
       .attr("font-size", "10px").attr("fill", "#1b2033")
       .text("50% — warning threshold");
 
-    // Numeric labels under the bar.
-    // Legend row under the bar: swatch + name + count per slice. Avoids
-    // anchoring labels to narrow slices where the centred text would
-    // clip the bar's left edge.
-    const LEG_Y = barY + barH + 22;
-    const legendItems = [
-      { name: "outlier", color: OUTLIER_RED, get: (xi) => W_OUT },
-      ...NON_ORDER.map(c => ({
-        name: c, color: COL[c],
-        get: (xi) => xi * W_BY_CLUSTER[c],
-      })),
-    ];
-    const legendG = g.append("g").attr("class", "warn-legend");
-    const items = legendItems.map((item, i) => {
-      const ig = legendG.append("g").attr("transform", `translate(${i * 132},${LEG_Y})`);
-      ig.append("rect").attr("x", 0).attr("y", -10).attr("width", 12).attr("height", 12)
-        .attr("fill", item.color).attr("opacity", 0.88);
-      ig.append("text").attr("x", 18).attr("y", 0)
+    // ξ axis below the bar with three ticks: ξ*, page's profile ξ, and
+    // the slider's live ξ. Keeps the question "where does our ξ sit
+    // relative to the threshold" answerable at a glance.
+    const AX_Y = barY + barH + 28;
+    g.append("line").attr("x1", 0).attr("x2", iw)
+      .attr("y1", AX_Y).attr("y2", AX_Y)
+      .attr("stroke", "#b9a263").attr("stroke-width", 0.8);
+    [0, 0.25, 0.5, 0.75, 1].forEach(t => {
+      g.append("line").attr("x1", t * iw).attr("x2", t * iw)
+        .attr("y1", AX_Y - 3).attr("y2", AX_Y + 3)
+        .attr("stroke", "#b9a263").attr("stroke-width", 0.8);
+      g.append("text").attr("x", t * iw).attr("y", AX_Y + 14)
+        .attr("text-anchor", "middle")
         .attr("font-family", "Special Elite, Courier New, monospace")
-        .attr("font-size", "10.5px").attr("fill", "#2f3a54")
-        .text(item.name);
-      const num = ig.append("text").attr("x", 18).attr("y", 14)
-        .attr("font-family", "Special Elite, Courier New, monospace")
-        .attr("font-size", "10.5px").attr("fill", "#6b6a54");
-      return { item, num };
+        .attr("font-size", "9.5px").attr("fill", "#6b6a54")
+        .text(t.toFixed(2));
     });
-    const summary = g.append("text").attr("y", LEG_Y + 44).attr("x", 0)
+    g.append("text").attr("x", -8).attr("y", AX_Y + 4)
+      .attr("text-anchor", "end")
       .attr("font-family", "Special Elite, Courier New, monospace")
-      .attr("font-size", "11px").attr("fill", "#1b2033");
+      .attr("font-size", "10px").attr("fill", "#6b6a54")
+      .text("ξ");
+
+    if (xiThreshold > 0 && xiThreshold < 1) {
+      const tx = xiThreshold * iw;
+      g.append("line").attr("x1", tx).attr("x2", tx)
+        .attr("y1", AX_Y - 8).attr("y2", AX_Y + 8)
+        .attr("stroke", "#c92a2a").attr("stroke-width", 1.6);
+      g.append("text").attr("x", tx).attr("y", AX_Y - 10)
+        .attr("text-anchor", "middle")
+        .attr("font-family", "Special Elite, Courier New, monospace")
+        .attr("font-size", "9.5px").attr("fill", "#c92a2a")
+        .text(`ξ* = ${xiThreshold.toFixed(3)}`);
+    }
+    const pageX = SYNTHETIC_XI * iw;
+    g.append("line").attr("x1", pageX).attr("x2", pageX)
+      .attr("y1", AX_Y - 8).attr("y2", AX_Y + 8)
+      .attr("stroke", "#3559a0").attr("stroke-width", 1.6);
+    g.append("text").attr("x", pageX).attr("y", AX_Y + 30)
+      .attr("text-anchor", "middle")
+      .attr("font-family", "Special Elite, Courier New, monospace")
+      .attr("font-size", "9.5px").attr("fill", "#3559a0")
+      .text(`page ξ = ${SYNTHETIC_XI.toFixed(3)}`);
+
+    const liveTick = g.append("line")
+      .attr("y1", AX_Y - 8).attr("y2", AX_Y + 8)
+      .attr("stroke", "#1b2033").attr("stroke-width", 2);
+    const liveLabel = g.append("text").attr("y", AX_Y - 10)
+      .attr("text-anchor", "middle")
+      .attr("font-family", "Special Elite, Courier New, monospace")
+      .attr("font-size", "9.5px").attr("fill", "#1b2033");
 
     function update(xi) {
       val.textContent = xi.toFixed(2);
@@ -2877,31 +2889,26 @@ window.MathJax = {
       const outShare = total > 0 ? wOut / total : 0;
       const fired = outShare > 0.5;
 
-      const outW = xPx(wOut);
+      const outW = total > 0 ? iw * (wOut / total) : 0;
       outRect.attr("width", outW);
       let cursor = outW;
       NON_ORDER.forEach((name, i) => {
-        const w = xi * W_BY_CLUSTER[name];
-        const px = xPx(w);
+        const share = total > 0 ? (xi * W_BY_CLUSTER[name]) / total : 0;
+        const px = iw * share;
         subRects[i].attr("x", cursor).attr("width", px);
         cursor += px;
       });
 
-      items.forEach(({ item, num }) => {
-        num.text(`Σ d_u = ${item.get(xi).toFixed(item.name === "outlier" ? 0 : 1)}`);
-      });
-      summary.text(
-        `ξ_threshold ≈ W_out / W_non = ${xiThreshold.toFixed(3)} · ` +
-        `outlier share at ξ = ${xi.toFixed(2)} is ${(outShare * 100).toFixed(0)}% ` +
-        (fired ? "(over 50% — warning fires)" : "(under 50% — warning silent)")
-      );
+      const tx = xi * iw;
+      liveTick.attr("x1", tx).attr("x2", tx);
+      liveLabel.attr("x", tx).text(`now ξ = ${xi.toFixed(2)}`);
 
       if (fired) {
         banner.classList.remove("silent");
         text.innerHTML = '<b>warning fired.</b> "outlier nodes form a community"; cluster_id = 1 kept in com.csv.';
       } else {
         banner.classList.add("silent");
-        text.innerHTML = "warning silent. cluster_id = 1 filtered from com.csv.";
+        text.innerHTML = `warning silent. cluster_id = 1 filtered from com.csv. <span class="dim">(outlier share ${(outShare * 100).toFixed(0)}%)</span>`;
       }
     }
     slider.addEventListener("input", () => update(parseFloat(slider.value)));
