@@ -2555,21 +2555,22 @@ window.MathJax = {
   })();
 
   // ── Cross-cluster final swap walker ──
-  // Same shared mountFinalSwapWalker as abcd. abcd+o's only divergence
-  // is the node-color rule (sampler-picked outliers paint via COL.signal)
-  // + the edge intra/inter classifier reading R.outliers as a separate
-  // block alongside the input clusters. xi-slider subscribes via the
-  // returned reconfigReset since xi is a per-page dial that abcd does
-  // not have.
+  // Block lookup tracks the assignment trace: outliers paint
+  // OUTLIER_RED; non-outliers paint by their LIVE_REAL_CLUSTER_OF
+  // (driven by the assign walker), not by their original input
+  // CLUSTER_OF. After an assign re-roll, a node moved from C1 to C2
+  // recolours and re-classifies its edges accordingly.
   (function () {
+    function blockOf(id, R) {
+      return R.outliers.has(id) ? "outlier" : LIVE_REAL_CLUSTER_OF[id];
+    }
     const fs = NETGEN.mountFinalSwapWalker({
       hostId: "g-finalswap",
       getR: () => getCurrentR(),
-      nodeColorOf: (id, R) => R.outliers.has(id) ? OUTLIER_RED : COL[CLUSTER_OF[id]],
+      nodeColorOf: (id, R) => R.outliers.has(id) ? OUTLIER_RED : BLOCK_COLOR[LIVE_REAL_CLUSTER_OF[id]],
       edgeColorOf: (u, v, R) => {
-        const cu = R.outliers.has(u) ? "OUT" : CLUSTER_OF[u];
-        const cv = R.outliers.has(v) ? "OUT" : CLUSTER_OF[v];
-        if (cu === cv && COL.edge_intra[cu]) return COL.edge_intra[cu];
+        const bu = blockOf(u, R), bv = blockOf(v, R);
+        if (bu === bv && COL.edge_intra[bu]) return COL.edge_intra[bu];
         return COL.edge_inter;
       },
       dropColor: COL.edge_drop,
