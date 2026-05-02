@@ -527,6 +527,259 @@
     return phase1.concat(phase2);
   }
 
+  // ── cluster-preserving helpers ─────────────────────────────
+  // bp = (min_block, max_block) over node iids. bpBudget is keyed
+  // "min-max" -> remaining edges allowed in that block-pair. The CP
+  // variants mirror src/match_degree.py:cluster_preserving_* by
+  // filtering candidate partners on a positive remaining budget and
+  // decrementing on accept.
+  function bpKey(b, u, v) {
+    const a = b[u], c = b[v];
+    return Math.min(a, c) + "-" + Math.max(a, c);
+  }
+  function bpAvail(bpBudget, key) {
+    return (bpBudget[key] || 0) > 0;
+  }
+  function cloneBudget(bp) {
+    const out = {};
+    for (const k in bp) out[k] = bp[k];
+    return out;
+  }
+
+  // ── cluster_preserving_greedy ──────────────────────────────
+  // Mirrors src/match_degree.py:match_missing_degrees_cluster_preserving_greedy.
+  // Same heap-and-set scaffolding as runGreedy; partners filtered by
+  // bpBudget>0; on accept decrement bpBudget for that bp.
+  function runClusterPreservingGreedy(payload, opts) {
+    opts = opts || {};
+    const initialState = opts.initialState;
+    const initialDeficit = payload.deficit;
+    if (!payload.b || !payload.bpBudget) {
+      throw new Error("runClusterPreservingGreedy: payload.b and payload.bpBudget required");
+    }
+    const b = payload.b;
+    const bpBudget = cloneBudget(payload.bpBudget);
+    const { residual, unplaced, adj, edges, exitOrder } = initState(payload, initialState);
+    const steps = [];
+    maybeInitStep(steps, residual, unplaced, edges, exitOrder, initialState);
+
+    const availSet = new Set();
+    const availDeg = {};
+    for (const k in residual) {
+      const u = parseInt(k, 10);
+      if (residual[u] > 0) { availSet.add(u); availDeg[u] = residual[u]; }
+    }
+    const heap = [];
+    for (const n of availSet) heap.push([-availDeg[n], n]);
+    heap.sort((a, bb) => (a[0] - bb[0]) || (a[1] - bb[1]));
+
+    function recordExit(n) { if (!exitOrder.includes(n)) exitOrder.push(n); }
+
+    while (heap.length > 0) {
+      const popped = heap.shift();
+      const u = popped[1];
+      if (!availSet.has(u)) continue;
+      const invalid = new Set(adj[u]); invalid.add(u);
+      let candidates = [];
+      for (const n of availSet) if (!invalid.has(n)) candidates.push(n);
+      candidates.sort((a, bb) => a - bb);
+      candidates = candidates.filter(n => bpAvail(bpBudget, bpKey(b, u, n)));
+      const availK = Math.min(availDeg[u], candidates.length);
+      for (let k = 0; k < availK; k++) {
+        const v = candidates[k];
+        const key = bpKey(b, u, v);
+        if (!bpAvail(bpBudget, key)) continue;
+        adj[u].add(v); adj[v].add(u);
+        edges.push([u, v]);
+        residual[u] -= 1; residual[v] -= 1;
+        bpBudget[key] -= 1;
+        availDeg[v] -= 1;
+        if (availDeg[v] === 0) { availSet.delete(v); delete availDeg[v]; }
+        if (residual[u] === 0) recordExit(u);
+        if (residual[v] === 0 && (initialDeficit[v] || 0) > 0) recordExit(v);
+        steps.push(snapshot("add", { u, v, bp: key, bpRemaining: bpBudget[key] },
+          residual, unplaced, edges, exitOrder,
+          `pop u=${u} (cp burst, k=${availK}). step ${k + 1}/${availK}: bp ${key} → v=${v}; remaining ${bpBudget[key]}.`));
+      }
+      if (residual[u] > 0) {
+        const lost = residual[u];
+        unplaced[u] = (unplaced[u] || 0) + lost;
+        residual[u] = 0;
+        recordExit(u);
+        steps.push(snapshot("gridlock_silent", { u },
+          residual, unplaced, edges, exitOrder,
+          `u=${u}: ${lost} stub(s) silently dropped (cp burst found no in-budget partner).`));
+      }
+      availSet.delete(u);
+      delete availDeg[u];
+    }
+    steps.push(snapshot("done", null, residual, unplaced, edges, exitOrder,
+      `done. ${edges.length} edge(s) placed; ${residualSum(unplaced)} stub(s) abandoned.`));
+    return steps;
+  }
+
+  // ── cluster_preserving_true_greedy ─────────────────────────
+  // Mirrors src/match_degree.py:match_missing_degrees_cluster_preserving_true_greedy.
+  function runClusterPreservingTrueGreedy(payload, opts) {
+    opts = opts || {};
+    const initialState = opts.initialState;
+    const initialDeficit = payload.deficit;
+    if (!payload.b || !payload.bpBudget) {
+      throw new Error("runClusterPreservingTrueGreedy: payload.b and payload.bpBudget required");
+    }
+    const b = payload.b;
+    const bpBudget = cloneBudget(payload.bpBudget);
+    const { residual, unplaced, adj, edges, exitOrder } = initState(payload, initialState);
+    const steps = [];
+    maybeInitStep(steps, residual, unplaced, edges, exitOrder, initialState);
+
+    const currentDeg = {};
+    for (const k in residual) {
+      const u = parseInt(k, 10);
+      if (residual[u] > 0) currentDeg[u] = residual[u];
+    }
+    const heap = [];
+    for (const n in currentDeg) heap.push([-currentDeg[n], parseInt(n, 10)]);
+    heap.sort((a, bb) => (a[0] - bb[0]) || (a[1] - bb[1]));
+    function heapPush(item) { heap.push(item); heap.sort((a, bb) => (a[0] - bb[0]) || (a[1] - bb[1])); }
+    function recordExit(n) { if (!exitOrder.includes(n)) exitOrder.push(n); }
+
+    while (heap.length > 0) {
+      const [negDeg, u] = heap.shift();
+      const degU = -negDeg;
+      if (currentDeg[u] === undefined || currentDeg[u] !== degU) continue;
+      const invalid = adj[u];
+      const validTargets = [];
+      for (const k in currentDeg) {
+        const n = parseInt(k, 10);
+        if (n === u) continue;
+        if (invalid.has(n)) continue;
+        if (!bpAvail(bpBudget, bpKey(b, u, n))) continue;
+        validTargets.push(n);
+      }
+      if (validTargets.length === 0) {
+        const lost = residual[u];
+        unplaced[u] = (unplaced[u] || 0) + lost;
+        residual[u] = 0;
+        delete currentDeg[u];
+        recordExit(u);
+        steps.push(snapshot("gridlock_logged", { u },
+          residual, unplaced, edges, exitOrder,
+          `u=${u} starved: no in-budget partner; ${lost} stub(s) unplaced.`));
+        continue;
+      }
+      let v = null, vDeg = -1;
+      for (const n of validTargets) {
+        const d = currentDeg[n];
+        if (d > vDeg || (d === vDeg && (v === null || n < v))) { v = n; vDeg = d; }
+      }
+      const key = bpKey(b, u, v);
+      adj[u].add(v); adj[v].add(u);
+      edges.push([u, v]);
+      residual[u] -= 1; residual[v] -= 1;
+      currentDeg[u] -= 1; currentDeg[v] -= 1;
+      bpBudget[key] -= 1;
+      if (residual[u] === 0) recordExit(u);
+      if (residual[v] === 0 && (initialDeficit[v] || 0) > 0) recordExit(v);
+      if (currentDeg[u] > 0) heapPush([-currentDeg[u], u]); else delete currentDeg[u];
+      if (currentDeg[v] > 0) heapPush([-currentDeg[v], v]);
+      else if (currentDeg[v] !== undefined) delete currentDeg[v];
+      steps.push(snapshot("add", { u, v, bp: key, bpRemaining: bpBudget[key] },
+        residual, unplaced, edges, exitOrder,
+        `pop u=${u}; argmax with bp filter picks v=${v} (deg ${vDeg}, bp ${key}); remaining ${bpBudget[key]}.`));
+    }
+    steps.push(snapshot("done", null, residual, unplaced, edges, exitOrder,
+      `done. ${edges.length} edge(s) placed; ${residualSum(unplaced)} stub(s) gridlocked.`));
+    return steps;
+  }
+
+  // ── cluster_preserving_random_greedy ───────────────────────
+  // Mirrors src/match_degree.py:match_missing_degrees_cluster_preserving_random_greedy.
+  function runClusterPreservingRandomGreedy(payload, opts) {
+    opts = opts || {};
+    if (!opts.rng) throw new Error("runClusterPreservingRandomGreedy: opts.rng required");
+    const rng = opts.rng;
+    const initialState = opts.initialState;
+    const initialDeficit = payload.deficit;
+    if (!payload.b || !payload.bpBudget) {
+      throw new Error("runClusterPreservingRandomGreedy: payload.b and payload.bpBudget required");
+    }
+    const b = payload.b;
+    const bpBudget = cloneBudget(payload.bpBudget);
+    const { residual, unplaced, adj, edges, exitOrder } = initState(payload, initialState);
+    const steps = [];
+    maybeInitStep(steps, residual, unplaced, edges, exitOrder, initialState);
+
+    function weightedPick(items, weights) {
+      let total = 0;
+      for (const w of weights) total += w;
+      if (total <= 0) return -1;
+      let r = rng() * total;
+      for (let i = 0; i < items.length; i++) {
+        r -= weights[i];
+        if (r <= 0) return i;
+      }
+      return items.length - 1;
+    }
+    function recordExit(n) { if (!exitOrder.includes(n)) exitOrder.push(n); }
+
+    const availDeg = {};
+    const availNodes = [];
+    const sortedKeys = Object.keys(residual)
+      .map(k => parseInt(k, 10))
+      .filter(k => residual[k] > 0)
+      .sort((a, bb) => a - bb);
+    for (const k of sortedKeys) { availDeg[k] = residual[k]; availNodes.push(k); }
+
+    let safety = 5000;
+    while (availNodes.length > 0 && safety-- > 0) {
+      const weights = availNodes.map(n => availDeg[n]);
+      const uIdx = weightedPick(availNodes, weights);
+      if (uIdx < 0) break;
+      const u = availNodes[uIdx];
+      const invalid = adj[u];
+      const validTargets = [];
+      for (const n of availNodes) {
+        if (n === u) continue;
+        if (invalid.has(n)) continue;
+        if (!bpAvail(bpBudget, bpKey(b, u, n))) continue;
+        validTargets.push(n);
+      }
+      if (validTargets.length === 0) {
+        const lost = residual[u];
+        unplaced[u] = (unplaced[u] || 0) + lost;
+        residual[u] = 0;
+        const i = availNodes.indexOf(u);
+        if (i >= 0) availNodes.splice(i, 1);
+        delete availDeg[u];
+        recordExit(u);
+        steps.push(snapshot("gridlock_logged", { u },
+          residual, unplaced, edges, exitOrder,
+          `u=${u} starved (no in-budget partner): ${lost} stub(s).`));
+        continue;
+      }
+      const vWeights = validTargets.map(n => availDeg[n]);
+      const vIdx = weightedPick(validTargets, vWeights);
+      const v = validTargets[vIdx];
+      const key = bpKey(b, u, v);
+      adj[u].add(v); adj[v].add(u);
+      edges.push([u, v]);
+      residual[u] -= 1; residual[v] -= 1;
+      availDeg[u] -= 1; availDeg[v] -= 1;
+      bpBudget[key] -= 1;
+      if (availDeg[u] === 0) { const i = availNodes.indexOf(u); if (i >= 0) availNodes.splice(i, 1); delete availDeg[u]; }
+      if (availDeg[v] === 0) { const i = availNodes.indexOf(v); if (i >= 0) availNodes.splice(i, 1); delete availDeg[v]; }
+      if (residual[u] === 0) recordExit(u);
+      if (residual[v] === 0 && (initialDeficit[v] || 0) > 0) recordExit(v);
+      steps.push(snapshot("add", { u, v, bp: key, bpRemaining: bpBudget[key] },
+        residual, unplaced, edges, exitOrder,
+        `weighted u=${u}; weighted v=${v} from ${validTargets.length} in-budget; bp ${key} remaining ${bpBudget[key]}.`));
+    }
+    steps.push(snapshot("done", null, residual, unplaced, edges, exitOrder,
+      `done. ${edges.length} edge(s) placed; ${residualSum(unplaced)} stub(s) gridlocked.`));
+    return steps;
+  }
+
   window.MatchDegreeKernel = {
     cloneResidual,
     cloneAdj,
@@ -537,5 +790,8 @@
     runRandomGreedy,
     runRewire,
     runHybrid,
+    runClusterPreservingGreedy,
+    runClusterPreservingTrueGreedy,
+    runClusterPreservingRandomGreedy,
   };
 })();
