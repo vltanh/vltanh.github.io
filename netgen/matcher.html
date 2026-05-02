@@ -407,6 +407,161 @@
   </div>
 </section>
 
+<!-- ─────────── cluster_preserving family · overview ─────────── -->
+<section class="stage">
+  <div class="stage-num">family · cluster_preserving</div>
+  <h2>The same five algorithms, gated on a per-block-pair budget.</h2>
+  <p>The five algorithms above only watch per-node deficit. They pick whichever partner closes the deficit, no matter what cluster the partner sits in — which means a hub deep inside cluster C1 can drain its deficit by reaching across to a nearly-isolated outlier when nothing closer is left on the candidate list. The matched degree sequence ends up correct, but the block-pair edge counts drift away from the reference clustering's distribution.</p>
+  <p>The <code>cluster_preserving_*</code> family adds a second budget: a count, per <span class="formula">(B_i, B_j)</span> block-pair, of how many additional edges are still allowed in that pair. The matcher refuses any partner whose bp budget is empty, decrements the counter on accept, and starves nodes whose remaining stubs have no in-budget partner left. Stubs that the global family would silently drain across-cluster instead surface as gridlock; the matched degree sequence is no longer guaranteed to close cleanly, but the block-pair distribution stays loyal to the reference.</p>
+  <p>The five variants below mirror the five global algorithms one-for-one. Each takes the same residual deficit, runs its corresponding global control flow, and adds the bp filter on candidate selection plus the bp decrement on accept. Walker captions name the bp the matcher just touched and the remaining bp budget after the decrement.</p>
+  <div class="callout">
+    <div class="tag">when each generator picks it</div>
+    <p>The sweep at <code>examples/output/synthetic_networks_md_sweep/comparison_table.md</code> ranks every (gen, matcher, remap) cell on the dnc fixture by a per-cluster fidelity score. <code>cluster_preserving_true_greedy / direct</code> wins on every clustered gen (<code>sbm</code>, <code>ec-sbm-v1</code>, <code>ec-sbm-v2</code>, <code>ec-sbm-v3</code>) and is the per-metric champion on six of the nine distribution metrics.</p>
+  </div>
+</section>
+
+<!-- ─────────── algorithm · cluster_preserving_greedy ─────────── -->
+<section class="stage">
+  <div class="stage-num">algorithm · cluster_preserving_greedy</div>
+  <h2>Greedy with a per-bp filter on the partner sort.</h2>
+  <p>Same static-heap drain-burst as <code>greedy</code>: pop the node with the most missing stubs, sort the candidate set by id-ascending, take the first <code>min(deficit, |candidates|)</code>. The filter strips any partner whose bp <span class="formula">(B_u, B_n)</span> has zero remaining budget; on accept, the bp counter goes down. When the bp pool runs dry early in the burst, the remainder of the deficit drops silently (canonical greedy's silent gridlock).</p>
+  <div class="pseudo"><span class="kw">def</span> cluster_preserving_greedy(residual, adj, b, bp_budget):
+    heap = max-heap of (residual[u], u) for u with residual[u] &gt; 0
+    <span class="kw">while</span> heap not empty:
+        u = heap.pop()
+        candidates = sorted({v : v != u, v not in adj[u], residual[v] &gt; 0})
+        candidates = [v <span class="kw">for</span> v <span class="kw">in</span> candidates <span class="kw">if</span> bp_budget[bp(b[u], b[v])] &gt; 0]
+        <span class="kw">for</span> v <span class="kw">in</span> candidates[:residual[u]]:
+            adj[u].add(v); adj[v].add(u)
+            residual[u] -= 1; residual[v] -= 1
+            bp_budget[bp(b[u], b[v])] -= 1</div>
+  <div class="graph" id="g-cpgreedy">
+    <div class="graph-chrome">
+      <span id="g-cpgreedy-stage">step 0 &middot; initial deficit</span>
+      <span class="right step-label">step <b id="g-cpgreedy-cur">0</b> / <span id="g-cpgreedy-total">0</span></span>
+    </div>
+    <div class="graph-canvas" id="g-cpgreedy-cy"></div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-cpgreedy-start" type="button">to start</button>
+      <button class="btn" id="g-cpgreedy-prev" type="button">back</button>
+      <button class="btn primary" id="g-cpgreedy-next" type="button">next</button>
+      <button class="btn" id="g-cpgreedy-end" type="button">to end</button>
+      <span class="step-label" id="g-cpgreedy-real">deterministic; same output every run</span>
+    </div>
+    <div class="step-desc" id="g-cpgreedy-desc">click <em>next</em> to advance.</div>
+  </div>
+</section>
+
+<!-- ─────────── algorithm · cluster_preserving_true_greedy ─────────── -->
+<section class="stage">
+  <div class="stage-num">algorithm · cluster_preserving_true_greedy</div>
+  <h2>True-greedy, only partners whose bp still has budget.</h2>
+  <p>Mirrors <code>true_greedy</code>: pop the highest-residual node and pick the single partner with maximum live degree, id-ascending tiebreak. The filter strips out-of-budget partners; on accept the bp counter goes down. Re-pushes both nodes into the heap with their decremented residuals. Gridlock (no in-budget partner with deficit left) is logged.</p>
+  <div class="pseudo"><span class="kw">def</span> cluster_preserving_true_greedy(residual, adj, b, bp_budget):
+    heap = max-heap on residual
+    <span class="kw">while</span> heap not empty:
+        u = pop with re-push protocol (lazy delete)
+        valid = [v <span class="kw">for</span> v <span class="kw">in</span> residual <span class="kw">if</span> v != u, v <span class="kw">not</span> <span class="kw">in</span> adj[u],
+                            bp_budget[bp(b[u], b[v])] &gt; 0]
+        <span class="kw">if</span> not valid: log.warn(...)
+        v = max(valid, key=lambda x: (residual[x], -x))
+        accept (u, v); decrement bp_budget</div>
+  <div class="graph" id="g-cptruegreedy">
+    <div class="graph-chrome">
+      <span id="g-cptruegreedy-stage">step 0 &middot; initial deficit</span>
+      <span class="right step-label">step <b id="g-cptruegreedy-cur">0</b> / <span id="g-cptruegreedy-total">0</span></span>
+    </div>
+    <div class="graph-canvas" id="g-cptruegreedy-cy"></div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-cptruegreedy-start" type="button">to start</button>
+      <button class="btn" id="g-cptruegreedy-prev" type="button">back</button>
+      <button class="btn primary" id="g-cptruegreedy-next" type="button">next</button>
+      <button class="btn" id="g-cptruegreedy-end" type="button">to end</button>
+      <span class="step-label" id="g-cptruegreedy-real">deterministic; same output every run</span>
+    </div>
+    <div class="step-desc" id="g-cptruegreedy-desc">click <em>next</em> to advance.</div>
+  </div>
+</section>
+
+<!-- ─────────── algorithm · cluster_preserving_random_greedy ─────────── -->
+<section class="stage">
+  <div class="stage-num">algorithm · cluster_preserving_random_greedy</div>
+  <h2>Weighted-random pick on an in-budget candidate set.</h2>
+  <p>Mirrors <code>random_greedy</code>: weighted-random <span class="formula">u</span> proportional to <span class="formula">residual[u]</span>; weighted-random <span class="formula">v</span> proportional to residual on the in-budget candidate set. Bp filter applied to the candidate list before weighting. Decrements happen on accept.</p>
+  <div class="graph" id="g-cprandgreedy">
+    <div class="graph-chrome">
+      <span id="g-cprandgreedy-stage">step 0 &middot; initial deficit</span>
+      <span class="right step-label">step <b id="g-cprandgreedy-cur">0</b> / <span id="g-cprandgreedy-total">0</span></span>
+    </div>
+    <div class="graph-canvas" id="g-cprandgreedy-cy"></div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-cprandgreedy-rand-step" type="button" title="re-randomize this step's pick only">random step</button>
+      <button class="btn" id="g-cprandgreedy-rand-all" type="button" title="reseed every weighted draw">random all</button>
+      <span class="step-label" id="g-cprandgreedy-real">step: redo current pick · all: reseed every pick</span>
+    </div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-cprandgreedy-start" type="button">to start</button>
+      <button class="btn" id="g-cprandgreedy-prev" type="button">back</button>
+      <button class="btn primary" id="g-cprandgreedy-next" type="button">next</button>
+      <button class="btn" id="g-cprandgreedy-end" type="button">to end</button>
+    </div>
+    <div class="step-desc" id="g-cprandgreedy-desc">click <em>next</em> to advance.</div>
+  </div>
+</section>
+
+<!-- ─────────── algorithm · cluster_preserving_rewire ─────────── -->
+<section class="stage">
+  <div class="stage-num">algorithm · cluster_preserving_rewire</div>
+  <h2>Per-bp stub-pair sampler + bp-preserving 2-opt.</h2>
+  <p>Mirrors <code>rewire</code>'s two-phase shape but works inside each bp independently. Phase 1: for every bp with a positive budget, draw stubs proportional to the per-node deficit restricted to that bp's blocks, shuffle, pair adjacent — exactly the residual-SBM stub draw <code>gen_outlier</code> uses on EC-SBM stage 3a. Self-loops and duplicates queue for repair. Phase 2 runs the same per-bp 2-opt swap as <code>graph_utils.cluster_preserving_2opt_rewire</code>: pick a random valid edge inside the bp, recombine endpoints with a coin flip when intra-block, swap "across" the bp partition when inter-block. Up to ten retries; whatever still conflicts at the end is dropped.</p>
+  <p class="muted small">The page walker is <em>algorithmically</em> faithful to the canonical Python but does <strong>not</strong> byte-equal it: canonical delegates the stub draw to <code>gt.generate_sbm</code>, whose RNG is not portable to JS. The page kernel uses a JS-native weighted draw with the same control flow.</p>
+  <div class="graph" id="g-cprewire">
+    <div class="graph-chrome">
+      <span id="g-cprewire-stage">step 0 &middot; initial deficit</span>
+      <span class="right step-label">step <b id="g-cprewire-cur">0</b> / <span id="g-cprewire-total">0</span></span>
+    </div>
+    <div class="graph-canvas" id="g-cprewire-cy"></div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-cprewire-rand-step" type="button" title="re-randomize this step's pick only">random step</button>
+      <button class="btn" id="g-cprewire-rand-all" type="button" title="reseed the whole rewire pass">random all</button>
+      <span class="step-label" id="g-cprewire-real">step: redo current pick · all: reseed every draw</span>
+    </div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-cprewire-start" type="button">to start</button>
+      <button class="btn" id="g-cprewire-prev" type="button">back</button>
+      <button class="btn primary" id="g-cprewire-next" type="button">next</button>
+      <button class="btn" id="g-cprewire-end" type="button">to end</button>
+    </div>
+    <div class="step-desc" id="g-cprewire-desc">click <em>next</em> to advance.</div>
+  </div>
+</section>
+
+<!-- ─────────── algorithm · cluster_preserving_hybrid ─────────── -->
+<section class="stage">
+  <div class="stage-num">algorithm · cluster_preserving_hybrid</div>
+  <h2><code>cp_rewire</code>, then <code>cp_true_greedy</code> on what is left.</h2>
+  <p>Mirrors <code>hybrid</code>'s two-phase shape but every accepted edge stays inside a positive-budget bp. Phase 1 runs <code>cluster_preserving_rewire</code> with <code>keepResidual=true</code>, leaving any unmatched stubs for phase 2. Phase 2 runs <code>cluster_preserving_true_greedy</code> on the residual against the now-smaller bp budget. Whatever cannot close in either phase is logged.</p>
+  <div class="graph" id="g-cphybrid">
+    <div class="graph-chrome">
+      <span id="g-cphybrid-stage">step 0 &middot; initial deficit</span>
+      <span class="right step-label">step <b id="g-cphybrid-cur">0</b> / <span id="g-cphybrid-total">0</span></span>
+    </div>
+    <div class="graph-canvas" id="g-cphybrid-cy"></div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-cphybrid-rand-step" type="button" title="re-randomize this step's pick only">random step</button>
+      <button class="btn" id="g-cphybrid-rand-all" type="button" title="reseed both phases from the start">random all</button>
+      <span class="step-label" id="g-cphybrid-real">step: redo current pick · all: reseed full pipeline</span>
+    </div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-cphybrid-start" type="button">to start</button>
+      <button class="btn" id="g-cphybrid-prev" type="button">back</button>
+      <button class="btn primary" id="g-cphybrid-next" type="button">next</button>
+      <button class="btn" id="g-cphybrid-end" type="button">to end</button>
+    </div>
+    <div class="step-desc" id="g-cphybrid-desc">click <em>next</em> to advance.</div>
+  </div>
+</section>
+
 <!-- ─────────── --remap mode ─────────── -->
 <section class="stage">
   <div class="stage-num">the --remap option</div>
@@ -569,6 +724,50 @@ window.MathJax = {
     return { iids: NODES, deficit: DEFICIT, baseAdj: adjBase };
   }
 
+  // Cluster-preserving extension: map each cluster name to a small
+  // integer block id. Outliers fall under "OUT" → block 3. The bp budget
+  // is computed as the per-bp expected new edge count under random
+  // pairing of the residual stubs (size_i * size_j / total for inter,
+  // C(size_i, 2) / total for intra), rounded up to at least 1 so every
+  // currently-occupied bp can accept at least one matcher edge.
+  const CLUSTER_TO_BLOCK = { C1: 0, C2: 1, C3: 2, OUT: 3 };
+  function makeBlockArray() {
+    const b = {};
+    NODES.forEach(n => {
+      const c = CLUSTER_OF[n];
+      b[n] = (c in CLUSTER_TO_BLOCK) ? CLUSTER_TO_BLOCK[c] : 3;
+    });
+    return b;
+  }
+  function makeBpBudget(deficit, b) {
+    const stubs = {};  // block → total residual stubs
+    for (const k in deficit) {
+      const u = parseInt(k, 10);
+      if (deficit[u] <= 0) continue;
+      stubs[b[u]] = (stubs[b[u]] || 0) + deficit[u];
+    }
+    const total = Object.values(stubs).reduce((a, c) => a + c, 0);
+    if (total < 2) return {};
+    const blocks = Object.keys(stubs).map(Number).sort((a, c) => a - c);
+    const budget = {};
+    for (let i = 0; i < blocks.length; i++) {
+      for (let j = i; j < blocks.length; j++) {
+        const bi = blocks[i], bj = blocks[j];
+        const si = stubs[bi], sj = stubs[bj];
+        const exp = (bi === bj) ? si * (si - 1) / (2 * total) : si * sj / total;
+        budget[bi + "-" + bj] = Math.max(1, Math.round(exp));
+      }
+    }
+    return budget;
+  }
+  function makeKernelPayloadCP() {
+    const b = makeBlockArray();
+    return {
+      iids: NODES, deficit: DEFICIT, baseAdj: adjBase,
+      b, bpBudget: makeBpBudget(DEFICIT, b),
+    };
+  }
+
   // ── Algorithm: greedy ──
   // Canonical static-heap drain-burst per src/match_degree.py (no re-push;
   // sorted non-neighbors[:avail_k] in one go; silent gridlock when the
@@ -617,6 +816,32 @@ window.MathJax = {
     return MatchDegreeKernel.runHybrid(makeKernelPayload(), {
       rng: makeLCG(seed), initialState,
     });
+  }
+
+  // ── Cluster-preserving variants (5 wrappers) ──
+  // Same shapes as the global wrappers above, but the kernel payload
+  // carries the (b, bpBudget) extension so each matcher gates partner
+  // selection on the per-bp budget and decrements on accept.
+  function runClusterPreservingGreedy(seed, initialState) {
+    return MatchDegreeKernel.runClusterPreservingGreedy(
+      makeKernelPayloadCP(), { initialState });
+  }
+  function runClusterPreservingTrueGreedy(seed, initialState) {
+    return MatchDegreeKernel.runClusterPreservingTrueGreedy(
+      makeKernelPayloadCP(), { initialState });
+  }
+  function runClusterPreservingRandomGreedy(seed, initialState) {
+    return MatchDegreeKernel.runClusterPreservingRandomGreedy(
+      makeKernelPayloadCP(), { rng: makeLCG(seed), initialState });
+  }
+  function runClusterPreservingRewire(seed, initialState, keepResidual) {
+    return MatchDegreeKernel.runClusterPreservingRewire(
+      makeKernelPayloadCP(),
+      { rng: makeLCG(seed), initialState, keepResidual });
+  }
+  function runClusterPreservingHybrid(seed, initialState) {
+    return MatchDegreeKernel.runClusterPreservingHybrid(
+      makeKernelPayloadCP(), { rng: makeLCG(seed), initialState });
   }
 
   // ── Deficit-only bars renderer ──
@@ -1101,6 +1326,11 @@ window.MathJax = {
   sectionHandles.push(setupAlgoSection({ prefix: "randgreedy", algoFn: runRandomGreedy, orderMode: "dynamic", stochastic: true }));
   sectionHandles.push(setupAlgoSection({ prefix: "rewire",     algoFn: runRewire,       orderMode: "id", useSpokes: true, stochastic: true }));
   sectionHandles.push(setupAlgoSection({ prefix: "hybrid",     algoFn: runHybrid,       orderMode: "hybrid", stochastic: true }));
+  sectionHandles.push(setupAlgoSection({ prefix: "cpgreedy",       algoFn: runClusterPreservingGreedy,       orderMode: "static" }));
+  sectionHandles.push(setupAlgoSection({ prefix: "cptruegreedy",   algoFn: runClusterPreservingTrueGreedy,   orderMode: "dynamic" }));
+  sectionHandles.push(setupAlgoSection({ prefix: "cprandgreedy",   algoFn: runClusterPreservingRandomGreedy, orderMode: "dynamic", stochastic: true }));
+  sectionHandles.push(setupAlgoSection({ prefix: "cprewire",       algoFn: runClusterPreservingRewire,       orderMode: "id", stochastic: true }));
+  sectionHandles.push(setupAlgoSection({ prefix: "cphybrid",       algoFn: runClusterPreservingHybrid,       orderMode: "hybrid", stochastic: true }));
 
   // ── Input deficit panel: graph + bars + re-roll ──
   // Mirrors the per-algorithm walker layout: graph on the left with

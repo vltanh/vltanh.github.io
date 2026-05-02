@@ -780,6 +780,244 @@
     return steps;
   }
 
+  // ── cluster_preserving_rewire ──────────────────────────────
+  // Algorithmically faithful to src/match_degree.py:cluster_preserving_rewire
+  // but does NOT byte-equal canonical because gt.generate_sbm's RNG is
+  // not portable. Two phases:
+  //   1. Per-bp stub-pair sampler. For each block-pair (B_i, B_j) with
+  //      bpBudget[key] = c, draw 2c stubs proportional to per-node
+  //      deficit restricted to the bp's blocks; shuffle and pair adjacent.
+  //      Self-loops + duplicates queue for repair.
+  //   2. cluster_preserving_2opt_rewire: same per-bp 2-opt swap as the
+  //      gen_outlier helper. Up to 10 retries; leftover invalid edges
+  //      hand off to the hybrid wrapper.
+  // bpBudget decrements only on accepted (post-rewire, exist-clean) edges.
+  function runClusterPreservingRewire(payload, opts) {
+    opts = opts || {};
+    if (!opts.rng) throw new Error("runClusterPreservingRewire: opts.rng required");
+    const rng = opts.rng;
+    const initialState = opts.initialState;
+    const initialDeficit = payload.deficit;
+    if (!payload.b || !payload.bpBudget) {
+      throw new Error("runClusterPreservingRewire: payload.b and payload.bpBudget required");
+    }
+    const b = payload.b;
+    const bpBudget = cloneBudget(payload.bpBudget);
+    const { residual, unplaced, adj, edges, exitOrder } = initState(payload, initialState);
+    const steps = [];
+    maybeInitStep(steps, residual, unplaced, edges, exitOrder, initialState);
+
+    function recordExit(n) { if (!exitOrder.includes(n)) exitOrder.push(n); }
+
+    // Group nodes by block.
+    const nodesByBlock = {};
+    for (const k in residual) {
+      const u = parseInt(k, 10);
+      const blk = b[u];
+      (nodesByBlock[blk] = nodesByBlock[blk] || []).push(u);
+    }
+    for (const k in nodesByBlock) nodesByBlock[k].sort((a, c) => a - c);
+
+    // Phase 1: per-bp stub draw + pair.
+    const validPool = {};   // bpKey -> [[u,v], ...] accepted normalized edges
+    const invalidEdges = [];
+    const validSet = new Set();
+    const localResidual = cloneResidual(residual);
+
+    function drawStub(blockNodes) {
+      // weighted-random by localResidual.
+      let total = 0;
+      for (const n of blockNodes) total += Math.max(0, localResidual[n] || 0);
+      if (total <= 0) return -1;
+      let r = rng() * total;
+      for (const n of blockNodes) {
+        const w = Math.max(0, localResidual[n] || 0);
+        r -= w;
+        if (r <= 0) return n;
+      }
+      return blockNodes[blockNodes.length - 1];
+    }
+
+    const sortedKeys = Object.keys(bpBudget).filter(k => bpBudget[k] > 0).sort();
+    for (const key of sortedKeys) {
+      const [biStr, bjStr] = key.split("-");
+      const bi = parseInt(biStr, 10);
+      const bj = parseInt(bjStr, 10);
+      const Bi = nodesByBlock[bi] || [];
+      const Bj = nodesByBlock[bj] || [];
+      const cnt = bpBudget[key];
+      const pairs = [];
+      for (let i = 0; i < cnt; i++) {
+        const u = drawStub(Bi);
+        if (u < 0) break;
+        localResidual[u] -= 1;
+        const Bj_eff = (bi === bj) ? Bi : Bj;
+        const v = drawStub(Bj_eff);
+        if (v < 0) {
+          localResidual[u] += 1;  // refund
+          break;
+        }
+        localResidual[v] -= 1;
+        pairs.push([u, v]);
+      }
+      // Shuffle pairs once for parity with canonical's stub shuffle ordering.
+      for (let i = pairs.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        [pairs[i], pairs[j]] = [pairs[j], pairs[i]];
+      }
+      validPool[key] = [];
+      for (const [u, v] of pairs) {
+        if (u === v) {
+          invalidEdges.push([u, v]);
+          continue;
+        }
+        const e = normEdge(u, v);
+        const ek = edgeKey(u, v);
+        if (validSet.has(ek)) {
+          invalidEdges.push([u, v]);
+          continue;
+        }
+        validSet.add(ek);
+        validPool[key].push(e);
+      }
+    }
+    steps.push(snapshot("phase1_done", null, residual, unplaced, edges, exitOrder,
+      `phase 1: per-bp stub-pair sampling drew ${validSet.size} valid + ${invalidEdges.length} invalid edges across ${sortedKeys.length} bp(s).`));
+
+    // Phase 2: cluster_preserving_2opt_rewire (mirrors graph_utils helper).
+    const initialValidSet = new Set(validSet);
+    function getBp(u, v) {
+      const x = b[u], y = b[v];
+      return Math.min(x, y) + "-" + Math.max(x, y);
+    }
+    const queue = invalidEdges.slice();
+    const maxRetries = 10;
+    for (let attempt = 0; attempt < maxRetries && queue.length > 0; attempt++) {
+      let lastRecycle = queue.length;
+      let recycle = lastRecycle;
+      while (queue.length > 0) {
+        recycle -= 1;
+        if (recycle < 0) {
+          if (queue.length < lastRecycle) {
+            lastRecycle = queue.length;
+            recycle = lastRecycle;
+          } else {
+            break;
+          }
+        }
+        const [u, v] = queue.shift();
+        const bp = getBp(u, v);
+        const pool = validPool[bp] || [];
+        if (pool.length === 0) {
+          queue.push([u, v]);
+          continue;
+        }
+        const idx = Math.floor(rng() * pool.length);
+        const [x, y] = pool[idx];
+        const A = parseInt(bp.split("-")[0], 10);
+        const B = parseInt(bp.split("-")[1], 10);
+        let new1, new2;
+        if (A !== B) {
+          const uA = (b[u] === A) ? u : v;
+          const uB = (b[u] === A) ? v : u;
+          const xA = (b[x] === A) ? x : y;
+          const xB = (b[x] === A) ? y : x;
+          new1 = normEdge(uA, xB);
+          new2 = normEdge(xA, uB);
+        } else if (rng() < 0.5) {
+          new1 = normEdge(u, x); new2 = normEdge(v, y);
+        } else {
+          new1 = normEdge(u, y); new2 = normEdge(v, x);
+        }
+        const k1 = edgeKey(new1[0], new1[1]);
+        const k2 = edgeKey(new2[0], new2[1]);
+        if (
+          new1[0] !== new1[1] && new2[0] !== new2[1] &&
+          !validSet.has(k1) && !validSet.has(k2) &&
+          k1 !== k2
+        ) {
+          validSet.delete(edgeKey(x, y));
+          pool[idx] = pool[pool.length - 1];
+          pool.pop();
+          validSet.add(k1);
+          validSet.add(k2);
+          pool.push(new1);
+          pool.push(new2);
+        } else {
+          queue.push([u, v]);
+        }
+      }
+    }
+
+    // Collect placed edges from validPool, drop those conflicting with
+    // exist_neighbor; bp_budget decremented per accepted edge.
+    const leftover = [];
+    for (const key in validPool) {
+      for (const [u, v] of validPool[key]) {
+        if (adj[u].has(v) || adj[v].has(u)) {
+          leftover.push([u, v]);
+          continue;
+        }
+        adj[u].add(v); adj[v].add(u);
+        edges.push([u, v]);
+        residual[u] -= 1; residual[v] -= 1;
+        bpBudget[key] = Math.max(0, (bpBudget[key] || 0) - 1);
+        if (residual[u] === 0 && (initialDeficit[u] || 0) > 0) recordExit(u);
+        if (residual[v] === 0 && (initialDeficit[v] || 0) > 0) recordExit(v);
+        steps.push(snapshot("add", { u, v, bp: key },
+          residual, unplaced, edges, exitOrder,
+          `phase 2 commit (${u}, ${v}); bp ${key}.`));
+      }
+    }
+
+    if (opts.keepResidual) {
+      // Hybrid hands off: residual + invalid pairs become phase-2 input
+      // to cluster_preserving_true_greedy.
+      steps.push(snapshot("phase1_handoff", null, residual, unplaced, edges, exitOrder,
+        `cluster_preserving_rewire leaves ${residualSum(residual)} stub(s) for fallback.`));
+      return steps;
+    }
+
+    if (queue.length > 0) {
+      for (const [u, v] of queue) {
+        unplaced[u] = (unplaced[u] || 0) + 1;
+        unplaced[v] = (unplaced[v] || 0) + 1;
+      }
+    }
+    steps.push(snapshot("done", null, residual, unplaced, edges, exitOrder,
+      `done. ${edges.length} edge(s) placed; ${residualSum(unplaced)} stub(s) abandoned.`));
+    return steps;
+  }
+
+  // ── cluster_preserving_hybrid ──────────────────────────────
+  // cluster_preserving_rewire (keepResidual=true) → cluster_preserving_true_greedy
+  // on whatever residual remains.
+  function runClusterPreservingHybrid(payload, opts) {
+    opts = opts || {};
+    if (!opts.rng) throw new Error("runClusterPreservingHybrid: opts.rng required");
+    const phase1 = runClusterPreservingRewire(payload, Object.assign({}, opts, { keepResidual: true }));
+    while (phase1.length && phase1[phase1.length - 1].action === "done") phase1.pop();
+    phase1.forEach(s => { s.phase = 1; });
+    const last = phase1[phase1.length - 1];
+    const phase1State = last
+      ? { residual: last.residual, unplaced: last.unplaced, edges: last.edges, exitOrder: last.exitOrder }
+      : { residual: payload.deficit, unplaced: {}, edges: [], exitOrder: [] };
+    let phase2;
+    if (residualSum(phase1State.residual) === 0) {
+      phase2 = [snapshot("phase2_skip", { phase: 2 },
+        phase1State.residual, phase1State.unplaced, phase1State.edges, phase1State.exitOrder,
+        "phase 1 (cp_rewire) drained the deficit. phase 2 (cp_true_greedy) skipped.")];
+    } else {
+      const handoff = snapshot("phase2_start", { phase: 2 },
+        phase1State.residual, phase1State.unplaced, phase1State.edges, phase1State.exitOrder,
+        `phase 1 (cp_rewire) left ${residualSum(phase1State.residual)} stub(s). handing off to cp_true_greedy.`);
+      const tg = runClusterPreservingTrueGreedy(payload, { initialState: phase1State });
+      tg.forEach(s => { s.phase = 2; });
+      phase2 = [handoff].concat(tg);
+    }
+    return phase1.concat(phase2);
+  }
+
   window.MatchDegreeKernel = {
     cloneResidual,
     cloneAdj,
@@ -793,5 +1031,7 @@
     runClusterPreservingGreedy,
     runClusterPreservingTrueGreedy,
     runClusterPreservingRandomGreedy,
+    runClusterPreservingRewire,
+    runClusterPreservingHybrid,
   };
 })();
