@@ -140,6 +140,8 @@
     }
 
     let lastStep = 0;
+    let lastRendered = null;
+    let firstRender = true;
     function render(step, snap) {
       const R = getR();
       const ops = effectiveFinalOps(R);
@@ -156,13 +158,60 @@
         labelEl.textContent = "no final-stage activity";
         descEl.innerHTML = '<span class="st">empty</span> &middot; the bg-rewire loop emptied its recycle list, so this stage never fired.';
         lastStep = step;
+        lastRendered = [];
+        firstRender = false;
         return;
       }
       const after = stateAtStep(R, step);
       const byNode = byNodeFromList(after);
-      const adjacent = step === lastStep + 1 || step === lastStep - 1;
-      if (!adjacent || snap) {
+      // First mount: seed state without animating in the pre-final list.
+      if (firstRender) {
         spokes.snapToState({ byNode, placed: after, just: null, justSeq: step });
+        lastRendered = after;
+        firstRender = false;
+        lastStep = step;
+        return;
+      }
+      const adjacent = step === lastStep + 1 || step === lastStep - 1;
+      // Multi-step jump (ToStart / ToEnd) or RandAll-driven snap: diff
+      // the live rendered list against the new target and dispatch one
+      // chained rewind→forward (SBM g3 pattern). Adjacent next/prev
+      // keeps the existing single-op simplify / unsimplify / playMany.
+      if (!adjacent || snap) {
+        const isDropStale = step > totalOps;
+        const crossesDropStale = isDropStale && lastStep <= totalOps;
+        // Drop-stale cuts bad edges from the model (residue truly leaves
+        // here, unlike crewire/bgrewire which forward to a later stage).
+        // Use simplify (dashify-fade) for the cut, mirroring SBM g4.
+        function chainDropStaleCut(beforeList) {
+          const { removes } = NS.diffPlacedById(beforeList, after);
+          if (removes.length) spokes.simplify(removes, () => {}, { byNode });
+          else spokes.snapToState({ byNode, placed: after, just: null, justSeq: step });
+        }
+        if (crossesDropStale) {
+          // Two-stage: place all swap ops first, then chain the
+          // residue cut so the trim reads as a follow-up to the build.
+          const opsApplied = stateAtStep(R, totalOps);
+          const opsByNode = byNodeFromList(opsApplied);
+          NS.playManyDiff(spokes, lastRendered || [], opsApplied, {
+            byNode: opsByNode,
+            onEmpty: () => spokes.snapToState({ byNode: opsByNode, placed: opsApplied, just: null, justSeq: totalOps }),
+            onDone: () => {
+              chainDropStaleCut(opsApplied);
+              lastRendered = after;
+            },
+          });
+          lastRendered = opsApplied;
+          lastStep = step;
+          return;
+        }
+        // Already at drop-stale (RandAll re-rolls ops in place): both
+        // removes and adds exist, so a simplify-only would skip adds.
+        // Single playMany handles the full rewind→forward.
+        NS.playManyDiff(spokes, lastRendered || [], after, {
+          byNode,
+          onEmpty: () => spokes.snapToState({ byNode, placed: after, just: null, justSeq: step }),
+        });
       } else {
         const before = stateAtStep(R, lastStep);
         const beforeIds = new Set(before.map(e => e.id));
@@ -181,6 +230,7 @@
           spokes.playMany(removes, adds, () => {}, { byNode });
         }
       }
+      lastRendered = after;
       lastStep = step;
 
       const isDropStale = step > totalOps;
@@ -254,30 +304,23 @@
             "</code> from the union; place <code>" + newOp.newp1.join("&ndash;") +
             "</code> + <code>" + newOp.newp2.join("&ndash;") + "</code>. " + status + ".";
         }
-        const beforeById = new Map(beforeList.map(e => [e.id, e]));
-        const afterById = new Map(afterList.map(e => [e.id, e]));
-        const removes = [], adds = [];
-        beforeById.forEach((be, id) => {
-          const ae = afterById.get(id);
-          if (!ae) removes.push(toEntry(be));
-          else if (ae.u !== be.u || ae.v !== be.v) {
-            removes.push(toEntry(be)); adds.push(toEntry(ae));
-          }
-        });
-        afterById.forEach((ae, id) => {
-          if (!beforeById.has(id)) adds.push(toEntry(ae));
-        });
+        const { removes, adds } = NS.diffPlacedById(beforeList, afterList, toEntry);
         viz.clearAllNodeClass("dim");
         viz.clearAllNodeClass("pick");
         const byNode = byNodeFromList(afterList);
         spokes.playMany(removes, adds, () => {}, { byNode });
         lastStep = idx;
+        lastRendered = afterList;
         ctl.setTotalIdxSilent(newTotal, idx);
         return NS.SKIP;
       },
       onRandAll: () => {
+        // wrappedRandAll (rerollWalker) handles total/idx via
+        // setTotalIdxSilent; calling reconfigureKeep here too would
+        // fire an extra render that races the stepController's own
+        // render and leaves stale state.placed entries from the
+        // interrupted playMany.
         replayFinalSwap(0);
-        ctl.reconfigureKeep(totalForCurrent(), 0);
       },
     });
 
@@ -331,9 +374,11 @@
     });
     let lockOverride = false;
     let ctl = null;
+    const lockListeners = [];
     function setRandLock(locked) {
       lockOverride = locked;
       if (ctl) ctl.refreshButtons();
+      lockListeners.forEach(fn => fn(locked));
     }
     const spokes = NS.spokeLayer.attach(viz, { onLockChange: setRandLock });
     function totalFromR(R) { return 1 + R.clusterPre.length; }
@@ -388,6 +433,8 @@
       spokes.markReroll();
     }
 
+    let lastTargetList = null;
+    let firstRender = true;
     function render(step, snap) {
       const R = getR();
       const total = 1 + R.clusterPre.length;
@@ -415,7 +462,39 @@
           badColor: j.bad ? dropColor : null,
         };
       }
-      NS.snapOrSync(spokes, { byNode: cfgByNode, placed, just, justSeq: step, bridgeColor }, snap);
+      // Cumulative target list for the snap-jump diff path: placed
+      // entries + the active "just" pair carried with the same id it
+      // would have when settled (cp-${step-1}). Lets a multi-step jump
+      // animate every changed pair concurrently via playManyDiff.
+      const targetList = placed.slice();
+      if (just) {
+        targetList.push({
+          u: just.u, v: just.v,
+          color: bridgeColor, bad: just.bad,
+          badColor: just.badColor,
+          id: "cp-" + (step - 1),
+        });
+      }
+      if (firstRender) {
+        spokes.snapToState({ byNode: cfgByNode, placed: targetList, just: null, justSeq: step });
+        firstRender = false;
+      } else if (snap) {
+        // Promote the previously-rendered just into state.placed so
+        // playMany's diff baseline matches what's actually on screen;
+        // syncState leaves state.placed without the just, but our
+        // targetList tracking includes it. Settled bridge paint ≈
+        // placed paint, so this snap is visually idempotent.
+        if (lastTargetList) {
+          spokes.snapToState({ byNode: cfgByNode, placed: lastTargetList, just: null, justSeq: -1 });
+        }
+        NS.playManyDiff(spokes, lastTargetList || [], targetList, {
+          byNode: cfgByNode,
+          onEmpty: () => spokes.snapToState({ byNode: cfgByNode, placed: targetList, just: null, justSeq: step }),
+        });
+      } else {
+        NS.snapOrSync(spokes, { byNode: cfgByNode, placed, just, justSeq: step, bridgeColor }, false);
+      }
+      lastTargetList = targetList;
 
       const totEl = document.getElementById(hostId + "-total");
       const curEl = document.getElementById(hostId + "-cur");
@@ -468,6 +547,7 @@
         curElId: hostId + "-cur",
         getLocked: () => lockOverride,
         boundariesFn: navBoundariesFn,
+        bindLockChange: (cb) => lockListeners.push(cb),
       });
     }
     return { ctl, reTotalReset };
@@ -494,9 +574,17 @@
     host.appendChild(prev);
     host.appendChild(next);
     function refresh() {
-      prev.disabled = ctl.idx <= 0;
-      next.disabled = ctl.idx >= ctl.total - 1;
+      const starts = boundariesFn();
+      const cur = ctl.idx;
+      const locked = !!(getLocked && getLocked());
+      // Drop-stale (cur > last cluster boundary) is outside the
+      // cluster sequence; cluster-skip arrows don't apply there.
+      const maxStart = starts.length ? starts[starts.length - 1] : -1;
+      const offCluster = cur > maxStart;
+      prev.disabled = locked || offCluster || cur <= 0;
+      next.disabled = locked || offCluster || !starts.some(s => s > cur);
     }
+    if (opts.bindLockChange) opts.bindLockChange(refresh);
     function jump(forward) {
       if (getLocked && getLocked()) return;
       const starts = boundariesFn();
@@ -505,12 +593,14 @@
       let target;
       if (forward) {
         target = starts.find(s => s > cur);
-        if (target == null) target = ctl.total - 1;
+        // No further boundary: stop at the last cluster's end. Drop-
+        // stale is reached via Next, not the cluster-skip arrow.
+        if (target == null) return;
       } else {
         const earlier = starts.filter(s => s < cur);
         target = earlier.length ? earlier[earlier.length - 1] : 0;
       }
-      ctl.set(target);
+      ctl.setSnap(target);
       refresh();
     }
     prev.addEventListener("click", () => jump(false));

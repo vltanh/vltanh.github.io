@@ -646,10 +646,15 @@ NETGEN.spokeLayer = (function () {
           if (!a.justSlots) return;
           a.justSlots = a.justSlots.filter(function (e) { return e.slot !== info.d.slot; });
         }
+        let maxOrbitMs = 0;
         orbits.forEach(function (info) {
           const { el, d, a, restA, fromA } = info;
           if (fromA == null || Math.abs(shortDelta(fromA, restA)) < 1e-3) {
             clearJust(info);
+            // Repaint at the full (non-loop) length now that the slot
+            // is no longer a self-loop just-slot.
+            const t = spokeTip(d.nid, d.slot);
+            if (t) d3.select(el).attr("x1", t.x1).attr("y1", t.y1).attr("x2", t.x2).attr("y2", t.y2);
             return;
           }
           const node = viz.nodeById[String(d.nid)];
@@ -657,6 +662,7 @@ NETGEN.spokeLayer = (function () {
           const r1 = r0 + spokeOuterFor(d.nid, d.slot) * lenScale(a.count);
           const delta = shortDelta(fromA, restA);
           const orbitMs = scaleOrbitDuration(T.rewindOrbit, delta);
+          if (orbitMs > maxOrbitMs) maxOrbitMs = orbitMs;
           d3.select(el)
             .interrupt("orbit")
             .transition("orbit").duration(orbitMs).ease(d3.easeCubicInOut)
@@ -664,10 +670,20 @@ NETGEN.spokeLayer = (function () {
             .attrTween("y1", function () { return function (k) { return node.y + Math.sin(fromA + delta * k) * r0; }; })
             .attrTween("x2", function () { return function (k) { return node.x + Math.cos(fromA + delta * k) * r1; }; })
             .attrTween("y2", function () { return function (k) { return node.y + Math.sin(fromA + delta * k) * r1; }; })
-            .on("end", function () { clearJust(info); });
+            .on("end", function () {
+              clearJust(info);
+              // Resnap the spoke length now that the slot has dropped
+              // its just-slot. Without this, scaled orbit durations
+              // that overrun T.rewindOrbit leave self-loop sides
+              // stuck at SELF_LOOP_SPOKE_LEN — `done` already fired
+              // and there's no tick to repaint a pinned sim.
+              const t = spokeTip(d.nid, d.slot);
+              if (t) d3.select(el).attr("x1", t.x1).attr("y1", t.y1).attr("x2", t.x2).attr("y2", t.y2);
+            });
         });
+        const settleDoneMs = (maxOrbitMs > 0 ? maxOrbitMs : T.rewindOrbit) + T.rewindIdle;
+        setTimeout(done, settleDoneMs);
       }, T.rewindBridge);
-      setTimeout(done, T.rewindBridge + T.rewindOrbit + T.rewindIdle);
     }
 
     function render(animate) {

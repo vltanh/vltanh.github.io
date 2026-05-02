@@ -1465,6 +1465,10 @@ function stepController(opts) {
     get idx() { return idx; },
     get total() { return total; },
     set: (i) => { idx = Math.max(0, Math.min(total-1, i)); render(); },
+    // Multi-step jump that flags onRender(snap=true) — same effect as
+    // ToStart / ToEnd, used by cluster-nav arrows so cpair / bgpair
+    // route through playManyDiff instead of single-step snapOrSync.
+    setSnap: (i) => { withSnap(() => { idx = Math.max(0, Math.min(total-1, i)); render(); }); },
     rerender: () => render(),
     refreshButtons: () => refreshButtons(),
     // Callers that regenerate their data (e.g. nPSO's trajectory on a
@@ -1676,6 +1680,55 @@ function singletonOpener(opts) {
 function snapOrSync(spokes, state, snap) {
   if (snap && spokes && spokes.snapToState) spokes.snapToState(state);
   else if (spokes && spokes.syncState) spokes.syncState(state);
+}
+
+// Diff two placed-style entry lists by id, with u/v change detection
+// for stable-id swaps (RandStep that mutates endpoints under a stable
+// op id). Returns { removes, adds } mapped through opts.placedEntry
+// (identity if absent).
+function diffPlacedById(beforeList, afterList, placedEntry) {
+  const map = placedEntry || function (e) { return e; };
+  const beforeById = new Map((beforeList || []).map(function (e) { return [e.id, e]; }));
+  const afterById  = new Map((afterList  || []).map(function (e) { return [e.id, e]; }));
+  const removes = [], adds = [];
+  beforeById.forEach(function (be, id) {
+    const ae = afterById.get(id);
+    if (!ae) removes.push(map(be));
+    else if (ae.u !== be.u || ae.v !== be.v) {
+      removes.push(map(be));
+      adds.push(map(ae));
+    }
+  });
+  afterById.forEach(function (ae, id) {
+    if (!beforeById.has(id)) adds.push(map(ae));
+  });
+  return { removes, adds };
+}
+
+// Single-call alternative to snapToState for multi-step jumps (ToStart
+// / ToEnd / RandAll): every changed entry animates concurrently in one
+// chained rewind→forward sequence (SBM g3 pattern). Removes-only
+// stays on playMany (rewind) — simplify's dashify-fade is the wrong
+// gesture for ToStart/RandAll, which should mirror Back through every
+// placement.
+//
+// opts:
+//   placedEntry  entry → spoke-layer placed shape (identity if absent)
+//   byNode       passed to playMany
+//   onEmpty      callback for the no-diff case
+//   onDone       callback when playMany settles (also fires on empty diff)
+function playManyDiff(spokes, beforeList, afterList, opts) {
+  const o = opts || {};
+  const done = o.onDone || function () {};
+  const { removes, adds } = diffPlacedById(beforeList, afterList, o.placedEntry);
+  if (removes.length === 0 && adds.length === 0) {
+    if (o.onEmpty) o.onEmpty();
+    done();
+    return false;
+  }
+  const passOpts = o.byNode ? { byNode: o.byNode } : undefined;
+  spokes.playMany(removes, adds, done, passOpts);
+  return true;
 }
 
 // Walk a list of pair entries {u, v, loop, ...} and tag each with
@@ -1980,7 +2033,13 @@ function makeRewireRender(opts) {
   const totalEl = document.getElementById(prefix + "-total");
   const curEl = document.getElementById(prefix + "-cur");
   const noopFn = function () {};
-  return function render(step, snap) {
+  // Tracks the last rendered list — the honest before-state for diffs.
+  // RandAll mutates ops without moving the cursor, so stateAtStep(R,
+  // lastStep) post-reroll no longer matches what's currently painted;
+  // the rendered list is what playMany has to retract from.
+  let lastRendered = null;
+  let firstRender = true;
+  function render(step, snap) {
     const R = getR();
     const ops = opsOf(R);
     const total = 2 + ops.length;
@@ -1990,24 +2049,78 @@ function makeRewireRender(opts) {
     const isDropStale = step > ops.length;
     paintLabelDesc(step, ops, isDropStale);
 
-    const lastStep = getLastStep();
     const afterList  = stateAtStep(R, step);
     const byNode = byNodeFromList(afterList);
     const backdrop = backdropOf ? backdropOf(R) : [];
 
-    // Snap path: non-adjacent step OR caller flagged snap (RandAll
-    // / ToEnd / ToStart wrap onRender in withSnap). RandAll into
-    // drop-stale animated would drift via id-keyed simplify against
-    // a state.placed that no longer matches — snap rebuilds
-    // state.placed wholesale from afterList. Adjacent Next/Prev
-    // (snap=false) keeps the dedup animation.
-    const adjacent = step === lastStep + 1 || step === lastStep - 1;
-    if (!adjacent || snap) {
+    // First mount: seed state instantly so the page doesn't open with a
+    // forward grow of the entire pre-rewire snapshot.
+    if (firstRender) {
       spokes.snapToState({
         byNode,
         placed: backdrop.concat(afterList.map(placedEntry)),
         just: null, justSeq: step,
       });
+      lastRendered = afterList;
+      firstRender = false;
+      setLastStep(step);
+      return;
+    }
+
+    const lastStep = getLastStep();
+    const adjacent = step === lastStep + 1 || step === lastStep - 1;
+
+    // Multi-step jump or RandAll-driven snap: SBM g3 pattern — diff
+    // the live rendered list against the new target, animate every
+    // changed entry concurrently in one chained rewind→forward.
+    if (!adjacent || snap) {
+      // Two-stage when crossing into drop-stale: place all rewire ops
+      // first, then chain the residue cut. Reads as "build, then trim"
+      // instead of fusing both into one bulk diff that hides the cut.
+      const opsAppliedStep = ops.length;
+      const crossesDropStale = isDropStale
+        && (lastRendered === null || (getLastStep() <= opsAppliedStep));
+      if (crossesDropStale) {
+        const opsApplied = stateAtStep(R, opsAppliedStep);
+        const opsByNode = byNodeFromList(opsApplied);
+        playManyDiff(spokes, lastRendered || [], opsApplied, {
+          placedEntry, byNode: opsByNode,
+          onEmpty: function () {
+            spokes.snapToState({
+              byNode: opsByNode,
+              placed: backdrop.concat(opsApplied.map(placedEntry)),
+              just: null, justSeq: opsAppliedStep,
+            });
+          },
+          onDone: function () {
+            playManyDiff(spokes, opsApplied, afterList, {
+              placedEntry, byNode,
+              onEmpty: function () {
+                spokes.snapToState({
+                  byNode,
+                  placed: backdrop.concat(afterList.map(placedEntry)),
+                  just: null, justSeq: step,
+                });
+              },
+            });
+            lastRendered = afterList;
+          },
+        });
+        lastRendered = opsApplied;
+        setLastStep(step);
+        return;
+      }
+      playManyDiff(spokes, lastRendered || [], afterList, {
+        placedEntry, byNode,
+        onEmpty: function () {
+          spokes.snapToState({
+            byNode,
+            placed: backdrop.concat(afterList.map(placedEntry)),
+            just: null, justSeq: step,
+          });
+        },
+      });
+      lastRendered = afterList;
       setLastStep(step);
       return;
     }
@@ -2023,8 +2136,14 @@ function makeRewireRender(opts) {
     } else {
       spokes.playMany(removes, adds, noopFn, { byNode });
     }
+    lastRendered = afterList;
     setLastStep(step);
-  };
+  }
+  // Page handlers that drive their own playMany (e.g. RandStep with a
+  // custom desc) sync the renderer's diff baseline by calling
+  // render.setLastRendered(afterList) after their dispatch.
+  render.setLastRendered = function (list) { lastRendered = list; };
+  return render;
 }
 
 // ── Cluster-post backdrop helper ──────────────────────────────
@@ -2630,7 +2749,7 @@ global.NETGEN = {
   C1, C2, C3, OUT, INTRA, INTER, OUT_EDGES,
   CORE_NODES, CORE_EDGES, topK, cliqueEdges,
   COLORS, CY, VIZ,
-  makeTooltip, scrubSlider, stepController, walkerRow, wireWalker, rerollWalker, makePageBus, makeRewireStateAtStep, makeRewireRender, clusterPostBackdrop, followCursor, clusterPrePairsByName, globalPrePairsTuples, clusterEdgeEkeys, rerollClusterRewireRange, replayFinalSwap, abcdClusterRewireApplyOp, abcdBgRewireApplyOp, snapOrSync, singletonOpener, defaultSingletonClusters, bindPanelToggle, mountGxPanel, walkerMarkPlaced, walkerMarkJust, reseedSuffix, stubPoolReseed, keyOf, toggle,
+  makeTooltip, scrubSlider, stepController, walkerRow, wireWalker, rerollWalker, makePageBus, makeRewireStateAtStep, makeRewireRender, clusterPostBackdrop, followCursor, clusterPrePairsByName, globalPrePairsTuples, clusterEdgeEkeys, rerollClusterRewireRange, replayFinalSwap, abcdClusterRewireApplyOp, abcdBgRewireApplyOp, snapOrSync, diffPlacedById, playManyDiff, singletonOpener, defaultSingletonClusters, bindPanelToggle, mountGxPanel, walkerMarkPlaced, walkerMarkJust, reseedSuffix, stubPoolReseed, keyOf, toggle,
   SKIP: SKIP_SENTINEL,
   linksRow, kinSection,
   fitViewBoxAttr,

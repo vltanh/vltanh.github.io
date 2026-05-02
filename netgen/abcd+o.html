@@ -1956,9 +1956,17 @@ window.MathJax = {
     host.appendChild(prev);
     host.appendChild(next);
     function refresh() {
-      prev.disabled = ctl.idx <= 0;
-      next.disabled = ctl.idx >= ctl.total - 1;
+      const starts = boundariesFn();
+      const cur = ctl.idx;
+      const locked = !!(getLocked && getLocked());
+      // Drop-stale (cur > last cluster boundary) is outside the
+      // cluster sequence; cluster-skip arrows don't apply there.
+      const maxStart = starts.length ? starts[starts.length - 1] : -1;
+      const offCluster = cur > maxStart;
+      prev.disabled = locked || offCluster || cur <= 0;
+      next.disabled = locked || offCluster || !starts.some(s => s > cur);
     }
+    if (opts.bindLockChange) opts.bindLockChange(refresh);
     function jump(forward) {
       if (getLocked && getLocked()) return;
       const starts = boundariesFn();
@@ -1967,12 +1975,14 @@ window.MathJax = {
       let target;
       if (forward) {
         target = starts.find(s => s > cur);
-        if (target == null) target = ctl.total - 1;
+        // No further boundary: stop at last cluster's end. Drop-stale
+        // is reached via Next, not the cluster-skip arrow.
+        if (target == null) return;
       } else {
         const earlier = starts.filter(s => s < cur);
         target = earlier.length ? earlier[earlier.length - 1] : 0;
       }
-      ctl.set(target);
+      ctl.setSnap(target);
       refresh();
     }
     prev.addEventListener("click", () => jump(false));
@@ -2031,10 +2041,12 @@ window.MathJax = {
     let lastStep = 0;
     let lockBusy = false;
     let ctl = null;
+    const crewireLockListeners = [];
     function setLock(b) {
       if (lockBusy === b) return;
       lockBusy = b;
       if (ctl) ctl.refreshButtons();
+      crewireLockListeners.forEach(fn => fn(b));
     }
     const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setLock });
     const byNodeFromList = (list) => {
@@ -2160,6 +2172,7 @@ window.MathJax = {
       prefix: "g-crewire",
       curElId: "g-crewire-cur",
       getLocked: () => lockBusy,
+      bindLockChange: (cb) => crewireLockListeners.push(cb),
       boundariesFn: () => {
         const R = getCurrentR();
         const ops = effectiveClusterRewireOps(R);

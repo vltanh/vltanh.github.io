@@ -1063,7 +1063,10 @@ window.MathJax = {
       return trace;
     }
 
+    let lastAssignStep = 0;
     function render(step) {
+      const prevStep = lastAssignStep;
+      lastAssignStep = step;
       currentStep = step;
       // Bin opacity always tracks the current candidate vertex's
       // sampling probabilities; admissible clusters scale by p, others
@@ -1088,14 +1091,34 @@ window.MathJax = {
         .on("mousemove",  (ev) => placeTip(ev))
         .on("mouseleave", () => hideTip());
       const all = enter.merge(sel);
+      // Multi-step jumps stagger transitions by trace order so the
+      // sequence reads as a queue draining (ToEnd) or refilling
+      // (ToStart) instead of every vertex moving at once.
+      const stepDelta = step - prevStep;
+      const isJump = Math.abs(stepDelta) > 1;
+      const jumpRange = Math.abs(stepDelta);
+      const STAGGER_MS = 60;
+      const STAGGER_CAP = 1200;
+      const perStep = isJump ? Math.min(STAGGER_MS, STAGGER_CAP / Math.max(1, jumpRange)) : 0;
       all.each(function (id) {
         const placedIdx = TRACE.findIndex(t => t.v === id);
         const isPlaced = placedIdx >= 0 && placedIdx < step;
+        const wasPlaced = placedIdx >= 0 && placedIdx < prevStep;
         const g = d3.select(this);
+        let delay = 0;
+        if (isJump) {
+          if (stepDelta > 0 && isPlaced && !wasPlaced) {
+            // Forward jump: place trace[prevStep..step-1] in order.
+            delay = (placedIdx - prevStep) * perStep;
+          } else if (stepDelta < 0 && wasPlaced && !isPlaced) {
+            // Backward jump: pull trace[step..prevStep-1] back, latest first.
+            delay = (prevStep - 1 - placedIdx) * perStep;
+          }
+        }
         if (isPlaced) {
           const t = TRACE[placedIdx];
           const p = POS[t.slot];
-          g.transition().duration(380).attr("transform", `translate(${p.x},${p.y})`);
+          g.transition().delay(delay).duration(380).attr("transform", `translate(${p.x},${p.y})`);
           g.select("circle")
             .attr("fill", BLOCK_COLOR[t.picked])
             .attr("stroke", "#1b2033").attr("opacity", 0.95);
@@ -1103,7 +1126,7 @@ window.MathJax = {
           const qIdx = queueRanks.indexOf(id);
           const y = queueY0 + qIdx * queueDY;
           const isNext = qIdx === step;
-          g.transition().duration(280).attr("transform", `translate(${queueX},${y})`);
+          g.transition().delay(delay).duration(280).attr("transform", `translate(${queueX},${y})`);
           g.select("circle")
             .attr("fill", isNext ? COL.hl_yellow : "#ede4c9")
             .attr("stroke", isNext ? "#c7801e" : "#6b6a54")
@@ -1183,7 +1206,7 @@ window.MathJax = {
   // clearly helps but does not get all the way to zero, so the
   // walker shows a real drop-stale at the end.
   let U_SEED = 78;
-  let STUB_SEED = 80;
+  let STUB_SEED = 4160;
   const onUChanged = [];
   const onStubChanged = [];
   function rerollU() {
@@ -1899,13 +1922,17 @@ window.MathJax = {
     host.appendChild(prev);
     host.appendChild(next);
     function refresh() {
-      // Disable based on idx position only. Lock state is checked
-      // inside jump() so clicks during a walker animation no-op
-      // safely; disabling on lock would leave the buttons stuck off
-      // because lock-release fires no DOM mutation we observe.
-      prev.disabled = ctl.idx <= 0;
-      next.disabled = ctl.idx >= ctl.total - 1;
+      const starts = boundariesFn();
+      const cur = ctl.idx;
+      const locked = !!(getLocked && getLocked());
+      // Drop-stale (cur > last cluster boundary) is outside the
+      // cluster sequence; cluster-skip arrows don't apply there.
+      const maxStart = starts.length ? starts[starts.length - 1] : -1;
+      const offCluster = cur > maxStart;
+      prev.disabled = locked || offCluster || cur <= 0;
+      next.disabled = locked || offCluster || !starts.some(s => s > cur);
     }
+    if (opts.bindLockChange) opts.bindLockChange(refresh);
     function jump(forward) {
       if (getLocked && getLocked()) return;
       const starts = boundariesFn();
@@ -1914,12 +1941,14 @@ window.MathJax = {
       let target;
       if (forward) {
         target = starts.find(s => s > cur);
-        if (target == null) target = ctl.total - 1;
+        // No further boundary: stop at last cluster's end. Drop-stale
+        // is reached via Next, not the cluster-skip arrow.
+        if (target == null) return;
       } else {
         const earlier = starts.filter(s => s < cur);
         target = earlier.length ? earlier[earlier.length - 1] : 0;
       }
-      ctl.set(target);
+      ctl.setSnap(target);
       refresh();
     }
     prev.addEventListener("click", () => jump(false));
@@ -1974,10 +2003,12 @@ window.MathJax = {
     let lastStep = 0;
     let lockBusy = false;
     let ctl = null;
+    const crewireLockListeners = [];
     function setLock(b) {
       if (lockBusy === b) return;
       lockBusy = b;
       if (ctl) ctl.refreshButtons();
+      crewireLockListeners.forEach(fn => fn(b));
     }
     const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setLock });
     const byNodeFromList = (list) => {
@@ -2175,29 +2206,14 @@ window.MathJax = {
           descEl.innerHTML = '<span class="st">op ' + idx + '</span> &middot; ' + undoBit + newBit;
         }
         clearDimPick(viz);
-        // Diff by id AND (u,v): rand-step keeps op-indexed ids stable
-        // (cr-op<i>-1 / -2) but the underlying endpoints can change
-        // (e.g. coin2 flips orientation, so newp1/newp2 swap u,v).
-        // An id-only diff would emit empty removes/adds and the swap
-        // would land as an invisible no-op.
-        const beforeById = new Map(beforeList.map(e => [e.id, e]));
-        const afterById = new Map(afterList.map(e => [e.id, e]));
-        const removes = [], adds = [];
-        beforeById.forEach((be, id) => {
-          const ae = afterById.get(id);
-          if (!ae) {
-            removes.push(placedEntry(be));
-          } else if (ae.u !== be.u || ae.v !== be.v) {
-            removes.push(placedEntry(be));
-            adds.push(placedEntry(ae));
-          }
-        });
-        afterById.forEach((ae, id) => {
-          if (!beforeById.has(id)) adds.push(placedEntry(ae));
-        });
+        // Diff by id AND (u,v): RandStep keeps op-indexed ids stable
+        // (cr-op<i>-1 / -2) but coin flips can swap newp1/newp2's u,v
+        // under the same slot — id-only diff would miss that.
+        const { removes, adds } = NETGEN.diffPlacedById(beforeList, afterList, placedEntry);
         const byNode = byNodeFromList(afterList);
         spokes.playMany(removes, adds, () => {}, { byNode });
         lastStep = idx;
+        render.setLastRendered(afterList);
         return NETGEN.SKIP;
       },
       onRandAll: idx => {
@@ -2221,6 +2237,7 @@ window.MathJax = {
       prefix: "g-crewire",
       curElId: "g-crewire-cur",
       getLocked: () => lockBusy,
+      bindLockChange: (cb) => crewireLockListeners.push(cb),
       boundariesFn: () => {
         const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
         const ops = effectiveOps(R);
@@ -2287,6 +2304,8 @@ window.MathJax = {
       fireBgPairChanged();
     }
 
+    let lastTargetList = null;
+    let firstRender = true;
     function render(step, snap) {
       const xi = SYNTHETIC_XI;
       const R = buildRealization(U_SEED, STUB_SEED, xi);
@@ -2347,7 +2366,33 @@ window.MathJax = {
         idPrefix: "bp-cluster-",
         colorOf: e => CLUSTER_COLOR_OF[e.cluster] || COL.edge_stage2,
       });
-      NETGEN.snapOrSync(spokes, { byNode: cfg, placed: backdrop.concat(placed), just, justSeq: step, bridgeColor }, snap);
+      // Cumulative target list for the snap-jump diff path: backdrop +
+      // placed entries + just-as-placed-entry with the id it would carry
+      // when settled (bp-${step-1}). Lets multi-step jumps run one
+      // chained playMany so every changed pair animates concurrently.
+      const targetList = backdrop.concat(placed);
+      if (just) {
+        targetList.push({
+          u: just.u, v: just.v, color: bridgeColor,
+          bad: just.bad, badColor: just.badColor,
+          id: "bp-" + (step - 1),
+        });
+      }
+      if (firstRender) {
+        spokes.snapToState({ byNode: cfg, placed: targetList, just: null, justSeq: step });
+        firstRender = false;
+      } else if (snap) {
+        if (lastTargetList) {
+          spokes.snapToState({ byNode: cfg, placed: lastTargetList, just: null, justSeq: -1 });
+        }
+        NETGEN.playManyDiff(spokes, lastTargetList || [], targetList, null, {
+          byNode: cfg,
+          onEmpty: () => spokes.snapToState({ byNode: cfg, placed: targetList, just: null, justSeq: step }),
+        });
+      } else {
+        NETGEN.snapOrSync(spokes, { byNode: cfg, placed: backdrop.concat(placed), just, justSeq: step, bridgeColor }, false);
+      }
+      lastTargetList = targetList;
 
       const totEl = document.getElementById("g-bgpair-total");
       const curEl = document.getElementById("g-bgpair-cur");
@@ -2608,29 +2653,14 @@ window.MathJax = {
           color: e.bad ? COL.edge_drop : COL.edge_inter,
           badColor: COL.edge_drop,
         });
-        // Diff by id AND (u,v): rand-step keeps op-indexed ids stable
-        // (br-op<i>-1 / -2) but the underlying endpoints can change
-        // (e.g. coin flip swaps newp1/newp2 within the same id slot).
-        // An id-only diff would emit empty removes/adds and the swap
-        // would land as an invisible no-op.
-        const beforeById = new Map(beforeList.map(e => [e.id, e]));
-        const afterById = new Map(afterList.map(e => [e.id, e]));
-        const removes = [], adds = [];
-        beforeById.forEach((be, id) => {
-          const ae = afterById.get(id);
-          if (!ae) {
-            removes.push(toEntry(be));
-          } else if (ae.u !== be.u || ae.v !== be.v) {
-            removes.push(toEntry(be));
-            adds.push(toEntry(ae));
-          }
-        });
-        afterById.forEach((ae, id) => {
-          if (!beforeById.has(id)) adds.push(toEntry(ae));
-        });
+        // Diff by id AND (u,v): RandStep keeps op-indexed ids stable
+        // (br-op<i>-1 / -2) but coin flips can swap newp1/newp2's u,v
+        // under the same slot — id-only diff would miss that.
+        const { removes, adds } = NETGEN.diffPlacedById(beforeList, afterList, toEntry);
         const byNode = byNodeFromList(afterList);
         spokes.playMany(removes, adds, () => {}, { byNode });
         lastStep = idx;
+        render.setLastRendered(afterList);
         return NETGEN.SKIP;
       },
       onRandAll: idx => {
