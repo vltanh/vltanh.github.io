@@ -574,6 +574,32 @@ const VIZ = {
     // alpha 0; we drive paint manually via paint() and a one-shot
     // sim.tick() / direct attr writes.
     const sim = d3.forceSimulation(nodesData);
+    // Pinned sims park at alpha=0 with the timer stopped, so the d3
+    // dispatcher never fires "tick.*" listeners. Overlay layers (spoke
+    // layer, mountBlockGraph's block rects, etc.) bind to "tick.<name>"
+    // and would freeze on drag without a synchronous fan-out hook.
+    // Wrap sim.on so every named tick subscription is recorded; the
+    // pinned drag handler invokes the recorded callbacks after each
+    // paint() so overlays follow the dragged node.
+    const _tickNames = new Set();
+    const _origOn = sim.on.bind(sim);
+    sim.on = function (typename, callback) {
+      if (arguments.length >= 2 && typeof typename === "string") {
+        typename.split(/\s+/).forEach(function (tn) {
+          const m = /^tick\.(.+)$/.exec(tn);
+          if (!m) return;
+          if (callback == null) _tickNames.delete(m[1]);
+          else _tickNames.add(m[1]);
+        });
+      }
+      return _origOn.apply(sim, arguments);
+    };
+    function fireTickOverlays() {
+      _tickNames.forEach(function (name) {
+        const fn = _origOn("tick." + name);
+        if (fn) fn.call(sim, sim);
+      });
+    }
     if (pinned) {
       sim.alpha(0).alphaDecay(1).alphaMin(1).stop();
     } else {
@@ -794,7 +820,15 @@ const VIZ = {
           })
           .on("drag",  function (ev, d) {
             d.fx = ev.x; d.fy = ev.y;
-            if (pinned) { d.x = ev.x; d.y = ev.y; paint(); }
+            if (pinned) {
+              d.x = ev.x; d.y = ev.y;
+              paint();
+              // sim.tick() advances state but does NOT dispatch the
+              // "tick" event (d3-force only dispatches from the timer
+              // step). Pinned sims have the timer stopped, so we fan
+              // out to every recorded "tick.<name>" listener manually.
+              fireTickOverlays();
+            }
           })
           .on("end",   function (ev, d) {
             if (!ev.active && !pinned) sim.alphaTarget(0);
@@ -808,6 +842,7 @@ const VIZ = {
                   d.fy = sy + (ey - sy) * t;
                   d.x  = d.fx; d.y = d.fy;
                   paint();
+                  fireTickOverlays();
                 })
                 .on("end.snap", () => { d.fx = d.homeX; d.fy = d.homeY; });
             } else {

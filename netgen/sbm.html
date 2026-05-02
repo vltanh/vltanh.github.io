@@ -884,7 +884,7 @@ window.MathJax = {
     for (let r = 0; r < NUM_BLOCKS; r++)
       for (let s = r; s < NUM_BLOCKS; s++) blockPairs.push([r, s]);
 
-    let currentSeed = 1;
+    let currentSeed = 6320;
     let trace = [];
     let totalPairs = 0;
     let stepIdx = 0;
@@ -1402,23 +1402,36 @@ window.MathJax = {
       return final.edges.map(([u, v]) => [u, v]);
     }
 
+    // Pre-top-up: kept sampler edges dim from the start so the panel
+    // reads as "the deficit picture" before the play button is hit.
+    // Match-degree edges land at full opacity + bumped width on top,
+    // and the existing playMatch fade keeps kept at the same dim level
+    // (KEPT_DIM, defined below) so there's no opacity jump.
     function placedKept(sample) {
       return sample.kept.map((e, i) => ({
         u: e.u, v: e.v,
         color: e.intra ? (COL.edge_intra[blockOf(e.u)] || COL.edge_stage2)
                        : COL.edge_inter,
+        opacity: KEPT_DIM,
         id: "g5-k-" + i,
       }));
     }
-    // Match-edge stroke is a teal that doesn't appear elsewhere in the
-    // page palette — C2 cluster + its intra-edge tone are both amber-
-    // adjacent, so the previous COL.amber match edges read as ordinary
-    // C2 sampler edges on this fixture.
-    const MATCH_EDGE_COLOR = "#1f7a8c";
+    // Match-edge palette: same intra / inter colour each edge would get
+    // if the sampler had drawn it (so block-fidelity reads the same as
+    // every other edge on the page). Stroke is bumped to spoke_layer's
+    // highlight width (2.6 vs 1.6) so the top-up edges still pop next
+    // to the kept sampler edges.
+    const MATCH_EDGE_W = 2.6;
+    function matchEdgeColor(u, v) {
+      const bu = blockOf(u), bv = blockOf(v);
+      return (bu === bv) ? (COL.edge_intra[bu] || COL.edge_stage2)
+                         : COL.edge_inter;
+    }
     function placedMatch(edges) {
       return edges.map(([u, v], i) => ({
         u, v,
-        color: MATCH_EDGE_COLOR,
+        color: matchEdgeColor(u, v),
+        w: MATCH_EDGE_W,
         id: "g5-m-" + i,
       }));
     }
@@ -1499,9 +1512,11 @@ window.MathJax = {
       if (playBtn) playBtn.disabled = true;
       if (resetBtn) resetBtn.disabled = true;
       let fired = false;
-      keptPathSel()
-        .transition("g5-fade").duration(FADE_MS).ease(d3.easeCubicInOut)
-        .attr("opacity", KEPT_DIM);
+      // Kept (sampler) edges already render at KEPT_DIM via placedKept's
+      // data-side opacity, so no fade transition on them — only the
+      // match edges need to fade in. Avoids a stale-attr flash where
+      // d3's transition would briefly read opacity=1 between snapToState
+      // and the first frame, undimming the kept edges for a tick.
       matchPathSel()
         .attr("opacity", 0)
         .transition("g5-fade").duration(FADE_MS).ease(d3.easeCubicInOut)
@@ -1525,9 +1540,10 @@ window.MathJax = {
       if (playBtn) playBtn.disabled = true;
       if (resetBtn) resetBtn.disabled = true;
       let fired = false;
-      keptPathSel()
-        .transition("g5-fade").duration(FADE_MS).ease(d3.easeCubicInOut)
-        .attr("opacity", 1);
+      // Kept edges stay at their data-side KEPT_DIM throughout reset —
+      // no transition on them avoids the brief un-dim flash that d3's
+      // attr-tween read produced when starting from a possibly-stale
+      // opacity value.
       sel.transition("g5-fade").duration(FADE_MS).ease(d3.easeCubicInOut)
         .attr("opacity", 0)
         .on("end", function () {
