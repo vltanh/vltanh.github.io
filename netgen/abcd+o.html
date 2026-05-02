@@ -175,7 +175,7 @@
 <section class="stage">
   <div class="stage-num">profiling · degree sequence</div>
   <h2>Drop OO edges first, then read per-node degrees.</h2>
-  <p>ABCD+o is the only generator in the repo that drops OO edges by default. Target-stability is the reason: the background graph's uniform pairing produces OO edges at a rate of roughly \((s_0 / n)^2\), well below what an OO-dense input would have. Keeping those OO edges in profile would set a target \(\xi\) the sampler cannot reach, and the realised \(\xi\) would drift low. Dropping OO at profile time gives the sampler a target it can hit.</p>
+  <p>ABCD+o drops OO edges before reading degrees. The reason is target-stability: the background graph's uniform pairing produces OO edges at a rate of roughly \((s_0 / n)^2\), well below what an OO-dense input would have. Keeping those OO edges in profile would set a target \(\xi\) the sampler cannot reach, and the realised \(\xi\) would drift low. Dropping OO at profile time gives the sampler a target it can hit.</p>
   <p>On our synthetic, the edge \((19, 20)\) is the only OO edge. Dropping it reduces \(w_{19}\) and \(w_{20}\) by one each. On <code>dnc</code> the drop is more aggressive: 233 input outliers had all their edges inside the outlier pool; drop_oo zeroes their degrees and they drop out of <code>edge.csv</code> entirely.</p>
   <div class="graph" id="g-deg">
     <div class="graph-chrome">
@@ -248,7 +248,8 @@
     \phi \;=\; 1 - \sum_{j \in [\ell]} \left(\frac{s_j}{n - s_0}\right)^{\!2}
             \frac{(n - s_0)\xi}{(n - s_0)\xi + s_0}.
   \]
-  <p>Two factors modify \(\phi\) relative to plain ABCD. The cluster proportion is \(s_j / (n - s_0)\), reading the partition over non-outliers only since outliers cannot land in any real cluster. The \((n - s_0)\xi / ((n - s_0)\xi + s_0)\) factor is the share of background-pool stubs contributed by non-outliers: outliers dump their full degree there while non-outliers dump only \(\xi d_u\), so the non-outlier share of a random background match shrinks and \(\phi\) shrinks with it. Setting \(s_0 = 0\) recovers ABCD's \(\phi = 1 - \sum (s_j / n)^2\). The outlier-block asymmetry survives downstream: eligibility runs on raw \(d_u\) rather than \(x_u\), so on hub-heavy inputs the threshold sits below the largest input degrees and outliers come from mid-degree nodes; on flatter inputs every node is eligible and a hub can land in the block. Either way every outlier's full degree funds \(G_0\), so the realised \(\xi\) drifts above target in proportion to how much aggregate degree the eligible draw absorbed.</p>
+  <p>Two factors carve the outlier block out of \(\phi\). The cluster proportion is \(s_j / (n - s_0)\), reading the partition over non-outliers only since outliers cannot land in any real cluster. The \((n - s_0)\xi / ((n - s_0)\xi + s_0)\) factor is the non-outlier share of the background-pool stubs: outliers dump their full degree there while non-outliers dump only \(\xi d_u\), so the non-outlier share of a random background match shrinks and \(\phi\) shrinks with it. Setting \(s_0 = 0\) recovers ABCD's \(\phi = 1 - \sum (s_j / n)^2\) and the original bound.</p>
+  <p>The outlier-block asymmetry survives downstream: eligibility runs on raw \(d_u\) rather than the cluster-fitting bound \(x_u\), so on hub-heavy inputs the threshold sits below the largest input degrees and outliers come from mid-degree nodes; on flatter inputs every node is eligible and a hub can land in the block. Either way every outlier's full degree funds \(G_0\), so the realised \(\xi\) drifts above target in proportion to how much aggregate degree the eligible draw absorbed.</p>
   <div class="graph" id="g-assign">
     <div class="graph-chrome">
       <span></span>
@@ -270,7 +271,7 @@
   </div>
   <div class="callout warn">
     <div class="tag">low-\(\xi\) exhausts eligibility before \(s_0\) outliers can be drawn</div>
-    <p>\(\bar L\) is bounded above by \(\sum_u \xi d_u = \xi |E| \cdot 2 / n \cdot n = 2\xi|E|\), so \(\bar L \to 0\) as \(\xi \to 0\) and the eligibility bound \(\bar L + s_0 - \bar L s_0/n - 1 \to s_0 - 1\). The eligible set then collapses to the nodes with \(d_u \le s_0 - 1\), and unless that set has at least \(s_0\) members the sampler cannot fill the outlier block. The paper notes this corner: in the extreme \(\xi = 0\), only outliers contribute background stubs at all, so a graphic residual requires every outlier's degree to fit below \(s_0\). The page's wrapper forces \(\xi \in (0, 1)\) and the synthetic's degrees clear the bound by a wide margin, so this case never fires here; it's the analog of ABCD's singleton trap, the corner of parameter space where the assignment runs out of legal moves.</p>
+    <p>\(\bar L\) is bounded above by \(\sum_u \xi d_u\), so \(\bar L \to 0\) as \(\xi \to 0\) and the eligibility bound \(\bar L + s_0 - \bar L s_0/n - 1 \to s_0 - 1\). The eligible set then collapses to the nodes with \(d_u \le s_0 - 1\), and unless that set has at least \(s_0\) members the sampler cannot fill the outlier block. In the extreme \(\xi = 0\), only outliers contribute background stubs at all; a graphic residual then requires every outlier's degree to fit below \(s_0\). It is the analog of ABCD's singleton trap, the corner of parameter space where the assignment runs out of legal moves.</p>
   </div>
   <div class="callout">
     <div class="tag">node identity is not preserved across the assignment</div>
