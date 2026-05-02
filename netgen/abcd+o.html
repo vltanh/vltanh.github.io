@@ -160,11 +160,11 @@
 <!-- ─────────── Profiling · the shared fixture ─────────── -->
 <section class="stage">
   <div class="stage-num">profiling · outliers as singletons</div>
-  <h2>Shared input graph: 18 clustered + 2 singletons (with the OO edge dashed).</h2>
-  <p>The 20-node synthetic this page builds on: C1 (8), C2 (6), C3 (4), plus outliers 19 + 20 each in their own 1-node cluster. ABCD+o's profile flips <code>drop_outlier_outlier_edges</code> on, so the (19, 20) edge below is dashed-red as a visual cue: it disappears before stage 2 sees the input. The sampler then picks its own \(s_0\) outliers in stage 2; this view shows the input partition only.</p>
+  <h2>Shared input graph: 18 clustered + 2 outliers in one combined block (with the OO edge dashed).</h2>
+  <p>The 20-node synthetic this page builds on: C1 (8), C2 (6), C3 (4), plus a 2-node outlier block (light red). ABCD+o's profile flips <code>drop_outlier_outlier_edges</code> on, so the (19, 20) edge below is dashed-red as a visual cue: it disappears before stage 2 sees the input. The sampler then picks its own \(s_0\) outliers in stage 2; this view shows the input partition only.</p>
   <div class="graph" id="g-shared-input">
     <div class="graph-chrome">
-      <span>input G &middot; singleton mode &middot; 5 clusters &middot; OO dashed</span>
+      <span>input G &middot; combined mode &middot; 4 clusters &middot; OO dashed</span>
       <span class="right">shared fixture</span>
     </div>
     <div class="graph-canvas" id="g-shared-input-cy"></div>
@@ -647,27 +647,27 @@ window.MathJax = {
   }
   const isOO = (e) => INPUT_OUT_SET.has(e.u) && INPUT_OUT_SET.has(e.v);
 
-  // Shared input opener · singleton mode (abcd+o's profile default;
-  // the input partition has nodes 19 and 20 each as their own size-1
-  // cluster). drop_oo flags the (19, 20) edge as dashed-red since it
-  // is stripped before stage 2 sees the input.
+  // Shared input opener · combined mode (abcd+o's profile default;
+  // outliers fold into one cluster_id = 1 block). drop_oo flags the
+  // (19, 20) OO edge as dashed-red since it is stripped before stage 2
+  // sees the input.
   (function () {
-    const pal = COL.outlier_palette;
     const clusters = [
       { id: "C1", nodes: C1, color: COL.C1, isOutlier: false },
       { id: "C2", nodes: C2, color: COL.C2, isOutlier: false },
       { id: "C3", nodes: C3, color: COL.C3, isOutlier: false },
+      { id: "outlier", nodes: OUT_N, color: OUTLIER_RED, isOutlier: true },
     ];
-    OUT_N.forEach((n, i) => {
-      clusters.push({ id: "S" + n, nodes: [n], color: pal[i % pal.length], isOutlier: true });
-    });
     const edges = EDGES.map(e => {
-      const isOO = INPUT_OUT_SET.has(e.u) && INPUT_OUT_SET.has(e.v);
+      const oo = isOO(e);
       return {
         u: e.u, v: e.v,
-        color: isOO ? COL.edge_drop : COL.paper_3,
-        w: isOO ? 1.4 : 0.9,
-        classes: isOO ? "dashed thick" : "",
+        color: oo ? COL.edge_drop : COL.paper_3,
+        w: oo ? 2.2 : 0.9,
+        // .thick is stroke-width:3.5, which makes the .dashed (6 3)
+        // pattern read as almost solid; keep just .dashed and let the
+        // higher inline w give the line its weight.
+        classes: oo ? "dashed" : "",
       };
     });
     NETGEN.singletonOpener({ hostId: "g-shared-input-cy", clusters, edges });
