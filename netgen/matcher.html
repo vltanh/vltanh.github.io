@@ -324,8 +324,7 @@
 
   <h3>cluster-preserving twin</h3>
   <p>Stubs are partitioned by (block, block) bucket up front and drawn per bucket independently, capped at the bucket budget. The 2-opt repair only swaps endpoints in ways that keep both resulting pairs inside their original buckets.</p>
-  <p class="muted small">The walker is algorithmically faithful to the production code. Production delegates the per-bucket stub draw to graph-tool's <code>generate_sbm</code>, which builds an urn of stub copies per bucket and pops uniformly without replacement. The walker does the same draw in a different operational form: instead of materialising the urn, it samples from a per-node residual count weighted by the count itself and decrements after each pick. Sampling from a multiset proportional to its element counts is equivalent to popping a uniform index from the urn of repeated copies; both yield the same distribution of pairs. What does not transfer is the bit stream: graph-tool's RNG is <code>pcg64_k1024</code> wrapped in <code>std::uniform_int_distribution</code>, neither of which is portable to a browser. So the walker matches the spec, not the exact edges a graph-tool run would emit on the same seed.</p>
-  <p class="muted small">The byte-equal test for the walker lives at <code>tools/viz_check/match_degree/</code>: a standalone C++ reference mirrors the same urn algorithm with <code>std::mt19937</code>, the JS replay consumes its trace, edges match exactly. Same pattern <code>tools/viz_check/sbm/</code> uses for the SBM stub-pair viz.</p>
+  <p class="muted small">Same pair distribution as production; specific edges differ because the browser cannot share graph-tool's RNG.</p>
   <div class="graph" id="g-cprewire">
     <div class="graph-chrome">
       <span id="g-cprewire-stage">step 0 &middot; initial deficit</span>
@@ -1075,12 +1074,21 @@ window.MathJax = {
       }
       return out;
     }
-    function byNodeFor(placedList) {
-      // Stub count per node = its incidence in the placed list. Spoke
-      // layer reads count for the rim count and re-uses node colour for
-      // stub stroke. Same idiom as abcd's byNodeFromList wrapper.
-      return NETGEN.spokeLayer.byNodeFromEdges(viz, placedList,
-        n => COL[CLUSTER_OF[parseInt(n.id, 10)]] || COL.paper_3);
+    function byNodeFor(_placedList) {
+      // SBM g3 idiom: rim stub count = initial deficit, constant across
+      // steps. Stubs paint at step 0; each placed bridge occupies two
+      // rim slots and the unplaced slots stay visible as half-edges, so
+      // the picture reads as "the matcher's job is to bridge these
+      // stubs together." Without this, the rim was empty until the
+      // first edge landed.
+      const cfg = {};
+      NODES.forEach(n => {
+        const def = DEFICIT[n] || 0;
+        if (def > 0) {
+          cfg[n] = { count: def, color: COL[CLUSTER_OF[n]] || COL.paper_3 };
+        }
+      });
+      return cfg;
     }
 
     function paintCaption(s) {
