@@ -151,7 +151,7 @@
         <td class="desc">Silent gridlock: when no partner is left it drops the remaining stubs without logging.</td>
       </tr>
       <tr class="pref">
-        <th>true_greedy (default)</th>
+        <th>true_greedy</th>
         <td class="desc">Take the most-needy node. Take the partner that is itself currently most needy, breaking ties by id. Push the updated needs back into the priority order before the next pick.</td>
         <td class="desc">Logs gridlock when no partner with positive deficit is left.</td>
       </tr>
@@ -167,7 +167,7 @@
       </tr>
     </tbody>
   </table>
-  <p>The table reads as a spectrum from determinism to randomness. Greedy and true_greedy produce the same output every run on the same input (no seed needed). Random_greedy and rewire sample fresh draws each call. True_greedy is the default: it closes the residual deterministically with negligible drop on realistic inputs.</p>
+  <p>The table reads as a spectrum from determinism to randomness. Greedy and true_greedy produce the same output every run on the same input (no seed needed). Random_greedy and rewire sample fresh draws each call. The bare CLI defaults to plain <code>true_greedy</code> for inputs without a reference clustering; clustered generators (<code>sbm</code>, <code>ec-sbm-v2</code>, <code>ec-sbm-v3</code>) override that to <code>cluster_preserving_true_greedy</code>, which is the practical default everywhere a clustering is available.</p>
   <p>Each family also has a <strong>cluster-preserving</strong> twin (<code>cluster_preserving_greedy</code>, <code>cluster_preserving_true_greedy</code>, and so on). The twin runs the same outer loop but adds one rule: a candidate partner is rejected if the (block, block) bucket of the pair has zero edges left in its budget. The budget is built once at the start, from the reference clustering's per-(block, block) edge counts minus what the current graph already has, and decremented every time the matcher accepts an edge. The four merged sections below describe each family and then how the cluster-preserving twin changes its behaviour. Walkers run on the residual deficit drawn at the top of the page; click <em>re-roll input</em> to draw a new pile and reset every walker.</p>
   <h3>when each one shines, and where it fumbles</h3>
   <p><strong>greedy</strong> is fast and deterministic, and on residuals where the deficit pile is well-spread it closes everything in one pass. Where it struggles: an id-sorted partner list pins partner choice to whoever sorts low among valid candidates, regardless of how much room that partner has left. On the first draw the most-needy node may grab a low-id partner whose own deficit is small, leaving high-deficit nodes scrambling for partners later in the run. Combined with the silent-gridlock failure mode (no log when stubs are dropped), it is the riskiest choice on hub-heavy or otherwise skewed deficits.</p>
@@ -381,12 +381,54 @@
   <p>Stack composition is not free. Each plain step that follows a cluster-preserving step trades budget fidelity for residual closure: the new edges land in (block, block) buckets that the gated steps already exhausted, so block-shape stats (conductance, mixing parameter, modularity) drift away from the reference while the degree gap closes. Pick a single cluster-preserving step when block fidelity is the priority and the residual stubs are tolerable; chain a plain step at the end when degree exactness matters more.</p>
 </section>
 
+<!-- ─────────── DNC case study ─────────── -->
+<section class="stage">
+  <div class="stage-num">case study &middot; dnc</div>
+  <h2>Pick the matcher off a graph that loses 29% of its edges to dedup.</h2>
+  <p>The dnc network has 1,891 nodes, 5 reference clusters, and 10,429 reference edges. Run the standalone SBM generator on that input with seed 1: graph-tool's stub-pair sampler hits enough collisions on the dense intra-cluster blocks that, after self-loops and duplicates are removed, only 7,438 edges survive. The matcher's job is to top up 2,991 missing edges &mdash; a 29% deficit, almost entirely concentrated inside cluster interiors because that is where the SBM's parallel-edge collisions concentrate.</p>
+  <p>Four matcher choices, same SBM output, same seed:</p>
+  <table class="matcher-table">
+    <thead>
+      <tr><th>matcher</th><th>final edges</th><th>deficit closed</th><th>cluster fidelity</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <th>true_greedy</th>
+        <td class="desc">10,429</td>
+        <td class="desc">100% (zero residual)</td>
+        <td class="desc">No bucket gate. Hubs deep inside one cluster reach across to outliers in another whenever no closer partner is left, so the block-pair edge counts drift away from the reference.</td>
+      </tr>
+      <tr class="pref">
+        <th>cluster_preserving_true_greedy (default)</th>
+        <td class="desc">10,155</td>
+        <td class="desc">90.8% (274 stubs stuck)</td>
+        <td class="desc">Bucket gate enforced strictly. Edges land where the reference says they should, but 274 stubs are abandoned because the buckets they would consume are already exhausted by the time their partner becomes the priority pick.</td>
+      </tr>
+      <tr>
+        <th>cluster_preserving_true_greedy, true_greedy</th>
+        <td class="desc">10,340</td>
+        <td class="desc">97.0% (89 stubs stuck)</td>
+        <td class="desc">Cluster-preserving pass first; plain pass picks up the residual. Recovers 185 of the 274 edges the gate refused. The 185 cleanup edges land in buckets the cluster-preserving step had used up, so block-pair fidelity is slightly looser than the gated-only run, but vastly closer to the reference than plain true_greedy.</td>
+      </tr>
+      <tr>
+        <th>cluster_preserving_rewire, cluster_preserving_true_greedy, true_greedy</th>
+        <td class="desc">10,347</td>
+        <td class="desc">97.1% (82 stubs stuck)</td>
+        <td class="desc">Same as the two-step stack, plus a stochastic bulk drain at the front. The 2-opt repair has more room to manoeuvre while the buckets are still mostly full, so the cluster-preserving true-greedy step has fewer hard cases to handle. Marginal extra recovery on dnc (7 more edges over the two-step stack).</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>Plain <code>true_greedy</code> always closes the deficit but is blind to clusters. The cluster-preserving variant nails clusters but leaves a few percent of the deficit unplaced. The two-step stack recovers most of what the budget refused while keeping the bulk of the cluster-level fidelity for the gated step's edges. The three-step stack adds a stochastic mixing pass on the front that helps marginally on this fixture.</p>
+  <p class="muted small">Numbers come from running <code>run_generator.sh --generator sbm</code> on dnc with seed 1 and toggling <code>--degree-matcher</code> across the four configurations above. The SBM output is identical across all four runs (same graph-tool seed), so the differences are purely matcher behaviour.</p>
+</section>
+
 <!-- ─────────── --remap mode ─────────── -->
 <section class="stage">
   <div class="stage-num">the --remap option</div>
   <h2>Pair by degree rank for gens that emit fresh node IDs.</h2>
   <p>Three of the simple gens (abcd, abcd+o, lfr) and nPSO emit integer node IDs that have no relation to the input's IDs: ABCD's <code>com.tsv</code> uses <code>1, 2, ..., N</code>, LFR's binary outputs <code>0, 1, ..., N-1</code>, and nPSO's MATLAB sampler labels nodes by arrival rank. Naively diffing degrees against the input's IDs is meaningless. The <code>--remap</code> flag pairs nodes by degree rank: the input node at rank \(i\) (descending input-degree) is paired with the output node at rank \(i\) (descending output-degree), and the deficit is computed on that pairing.</p>
   <p>Algorithm-side this is an accounting layer: the matcher still adds edges in the input's ID space, but it judges deficits against the rank-paired target. The pairing is the L1- and L2-optimal one (rearrangement inequality) for matching two non-identical degree sequences. There is no on-disk re-ID; the output edge.csv keeps the input's IDs throughout.</p>
+  <p>Cluster-preserving variants compose with <code>--remap</code> the same way. The per-(block, block) budget is built in the reference clustering's ID space, then the rank pairing projects the source side onto the input's IDs so the matcher can apply the budget gate to candidates expressed in input IDs. Block assignment for the input side is taken from <code>--input-clustering</code>; the budget itself is taken from <code>--ref-clustering</code>. The two flags collapse to the same file in direct mode where input and reference share an ID space.</p>
   <div class="disk-panel" style="margin-top:1rem">
     <div class="step-desc" style="margin-bottom:.6rem"><span class="st">illustration</span> &middot; toggle <em>--remap</em> below to see the pairing change. Input nodes (left, sorted by input degree desc) are connected to output nodes (right) under either <em>id-pair</em> mode (input id == output id) or <em>rank-pair</em> mode (rank \(i\) ↔ rank \(i\)). Numbers in parens are degrees. Crossings under id-pair show how badly the two sequences disagree on which IDs carry which degrees.</div>
     <div class="widget-row" style="padding:0;border:none;margin:0 0 .8rem">
@@ -470,8 +512,13 @@ window.MathJax = {
   function edgeKey(u, v) { return Math.min(u, v) + "-" + Math.max(u, v); }
 
   // ── Common state: base graph + deficit + adjacency snapshot ──
+  // Base edges paint at sbm g5's KEPT_DIM (0.22): the existing graph is
+  // backdrop while the matcher adds new edges, so the new edges can read
+  // at full opacity + bumped stroke without competing with the kept pile.
+  const KEPT_DIM = 0.22;
+  const MATCH_EDGE_W = 2.6;
   const baseEdges = EDGES.map(e => ({
-    u: e.u, v: e.v, color: COL.edge_stage2, w: 1.4,
+    u: e.u, v: e.v, color: COL.edge_stage2, w: 1.4, opacity: KEPT_DIM,
     id: `m-base-${edgeKey(e.u, e.v)}`,
   }));
   // SBM-style deficit generator: configuration-model pairing on the
@@ -1011,15 +1058,23 @@ window.MathJax = {
     let firstRender = true;
     function isLocked() { return spokeLockHeld; }
 
-    const matchColor = COL.edge_stage4;
     const dropColor = COL.edge_drop;
     const pairKey = (u, v) => u < v ? `${u}-${v}` : `${v}-${u}`;
+    // Match edges read at full opacity + bumped stroke (sbm g5 idiom)
+    // against the dimmed kept backdrop. Colour follows the same rule
+    // sbm g5 uses: intra edges take their block's intra colour, inter
+    // edges fall back to the shared inter accent. Failed-pair edges
+    // (pair_invalid / repair_fail) stay red dashed via the bad flag.
+    function matchEdgeColor(u, v) {
+      const cu = CLUSTER_OF[u], cv = CLUSTER_OF[v];
+      if (cu === cv) return COL.edge_intra[cu] || COL.edge_stage2;
+      return COL.edge_inter;
+    }
     function placedEntry(e) {
-      // Always copy through e.bad / e.color so playMany retains the
-      // bad-flagged appearance for failed pair attempts.
       return Object.assign({}, e, {
-        color: e.bad ? dropColor : matchColor,
+        color: e.bad ? dropColor : matchEdgeColor(e.u, e.v),
         badColor: dropColor,
+        w: MATCH_EDGE_W,
       });
     }
     // Build the placed list at step k: every committed edge plus an
