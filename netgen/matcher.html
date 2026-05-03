@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Degree Matchers &middot; post-hoc rewire utility | Synthetic Network Generators</title>
 <link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐖</text></svg>">
-<meta name="description" content="match_degree: top-up tool that drives a graph's degree sequence toward an input target. Ten algorithms — five global (greedy, true_greedy, random_greedy, rewire, hybrid) plus five cluster_preserving_* counterparts that gate every accepted edge on a per-block-pair budget — trade off bias, throughput, gridlock honesty, and block-level fidelity.">
+<meta name="description" content="match_degree: top-up tool that drives a graph's degree sequence toward an input target. Four algorithm families (greedy, true_greedy, random_greedy, rewire), each with a cluster-preserving twin that gates every accepted edge on a per-block-pair budget. Stackable: list a sequence of matchers, each cleans up what the previous one could not place.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
@@ -118,19 +118,20 @@
 <header class="hdr">
   <div class="kicker">network-generation · shared utility</div>
   <h1>degree <em>matchers</em></h1>
-  <p class="sub">A shared top-up toolkit every generator can call after its main pass. Reads two edgelists (current graph + reference target), finds per-node residual deficits, and adds edges that close the gap. Five algorithms; pick by failure mode.</p>
+  <p class="sub">A shared top-up toolkit every generator can call after its main pass. Reads two edgelists (current graph + reference target), finds per-node residual deficits, and adds edges that close the gap. Four algorithm families, each with a cluster-preserving twin, and a stacking driver that lets one algorithm clean up what the previous one could not place.</p>
 </header>
 
 <section class="hook">
-  <p>Every generator in this project ends with an output that is "close to" the input degree sequence but not exact. Dedup, rewire, and outlier handling each remove a few stubs from each node's target. <code>src/match_degree.py</code> is the shared finishing tool: pop the highest-deficit node, find a partner with deficit and no edge between them, drop the edge in. Repeat until the deficit set is empty or every remaining pair is blocked.</p>
-  <p>That last word, "blocked", is where the algorithm choices matter. The same residual can be drained five different ways, and they disagree on which pairs to try, in what order, and what to do when a deficit cannot be closed cleanly. The choices show up in the output degree sequence and in how many stubs end up unplaced.</p>
+  <p>Every generator in this project ends with an output that is "close to" the input degree sequence but not exact. Dedup, rewire, and outlier handling each remove a few stubs from each node's target. The matcher's job is the last one in line: pop the node still missing the most edges, find a partner that also still has room and is not already connected to it, drop the edge in. Repeat until either the deficit list is empty or every remaining pair is blocked.</p>
+  <p>That last word, "blocked", is where the algorithm choices matter. The same residual can be drained several different ways, and they disagree on which pairs to try, in what order, and what to do when a deficit cannot be closed cleanly. The choices show up in the output degree sequence and in how many stubs end up unplaced. On top of that, each algorithm has a cluster-preserving twin that adds a second budget — a per-(block, block) edge cap derived from the reference clustering — so the matcher cannot trade block-level structure for closing the degree gap.</p>
+  <p>The original code shipped with two two-step "hybrid" variants (rewire then true-greedy, both global and cluster-preserving). Those are now exposed as a more general feature: <strong>any sequence of matchers can be stacked</strong>. The next pass picks up whatever stubs the previous pass could not place. The same hybrid behaviour is recovered as a two-element stack, and new useful chains become available — for instance, a cluster-preserving pass first to anchor block structure, then a plain pass to close the residual that the budget gate refused.</p>
 </section>
 
 <!-- ─────────── input deficit ─────────── -->
 <section class="stage">
   <div class="stage-num">input · the residual deficit</div>
   <h2>Where the deficit comes from. Re-roll for a fresh draw.</h2>
-  <p>The five algorithms below all run on the same residual deficit, drawn here. We generate the toy deficit by running a configuration-model pairing on the 20-node fixture's degree sequence, then dropping self-loops and parallel edges (the same dedup pass SBM does). Hubs lose more stubs because expected collisions scale with \(k_u^2\); leaves rarely lose any. Click <em>re-roll input</em> to draw a fresh shuffle and re-run every walker.</p>
+  <p>Every walker on this page works on the same residual deficit, drawn here. The toy deficit comes from running a configuration-model pairing on the 20-node fixture's degree sequence and then dropping self-loops and parallel edges — the same dedup pass the SBM generator uses. Hubs lose more stubs because expected collisions scale with the square of the degree; leaves rarely lose any. Click <em>re-roll input</em> to draw a fresh shuffle and re-run every walker.</p>
   <div class="graph" id="g-input">
     <div class="graph-chrome">
       <span>20-node fixture &middot; non-deficit nodes dimmed</span>
@@ -148,84 +149,60 @@
 <section class="stage">
   <div class="stage-num">input contract</div>
   <h2>Two edgelists in. Top-up edges out.</h2>
-  <p>The CLI is generator-agnostic:</p>
-  <div class="pseudo">python src/match_degree.py \
-  --input-edgelist  &lt;current.csv&gt; \
-  --ref-edgelist    &lt;target.csv&gt; \
-  --degree-matcher  greedy|true_greedy|random_greedy|rewire|hybrid \
-                          | cluster_preserving_{greedy|true_greedy|random_greedy|rewire|hybrid} \
-  --output-folder   &lt;dir&gt; \
-  --seed            &lt;int&gt; \
-  [--remap] [--input-clustering &lt;com.csv&gt;] [--ref-clustering &lt;com.csv&gt;]</div>
-  <p class="muted small">The five <code>cluster_preserving_*</code> variants gate every accepted edge on a per-block-pair budget derived from the reference clustering, so the matcher cannot trade block-level fidelity for closing the degree gap. They consume the input + reference clustering CSVs; cluster-preserving mode is inferred from the algorithm-name prefix.</p>
-  <p>The two inputs share a node set. For each node \(u\), the residual deficit is</p>
+  <p>The matcher takes two inputs that share a node set: the current graph (the generator's output so far) and a reference graph (whose degree sequence is the target). For each node it computes the residual deficit:</p>
   \[
     r_u \;=\; \max\bigl(0, \,d_u^{\text{ref}} - d_u^{\text{input}}\bigr),
   \]
-  <p>where \(d_u^{\text{ref}}\) is \(u\)'s degree in the reference and \(d_u^{\text{input}}\) is its degree in the current graph. The matcher's job is to add new edges so that, post-match, \(d_u^{\text{out}} \approx d_u^{\text{ref}}\) for every \(u\). It can never <em>reduce</em> a degree; if some node already has more edges than its target, the matcher leaves it alone.</p>
+  <p>where \(d_u^{\text{ref}}\) is \(u\)'s degree in the reference and \(d_u^{\text{input}}\) is its degree in the current graph. The matcher's job is to add new edges so that, post-match, \(d_u^{\text{out}} \approx d_u^{\text{ref}}\) for every node. It can never <em>reduce</em> a degree; if some node already has more edges than its target, the matcher leaves it alone.</p>
+  <p>The matcher is selected by name. A single name picks one algorithm; a comma-separated list picks a stack — each algorithm runs in turn on the residual the previous one left behind. Cluster-preserving algorithms additionally consume the reference clustering and a derived per-(block, block) edge budget; non-cluster-preserving ones do not need it. The pipelines that wrap the matcher take care of attaching the clustering files when any step in the stack is cluster-preserving.</p>
   <div class="callout">
     <div class="tag">when each generator calls it</div>
-    <p>EC-SBM-v1 hardcodes <code>greedy</code> for byte-compat with the original paper implementation. EC-SBM-v2 and EC-SBM-v3 default to <code>cluster_preserving_true_greedy</code>. <code>sbm</code> defaults to the same. <code>abcd</code> / <code>abcd+o</code> / <code>lfr</code> / <code>npso</code> leave match-degree off by default; their pipelines accept <code>--match-degree</code> as an opt-in flag, paired with the optional <code>--remap</code> mode below for gens that emit fresh node IDs.</p>
+    <p>EC-SBM-v1 uses <code>greedy</code> for byte-compatibility with the original paper. EC-SBM-v2 and EC-SBM-v3 default to <code>cluster_preserving_true_greedy</code>. The standalone SBM generator defaults to the same. ABCD, ABCD+o, LFR, and nPSO leave the matcher off by default; their pipelines turn it on as an opt-in step, usually paired with the <em>--remap</em> mode covered at the bottom of the page (their output node IDs do not align with the input's).</p>
   </div>
 </section>
 
 <!-- ─────────── overview table ─────────── -->
 <section class="stage">
-  <div class="stage-num">the five algorithms · overview</div>
+  <div class="stage-num">the four families · overview</div>
   <h2>Different ways to drain the same deficit pile.</h2>
-  <p>All five algorithms share the same outer loop: pick a node \(u\) with positive deficit, pick a partner \(v\) such that \((u, v)\) is not already an edge and \(v\) has positive deficit, add the edge, decrement both. They differ on the picking order and on what they do when the loop stalls.</p>
+  <p>All four families share the same outer loop: pick a node with positive deficit, pick a partner that also still has room and is not already adjacent, add the edge, decrement both. They differ on the picking order, on whether the partner is chosen deterministically or by a weighted random draw, and on what they do when the loop stalls.</p>
   <table class="matcher-table">
     <thead>
-      <tr><th>algorithm</th><th>how it picks pairs</th><th>failure mode</th></tr>
+      <tr><th>family</th><th>how it picks pairs</th><th>failure mode</th></tr>
     </thead>
     <tbody>
       <tr>
         <th>greedy</th>
-        <td class="desc">Heap-based. Pop \(u\) with max residual; connect to <code>min(residual, |non-neighbours|)</code> partners drawn via <code>set.pop()</code>.</td>
-        <td class="desc">Silent gridlock: drops stubs without logging.</td>
+        <td class="desc">Take the most-needy node. Take its first acceptable partner in id-ascending order. Repeat until that node's deficit is closed, then move on.</td>
+        <td class="desc">Silent gridlock: when no partner is left it drops the remaining stubs without logging.</td>
       </tr>
       <tr class="pref">
         <th>true_greedy (default)</th>
-        <td class="desc">Max-heap with dynamic re-push. Pop \(u\), pick \(v\) via <code>argmax</code> over current degrees among valid targets, push updated residuals back.</td>
-        <td class="desc">Logs gridlock when no partner is left.</td>
+        <td class="desc">Take the most-needy node. Take the partner that is itself currently most needy, breaking ties by id. Push the updated needs back into the priority order before the next pick.</td>
+        <td class="desc">Logs gridlock when no partner with positive deficit is left.</td>
       </tr>
       <tr>
         <th>random_greedy</th>
-        <td class="desc">Weighted-random \(u\) (by residual), weighted-random \(v\) from valid targets.</td>
-        <td class="desc">Logs gridlock; useful for comparing bias against deterministic greedy.</td>
+        <td class="desc">Pick the source node by a weighted random draw over residuals. Pick the partner the same way over valid targets.</td>
+        <td class="desc">Logs gridlock. Useful for measuring how much of greedy's output comes from the deterministic ordering.</td>
       </tr>
       <tr>
         <th>rewire</th>
-        <td class="desc">Configuration-model pairing then 2-opt repair. Build a flat stub list (each node repeated <code>residual</code> times), shuffle, pair adjacent. Invalid pairs queue for <code>run_rewire_attempts</code>.</td>
-        <td class="desc">Logs gridlock; almost always resolves on realistic inputs.</td>
-      </tr>
-      <tr>
-        <th>hybrid</th>
-        <td class="desc">Run <code>rewire</code> first, then <code>true_greedy</code> on whatever <code>rewire</code> could not place. Rewire handles the bulk unbiased; greedy handles the stuck tail deterministically.</td>
-        <td class="desc">Logs gridlock; drops near zero on realistic inputs.</td>
+        <td class="desc">Make one stub per missing edge per node, shuffle the pile, pair adjacent stubs. Self-loops, parallels, and duplicates queue for a 2-opt repair pass that swaps endpoints with a random valid edge until the queue is empty or a retry budget is hit.</td>
+        <td class="desc">Logs gridlock. Almost always resolves on realistic inputs; the repair pass is the slow path on hub-heavy graphs.</td>
       </tr>
     </tbody>
   </table>
-  <p>The table reads as a spectrum from determinism to randomness. <code>greedy</code> and <code>true_greedy</code> produce the same output every run on the same input (no seed needed). <code>random_greedy</code> and <code>rewire</code> sample fresh draws each call. <code>true_greedy</code> is the default: dynamic re-push closes the residual deterministically with negligible drop on realistic inputs. <code>hybrid</code> stays available when randomized config-model pairing is preferred (rewire bulk drain + true_greedy tail).</p>
-  <p>The five sections below walk each algorithm step by step on the same residual deficit, drawn at the top of the page from a fresh SBM-style stub-pairing on the 20-node fixture. Click <em>re-roll input</em> at the top to draw a new pile and reset every walker.</p>
+  <p>The table reads as a spectrum from determinism to randomness. Greedy and true_greedy produce the same output every run on the same input (no seed needed). Random_greedy and rewire sample fresh draws each call. True_greedy is the default: it closes the residual deterministically with negligible drop on realistic inputs.</p>
+  <p>Each family also has a <strong>cluster-preserving</strong> twin (<code>cluster_preserving_greedy</code>, <code>cluster_preserving_true_greedy</code>, and so on). The twin runs the same outer loop but adds one rule: a candidate partner is rejected if the (block, block) bucket of the pair has zero edges left in its budget. The budget is built once at the start, from the reference clustering's per-(block, block) edge counts minus what the current graph already has, and decremented every time the matcher accepts an edge. The four merged sections below describe each family and then how the cluster-preserving twin changes its behaviour. Walkers run on the residual deficit drawn at the top of the page; click <em>re-roll input</em> to draw a new pile and reset every walker.</p>
 </section>
 
-<!-- ─────────── algorithm · greedy ─────────── -->
+<!-- ─────────── family · greedy + cluster_preserving_greedy ─────────── -->
 <section class="stage">
-  <div class="stage-num">algorithm · greedy</div>
-  <h2>Heap pop, partner via id-ascending sort.</h2>
-  <p>v1's matcher. Pops the node with the most missing stubs and drains it against the candidate pool. Older versions of the code used Python's <code>set.pop()</code> and relied on <code>hash(n) == n</code> for small ints to drain in slot order; the production code now sorts the candidate set explicitly by id ascending so the algorithm is deterministic across <code>PYTHONHASHSEED</code> values and matches this page's JS port.</p>
-  <p>Once \(u\)'s deficit is zero or partners run out, move on; unplaced stubs disappear without a log line.</p>
-  <div class="pseudo"><span class="kw">def</span> greedy(residual, adj):
-    heap = max-heap of (residual[u], u) for u with residual[u] &gt; 0
-    <span class="kw">while</span> heap not empty:
-        u = heap.pop()
-        candidates = sorted({v : v != u, v not in adj[u], residual[v] &gt; 0})
-        <span class="kw">for</span> v <span class="kw">in</span> candidates[:residual[u]]:
-            adj[u].add(v); adj[v].add(u)
-            residual[u] -= 1; residual[v] -= 1
-        <span class="cm"># residual[u] &gt; 0 here means u was starved. dropped silently.</span></div>
-  <p>Walk the steps below. Each step pops one \(u\) and drains it; the caption names the partner picked at each draw. The "deterministic; same output every run" tag follows from the int-hash-table behaviour above. Gridlock surfaces as a "starved" event with no log message.</p>
+  <div class="stage-num">family · greedy</div>
+  <h2>Take the most-needy node. Drain it against an id-sorted partner list.</h2>
+  <p>The matcher v1 of this project shipped with. Each step pulls out the node with the largest deficit, builds the list of candidate partners (every other node that still has room and is not already adjacent to it), sorts that list by id ascending, and walks down it adding edges until either the source node's deficit is closed or the candidate list runs out. Once one node is fully drained the loop moves on to the next-most-needy one. Stubs that cannot be placed because no partner is left disappear without any log line — the "silent gridlock" failure mode.</p>
+  <p>The walker below replays one such drain per step. The caption names the partner picked at each draw. The output is deterministic because the source order, the partner sort, and the tie-break rule are all fixed; the same input gives the same output every run, no seed needed.</p>
   <div class="graph" id="g-greedy">
     <div class="graph-chrome">
       <span id="g-greedy-stage">step 0 &middot; initial deficit</span>
@@ -243,29 +220,35 @@
   </div>
   <div class="callout warn">
     <div class="tag">caveat: silent gridlock</div>
-    <p>If a node is starved (no valid partner with deficit), greedy drops the remaining stubs without logging. The achieved degree drifts below the target, and downstream tools cannot tell whether a node "really" lost edges or just got starved by the matcher. The four other algorithms below all log gridlock as a <code>WARN</code>.</p>
+    <p>If a node is starved (no valid partner with deficit), greedy drops the remaining stubs without logging. The achieved degree drifts below the target, and downstream tools cannot tell whether a node "really" lost edges or got starved by the matcher. The other three families log gridlock as a warning.</p>
+  </div>
+
+  <h3>cluster-preserving twin</h3>
+  <p>The cluster-preserving variant runs the same outer loop and the same id-sorted partner list, then layers one extra rule on top: a candidate partner is removed from the list before the walk down it begins if the (block, block) bucket of the pair has zero edges left in its budget. The budget is computed once at the start from the reference clustering's per-(block, block) edge counts minus what the current graph already has. Each accepted edge decrements the corresponding bucket. When a bucket hits zero, candidates whose pair lands in that bucket disappear from future partner lists.</p>
+  <p>Effect: edges land where the reference clustering wants them — intra-block when its budget is healthy, inter-block when the inter budget is non-empty — at the cost of more starvation. Because greedy already swallows starvation silently, this twin can drop a noticeable number of stubs on inputs whose deficit is concentrated in a few blocks; the dropped stubs surface in the final output's degree drift, not in the log. The walker below makes the bucket draining visible: the caption names the bucket the matcher just touched and how much budget is left in it.</p>
+  <div class="graph" id="g-cpgreedy">
+    <div class="graph-chrome">
+      <span id="g-cpgreedy-stage">step 0 &middot; initial deficit</span>
+      <span class="right step-label">step <b id="g-cpgreedy-cur">0</b> / <span id="g-cpgreedy-total">0</span></span>
+    </div>
+    <div class="graph-canvas" id="g-cpgreedy-cy"></div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-cpgreedy-start" type="button">to start</button>
+      <button class="btn" id="g-cpgreedy-prev" type="button">back</button>
+      <button class="btn primary" id="g-cpgreedy-next" type="button">next</button>
+      <button class="btn" id="g-cpgreedy-end" type="button">to end</button>
+      <span class="step-label" id="g-cpgreedy-real">deterministic; same output every run</span>
+    </div>
+    <div class="step-desc" id="g-cpgreedy-desc">click <em>next</em> to advance.</div>
   </div>
 </section>
 
-<!-- ─────────── algorithm · true_greedy ─────────── -->
+<!-- ─────────── family · true_greedy + cluster_preserving_true_greedy ─────────── -->
 <section class="stage">
-  <div class="stage-num">algorithm · true_greedy</div>
-  <h2>Heap pop, partner via <code>argmax</code> over remaining residual deficit.</h2>
-  <p>Same outer pop as greedy, but the partner pick is deterministic: among valid targets (node not yet adjacent, has positive deficit), pick the one with the highest <em>remaining residual deficit</em>. Tie-break by id ascending. After each pair, push updated residuals back into the heap so subsequent pops see fresh values.</p>
-  <div class="pseudo"><span class="kw">def</span> true_greedy(residual, adj):
-    heap = max-heap of (residual[u], u) for u with residual[u] &gt; 0
-    <span class="kw">while</span> heap not empty:
-        u = heap.pop()
-        <span class="kw">while</span> residual[u] &gt; 0:
-            valid = {v : v != u, v not in adj[u], residual[v] &gt; 0}
-            <span class="kw">if not</span> valid: <span class="kw">break</span>
-            v = argmax(valid, key=lambda v: (residual[v], -v))  <span class="cm"># id-asc tiebreak</span>
-            adj[u].add(v); adj[v].add(u)
-            residual[u] -= 1; residual[v] -= 1
-            heap.push(residual[v], v)
-        <span class="kw">if</span> residual[u] &gt; 0:
-            log.warn(f"gridlock at u={u}, {residual[u]} stubs unplaced")</div>
-  <p>Picking by max remaining deficit biases toward the neediest nodes, draining them while they still have a wide pool of candidates. The deterministic tiebreak and explicit gridlock log are the two changes from <code>greedy</code>.</p>
+  <div class="stage-num">family · true_greedy</div>
+  <h2>Take the most-needy node. Pair it with the partner that itself is most needy.</h2>
+  <p>The default matcher. Same source pick as greedy (the node with the largest deficit goes first), but the partner is chosen differently: among the valid candidates (still has room, not already adjacent), pick the one whose own deficit is largest, breaking ties by id ascending. After each accepted edge, both endpoints' updated deficits go back into the priority order so subsequent picks see fresh values rather than stale ones from the start of the burst.</p>
+  <p>The change from greedy is small but consequential. Greedy commits to one source until it is fully drained or stuck, blind to whether its partners are running out of room. True_greedy lets the priorities re-shuffle after every edge, so the matcher always works on the currently neediest pair. On uneven deficits this closes the gap with substantially fewer dropped stubs. Gridlock — when no candidate with positive deficit is left — is logged as a warning rather than swallowed.</p>
   <div class="graph" id="g-truegreedy">
     <div class="graph-chrome">
       <span id="g-truegreedy-stage">step 0 &middot; initial deficit</span>
@@ -281,25 +264,33 @@
     </div>
     <div class="step-desc" id="g-truegreedy-desc">click <em>next</em> to advance.</div>
   </div>
+
+  <h3>cluster-preserving twin</h3>
+  <p>Same priority-driven source pick and partner pick as the global true_greedy. The twin filters the candidate list before scanning it: any candidate whose (block, block) bucket has zero edges left in its budget is excluded. The first candidate that maximises remaining deficit and respects the budget gets the edge, and the budget for that bucket goes down by one. Gridlock now triggers when no in-budget candidate with positive deficit is left, and is logged.</p>
+  <p>Because the source still pulls the most-needy node first and re-shuffles after every accept, the twin loses fewer stubs to starvation than the cluster-preserving greedy does. On the bench in <code>examples/bench_ecsbm/</code>, this is the algorithm EC-SBM v2 uses, and its loss to budget exhaustion is around 0.5% of total edges on networks in the 100K–200K node range. Where that 0.5% matters, the stack section below shows how to recover it without giving up cluster-level fidelity.</p>
+  <div class="graph" id="g-cptruegreedy">
+    <div class="graph-chrome">
+      <span id="g-cptruegreedy-stage">step 0 &middot; initial deficit</span>
+      <span class="right step-label">step <b id="g-cptruegreedy-cur">0</b> / <span id="g-cptruegreedy-total">0</span></span>
+    </div>
+    <div class="graph-canvas" id="g-cptruegreedy-cy"></div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-cptruegreedy-start" type="button">to start</button>
+      <button class="btn" id="g-cptruegreedy-prev" type="button">back</button>
+      <button class="btn primary" id="g-cptruegreedy-next" type="button">next</button>
+      <button class="btn" id="g-cptruegreedy-end" type="button">to end</button>
+      <span class="step-label" id="g-cptruegreedy-real">deterministic; same output every run</span>
+    </div>
+    <div class="step-desc" id="g-cptruegreedy-desc">click <em>next</em> to advance.</div>
+  </div>
 </section>
 
-<!-- ─────────── algorithm · random_greedy ─────────── -->
+<!-- ─────────── family · random_greedy + cluster_preserving_random_greedy ─────────── -->
 <section class="stage">
-  <div class="stage-num">algorithm · random_greedy</div>
-  <h2>Weighted-random pop, weighted-random partner.</h2>
-  <p>Both picks are residual-weighted. \(u\) is drawn proportional to its current residual; \(v\) is drawn proportional to the residuals of valid targets (not uniform). Useful when comparing matcher bias against the deterministic algorithms: the same input run with several seeds reveals how much of the output depends on which deterministic ordering greedy and true_greedy lock in.</p>
-  <div class="pseudo"><span class="kw">def</span> random_greedy(residual, adj, rng):
-    <span class="kw">while</span> any(residual[u] &gt; 0):
-        u = rng.choice(nodes, weights=residual)  <span class="cm"># residual-weighted</span>
-        valid = {v : v != u, v not in adj[u], residual[v] &gt; 0}
-        <span class="kw">if not</span> valid:
-            log.warn(f"gridlock at u={u}, {residual[u]} stubs unplaced")
-            residual[u] = 0  <span class="cm"># abandon this node</span>
-            <span class="kw">continue</span>
-        v = rng.choice(valid, weights=[residual[n] for n in valid])  <span class="cm"># residual-weighted</span>
-        adj[u].add(v); adj[v].add(u)
-        residual[u] -= 1; residual[v] -= 1</div>
-  <p>Each <em>random</em> click reseeds and reruns the algorithm; stepping through reveals how the picks differ across seeds. Step counts vary because gridlock-and-abandon makes the algorithm length depend on which u gets starved.</p>
+  <div class="stage-num">family · random_greedy</div>
+  <h2>Pick both endpoints by weighted random draw.</h2>
+  <p>Same outer loop, but every choice is a weighted random draw. The source node is sampled with probability proportional to its current deficit; among the valid candidates the partner is sampled the same way. The two random picks are independent, both keyed off the same seed.</p>
+  <p>This family exists mostly to measure how much of greedy and true_greedy's output is artifact of their tie-break rules. Running random_greedy with several different seeds and comparing the spread is the cleanest way to see which output features are pinned by the input deficit and which are pinned by the deterministic ordering. Gridlock is logged. Step count varies between seeds because the order in which nodes get starved changes.</p>
   <div class="graph" id="g-randgreedy">
     <div class="graph-chrome">
       <span id="g-randgreedy-stage">step 0 &middot; initial deficit</span>
@@ -319,174 +310,9 @@
     </div>
     <div class="step-desc" id="g-randgreedy-desc">click <em>next</em> to advance.</div>
   </div>
-</section>
 
-<!-- ─────────── algorithm · rewire ─────────── -->
-<section class="stage">
-  <div class="stage-num">algorithm · rewire</div>
-  <h2>Configuration-model pairing, then 2-opt repair on invalid pairs.</h2>
-  <p>The unbiased one. Build a flat stub list (each node \(u\) appears <code>residual[u]</code> times), shuffle, pair adjacent entries. Some pairs are invalid (self-loop, already an edge, or duplicate within this pairing). Queue them, then run a 2-opt swap pass that repairs each invalid pair against a random valid edge in the queue. Stagnation detector after a fixed retry budget.</p>
-  <div class="pseudo"><span class="kw">def</span> rewire(residual, adj, rng):
-    stubs = [u for u in nodes for _ in range(residual[u])]
-    rng.shuffle(stubs)
-    pairs, invalid = [], []
-    <span class="kw">for</span> i <span class="kw">in</span> range(0, len(stubs), 2):
-        u, v = stubs[i], stubs[i + 1]
-        <span class="kw">if</span> u == v <span class="kw">or</span> v in adj[u]:
-            invalid.append((u, v))
-        <span class="kw">else</span>:
-            pairs.append((u, v))
-            adj[u].add(v); adj[v].add(u)
-    <span class="cm"># 2-opt repair phase</span>
-    <span class="kw">for</span> attempt <span class="kw">in</span> range(MAX_RETRIES):
-        <span class="kw">if not</span> invalid: <span class="kw">break</span>
-        u, v = invalid.popleft()  <span class="cm"># FIFO over the queue</span>
-        x, y = rng.choice(pairs)  <span class="cm"># try swapping with valid edge (x, y)</span>
-        <span class="kw">if</span> can_swap(u, v, x, y, adj):
-            adj[u].add(y); adj[y].add(u)
-            adj[x].add(v); adj[v].add(x)
-            adj[x].discard(y); adj[y].discard(x)
-            pairs.remove((x, y)); pairs.extend([(u, y), (x, v)])
-        <span class="kw">else</span>:
-            invalid.append((u, v))  <span class="cm"># requeue</span>
-    <span class="kw">if</span> invalid:
-        log.warn(f"rewire: {len(invalid)} pairs unresolved after {MAX_RETRIES}")</div>
-  <p>The shuffle is the source of variation across seeds. On dense inputs almost every pairing is valid on the first pass; the repair queue is short. On long-tailed inputs with hubs, several pairs land invalid (the same hub gets two stubs that pair together); the repair phase walks them.</p>
-  <div class="graph" id="g-rewire">
-    <div class="graph-chrome">
-      <span id="g-rewire-stage">step 0 &middot; stubs ready, no pairs yet</span>
-      <span class="right step-label">step <b id="g-rewire-cur">0</b> / <span id="g-rewire-total">0</span></span>
-    </div>
-    <div class="graph-canvas" id="g-rewire-cy"></div>
-    <div class="widget-row tight">
-      <button class="btn" id="g-rewire-rand-step" type="button" title="re-randomize the shuffle for this step only">random step</button>
-      <button class="btn" id="g-rewire-rand-all" type="button" title="reseed the shuffle from the start through this step">random all</button>
-      <span class="step-label" id="g-rewire-real">step: redo current pair · all: reseed full shuffle</span>
-    </div>
-    <div class="widget-row tight">
-      <button class="btn" id="g-rewire-start" type="button">to start</button>
-      <button class="btn" id="g-rewire-prev" type="button">back</button>
-      <button class="btn primary" id="g-rewire-next" type="button">next</button>
-      <button class="btn" id="g-rewire-end" type="button">to end</button>
-    </div>
-    <div class="step-desc" id="g-rewire-desc">click <em>next</em> to advance.</div>
-  </div>
-</section>
-
-<!-- ─────────── algorithm · hybrid ─────────── -->
-<section class="stage">
-  <div class="stage-num">algorithm · hybrid</div>
-  <h2><code>rewire</code>, then <code>true_greedy</code> on what is left.</h2>
-  <p>Run <code>rewire</code> first to drain the bulk unbiased; whatever stubs are still unplaced after rewire's repair budget go to <code>true_greedy</code> for a deterministic finishing pass. Almost every realistic deficit drains to zero this way; what cannot is logged.</p>
-  <div class="pseudo"><span class="kw">def</span> hybrid(residual, adj, rng):
-    rewire(residual, adj, rng)              <span class="cm"># phase 1: stochastic bulk drain</span>
-    <span class="kw">if</span> any(residual[u] &gt; 0):
-        true_greedy(residual, adj, deg)     <span class="cm"># phase 2: deterministic tail</span>
-    <span class="kw">if</span> any(residual[u] &gt; 0):
-        log.warn(f"hybrid: {sum(residual)} stubs unplaced after both phases")</div>
-  <p>Walk the two phases below. Phase 1 (rewire) is highlighted; phase 2 (true_greedy on the remainder) picks up from rewire's residual.</p>
-  <div class="graph" id="g-hybrid">
-    <div class="graph-chrome">
-      <span id="g-hybrid-stage">step 0 &middot; initial deficit</span>
-      <span class="right step-label">step <b id="g-hybrid-cur">0</b> / <span id="g-hybrid-total">0</span></span>
-    </div>
-    <div class="graph-canvas" id="g-hybrid-cy"></div>
-    <div class="widget-row tight">
-      <button class="btn" id="g-hybrid-rand-step" type="button" title="re-randomize this step's pick only">random step</button>
-      <button class="btn" id="g-hybrid-rand-all" type="button" title="reseed the rewire phase from the start through this step">random all</button>
-      <span class="step-label" id="g-hybrid-real">step: redo current pick · all: reseed full pipeline</span>
-    </div>
-    <div class="widget-row tight">
-      <button class="btn" id="g-hybrid-start" type="button">to start</button>
-      <button class="btn" id="g-hybrid-prev" type="button">back</button>
-      <button class="btn primary" id="g-hybrid-next" type="button">next</button>
-      <button class="btn" id="g-hybrid-end" type="button">to end</button>
-    </div>
-    <div class="step-desc" id="g-hybrid-desc">click <em>next</em> to advance.</div>
-  </div>
-</section>
-
-<!-- ─────────── cluster_preserving family · overview ─────────── -->
-<section class="stage">
-  <div class="stage-num">family · cluster_preserving</div>
-  <h2>The same five algorithms, gated on a per-block-pair budget.</h2>
-  <p>The five algorithms above only watch per-node deficit. They pick whichever partner closes the deficit, no matter what cluster the partner sits in — which means a hub deep inside cluster C1 can drain its deficit by reaching across to a nearly-isolated outlier when nothing closer is left on the candidate list. The matched degree sequence ends up correct, but the block-pair edge counts drift away from the reference clustering's distribution.</p>
-  <p>The <code>cluster_preserving_*</code> family adds a second budget: a count, per <span class="formula">(B_i, B_j)</span> block-pair, of how many additional edges are still allowed in that pair. The matcher refuses any partner whose bp budget is empty, decrements the counter on accept, and starves nodes whose remaining stubs have no in-budget partner left. Stubs that the global family would silently drain across-cluster instead surface as gridlock; the matched degree sequence is no longer guaranteed to close cleanly, but the block-pair distribution stays loyal to the reference.</p>
-  <p>The five variants below mirror the five global algorithms one-for-one. Each takes the same residual deficit, runs its corresponding global control flow, and adds the bp filter on candidate selection plus the bp decrement on accept. Walker captions name the bp the matcher just touched and the remaining bp budget after the decrement.</p>
-  <div class="callout">
-    <div class="tag">when each generator picks it</div>
-    <p>The sweep at <code>examples/output/synthetic_networks_md_sweep/comparison_table.md</code> ranks every (gen, matcher, remap) cell on the dnc fixture by a per-cluster fidelity score. <code>cluster_preserving_true_greedy / direct</code> wins on every clustered gen (<code>sbm</code>, <code>ec-sbm-v1</code>, <code>ec-sbm-v2</code>, <code>ec-sbm-v3</code>) and is the per-metric champion on six of the nine distribution metrics.</p>
-  </div>
-</section>
-
-<!-- ─────────── algorithm · cluster_preserving_greedy ─────────── -->
-<section class="stage">
-  <div class="stage-num">algorithm · cluster_preserving_greedy</div>
-  <h2>Greedy with a per-bp filter on the partner sort.</h2>
-  <p>Same static-heap drain-burst as <code>greedy</code>: pop the node with the most missing stubs, sort the candidate set by id-ascending, take the first <code>min(deficit, |candidates|)</code>. The filter strips any partner whose bp <span class="formula">(B_u, B_n)</span> has zero remaining budget; on accept, the bp counter goes down. When the bp pool runs dry early in the burst, the remainder of the deficit drops silently (canonical greedy's silent gridlock).</p>
-  <div class="pseudo"><span class="kw">def</span> cluster_preserving_greedy(residual, adj, b, bp_budget):
-    heap = max-heap of (residual[u], u) for u with residual[u] &gt; 0
-    <span class="kw">while</span> heap not empty:
-        u = heap.pop()
-        candidates = sorted({v : v != u, v not in adj[u], residual[v] &gt; 0})
-        candidates = [v <span class="kw">for</span> v <span class="kw">in</span> candidates <span class="kw">if</span> bp_budget[bp(b[u], b[v])] &gt; 0]
-        <span class="kw">for</span> v <span class="kw">in</span> candidates[:residual[u]]:
-            adj[u].add(v); adj[v].add(u)
-            residual[u] -= 1; residual[v] -= 1
-            bp_budget[bp(b[u], b[v])] -= 1</div>
-  <div class="graph" id="g-cpgreedy">
-    <div class="graph-chrome">
-      <span id="g-cpgreedy-stage">step 0 &middot; initial deficit</span>
-      <span class="right step-label">step <b id="g-cpgreedy-cur">0</b> / <span id="g-cpgreedy-total">0</span></span>
-    </div>
-    <div class="graph-canvas" id="g-cpgreedy-cy"></div>
-    <div class="widget-row tight">
-      <button class="btn" id="g-cpgreedy-start" type="button">to start</button>
-      <button class="btn" id="g-cpgreedy-prev" type="button">back</button>
-      <button class="btn primary" id="g-cpgreedy-next" type="button">next</button>
-      <button class="btn" id="g-cpgreedy-end" type="button">to end</button>
-      <span class="step-label" id="g-cpgreedy-real">deterministic; same output every run</span>
-    </div>
-    <div class="step-desc" id="g-cpgreedy-desc">click <em>next</em> to advance.</div>
-  </div>
-</section>
-
-<!-- ─────────── algorithm · cluster_preserving_true_greedy ─────────── -->
-<section class="stage">
-  <div class="stage-num">algorithm · cluster_preserving_true_greedy</div>
-  <h2>True-greedy, only partners whose bp still has budget.</h2>
-  <p>Mirrors <code>true_greedy</code>: pop the highest-residual node and pick the single partner with maximum live degree, id-ascending tiebreak. The filter strips out-of-budget partners; on accept the bp counter goes down. Re-pushes both nodes into the heap with their decremented residuals. Gridlock (no in-budget partner with deficit left) is logged.</p>
-  <div class="pseudo"><span class="kw">def</span> cluster_preserving_true_greedy(residual, adj, b, bp_budget):
-    heap = max-heap on residual
-    <span class="kw">while</span> heap not empty:
-        u = pop with re-push protocol (lazy delete)
-        valid = [v <span class="kw">for</span> v <span class="kw">in</span> residual <span class="kw">if</span> v != u, v <span class="kw">not</span> <span class="kw">in</span> adj[u],
-                            bp_budget[bp(b[u], b[v])] &gt; 0]
-        <span class="kw">if</span> not valid: log.warn(...)
-        v = max(valid, key=lambda x: (residual[x], -x))
-        accept (u, v); decrement bp_budget</div>
-  <div class="graph" id="g-cptruegreedy">
-    <div class="graph-chrome">
-      <span id="g-cptruegreedy-stage">step 0 &middot; initial deficit</span>
-      <span class="right step-label">step <b id="g-cptruegreedy-cur">0</b> / <span id="g-cptruegreedy-total">0</span></span>
-    </div>
-    <div class="graph-canvas" id="g-cptruegreedy-cy"></div>
-    <div class="widget-row tight">
-      <button class="btn" id="g-cptruegreedy-start" type="button">to start</button>
-      <button class="btn" id="g-cptruegreedy-prev" type="button">back</button>
-      <button class="btn primary" id="g-cptruegreedy-next" type="button">next</button>
-      <button class="btn" id="g-cptruegreedy-end" type="button">to end</button>
-      <span class="step-label" id="g-cptruegreedy-real">deterministic; same output every run</span>
-    </div>
-    <div class="step-desc" id="g-cptruegreedy-desc">click <em>next</em> to advance.</div>
-  </div>
-</section>
-
-<!-- ─────────── algorithm · cluster_preserving_random_greedy ─────────── -->
-<section class="stage">
-  <div class="stage-num">algorithm · cluster_preserving_random_greedy</div>
-  <h2>Weighted-random pick on an in-budget candidate set.</h2>
-  <p>Mirrors <code>random_greedy</code>: weighted-random <span class="formula">u</span> proportional to <span class="formula">residual[u]</span>; weighted-random <span class="formula">v</span> proportional to residual on the in-budget candidate set. Bp filter applied to the candidate list before weighting. Decrements happen on accept.</p>
+  <h3>cluster-preserving twin</h3>
+  <p>Same weighted-random source and partner draws, but the partner draw is restricted to candidates whose (block, block) bucket has remaining budget. The weighting still uses each candidate's deficit. Each accepted edge consumes one unit from the corresponding bucket. When the in-budget candidate set is empty for the chosen source, gridlock is logged and that source is abandoned.</p>
   <div class="graph" id="g-cprandgreedy">
     <div class="graph-chrome">
       <span id="g-cprandgreedy-stage">step 0 &middot; initial deficit</span>
@@ -508,12 +334,36 @@
   </div>
 </section>
 
-<!-- ─────────── algorithm · cluster_preserving_rewire ─────────── -->
+<!-- ─────────── family · rewire + cluster_preserving_rewire ─────────── -->
 <section class="stage">
-  <div class="stage-num">algorithm · cluster_preserving_rewire</div>
-  <h2>Per-bp stub-pair sampler + bp-preserving 2-opt.</h2>
-  <p>Mirrors <code>rewire</code>'s two-phase shape but works inside each bp independently. Phase 1: for every bp with a positive budget, draw stubs proportional to the per-node deficit restricted to that bp's blocks, shuffle, pair adjacent — exactly the residual-SBM stub draw <code>gen_outlier</code> uses on EC-SBM stage 3a. Self-loops and duplicates queue for repair. Phase 2 runs the same per-bp 2-opt swap as <code>graph_utils.cluster_preserving_2opt_rewire</code>: pick a random valid edge inside the bp, recombine endpoints with a coin flip when intra-block, swap "across" the bp partition when inter-block. Up to ten retries; whatever still conflicts at the end is dropped.</p>
-  <p class="muted small">The page walker is <em>algorithmically</em> faithful to the canonical Python but does <strong>not</strong> byte-equal it: canonical delegates the stub draw to <code>gt.generate_sbm</code>, whose RNG is not portable to JS. The page kernel uses a JS-native weighted draw with the same control flow.</p>
+  <div class="stage-num">family · rewire</div>
+  <h2>Make a stub per missing edge, shuffle, pair adjacent. Repair conflicts.</h2>
+  <p>The configuration-model approach. The matcher imagines a small bag of half-edges, called stubs: each node contributes one stub for every edge it is still missing. The whole bag is shuffled and stubs are paired up two-at-a-time, each pair becoming an edge. Some pairs are invalid — a self-loop, a duplicate of an edge that already exists, or a duplicate within this same pairing. Those land in a repair queue.</p>
+  <p>The repair phase is a 2-opt swap. For every invalid pair the matcher pulls a random valid edge from the existing pile and tries the four endpoint recombinations: if any of them produces two valid edges, the swap is accepted and both pairs join the valid pile. If none works the pair goes back on the queue for a later attempt. The phase runs for a fixed retry budget; whatever still conflicts at the end is logged and dropped.</p>
+  <p>The shuffle is the only source of variation across seeds. On dense inputs almost every pairing is valid on the first pass and the repair queue stays short. On long-tailed inputs with hubs, several pairs land invalid (the same hub gets two stubs that pair together) and the repair pass walks them.</p>
+  <div class="graph" id="g-rewire">
+    <div class="graph-chrome">
+      <span id="g-rewire-stage">step 0 &middot; stubs ready, no pairs yet</span>
+      <span class="right step-label">step <b id="g-rewire-cur">0</b> / <span id="g-rewire-total">0</span></span>
+    </div>
+    <div class="graph-canvas" id="g-rewire-cy"></div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-rewire-rand-step" type="button" title="re-randomize the shuffle for this step only">random step</button>
+      <button class="btn" id="g-rewire-rand-all" type="button" title="reseed the shuffle from the start through this step">random all</button>
+      <span class="step-label" id="g-rewire-real">step: redo current pair · all: reseed full shuffle</span>
+    </div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-rewire-start" type="button">to start</button>
+      <button class="btn" id="g-rewire-prev" type="button">back</button>
+      <button class="btn primary" id="g-rewire-next" type="button">next</button>
+      <button class="btn" id="g-rewire-end" type="button">to end</button>
+    </div>
+    <div class="step-desc" id="g-rewire-desc">click <em>next</em> to advance.</div>
+  </div>
+
+  <h3>cluster-preserving twin</h3>
+  <p>Same idea, but the stub bag is partitioned by (block, block) bucket up front: each bucket's budget tells the matcher how many edges that pair is allowed to receive, and stubs are drawn from each bucket independently. The 2-opt repair phase respects the partition, only swapping endpoints in ways that keep both repaired pairs inside their original buckets. Whatever still conflicts at the retry budget is logged and dropped, just as in the global rewire.</p>
+  <p class="muted small">The walker is <em>algorithmically</em> faithful to the production code but does <strong>not</strong> byte-equal it: production delegates the per-bucket stub draw to graph-tool, whose random number generator is not portable to a browser. The page uses a JavaScript-native weighted draw with the same control flow, so the per-step decisions read identically even when the seeds do not.</p>
   <div class="graph" id="g-cprewire">
     <div class="graph-chrome">
       <span id="g-cprewire-stage">step 0 &middot; initial deficit</span>
@@ -535,30 +385,60 @@
   </div>
 </section>
 
-<!-- ─────────── algorithm · cluster_preserving_hybrid ─────────── -->
+<!-- ─────────── stackable matchers ─────────── -->
 <section class="stage">
-  <div class="stage-num">algorithm · cluster_preserving_hybrid</div>
-  <h2><code>cp_rewire</code>, then <code>cp_true_greedy</code> on what is left.</h2>
-  <p>Mirrors <code>hybrid</code>'s two-phase shape but every accepted edge stays inside a positive-budget bp. Phase 1 runs <code>cluster_preserving_rewire</code> with <code>keepResidual=true</code>, leaving any unmatched stubs for phase 2. Phase 2 runs <code>cluster_preserving_true_greedy</code> on the residual against the now-smaller bp budget. Whatever cannot close in either phase is logged.</p>
-  <div class="graph" id="g-cphybrid">
-    <div class="graph-chrome">
-      <span id="g-cphybrid-stage">step 0 &middot; initial deficit</span>
-      <span class="right step-label">step <b id="g-cphybrid-cur">0</b> / <span id="g-cphybrid-total">0</span></span>
-    </div>
-    <div class="graph-canvas" id="g-cphybrid-cy"></div>
-    <div class="widget-row tight">
-      <button class="btn" id="g-cphybrid-rand-step" type="button" title="re-randomize this step's pick only">random step</button>
-      <button class="btn" id="g-cphybrid-rand-all" type="button" title="reseed both phases from the start">random all</button>
-      <span class="step-label" id="g-cphybrid-real">step: redo current pick · all: reseed full pipeline</span>
-    </div>
-    <div class="widget-row tight">
-      <button class="btn" id="g-cphybrid-start" type="button">to start</button>
-      <button class="btn" id="g-cphybrid-prev" type="button">back</button>
-      <button class="btn primary" id="g-cphybrid-next" type="button">next</button>
-      <button class="btn" id="g-cphybrid-end" type="button">to end</button>
-    </div>
-    <div class="step-desc" id="g-cphybrid-desc">click <em>next</em> to advance.</div>
+  <div class="stage-num">stackable matchers</div>
+  <h2>Chain matchers. Each one cleans up what the previous left behind.</h2>
+  <p>The four families above and their cluster-preserving twins are not exclusive. The matcher CLI accepts a comma-separated list of algorithm names, runs them in order, and feeds whatever stubs are still unplaced from one step into the next. A single name is a one-element stack — the legacy single-algorithm behaviour. A two-name list reproduces the original "hybrid" shape: the first algorithm drains the bulk of the deficit, the second mops up the tail. Three or more elements are a more flexible chain.</p>
+  <p>Each step uses its own random seed, derived from the matcher's overall seed, so randomness in one step does not bleed into the priorities of the next. The shared state across steps is the running graph itself plus the deficit dictionary, both updated as edges land. Cluster-preserving steps additionally share the per-(block, block) edge budget, which every cluster-preserving step in the chain decrements; non-cluster-preserving steps ignore the budget entirely. Putting a non-cluster-preserving step <em>after</em> a cluster-preserving one is the way to recover degree mass that the budget gate refused, at the cost of letting that final step place a few edges in buckets the cluster-preserving steps would have refused.</p>
+  <div class="callout">
+    <div class="tag">stacks worth knowing</div>
+    <p><b>rewire, true_greedy</b> &mdash; replaces the old global "hybrid". Stochastic bulk drain, deterministic tail.</p>
+    <p><b>cluster_preserving_rewire, cluster_preserving_true_greedy</b> &mdash; replaces the old "cluster_preserving_hybrid". Same shape, every step gated by the bucket budget.</p>
+    <p><b>cluster_preserving_true_greedy, true_greedy</b> &mdash; cluster-preserving first, then plain. Anchors block structure on the bulk of the residual; the plain pass at the end places only the few edges the budget gate refused, so degree mass closes without giving up the bulk of the cluster-level fidelity.</p>
+    <p><b>cluster_preserving_rewire, cluster_preserving_true_greedy, true_greedy</b> &mdash; the most thorough chain. Stochastic bulk drain inside the buckets, deterministic in-bucket cleanup, then a plain finishing pass on whatever the buckets refused.</p>
   </div>
+</section>
+
+<!-- ─────────── DNC case study ─────────── -->
+<section class="stage">
+  <div class="stage-num">case study · dnc</div>
+  <h2>Pick the matcher off a graph that loses 29% of its edges to dedup.</h2>
+  <p>The dnc network has 1,891 nodes, 5 reference clusters, and 10,429 reference edges. Run the standalone SBM generator on that input with seed 1: graph-tool's stub-pair sampler hits enough collisions on the dense intra-cluster blocks that, after self-loops and duplicates are removed, only 7,438 edges survive. The matcher's job is to top up 2,991 missing edges &mdash; a 29% deficit, almost entirely concentrated inside cluster interiors because that is where the SBM's parallel-edge collisions concentrate.</p>
+  <p>Four matcher choices, same SBM output, same seed:</p>
+  <table class="matcher-table">
+    <thead>
+      <tr><th>matcher</th><th>final edges</th><th>deficit closed</th><th>cluster fidelity</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <th>true_greedy</th>
+        <td class="desc">10,429</td>
+        <td class="desc">100% (zero residual)</td>
+        <td class="desc">No bucket gate. Hubs deep inside one cluster reach across to outliers in another whenever no closer partner is left, so the block-pair edge counts drift away from the reference.</td>
+      </tr>
+      <tr>
+        <th>cluster_preserving_true_greedy</th>
+        <td class="desc">10,155</td>
+        <td class="desc">90.8% (274 stubs stuck)</td>
+        <td class="desc">Bucket gate enforced strictly. Edges land where the reference says they should, but 274 stubs are abandoned because the buckets they would consume are already exhausted by the time their partner becomes the priority pick.</td>
+      </tr>
+      <tr class="pref">
+        <th>cluster_preserving_true_greedy, true_greedy</th>
+        <td class="desc">10,340</td>
+        <td class="desc">97.0% (89 stubs stuck)</td>
+        <td class="desc">Cluster-preserving pass first; plain pass picks up the residual. Recovers 185 of the 274 edges the gate refused. The 185 cleanup edges land in buckets the cluster-preserving step had used up, so block-pair fidelity is slightly looser than the gated-only run, but vastly closer to the reference than plain true_greedy.</td>
+      </tr>
+      <tr>
+        <th>cluster_preserving_rewire, cluster_preserving_true_greedy, true_greedy</th>
+        <td class="desc">10,347</td>
+        <td class="desc">97.1% (82 stubs stuck)</td>
+        <td class="desc">Same as the two-step stack, plus a stochastic bulk drain at the front. The 2-opt repair has more room to manoeuvre while the buckets are still mostly full, so the cluster-preserving true-greedy step has fewer hard cases to handle. Marginal extra recovery (7 more edges) on dnc; the gain grows on graphs where the deficit is more skewed.</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>The trade-off is visible at a glance. Plain <code>true_greedy</code> always closes the deficit but is blind to clusters. The cluster-preserving variant nails clusters but leaves a few percent of the deficit unplaced. The stack recovers most of what the budget refused without giving up the cluster fidelity for the bulk of the edges. The three-step stack adds a small amount of stochastic mixing that helps on hub-heavy inputs.</p>
+  <p class="muted small">Numbers come from running <code>run_generator.sh --generator sbm</code> on dnc with seed 1 and toggling <code>--degree-matcher</code> across the four configurations above; the SBM output is identical across all four runs (same graph-tool seed) so the differences are purely matcher behaviour.</p>
 </section>
 
 <!-- ─────────── --remap mode ─────────── -->
@@ -1318,18 +1198,20 @@ window.MathJax = {
     };
   }
 
-  // Wire all five sections; collect reset handles for the input-reroll.
+  // Wire one section per family + its cluster-preserving twin; collect
+  // reset handles for the input-reroll. The hybrid + cphybrid bindings
+  // were removed alongside their HTML sections; the equivalent
+  // composition is now exposed via the stack-driver page section, not
+  // a single-step viz here.
   const sectionHandles = [];
   sectionHandles.push(setupAlgoSection({ prefix: "greedy",     algoFn: runGreedy,       orderMode: "static" }));
   sectionHandles.push(setupAlgoSection({ prefix: "truegreedy", algoFn: runTrueGreedy,   orderMode: "dynamic" }));
   sectionHandles.push(setupAlgoSection({ prefix: "randgreedy", algoFn: runRandomGreedy, orderMode: "dynamic", stochastic: true }));
   sectionHandles.push(setupAlgoSection({ prefix: "rewire",     algoFn: runRewire,       orderMode: "id", useSpokes: true, stochastic: true }));
-  sectionHandles.push(setupAlgoSection({ prefix: "hybrid",     algoFn: runHybrid,       orderMode: "hybrid", stochastic: true }));
   sectionHandles.push(setupAlgoSection({ prefix: "cpgreedy",       algoFn: runClusterPreservingGreedy,       orderMode: "static" }));
   sectionHandles.push(setupAlgoSection({ prefix: "cptruegreedy",   algoFn: runClusterPreservingTrueGreedy,   orderMode: "dynamic" }));
   sectionHandles.push(setupAlgoSection({ prefix: "cprandgreedy",   algoFn: runClusterPreservingRandomGreedy, orderMode: "dynamic", stochastic: true }));
   sectionHandles.push(setupAlgoSection({ prefix: "cprewire",       algoFn: runClusterPreservingRewire,       orderMode: "id", stochastic: true }));
-  sectionHandles.push(setupAlgoSection({ prefix: "cphybrid",       algoFn: runClusterPreservingHybrid,       orderMode: "hybrid", stochastic: true }));
 
   // ── Input deficit panel: graph + bars + re-roll ──
   // Mirrors the per-algorithm walker layout: graph on the left with
