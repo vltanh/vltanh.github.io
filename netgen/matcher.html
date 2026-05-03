@@ -169,6 +169,12 @@
   </table>
   <p>The table reads as a spectrum from determinism to randomness. Greedy and true_greedy produce the same output every run on the same input (no seed needed). Random_greedy and rewire sample fresh draws each call. True_greedy is the default: it closes the residual deterministically with negligible drop on realistic inputs.</p>
   <p>Each family also has a <strong>cluster-preserving</strong> twin (<code>cluster_preserving_greedy</code>, <code>cluster_preserving_true_greedy</code>, and so on). The twin runs the same outer loop but adds one rule: a candidate partner is rejected if the (block, block) bucket of the pair has zero edges left in its budget. The budget is built once at the start, from the reference clustering's per-(block, block) edge counts minus what the current graph already has, and decremented every time the matcher accepts an edge. The four merged sections below describe each family and then how the cluster-preserving twin changes its behaviour. Walkers run on the residual deficit drawn at the top of the page; click <em>re-roll input</em> to draw a new pile and reset every walker.</p>
+  <h3>when each one shines, and where it fumbles</h3>
+  <p><strong>greedy</strong> is fast and deterministic, and on residuals where the deficit pile is well-spread it closes everything in one pass. Where it struggles: an id-sorted partner list pins partner choice to whoever sorts low among valid candidates, regardless of how much room that partner has left. On the first draw the most-needy node may grab a low-id partner whose own deficit is small, leaving high-deficit nodes scrambling for partners later in the run. Combined with the silent-gridlock failure mode (no log when stubs are dropped), it is the riskiest choice on hub-heavy or otherwise skewed deficits.</p>
+  <p><strong>true_greedy</strong> is the default precisely because the dynamic priority queue lets the matcher always work on the currently neediest pair. On the toy deficit at the top of the page it closes every stub; greedy on the same input strands two. On realistic inputs the rate of stranded stubs is small but consistently lower than greedy. The cost is a heap re-push per accept, but for matcher work the constant factor is dwarfed by everything else.</p>
+  <p><strong>random_greedy</strong> doesn't outperform true_greedy on any single run, but running it across several seeds and comparing the spread is the cleanest way to tell which output features are forced by the input deficit and which are artifacts of the deterministic tie-break rules. Useful for sanity-checking before you draw conclusions about a single run.</p>
+  <p><strong>rewire</strong> is the right choice on dense inputs where the configuration-model pairing usually finds a valid match on the first pass. On hub-heavy graphs the repair queue gets long because the same hub picks up two stubs that pair to each other (a self-loop) or the same partner twice (a parallel); the 2-opt pass walks them, occasionally needing several rounds. On the page's toy input it takes more steps than the priority-queue families because every stub is its own animation, but on a 200K-node graph the cost is in stub generation, not the queue.</p>
+  <p>The <strong>cluster-preserving twins</strong> add a second budget on top: a per-(block, block) edge cap. They preserve block-level structure at the cost of starvation when one bucket exhausts. The cluster-preserving variant of greedy makes that worse — once a bucket runs out, every remaining candidate in it gets refused, so the source either takes a far-away partner or gets stranded. Cluster-preserving true_greedy mitigates this by re-prioritising after every accept: when the priority queue surfaces a node whose only legal partners are exhausted buckets, the queue moves on to a different source instead of burning steps on the same source. On the toy deficit, that re-shuffle saves two stubs over cluster-preserving greedy. The matcher CLI's default is <code>cluster_preserving_true_greedy</code> for this reason; if even that loses too many stubs, the stack section below shows how to chain a plain pass after the cluster-preserving one to recover the residual.</p>
 </section>
 
 <!-- ─────────── family · greedy + cluster_preserving_greedy ─────────── -->
@@ -241,7 +247,7 @@
 
   <h3>cluster-preserving twin</h3>
   <p>Same priority-driven source pick and partner pick as the global true_greedy. The twin filters the candidate list before scanning it: any candidate whose (block, block) bucket has zero edges left in its budget is excluded. The first candidate that maximises remaining deficit and respects the budget gets the edge, and the budget for that bucket goes down by one. Gridlock now triggers when no in-budget candidate with positive deficit is left, and is logged.</p>
-  <p>Because the source still pulls the most-needy node first and re-shuffles after every accept, the twin loses fewer stubs to starvation than the cluster-preserving greedy does. On the bench in <code>externals/ec-sbm/examples/bench/</code>, this is the algorithm EC-SBM v2 uses, and its loss to budget exhaustion is around 0.5% of total edges on networks in the 100K–200K node range. Where that 0.5% matters, the stack section below shows how to recover it without giving up cluster-level fidelity.</p>
+  <p>Because the source still pulls the most-needy node first and re-shuffles after every accept, the twin loses fewer stubs to starvation than the cluster-preserving greedy does. Whatever the budget gate refuses surfaces as gridlock and is logged; the stack section below shows how to chain a plain pass after this one to close residual stubs at the cost of letting the cleanup edges fall outside the reference's block budgets.</p>
   <div class="graph" id="g-cptruegreedy">
     <div class="graph-chrome">
       <span id="g-cptruegreedy-stage">step 0 &middot; initial deficit</span>
@@ -369,64 +375,10 @@
     <div class="tag">stacks worth knowing</div>
     <p><b>rewire, true_greedy</b> &mdash; stochastic bulk drain, deterministic tail.</p>
     <p><b>cluster_preserving_rewire, cluster_preserving_true_greedy</b> &mdash; same shape, every step gated by the bucket budget.</p>
-    <p><b>cluster_preserving_true_greedy, true_greedy</b> &mdash; cluster-preserving first, then plain. Closes the residual degree gap that the budget gate refused, at a measurable cost to cluster-shape stats (see the warning below).</p>
-    <p><b>cluster_preserving_rewire, cluster_preserving_true_greedy, true_greedy</b> &mdash; the most thorough chain. Stochastic bulk drain inside the buckets, deterministic in-bucket cleanup, then a plain finishing pass on whatever the buckets refused.</p>
+    <p><b>cluster_preserving_true_greedy, true_greedy</b> &mdash; cluster-preserving first, then plain. Closes the residual stubs the budget gate refused; the cleanup edges fall outside the reference's per-block buckets.</p>
+    <p><b>cluster_preserving_rewire, cluster_preserving_true_greedy, true_greedy</b> &mdash; stochastic bulk drain inside the buckets, deterministic in-bucket cleanup, then a plain finishing pass on whatever the buckets refused.</p>
   </div>
-  <div class="callout warn">
-    <div class="tag">stacking is not a free win</div>
-    <p>A 33-network sweep on EC-SBM v2 against <code>leiden-cpm-0.0001</code> (full report at <code>externals/ec-sbm/examples/bench_stack/report.md</code>) found:</p>
-    <ul>
-      <li>The two-step stack closes degree mass &mdash; n_edges gap drops from ~0.5% (single CP-TG) to ~0.4% &mdash; but conductance EMD goes 5x worse, mixing-parameter EMD 2x worse, and connected-component sizes drift away from the reference. Paired Wilcoxon p &lt; 1e-4 on every cluster-shape metric.</li>
-      <li>The three-step stack does not improve the trade-off; it is faster (CP-rewire batches stub draws) but regresses the same cluster-shape stats further.</li>
-    </ul>
-    <p>Use the single <code>cluster_preserving_true_greedy</code> when cluster-shape fidelity is the priority and a 0.5% degree-mass gap is acceptable. Use the stack when degree exactness matters more than cluster boundaries (for example, downstream code that asserts on exact m, or generators with heavily-refined clusterings where the budget gate disconnects small clusters &mdash; see the douban / piecewise note in <code>externals/ec-sbm/examples/bench/report.md</code>).</p>
-  </div>
-</section>
-
-<!-- ─────────── DNC case study ─────────── -->
-<section class="stage">
-  <div class="stage-num">case study · dnc</div>
-  <h2>Pick the matcher off a graph that loses 29% of its edges to dedup.</h2>
-  <p>The dnc network has 1,891 nodes, 5 reference clusters, and 10,429 reference edges. Run the standalone SBM generator on that input with seed 1: graph-tool's stub-pair sampler hits enough collisions on the dense intra-cluster blocks that, after self-loops and duplicates are removed, only 7,438 edges survive. The matcher's job is to top up 2,991 missing edges &mdash; a 29% deficit, almost entirely concentrated inside cluster interiors because that is where the SBM's parallel-edge collisions concentrate.</p>
-  <p>Four matcher choices, same SBM output, same seed:</p>
-  <table class="matcher-table">
-    <thead>
-      <tr><th>matcher</th><th>final edges</th><th>deficit closed</th><th>cluster fidelity</th></tr>
-    </thead>
-    <tbody>
-      <tr>
-        <th>true_greedy</th>
-        <td class="desc">10,429</td>
-        <td class="desc">100% (zero residual)</td>
-        <td class="desc">No bucket gate. Hubs deep inside one cluster reach across to outliers in another whenever no closer partner is left, so the block-pair edge counts drift away from the reference.</td>
-      </tr>
-      <tr>
-        <th>cluster_preserving_true_greedy</th>
-        <td class="desc">10,155</td>
-        <td class="desc">90.8% (274 stubs stuck)</td>
-        <td class="desc">Bucket gate enforced strictly. Edges land where the reference says they should, but 274 stubs are abandoned because the buckets they would consume are already exhausted by the time their partner becomes the priority pick.</td>
-      </tr>
-      <tr class="pref">
-        <th>cluster_preserving_true_greedy, true_greedy</th>
-        <td class="desc">10,340</td>
-        <td class="desc">97.0% (89 stubs stuck)</td>
-        <td class="desc">Cluster-preserving pass first; plain pass picks up the residual. Recovers 185 of the 274 edges the gate refused. The 185 cleanup edges land in buckets the cluster-preserving step had used up, so block-pair fidelity is slightly looser than the gated-only run, but vastly closer to the reference than plain true_greedy.</td>
-      </tr>
-      <tr>
-        <th>cluster_preserving_rewire, cluster_preserving_true_greedy, true_greedy</th>
-        <td class="desc">10,347</td>
-        <td class="desc">97.1% (82 stubs stuck)</td>
-        <td class="desc">Same as the two-step stack, plus a stochastic bulk drain at the front. The 2-opt repair has more room to manoeuvre while the buckets are still mostly full, so the cluster-preserving true-greedy step has fewer hard cases to handle. Marginal extra recovery (7 more edges) on dnc; the gain grows on graphs where the deficit is more skewed.</td>
-      </tr>
-    </tbody>
-  </table>
-  <p>The dnc table makes stacking look like a clean win on closing the deficit. The 33-network bench in <code>externals/ec-sbm/examples/bench_stack/report.md</code> shows a different picture: the cleanup edges land outside the reference clustering's per-block budgets, which is exactly what the budget gate was trying to prevent. Conductance EMD goes 5x worse, mixing-parameter EMD 2x worse, and connected-component sizes drift away from the reference. So the stack closes degree mass at a meaningful cost to the very cluster-shape stats the cluster-preserving family was designed for.</p>
-  <p>The dnc fixture is small enough that the cleanup spike does not dominate the per-net averages. On real benchmark networks (10K&ndash;200K nodes) the regression on cluster-shape stats is significant at α = 0.01 across nearly every relevant metric. Default to the single <code>cluster_preserving_true_greedy</code> matcher; reach for the stack only when one of these holds:</p>
-  <ul>
-    <li><strong>Downstream contract on exact n_edges</strong> &mdash; e.g., a comparator that asserts on m. The 0.5% deficit becomes blocking.</li>
-    <li><strong>Heavily-refined clusterings (piecewise CM and similar)</strong> &mdash; small refined clusters can have tiny per-block budgets that the gate exhausts before the matcher can bridge them, leaving the cluster disconnected. The stack closes those bridge edges. See the douban / piecewise case in <code>externals/ec-sbm/examples/bench/report.md</code> where single CP-TG produced n_concomp SRD = 0.99 on douban; the stack closes it.</li>
-  </ul>
-  <p class="muted small">Numbers come from running <code>run_generator.sh --generator sbm</code> on dnc with seed 1 and toggling <code>--degree-matcher</code> across the four configurations above; the SBM output is identical across all four runs (same graph-tool seed) so the differences are purely matcher behaviour. The 33-network bench results referenced above use EC-SBM v2 + 5 seeds per cell with paired Wilcoxon over networks within each bucket.</p>
+  <p>Stack composition is not free. Each plain step that follows a cluster-preserving step trades budget fidelity for residual closure: the new edges land in (block, block) buckets that the gated steps already exhausted, so block-shape stats (conductance, mixing parameter, modularity) drift away from the reference while the degree gap closes. Pick a single cluster-preserving step when block fidelity is the priority and the residual stubs are tolerable; chain a plain step at the end when degree exactness matters more.</p>
 </section>
 
 <!-- ─────────── --remap mode ─────────── -->
@@ -557,8 +509,13 @@ window.MathJax = {
     return out;
   }
   // Mutable DEFICIT so the input-reroll button can swap a fresh draw in
-  // and reset every walker.
-  let DEFICIT = generateSBMDeficit(1);
+  // and reset every walker. Seed 263 picked from a sweep over [1, 500]:
+  // 18 stubs over 12 nodes with deficit on every block (C1, C2, C3, OUT)
+  // and a clean separation between every algorithm — plain true_greedy
+  // closes the deficit (0 unplaced); plain greedy strands 2 stubs to
+  // silent gridlock; cluster_preserving_greedy strands 4 to budget
+  // exhaustion; cluster_preserving_true_greedy halves that to 2.
+  let DEFICIT = generateSBMDeficit(263);
   let DEFICIT_NODES = Object.keys(DEFICIT).map(n => parseInt(n, 10));
   function targetDeg(n) { return (DEGREES[n] || 0) + (DEFICIT[n] || 0); }
 
@@ -867,6 +824,100 @@ window.MathJax = {
       .attr("x1", dividerX).attr("x2", dividerX);
   }
 
+  // ── Budget bars renderer (per-(block, block) bucket) ──
+  // Stable bucket order, one row per non-zero bucket. Layout mirrors
+  // the deficit bars: dividerX = max budget across rows, used (red)
+  // extends rightward from 0, remaining (mint) extends rightward from
+  // the used edge. Values tween via merged.transition + integer
+  // interpolate, same idiom as renderBars.
+  const BLOCK_NAMES = { 0: "C1", 1: "C2", 2: "C3", 3: "OUT" };
+  const BUDGET_W = 340, BUDGET_H = 200;
+  const BUDGET_PAD = { top: 12, right: 50, bottom: 22, left: 60 };
+  function renderBudget(svgId, budget0, used) {
+    const svg = d3.select("#" + svgId);
+    if (!svg.node()) return;
+    svg.attr("viewBox", `0 0 ${BUDGET_W} ${BUDGET_H}`);
+    used = used || {};
+    const iw = BUDGET_W - BUDGET_PAD.left - BUDGET_PAD.right;
+    const ih = BUDGET_H - BUDGET_PAD.top - BUDGET_PAD.bottom;
+    const buckets = Object.keys(budget0).sort();
+    if (buckets.length === 0) return;
+    const y = d3.scaleBand().domain(buckets).range([0, ih]).padding(0.24);
+    const maxB = d3.max(buckets, k => budget0[k]) || 1;
+    const x = d3.scaleLinear().domain([0, maxB]).range([0, iw]);
+
+    let root = svg.select("g.budget-root");
+    let yAxisG, gRows;
+    if (root.empty()) {
+      root = svg.append("g").attr("class", "budget-root")
+        .attr("transform", `translate(${BUDGET_PAD.left},${BUDGET_PAD.top})`);
+      yAxisG = root.append("g").attr("class", "budget-yaxis");
+      gRows = root.append("g").attr("class", "budget-rows");
+      svg.append("text").attr("class", "budget-cap")
+        .attr("x", BUDGET_PAD.left - 26).attr("y", BUDGET_PAD.top - 4)
+        .style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace")
+        .style("font-size", "10px").text("bucket");
+      svg.append("text").attr("class", "budget-foot")
+        .attr("x", BUDGET_W / 2).attr("y", BUDGET_H - 4)
+        .attr("text-anchor", "middle").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace")
+        .style("font-size", "10.5px")
+        .text("(block, block) budget · red = used, mint = remaining");
+    } else {
+      yAxisG = root.select("g.budget-yaxis");
+      gRows = root.select("g.budget-rows");
+    }
+    yAxisG.call(d3.axisLeft(y).tickSize(0).tickPadding(6)
+      .tickFormat(k => {
+        const [a, b] = k.split("-").map(n => BLOCK_NAMES[+n] || n);
+        return a + "·" + b;
+      }));
+    yAxisG.selectAll("text").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace")
+      .style("font-size", "10px");
+    root.selectAll(".domain").style("stroke", "#b9a263");
+    root.selectAll(".tick line").style("stroke", "#cdbf8d");
+
+    const rows = gRows.selectAll(".bdg-row").data(buckets, d => d);
+    rows.exit().remove();
+    const enter = rows.enter().append("g").attr("class", "bdg-row");
+    enter.append("rect").attr("class", "used").attr("y", 0)
+      .attr("height", y.bandwidth())
+      .attr("fill", COL.signal).attr("opacity", 0.85);
+    enter.append("rect").attr("class", "remaining").attr("y", 0)
+      .attr("height", y.bandwidth())
+      .attr("fill", COL.mint).attr("opacity", 0.85);
+    enter.append("text").attr("class", "lbl")
+      .attr("dominant-baseline", "central").attr("y", y.bandwidth() / 2)
+      .attr("font-family", "Special Elite, Courier New, monospace")
+      .attr("font-size", "10px").attr("fill", "#2f3a54");
+
+    const merged = enter.merge(rows);
+    const ease = d3.easeCubicInOut;
+    const usedW = d => x(used[d] || 0);
+    const remainW = d => x(Math.max(0, (budget0[d] || 0) - (used[d] || 0)));
+    merged.transition("budget").duration(BARS_DUR).ease(ease)
+      .attr("transform", d => `translate(0,${y(d)})`);
+    merged.select("rect.used")
+      .transition("budget").duration(BARS_DUR).ease(ease)
+      .attr("x", 0).attr("width", usedW);
+    merged.select("rect.remaining")
+      .transition("budget").duration(BARS_DUR).ease(ease)
+      .attr("x", usedW).attr("width", remainW);
+    merged.select("text.lbl")
+      .transition("budget").duration(BARS_DUR).ease(ease)
+      .attr("x", d => usedW(d) + remainW(d) + 5)
+      .tween("budget-text", function (d) {
+        const node = this;
+        const startU = parseInt((node.textContent || "0").split("/")[0], 10) || 0;
+        const endU = used[d] || 0;
+        const tot = budget0[d];
+        const i = d3.interpolateNumber(startU, endU);
+        return function (k) { node.textContent = Math.round(i(k)) + "/" + tot; };
+      });
+  }
+
   // ── Per-section setup helper ──
   function setupAlgoSection(opts) {
     const { prefix, algoFn } = opts;
@@ -878,6 +929,13 @@ window.MathJax = {
     const descEl  = document.getElementById(`g-${prefix}-desc`);
     const realEl  = document.getElementById(`g-${prefix}-real`);
     const stochastic = !!opts.stochastic;
+    // CP variants get a second readout below the deficit bars showing
+    // the per-(block, block) budget. The budget is a static cap derived
+    // from the residual stub mass under random pairing; each accept
+    // decrements its bucket, and bucket-zero rejections are why the CP
+    // gate can starve a stub even when an unrelated partner is free.
+    const isCp = prefix.startsWith("cp");
+    const budgetId = `g-${prefix}-budget`;
 
     const viz = NETGEN.VIZ.init(cyId, {
       showLabels: true,
@@ -890,11 +948,34 @@ window.MathJax = {
       },
     });
     NETGEN.makeTooltip(viz, document.getElementById(`g-${prefix}`));
+    const panelBody = isCp
+      ? `<svg id="${barsId}" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet" style="display:block;width:18rem;height:auto"></svg>
+         <svg id="${budgetId}" viewBox="0 0 340 200" preserveAspectRatio="xMidYMid meet" style="display:block;width:18rem;height:auto;margin-top:.4rem"></svg>`
+      : `<svg id="${barsId}" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet" style="display:block;width:18rem;height:auto"></svg>`;
     NETGEN.mountGxPanel({
       viz, hostId: cyId, prefix: `g-${prefix}-bars-pnl`,
-      title: "deficit", maxWidth: "26rem",
-      bodyHTML: `<svg id="${barsId}" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet" style="display:block;width:18rem;height:auto"></svg>`,
+      title: isCp ? "deficit + budget" : "deficit", maxWidth: "26rem",
+      bodyHTML: panelBody,
     });
+    // CP walkers compute an initial per-bp budget once and render the
+    // bucket-by-bucket consumption from each step's edge list. cpPayload
+    // is the same payload the kernel ran on, so bpBudget0 matches the
+    // gate the kernel enforces.
+    const cpPayload = isCp ? makeKernelPayloadCP() : null;
+    const cpBudget0 = cpPayload ? Object.assign({}, cpPayload.bpBudget) : null;
+    const cpBlock = cpPayload ? cpPayload.b : null;
+    function bpKeyOf(u, v) {
+      const bu = cpBlock[u], bv = cpBlock[v];
+      return bu < bv ? `${bu}-${bv}` : `${bv}-${bu}`;
+    }
+    function bpUsedAt(stepEdges) {
+      const out = {};
+      stepEdges.forEach(([u, v]) => {
+        const k = bpKeyOf(u, v);
+        out[k] = (out[k] || 0) + 1;
+      });
+      return out;
+    }
     // Spoke layer applies pick + dim during the active animation by
     // default. On settle, it strips both classes; this onSettle
     // restores the matcher's deficit-driven baseline (deficit-zero
@@ -982,6 +1063,7 @@ window.MathJax = {
       const s = steps[stepIdx];
       paintCaption(s);
       renderBars(barsId, s.residual, s.edges, s.unplaced);
+      if (isCp) renderBudget(budgetId, cpBudget0, bpUsedAt(s.edges));
       lastResidual = s.residual;
       lastUnplaced = s.unplaced;
 
