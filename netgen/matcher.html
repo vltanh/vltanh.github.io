@@ -110,11 +110,6 @@
 
 <div id="links"></div>
 
-<div class="wip-banner" role="status">
-  <svg class="wip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 L22 20 H2 Z"/><path d="M12 10v5"/><circle cx="12" cy="17.6" r=".7" fill="currentColor"/></svg>
-  <span class="wip-label">under construction</span>
-</div>
-
 <header class="hdr">
   <div class="kicker">network-generation · shared utility</div>
   <h1>degree <em>matchers</em></h1>
@@ -132,12 +127,20 @@
   <div class="stage-num">input · the residual deficit</div>
   <h2>Where the deficit comes from. Re-roll for a fresh draw.</h2>
   <p>Every walker on this page works on the same residual deficit, drawn here. The toy deficit comes from running a configuration-model pairing on the 20-node fixture's degree sequence and then dropping self-loops and parallel edges — the same dedup pass the SBM generator uses. Hubs lose more stubs because expected collisions scale with the square of the degree; leaves rarely lose any. Click <em>re-roll input</em> to draw a fresh shuffle and re-run every walker.</p>
-  <div class="graph" id="g-input">
+  <div class="graph g-with-side" id="g-input">
     <div class="graph-chrome">
       <span>20-node fixture &middot; non-deficit nodes dimmed</span>
       <span class="right" id="input-status">total: 0 &middot; nodes with deficit: 0 &middot; max: 0</span>
     </div>
-    <div class="graph-canvas" id="g-input-cy"></div>
+    <div class="side-caption">
+      <span class="st">left</span>input graph &middot; non-deficit nodes dimmed &middot; <span class="st">right</span>per-node residual deficit bars. Every walker below drains this same pile.
+    </div>
+    <div class="side-body">
+      <div class="graph-canvas" id="g-input-cy"></div>
+      <div class="side-right">
+        <svg id="g-input-bars" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+    </div>
     <div class="widget-row">
       <button class="btn primary" id="input-reroll" type="button">re-roll input</button>
       <span class="step-label">draws a fresh SBM-style deficit and resets every walker below</span>
@@ -203,18 +206,30 @@
   <h2>Take the most-needy node. Drain it against an id-sorted partner list.</h2>
   <p>The matcher v1 of this project shipped with. Each step pulls out the node with the largest deficit, builds the list of candidate partners (every other node that still has room and is not already adjacent to it), sorts that list by id ascending, and walks down it adding edges until either the source node's deficit is closed or the candidate list runs out. Once one node is fully drained the loop moves on to the next-most-needy one. Stubs that cannot be placed because no partner is left disappear without any log line — the "silent gridlock" failure mode.</p>
   <p>The walker below replays one such drain per step. The caption names the partner picked at each draw. The output is deterministic because the source order, the partner sort, and the tie-break rule are all fixed; the same input gives the same output every run, no seed needed.</p>
-  <div class="graph" id="g-greedy">
+  <div class="graph g-with-side" id="g-greedy">
     <div class="graph-chrome">
       <span id="g-greedy-stage">step 0 &middot; initial deficit</span>
       <span class="right step-label">step <b id="g-greedy-cur">0</b> / <span id="g-greedy-total">0</span></span>
     </div>
-    <div class="graph-canvas" id="g-greedy-cy"></div>
+    <div class="side-caption">
+      <span class="st">left</span>matcher walker on the input deficit &middot; just-pair animates as a dashed bridge &middot; <span class="st">right</span>per-node deficit bars; rows shift state as the pile drains.
+    </div>
+    <div class="side-body">
+      <div class="graph-canvas" id="g-greedy-cy"></div>
+      <div class="side-right">
+        <svg id="g-greedy-bars" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+    </div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-greedy-rand-step" type="button" title="replay this step's animation">random step</button>
+      <button class="btn" id="g-greedy-rand-all" type="button" title="replay every step's animation from the start">random all</button>
+      <span class="step-label" id="g-greedy-real">deterministic &middot; step: replay this step &middot; all: replay from start</span>
+    </div>
     <div class="widget-row tight">
       <button class="btn" id="g-greedy-start" type="button">to start</button>
       <button class="btn" id="g-greedy-prev" type="button">back</button>
       <button class="btn primary" id="g-greedy-next" type="button">next</button>
       <button class="btn" id="g-greedy-end" type="button">to end</button>
-      <span class="step-label" id="g-greedy-real">deterministic; same output every run</span>
     </div>
     <div class="step-desc" id="g-greedy-desc">click <em>next</em> to advance.</div>
   </div>
@@ -226,18 +241,30 @@
   <h3>cluster-preserving twin</h3>
   <p>The cluster-preserving variant runs the same outer loop and the same id-sorted partner list, then layers one extra rule on top: a candidate partner is removed from the list before the walk down it begins if the (block, block) bucket of the pair has zero edges left in its budget. The budget is computed once at the start from the reference clustering's per-(block, block) edge counts minus what the current graph already has. Each accepted edge decrements the corresponding bucket. When a bucket hits zero, candidates whose pair lands in that bucket disappear from future partner lists.</p>
   <p>Effect: edges land where the reference clustering wants them — intra-block when its budget is healthy, inter-block when the inter budget is non-empty — at the cost of more starvation. Because greedy already swallows starvation silently, this twin can drop a noticeable number of stubs on inputs whose deficit is concentrated in a few blocks; the dropped stubs surface in the final output's degree drift, not in the log. The walker below makes the bucket draining visible: the caption names the bucket the matcher just touched and how much budget is left in it.</p>
-  <div class="graph" id="g-cpgreedy">
+  <div class="graph g-with-side" id="g-cpgreedy">
     <div class="graph-chrome">
       <span id="g-cpgreedy-stage">step 0 &middot; initial deficit</span>
       <span class="right step-label">step <b id="g-cpgreedy-cur">0</b> / <span id="g-cpgreedy-total">0</span></span>
     </div>
-    <div class="graph-canvas" id="g-cpgreedy-cy"></div>
+    <div class="side-caption">
+      <span class="st">left</span>same drain order as greedy, gated on the per-(block, block) budget &middot; <span class="st">right</span>per-node deficit bars; abandoned rows hatch when budget exhaustion starves a node.
+    </div>
+    <div class="side-body">
+      <div class="graph-canvas" id="g-cpgreedy-cy"></div>
+      <div class="side-right">
+        <svg id="g-cpgreedy-bars" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+    </div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-cpgreedy-rand-step" type="button" title="replay this step's animation">random step</button>
+      <button class="btn" id="g-cpgreedy-rand-all" type="button" title="replay every step's animation from the start">random all</button>
+      <span class="step-label" id="g-cpgreedy-real">deterministic &middot; step: replay this step &middot; all: replay from start</span>
+    </div>
     <div class="widget-row tight">
       <button class="btn" id="g-cpgreedy-start" type="button">to start</button>
       <button class="btn" id="g-cpgreedy-prev" type="button">back</button>
       <button class="btn primary" id="g-cpgreedy-next" type="button">next</button>
       <button class="btn" id="g-cpgreedy-end" type="button">to end</button>
-      <span class="step-label" id="g-cpgreedy-real">deterministic; same output every run</span>
     </div>
     <div class="step-desc" id="g-cpgreedy-desc">click <em>next</em> to advance.</div>
   </div>
@@ -249,18 +276,30 @@
   <h2>Take the most-needy node. Pair it with the partner that itself is most needy.</h2>
   <p>The default matcher. Same source pick as greedy (the node with the largest deficit goes first), but the partner is chosen differently: among the valid candidates (still has room, not already adjacent), pick the one whose own deficit is largest, breaking ties by id ascending. After each accepted edge, both endpoints' updated deficits go back into the priority order so subsequent picks see fresh values rather than stale ones from the start of the burst.</p>
   <p>The change from greedy is small but consequential. Greedy commits to one source until it is fully drained or stuck, blind to whether its partners are running out of room. True_greedy lets the priorities re-shuffle after every edge, so the matcher always works on the currently neediest pair. On uneven deficits this closes the gap with substantially fewer dropped stubs. Gridlock — when no candidate with positive deficit is left — is logged as a warning rather than swallowed.</p>
-  <div class="graph" id="g-truegreedy">
+  <div class="graph g-with-side" id="g-truegreedy">
     <div class="graph-chrome">
       <span id="g-truegreedy-stage">step 0 &middot; initial deficit</span>
       <span class="right step-label">step <b id="g-truegreedy-cur">0</b> / <span id="g-truegreedy-total">0</span></span>
     </div>
-    <div class="graph-canvas" id="g-truegreedy-cy"></div>
+    <div class="side-caption">
+      <span class="st">left</span>most-needy source paired with currently-most-needy partner &middot; <span class="st">right</span>queue order updates after every accept; row order on the right reflects current residual desc.
+    </div>
+    <div class="side-body">
+      <div class="graph-canvas" id="g-truegreedy-cy"></div>
+      <div class="side-right">
+        <svg id="g-truegreedy-bars" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+    </div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-truegreedy-rand-step" type="button" title="replay this step's animation">random step</button>
+      <button class="btn" id="g-truegreedy-rand-all" type="button" title="replay every step's animation from the start">random all</button>
+      <span class="step-label" id="g-truegreedy-real">deterministic &middot; step: replay this step &middot; all: replay from start</span>
+    </div>
     <div class="widget-row tight">
       <button class="btn" id="g-truegreedy-start" type="button">to start</button>
       <button class="btn" id="g-truegreedy-prev" type="button">back</button>
       <button class="btn primary" id="g-truegreedy-next" type="button">next</button>
       <button class="btn" id="g-truegreedy-end" type="button">to end</button>
-      <span class="step-label" id="g-truegreedy-real">deterministic; no reroll</span>
     </div>
     <div class="step-desc" id="g-truegreedy-desc">click <em>next</em> to advance.</div>
   </div>
@@ -268,18 +307,30 @@
   <h3>cluster-preserving twin</h3>
   <p>Same priority-driven source pick and partner pick as the global true_greedy. The twin filters the candidate list before scanning it: any candidate whose (block, block) bucket has zero edges left in its budget is excluded. The first candidate that maximises remaining deficit and respects the budget gets the edge, and the budget for that bucket goes down by one. Gridlock now triggers when no in-budget candidate with positive deficit is left, and is logged.</p>
   <p>Because the source still pulls the most-needy node first and re-shuffles after every accept, the twin loses fewer stubs to starvation than the cluster-preserving greedy does. On the bench in <code>examples/bench_ecsbm/</code>, this is the algorithm EC-SBM v2 uses, and its loss to budget exhaustion is around 0.5% of total edges on networks in the 100K–200K node range. Where that 0.5% matters, the stack section below shows how to recover it without giving up cluster-level fidelity.</p>
-  <div class="graph" id="g-cptruegreedy">
+  <div class="graph g-with-side" id="g-cptruegreedy">
     <div class="graph-chrome">
       <span id="g-cptruegreedy-stage">step 0 &middot; initial deficit</span>
       <span class="right step-label">step <b id="g-cptruegreedy-cur">0</b> / <span id="g-cptruegreedy-total">0</span></span>
     </div>
-    <div class="graph-canvas" id="g-cptruegreedy-cy"></div>
+    <div class="side-caption">
+      <span class="st">left</span>same priority-driven picks as true_greedy, candidate filter gated by (block, block) budget &middot; <span class="st">right</span>row state shifts as in-budget partners run out for some sources.
+    </div>
+    <div class="side-body">
+      <div class="graph-canvas" id="g-cptruegreedy-cy"></div>
+      <div class="side-right">
+        <svg id="g-cptruegreedy-bars" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+    </div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-cptruegreedy-rand-step" type="button" title="replay this step's animation">random step</button>
+      <button class="btn" id="g-cptruegreedy-rand-all" type="button" title="replay every step's animation from the start">random all</button>
+      <span class="step-label" id="g-cptruegreedy-real">deterministic &middot; step: replay this step &middot; all: replay from start</span>
+    </div>
     <div class="widget-row tight">
       <button class="btn" id="g-cptruegreedy-start" type="button">to start</button>
       <button class="btn" id="g-cptruegreedy-prev" type="button">back</button>
       <button class="btn primary" id="g-cptruegreedy-next" type="button">next</button>
       <button class="btn" id="g-cptruegreedy-end" type="button">to end</button>
-      <span class="step-label" id="g-cptruegreedy-real">deterministic; same output every run</span>
     </div>
     <div class="step-desc" id="g-cptruegreedy-desc">click <em>next</em> to advance.</div>
   </div>
@@ -291,16 +342,24 @@
   <h2>Pick both endpoints by weighted random draw.</h2>
   <p>Same outer loop, but every choice is a weighted random draw. The source node is sampled with probability proportional to its current deficit; among the valid candidates the partner is sampled the same way. The two random picks are independent, both keyed off the same seed.</p>
   <p>This family exists mostly to measure how much of greedy and true_greedy's output is artifact of their tie-break rules. Running random_greedy with several different seeds and comparing the spread is the cleanest way to see which output features are pinned by the input deficit and which are pinned by the deterministic ordering. Gridlock is logged. Step count varies between seeds because the order in which nodes get starved changes.</p>
-  <div class="graph" id="g-randgreedy">
+  <div class="graph g-with-side" id="g-randgreedy">
     <div class="graph-chrome">
       <span id="g-randgreedy-stage">step 0 &middot; initial deficit</span>
       <span class="right step-label">step <b id="g-randgreedy-cur">0</b> / <span id="g-randgreedy-total">0</span></span>
     </div>
-    <div class="graph-canvas" id="g-randgreedy-cy"></div>
+    <div class="side-caption">
+      <span class="st">left</span>weighted-random source + weighted-random partner (both proportional to current deficit) &middot; <span class="st">right</span>row order tracks the active queue; reseed for a fresh draw.
+    </div>
+    <div class="side-body">
+      <div class="graph-canvas" id="g-randgreedy-cy"></div>
+      <div class="side-right">
+        <svg id="g-randgreedy-bars" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+    </div>
     <div class="widget-row tight">
       <button class="btn" id="g-randgreedy-rand-step" type="button" title="re-randomize this step's pick only">random step</button>
       <button class="btn" id="g-randgreedy-rand-all" type="button" title="reseed every pick from the start through this step">random all</button>
-      <span class="step-label" id="g-randgreedy-real">step: redo current pick · all: reseed every pick</span>
+      <span class="step-label" id="g-randgreedy-real">step: redo current pick &middot; all: reseed every pick</span>
     </div>
     <div class="widget-row tight">
       <button class="btn" id="g-randgreedy-start" type="button">to start</button>
@@ -313,16 +372,24 @@
 
   <h3>cluster-preserving twin</h3>
   <p>Same weighted-random source and partner draws, but the partner draw is restricted to candidates whose (block, block) bucket has remaining budget. The weighting still uses each candidate's deficit. Each accepted edge consumes one unit from the corresponding bucket. When the in-budget candidate set is empty for the chosen source, gridlock is logged and that source is abandoned.</p>
-  <div class="graph" id="g-cprandgreedy">
+  <div class="graph g-with-side" id="g-cprandgreedy">
     <div class="graph-chrome">
       <span id="g-cprandgreedy-stage">step 0 &middot; initial deficit</span>
       <span class="right step-label">step <b id="g-cprandgreedy-cur">0</b> / <span id="g-cprandgreedy-total">0</span></span>
     </div>
-    <div class="graph-canvas" id="g-cprandgreedy-cy"></div>
+    <div class="side-caption">
+      <span class="st">left</span>weighted-random source + weighted-random partner restricted to in-budget (block, block) candidates &middot; <span class="st">right</span>budget exhaustion shows up as abandoned rows.
+    </div>
+    <div class="side-body">
+      <div class="graph-canvas" id="g-cprandgreedy-cy"></div>
+      <div class="side-right">
+        <svg id="g-cprandgreedy-bars" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+    </div>
     <div class="widget-row tight">
       <button class="btn" id="g-cprandgreedy-rand-step" type="button" title="re-randomize this step's pick only">random step</button>
       <button class="btn" id="g-cprandgreedy-rand-all" type="button" title="reseed every weighted draw">random all</button>
-      <span class="step-label" id="g-cprandgreedy-real">step: redo current pick · all: reseed every pick</span>
+      <span class="step-label" id="g-cprandgreedy-real">step: redo current pick &middot; all: reseed every pick</span>
     </div>
     <div class="widget-row tight">
       <button class="btn" id="g-cprandgreedy-start" type="button">to start</button>
@@ -341,16 +408,24 @@
   <p>The configuration-model approach. The matcher imagines a small bag of half-edges, called stubs: each node contributes one stub for every edge it is still missing. The whole bag is shuffled and stubs are paired up two-at-a-time, each pair becoming an edge. Some pairs are invalid — a self-loop, a duplicate of an edge that already exists, or a duplicate within this same pairing. Those land in a repair queue.</p>
   <p>The repair phase is a 2-opt swap. For every invalid pair the matcher pulls a random valid edge from the existing pile and tries the four endpoint recombinations: if any of them produces two valid edges, the swap is accepted and both pairs join the valid pile. If none works the pair goes back on the queue for a later attempt. The phase runs for a fixed retry budget; whatever still conflicts at the end is logged and dropped.</p>
   <p>The shuffle is the only source of variation across seeds. On dense inputs almost every pairing is valid on the first pass and the repair queue stays short. On long-tailed inputs with hubs, several pairs land invalid (the same hub gets two stubs that pair together) and the repair pass walks them.</p>
-  <div class="graph" id="g-rewire">
+  <div class="graph g-with-side" id="g-rewire">
     <div class="graph-chrome">
       <span id="g-rewire-stage">step 0 &middot; stubs ready, no pairs yet</span>
       <span class="right step-label">step <b id="g-rewire-cur">0</b> / <span id="g-rewire-total">0</span></span>
     </div>
-    <div class="graph-canvas" id="g-rewire-cy"></div>
+    <div class="side-caption">
+      <span class="st">left</span>stubs around each deficit node, paired adjacent after shuffle; invalid pairs go red and the 2-opt repair animates as a stub-pair swap &middot; <span class="st">right</span>per-node deficit bars; ID-asc row order reflects the stub list.
+    </div>
+    <div class="side-body">
+      <div class="graph-canvas" id="g-rewire-cy"></div>
+      <div class="side-right">
+        <svg id="g-rewire-bars" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+    </div>
     <div class="widget-row tight">
       <button class="btn" id="g-rewire-rand-step" type="button" title="re-randomize the shuffle for this step only">random step</button>
       <button class="btn" id="g-rewire-rand-all" type="button" title="reseed the shuffle from the start through this step">random all</button>
-      <span class="step-label" id="g-rewire-real">step: redo current pair · all: reseed full shuffle</span>
+      <span class="step-label" id="g-rewire-real">step: redo current pair &middot; all: reseed full shuffle</span>
     </div>
     <div class="widget-row tight">
       <button class="btn" id="g-rewire-start" type="button">to start</button>
@@ -364,16 +439,24 @@
   <h3>cluster-preserving twin</h3>
   <p>Same idea, but the stub bag is partitioned by (block, block) bucket up front: each bucket's budget tells the matcher how many edges that pair is allowed to receive, and stubs are drawn from each bucket independently. The 2-opt repair phase respects the partition, only swapping endpoints in ways that keep both repaired pairs inside their original buckets. Whatever still conflicts at the retry budget is logged and dropped, just as in the global rewire.</p>
   <p class="muted small">The walker is <em>algorithmically</em> faithful to the production code but does <strong>not</strong> byte-equal it: production delegates the per-bucket stub draw to graph-tool, whose random number generator is not portable to a browser. The page uses a JavaScript-native weighted draw with the same control flow, so the per-step decisions read identically even when the seeds do not.</p>
-  <div class="graph" id="g-cprewire">
+  <div class="graph g-with-side" id="g-cprewire">
     <div class="graph-chrome">
       <span id="g-cprewire-stage">step 0 &middot; initial deficit</span>
       <span class="right step-label">step <b id="g-cprewire-cur">0</b> / <span id="g-cprewire-total">0</span></span>
     </div>
-    <div class="graph-canvas" id="g-cprewire-cy"></div>
+    <div class="side-caption">
+      <span class="st">left</span>same stub-pair shuffle as rewire, partitioned by (block, block) bucket; 2-opt repair only swaps within a bucket &middot; <span class="st">right</span>per-node deficit bars.
+    </div>
+    <div class="side-body">
+      <div class="graph-canvas" id="g-cprewire-cy"></div>
+      <div class="side-right">
+        <svg id="g-cprewire-bars" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+    </div>
     <div class="widget-row tight">
       <button class="btn" id="g-cprewire-rand-step" type="button" title="re-randomize this step's pick only">random step</button>
       <button class="btn" id="g-cprewire-rand-all" type="button" title="reseed the whole rewire pass">random all</button>
-      <span class="step-label" id="g-cprewire-real">step: redo current pick · all: reseed every draw</span>
+      <span class="step-label" id="g-cprewire-real">step: redo current pick &middot; all: reseed every draw</span>
     </div>
     <div class="widget-row tight">
       <button class="btn" id="g-cprewire-start" type="button">to start</button>
@@ -688,15 +771,6 @@ window.MathJax = {
     });
   }
 
-  // ── Algorithm: hybrid ──
-  // Phase 1: rewire with keepResidual=true (no abandon). Phase 2:
-  // true_greedy from rewire's leftover state. Implemented in the kernel.
-  function runHybrid(seed, initialState) {
-    return MatchDegreeKernel.runHybrid(makeKernelPayload(), {
-      rng: makeLCG(seed), initialState,
-    });
-  }
-
   // ── Cluster-preserving variants (5 wrappers) ──
   // Same shapes as the global wrappers above, but the kernel payload
   // carries the (b, bpBudget) extension so each matcher gates partner
@@ -718,11 +792,6 @@ window.MathJax = {
       makeKernelPayloadCP(),
       { rng: makeLCG(seed), initialState, keepResidual });
   }
-  function runClusterPreservingHybrid(seed, initialState) {
-    return MatchDegreeKernel.runClusterPreservingHybrid(
-      makeKernelPayloadCP(), { rng: makeLCG(seed), initialState });
-  }
-
   // ── Deficit-only bars renderer ──
   // Renders only the rows for nodes that started with deficit > 0 (the
   // priority queue nodes). Row order is decided by orderMode:
@@ -911,10 +980,9 @@ window.MathJax = {
   }
 
   // ── Per-section setup helper ──
-  // orderMode: 'static' | 'dynamic' | 'id' | 'hybrid' (phase 1 id, phase 2 dynamic)
+  // orderMode: 'static' | 'dynamic' | 'id'
   function setupAlgoSection(opts) {
     const { prefix, algoFn, orderMode } = opts;
-    const useSpokes = !!opts.useSpokes;
     const cyId   = `g-${prefix}-cy`;
     const barsId = `g-${prefix}-bars`;
     const stageEl = document.getElementById(`g-${prefix}-stage`);
@@ -928,23 +996,13 @@ window.MathJax = {
       showLabels: true,
       edges: baseEdges,
       pinned: true,
-      pad: 40, padRight: 340,
+      pad: 40,
       nodeColor: (id) => {
         const c = CLUSTER_OF[id];
         return COL[c] || COL.paper_3;
       },
     });
     NETGEN.makeTooltip(viz, document.getElementById(`g-${prefix}`));
-    NETGEN.mountGxPanel({
-      viz,
-      hostId: cyId, prefix: `g-${prefix}-bars-pnl`,
-      title: "deficit", maxWidth: "26rem",
-      bodyHTML: `<svg id="${barsId}" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet" style="display:block;width:18rem;height:auto"></svg>`,
-    });
-    // Rewire (and any algo with stub-pairing semantics) shows match
-    // edges via spoke_layer: per-deficit-node spokes around the rim,
-    // active pair animates dashed bridge → solid edge. Other algos
-    // keep the plain addEdges renderer.
     // Spoke layer applies pick + dim during the active animation by
     // default. On settle, it strips both classes; this onSettle
     // restores the matcher's deficit-driven baseline (deficit-zero
@@ -967,166 +1025,138 @@ window.MathJax = {
     let spokeLockHeld = false;
     let ctl = null;
     function refreshButtons() { if (ctl) ctl.refreshButtons(); }
-    const spokes = useSpokes
-      ? NETGEN.spokeLayer.attach(viz, {
-          onSettle: applyBaseDim,
-          onLockChange: (locked) => { spokeLockHeld = locked; refreshButtons(); },
-        })
-      : null;
+    const spokes = NETGEN.spokeLayer.attach(viz, {
+      onSettle: applyBaseDim,
+      onLockChange: (locked) => { spokeLockHeld = locked; refreshButtons(); },
+    });
 
     let seed = 1;
     let steps = algoFn(seed);
     let stepIdx = 0;
     let swapAnim = null;
     let lastRenderIdx = -1;
+    // Bumped each render() call. Combined with stepIdx into the spoke
+    // layer's justSeq so repeat-renders of the same step still register
+    // as a fresh handoff and re-trigger the bridge animation. Also lets
+    // the deterministic walkers' RandStep / RandAll fire a visual replay
+    // even though the algorithm output is unchanged.
+    let renderEpoch = 0;
     function isLocked() { return spokeLockHeld || !!swapAnim; }
 
     function render(snap) {
+      renderEpoch++;
+      const seqBase = stepIdx + renderEpoch * 1000000;
       const s = steps[stepIdx];
       // Replace match edges with the snapshot for this step.
       viz.removeEdges(id => String(id).startsWith(`m-${prefix}-`));
       if (swapAnim) { swapAnim.cancel(); swapAnim = null; }
-      const isPhase2 = s.phase === 2;
       const phase1Color = COL.edge_stage4;
-      const phase2Color = COL.edge_stage3;
-      // For hybrid: phase 1 edges in stage4 grey, phase 2 in stage3 orchid.
-      // Each step's `edges` array holds all placed pairs cumulative; we
-      // need to know which are phase 1 vs phase 2 for hybrid.
-      let phase1Count = 0;
-      if (prefix === "hybrid") {
-        for (const ss of steps) {
-          if (ss === s) break;
-          if (ss.phase === 1 && ss.action === "add") phase1Count = ss.edges.length;
-        }
-        if (s.phase === 1 && s.action === "add") phase1Count = s.edges.length;
+      // Spoke layer owns match edges. byNode[n].count = initial
+      // deficit. just is the active pair when the action places or
+      // attempts an edge; bridge red on invalid / fail.
+      const cfg = {};
+      DEFICIT_NODES.forEach(n => {
+        cfg[n] = { count: DEFICIT[n] || 0, color: phase1Color };
+      });
+      // For repair_swap: place every cumulative edge, with the most-
+      // recently-added shown as the active just (mint bridge).
+      const placed = [];
+      const upto = Math.max(0, s.edges.length - (s.action === "add" || s.action === "repair_swap" ? 1 : 0));
+      for (let i = 0; i < upto; i++) {
+        const [u, v] = s.edges[i];
+        placed.push({ u, v, color: phase1Color, id: `m-${prefix}-${i}` });
       }
-      if (useSpokes) {
-        // Spoke layer owns match edges. byNode[n].count = initial
-        // deficit. just is the active pair when the action places or
-        // attempts an edge; bridge red on invalid / fail.
-        const cfg = {};
-        DEFICIT_NODES.forEach(n => {
-          cfg[n] = { count: DEFICIT[n] || 0, color: phase1Color };
-        });
-        // For repair_swap: place every cumulative edge, with the most-
-        // recently-added shown as the active just (mint bridge).
-        const placed = [];
-        const upto = Math.max(0, s.edges.length - (s.action === "add" || s.action === "repair_swap" ? 1 : 0));
-        for (let i = 0; i < upto; i++) {
+      let just = null;
+      let bridgeColor = phase1Color;
+      if (s.action === "add") {
+        const last = s.edges[s.edges.length - 1];
+        if (last) {
+          just = { u: last[0], v: last[1], color: phase1Color };
+          bridgeColor = phase1Color;
+        }
+      } else if (s.action === "pair_invalid" || s.action === "repair_fail" || s.action === "repair_skip") {
+        if (s.u != null && s.v != null) {
+          just = { u: s.u, v: s.v, color: COL.edge_drop, bad: true };
+          bridgeColor = COL.edge_drop;
+        }
+      }
+      // repair_swap is the 2-opt rewire: cut e1 (invalid) + e2
+      // (sacrificed valid), place newE1 + newE2. Drive it as the
+      // shared SBM-style swap animation: cuts retract into the 4
+      // affected stubs, stubs orbit to their new partner aim, new
+      // bridges grow. Triggered only on a forward step from the
+      // previous index so back / jump renders settle directly.
+      const isForwardSwap = !snap
+        && s.action === "repair_swap"
+        && lastRenderIdx === stepIdx - 1
+        && stepIdx > 0;
+      if (s.action === "repair_swap" && !isForwardSwap) {
+        // Settle directly into the post-swap state.
+        for (let i = upto; i < s.edges.length; i++) {
           const [u, v] = s.edges[i];
-          placed.push({
-            u, v, color: phase1Color, id: `m-${prefix}-${i}`,
-          });
+          placed.push({ u, v, color: phase1Color, id: `m-${prefix}-${i}` });
         }
-        let just = null;
-        let bridgeColor = phase1Color;
-        if (s.action === "add") {
-          const last = s.edges[s.edges.length - 1];
-          if (last) {
-            just = { u: last[0], v: last[1], color: phase1Color };
-            bridgeColor = phase1Color;
-          }
-        } else if (s.action === "pair_invalid" || s.action === "repair_fail" || s.action === "repair_skip") {
-          if (s.u != null && s.v != null) {
-            just = { u: s.u, v: s.v, color: COL.edge_drop, bad: true };
-            bridgeColor = COL.edge_drop;
-          }
-        }
-        // repair_swap is the 2-opt rewire: cut e1 (invalid) + e2
-        // (sacrificed valid), place newE1 + newE2. Drive it as the
-        // shared SBM-style swap animation: cuts retract into the 4
-        // affected stubs, stubs orbit to their new partner aim, new
-        // bridges grow. Triggered only on a forward step from the
-        // previous index so back / jump renders settle directly.
-        const isForwardSwap = !snap
-          && s.action === "repair_swap"
-          && lastRenderIdx === stepIdx - 1
-          && stepIdx > 0;
-        if (s.action === "repair_swap" && !isForwardSwap) {
-          // Settle directly into the post-swap state.
-          const last = s.edges[s.edges.length - 1];
-          for (let i = upto; i < s.edges.length; i++) {
+        spokes.syncState({ byNode: cfg, placed, just: null, justSeq: seqBase, bridgeColor: phase1Color });
+      } else if (isForwardSwap) {
+        // Snap to the pre-swap state without e2 (e1 was never placed),
+        // then drive the parallel cut + parallel place animation via
+        // spokeLayer.playMany, then commit to the post-swap state.
+        const e1 = [s.u, s.v];
+        const e2 = [s.x, s.y];
+        const newE1 = s.edges[s.edges.length - 2];
+        const newE2 = s.edges[s.edges.length - 1];
+        const isE2 = (e) =>
+          (e.u === e2[0] && e.v === e2[1]) || (e.u === e2[1] && e.v === e2[0]);
+        const prePlaced = placed.filter(e => !isE2(e));
+        spokes.syncState({
+          byNode: cfg, placed: prePlaced, just: null,
+          justSeq: seqBase * 100, bridgeColor: phase1Color,
+        });
+        const e2Entry = placed.find(isE2);
+        const e2Id = (e2Entry && e2Entry.id) || `m-${prefix}-e2`;
+        const removes = [
+          // e1 is the failed pair currently surfaced in red; it was
+          // never placed so playMany treats it as a phantom remove
+          // and animates only its dissolution into stubs.
+          { u: e1[0], v: e1[1], id: `m-${prefix}-e1`, bad: true,
+            color: COL.edge_drop, badColor: COL.edge_drop },
+          { u: e2[0], v: e2[1], id: e2Id, bad: false,
+            color: phase1Color },
+        ];
+        const adds = [
+          { u: newE1[0], v: newE1[1], id: `m-${prefix}-${s.edges.length - 2}`,
+            color: phase1Color },
+          { u: newE2[0], v: newE2[1], id: `m-${prefix}-${s.edges.length - 1}`,
+            color: phase1Color },
+        ];
+        swapAnim = { cancel: () => {} };
+        spokes.playMany(removes, adds, () => {
+          swapAnim = null;
+          // Re-sync to the canonical post-swap placed list so ids
+          // stay stable for any subsequent step.
+          const finalPlaced = [];
+          for (let i = 0; i < s.edges.length; i++) {
             const [u, v] = s.edges[i];
-            placed.push({ u, v, color: phase1Color, id: `m-${prefix}-${i}` });
+            finalPlaced.push({ u, v, color: phase1Color, id: `m-${prefix}-${i}` });
           }
-          spokes.syncState({ byNode: cfg, placed, just: null, justSeq: stepIdx, bridgeColor: phase1Color });
-        } else if (isForwardSwap) {
-          // Snap to the pre-swap state without e2 (e1 was never placed),
-          // then drive the parallel cut + parallel place animation via
-          // spokeLayer.playMany, then commit to the post-swap state.
-          const e1 = [s.u, s.v];
-          const e2 = [s.x, s.y];
-          const newE1 = s.edges[s.edges.length - 2];
-          const newE2 = s.edges[s.edges.length - 1];
-          const isE2 = (e) =>
-            (e.u === e2[0] && e.v === e2[1]) || (e.u === e2[1] && e.v === e2[0]);
-          const prePlaced = placed.filter(e => !isE2(e));
           spokes.syncState({
-            byNode: cfg, placed: prePlaced, just: null,
-            justSeq: stepIdx * 100, bridgeColor: phase1Color,
-          });
-          const e2Entry = placed.find(isE2);
-          const e2Id = (e2Entry && e2Entry.id) || `m-${prefix}-e2`;
-          const removes = [
-            // e1 is the failed pair currently surfaced in red; it was
-            // never placed so playMany treats it as a phantom remove
-            // and animates only its dissolution into stubs.
-            { u: e1[0], v: e1[1], id: `m-${prefix}-e1`, bad: true,
-              color: COL.edge_drop, badColor: COL.edge_drop },
-            { u: e2[0], v: e2[1], id: e2Id, bad: false,
-              color: phase1Color },
-          ];
-          const adds = [
-            { u: newE1[0], v: newE1[1], id: `m-${prefix}-${s.edges.length - 2}`,
-              color: phase1Color },
-            { u: newE2[0], v: newE2[1], id: `m-${prefix}-${s.edges.length - 1}`,
-              color: phase1Color },
-          ];
-          swapAnim = { cancel: () => {} };
-          spokes.playMany(removes, adds, () => {
-            swapAnim = null;
-            // Re-sync to the canonical post-swap placed list so ids
-            // stay stable for any subsequent step.
-            const finalPlaced = [];
-            for (let i = 0; i < s.edges.length; i++) {
-              const [u, v] = s.edges[i];
-              finalPlaced.push({ u, v, color: phase1Color, id: `m-${prefix}-${i}` });
-            }
-            spokes.syncState({
-              byNode: cfg, placed: finalPlaced, just: null,
-              justSeq: stepIdx * 100 + 1, bridgeColor: phase1Color,
-            });
-            refreshButtons();
+            byNode: cfg, placed: finalPlaced, just: null,
+            justSeq: seqBase * 100 + 1, bridgeColor: phase1Color,
           });
           refreshButtons();
-        } else {
-          spokes.syncState({
-            byNode: cfg, placed, just, justSeq: stepIdx, bridgeColor,
-          });
-        }
+        });
+        refreshButtons();
       } else {
-        s.edges.forEach(([u, v], i) => {
-          const isP2 = (prefix === "hybrid" && i >= phase1Count);
-          viz.addEdges([{
-            u, v,
-            color: isP2 ? phase2Color : phase1Color,
-            w: 2.4,
-            id: `m-${prefix}-${i}`,
-          }]);
+        spokes.syncState({
+          byNode: cfg, placed, just, justSeq: seqBase, bridgeColor,
         });
       }
-      // Highlight u and v of this step.
-      // (skipped for brevity; the new edge is the most recent grey/orchid line)
       stageEl.textContent = `step ${stepIdx} · ${s.action}`;
       curEl.textContent = String(stepIdx);
       totEl.textContent = String(steps.length - 1);
       descEl.innerHTML = `<span class="st">step ${stepIdx}</span> &middot; ${s.msg}`;
       NETGEN.retypeset(descEl);
-      let resolvedOrderMode = orderMode;
-      if (orderMode === "hybrid") {
-        resolvedOrderMode = (s.phase === 2) ? "dynamic" : "id";
-      }
-      renderBars(barsId, s.residual, s.edges, resolvedOrderMode, s.unplaced, s.exitOrder);
+      renderBars(barsId, s.residual, s.edges, orderMode, s.unplaced, s.exitOrder);
       // Graph dim layered on top of base styling:
       //   non-deficit nodes (no stubs to begin with): always dim. They
       //     never participate in the matcher.
@@ -1137,15 +1167,14 @@ window.MathJax = {
       //   end-state: when nothing is active any more, un-dim drained
       //     deficit nodes (they read as "completed"), keep non-deficit
       //     nodes dimmed.
-      // Spoke-mode renders own pick + dim during animation; on settle
-      // they call applyBaseDim via onSettle. Cache the snapshot so
-      // applyBaseDim sees this step's residual/unplaced.
+      // Spoke layer drives pick + dim during animation; on settle it
+      // calls applyBaseDim via onSettle. Cache the snapshot so that
+      // applyBaseDim sees this step's residual/unplaced. Skip the
+      // settled re-dim while an animation is in flight (the layer
+      // owns the dim during the just-fade) so we don't fight it.
       lastResidual = s.residual;
       lastUnplaced = s.unplaced;
-      if (!useSpokes) {
-        viz.clearAllNodeClass("dim");
-        applyBaseDim();
-      } else if (!spokes || !spokes.isAnimating || !spokes.isAnimating()) {
+      if (!spokes || !spokes.isAnimating || !spokes.isAnimating()) {
         viz.clearAllNodeClass("dim");
         applyBaseDim();
       }
@@ -1172,18 +1201,32 @@ window.MathJax = {
       totId: `g-${prefix}-total`,
       getLocked: isLocked,
       onRender: (idx, snap) => { stepIdx = idx; render(snap); },
+      // For stochastic walkers, RandStep splices a new tail from the
+      // current step and RandAll reruns from scratch with a fresh seed.
+      // For deterministic walkers, both buttons are visual-replay only:
+      // the algorithm output is fixed by the deficit pile, so RandStep
+      // re-renders the current step (bumping renderEpoch makes the
+      // spoke layer re-trigger its bridge animation) and RandAll jumps
+      // back to step 0 so the user can re-watch the walker drain.
       onRandStep: stochastic ? (idx) => {
         if (idx <= 0) return;
         const newSeed = Math.floor(Math.random() * 1e9);
         spliceFromIdx(newSeed, idx);
         if (realEl) realEl.textContent = "rerolled from current step";
-      } : undefined,
+      } : (idx) => {
+        if (idx <= 0) return;
+        if (realEl) realEl.textContent = "deterministic · replayed this step";
+      },
       onRandAll: stochastic ? (idx) => {
         if (idx <= 0) return;
         const newSeed = Math.floor(Math.random() * 1e9);
         steps = algoFn(newSeed);
         if (realEl) realEl.textContent = "fresh roll · all picks reseeded";
-      } : undefined,
+      } : (idx) => {
+        if (idx <= 0) return;
+        if (realEl) realEl.textContent = "deterministic · replaying from start";
+        ctl.set(0);
+      },
     });
     return {
       reset: () => {
@@ -1207,7 +1250,7 @@ window.MathJax = {
   sectionHandles.push(setupAlgoSection({ prefix: "greedy",     algoFn: runGreedy,       orderMode: "static" }));
   sectionHandles.push(setupAlgoSection({ prefix: "truegreedy", algoFn: runTrueGreedy,   orderMode: "dynamic" }));
   sectionHandles.push(setupAlgoSection({ prefix: "randgreedy", algoFn: runRandomGreedy, orderMode: "dynamic", stochastic: true }));
-  sectionHandles.push(setupAlgoSection({ prefix: "rewire",     algoFn: runRewire,       orderMode: "id", useSpokes: true, stochastic: true }));
+  sectionHandles.push(setupAlgoSection({ prefix: "rewire",     algoFn: runRewire,       orderMode: "id", stochastic: true }));
   sectionHandles.push(setupAlgoSection({ prefix: "cpgreedy",       algoFn: runClusterPreservingGreedy,       orderMode: "static" }));
   sectionHandles.push(setupAlgoSection({ prefix: "cptruegreedy",   algoFn: runClusterPreservingTrueGreedy,   orderMode: "dynamic" }));
   sectionHandles.push(setupAlgoSection({ prefix: "cprandgreedy",   algoFn: runClusterPreservingRandomGreedy, orderMode: "dynamic", stochastic: true }));
@@ -1222,19 +1265,13 @@ window.MathJax = {
     showLabels: true,
     edges: baseEdges,
     pinned: true,
-    pad: 40, padRight: 340,
+    pad: 40,
     nodeColor: (id) => {
       const c = CLUSTER_OF[id];
       return COL[c] || COL.paper_3;
     },
   });
   NETGEN.makeTooltip(inputViz, document.getElementById("g-input"));
-  NETGEN.mountGxPanel({
-    viz: inputViz,
-    hostId: "g-input-cy", prefix: "g-input-bars-pnl",
-    title: "deficit", maxWidth: "26rem",
-    bodyHTML: '<svg id="g-input-bars" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet" style="display:block;width:18rem;height:auto"></svg>',
-  });
 
   function renderInputPanel() {
     // Right panel: deficit bars rendered as the "initial residual" state
