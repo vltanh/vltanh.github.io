@@ -11,27 +11,6 @@
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="./shared.css">
 <style>
-.graph.g-with-side .side-caption{
-  font-family:'Special Elite','Courier New',monospace;
-  font-size:.76rem; color:var(--paper-2);
-  padding:.15rem 0 .7rem; margin-bottom:.55rem;
-  border-bottom:1px dashed rgba(139,117,65,.4); line-height:1.45;
-}
-.graph.g-with-side .side-caption .st{
-  color:var(--azure); letter-spacing:.12em;
-  text-transform:uppercase; margin-right:.25rem;
-}
-.graph.g-with-side .side-body{
-  display:grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
-  gap: 1rem; align-items: center; margin-bottom: .4rem;
-}
-.graph.g-with-side .side-right{
-  display:flex; flex-direction:column; align-items:stretch; gap:.4rem;
-}
-.graph.g-with-side .side-right > svg{ width:100%; height:auto; }
-@media (max-width: 820px){
-  .graph.g-with-side .side-body{ grid-template-columns: 1fr; align-items: start; }
-}
 .disk-panel{
   padding:1rem; background:var(--ink-2); border:1px solid var(--rule);
   border-radius:6px; margin:1rem 0;
@@ -127,20 +106,12 @@
   <div class="stage-num">input · the residual deficit</div>
   <h2>Where the deficit comes from. Re-roll for a fresh draw.</h2>
   <p>Every walker on this page works on the same residual deficit, drawn here. The toy deficit comes from running a configuration-model pairing on the 20-node fixture's degree sequence and then dropping self-loops and parallel edges — the same dedup pass the SBM generator uses. Hubs lose more stubs because expected collisions scale with the square of the degree; leaves rarely lose any. Click <em>re-roll input</em> to draw a fresh shuffle and re-run every walker.</p>
-  <div class="graph g-with-side" id="g-input">
+  <div class="graph" id="g-input">
     <div class="graph-chrome">
       <span>20-node fixture &middot; non-deficit nodes dimmed</span>
       <span class="right" id="input-status">total: 0 &middot; nodes with deficit: 0 &middot; max: 0</span>
     </div>
-    <div class="side-caption">
-      <span class="st">left</span>input graph &middot; non-deficit nodes dimmed &middot; <span class="st">right</span>per-node residual deficit bars. Every walker below drains this same pile.
-    </div>
-    <div class="side-body">
-      <div class="graph-canvas" id="g-input-cy"></div>
-      <div class="side-right">
-        <svg id="g-input-bars" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet"></svg>
-      </div>
-    </div>
+    <div class="graph-canvas" id="g-input-cy"></div>
     <div class="widget-row">
       <button class="btn primary" id="input-reroll" type="button">re-roll input</button>
       <span class="step-label">draws a fresh SBM-style deficit and resets every walker below</span>
@@ -206,20 +177,12 @@
   <h2>Take the most-needy node. Drain it against an id-sorted partner list.</h2>
   <p>The matcher v1 of this project shipped with. Each step pulls out the node with the largest deficit, builds the list of candidate partners (every other node that still has room and is not already adjacent to it), sorts that list by id ascending, and walks down it adding edges until either the source node's deficit is closed or the candidate list runs out. Once one node is fully drained the loop moves on to the next-most-needy one. Stubs that cannot be placed because no partner is left disappear without any log line — the "silent gridlock" failure mode.</p>
   <p>The walker below replays one such drain per step. The caption names the partner picked at each draw. The output is deterministic because the source order, the partner sort, and the tie-break rule are all fixed; the same input gives the same output every run, no seed needed.</p>
-  <div class="graph g-with-side" id="g-greedy">
+  <div class="graph" id="g-greedy">
     <div class="graph-chrome">
       <span id="g-greedy-stage">step 0 &middot; initial deficit</span>
       <span class="right step-label">step <b id="g-greedy-cur">0</b> / <span id="g-greedy-total">0</span></span>
     </div>
-    <div class="side-caption">
-      <span class="st">left</span>matcher walker on the input deficit &middot; just-pair animates as a dashed bridge &middot; <span class="st">right</span>per-node deficit bars; rows shift state as the pile drains.
-    </div>
-    <div class="side-body">
-      <div class="graph-canvas" id="g-greedy-cy"></div>
-      <div class="side-right">
-        <svg id="g-greedy-bars" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet"></svg>
-      </div>
-    </div>
+    <div class="graph-canvas" id="g-greedy-cy"></div>
     <div class="widget-row tight">
       <button class="btn" id="g-greedy-rand-step" type="button" title="replay this step's animation">random step</button>
       <button class="btn" id="g-greedy-rand-all" type="button" title="replay every step's animation from the start">random all</button>
@@ -241,20 +204,12 @@
   <h3>cluster-preserving twin</h3>
   <p>The cluster-preserving variant runs the same outer loop and the same id-sorted partner list, then layers one extra rule on top: a candidate partner is removed from the list before the walk down it begins if the (block, block) bucket of the pair has zero edges left in its budget. The budget is computed once at the start from the reference clustering's per-(block, block) edge counts minus what the current graph already has. Each accepted edge decrements the corresponding bucket. When a bucket hits zero, candidates whose pair lands in that bucket disappear from future partner lists.</p>
   <p>Effect: edges land where the reference clustering wants them — intra-block when its budget is healthy, inter-block when the inter budget is non-empty — at the cost of more starvation. Because greedy already swallows starvation silently, this twin can drop a noticeable number of stubs on inputs whose deficit is concentrated in a few blocks; the dropped stubs surface in the final output's degree drift, not in the log. The walker below makes the bucket draining visible: the caption names the bucket the matcher just touched and how much budget is left in it.</p>
-  <div class="graph g-with-side" id="g-cpgreedy">
+  <div class="graph" id="g-cpgreedy">
     <div class="graph-chrome">
       <span id="g-cpgreedy-stage">step 0 &middot; initial deficit</span>
       <span class="right step-label">step <b id="g-cpgreedy-cur">0</b> / <span id="g-cpgreedy-total">0</span></span>
     </div>
-    <div class="side-caption">
-      <span class="st">left</span>same drain order as greedy, gated on the per-(block, block) budget &middot; <span class="st">right</span>per-node deficit bars; abandoned rows hatch when budget exhaustion starves a node.
-    </div>
-    <div class="side-body">
-      <div class="graph-canvas" id="g-cpgreedy-cy"></div>
-      <div class="side-right">
-        <svg id="g-cpgreedy-bars" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet"></svg>
-      </div>
-    </div>
+    <div class="graph-canvas" id="g-cpgreedy-cy"></div>
     <div class="widget-row tight">
       <button class="btn" id="g-cpgreedy-rand-step" type="button" title="replay this step's animation">random step</button>
       <button class="btn" id="g-cpgreedy-rand-all" type="button" title="replay every step's animation from the start">random all</button>
@@ -276,20 +231,12 @@
   <h2>Take the most-needy node. Pair it with the partner that itself is most needy.</h2>
   <p>The default matcher. Same source pick as greedy (the node with the largest deficit goes first), but the partner is chosen differently: among the valid candidates (still has room, not already adjacent), pick the one whose own deficit is largest, breaking ties by id ascending. After each accepted edge, both endpoints' updated deficits go back into the priority order so subsequent picks see fresh values rather than stale ones from the start of the burst.</p>
   <p>The change from greedy is small but consequential. Greedy commits to one source until it is fully drained or stuck, blind to whether its partners are running out of room. True_greedy lets the priorities re-shuffle after every edge, so the matcher always works on the currently neediest pair. On uneven deficits this closes the gap with substantially fewer dropped stubs. Gridlock — when no candidate with positive deficit is left — is logged as a warning rather than swallowed.</p>
-  <div class="graph g-with-side" id="g-truegreedy">
+  <div class="graph" id="g-truegreedy">
     <div class="graph-chrome">
       <span id="g-truegreedy-stage">step 0 &middot; initial deficit</span>
       <span class="right step-label">step <b id="g-truegreedy-cur">0</b> / <span id="g-truegreedy-total">0</span></span>
     </div>
-    <div class="side-caption">
-      <span class="st">left</span>most-needy source paired with currently-most-needy partner &middot; <span class="st">right</span>queue order updates after every accept; row order on the right reflects current residual desc.
-    </div>
-    <div class="side-body">
-      <div class="graph-canvas" id="g-truegreedy-cy"></div>
-      <div class="side-right">
-        <svg id="g-truegreedy-bars" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet"></svg>
-      </div>
-    </div>
+    <div class="graph-canvas" id="g-truegreedy-cy"></div>
     <div class="widget-row tight">
       <button class="btn" id="g-truegreedy-rand-step" type="button" title="replay this step's animation">random step</button>
       <button class="btn" id="g-truegreedy-rand-all" type="button" title="replay every step's animation from the start">random all</button>
@@ -307,20 +254,12 @@
   <h3>cluster-preserving twin</h3>
   <p>Same priority-driven source pick and partner pick as the global true_greedy. The twin filters the candidate list before scanning it: any candidate whose (block, block) bucket has zero edges left in its budget is excluded. The first candidate that maximises remaining deficit and respects the budget gets the edge, and the budget for that bucket goes down by one. Gridlock now triggers when no in-budget candidate with positive deficit is left, and is logged.</p>
   <p>Because the source still pulls the most-needy node first and re-shuffles after every accept, the twin loses fewer stubs to starvation than the cluster-preserving greedy does. On the bench in <code>examples/bench_ecsbm/</code>, this is the algorithm EC-SBM v2 uses, and its loss to budget exhaustion is around 0.5% of total edges on networks in the 100K–200K node range. Where that 0.5% matters, the stack section below shows how to recover it without giving up cluster-level fidelity.</p>
-  <div class="graph g-with-side" id="g-cptruegreedy">
+  <div class="graph" id="g-cptruegreedy">
     <div class="graph-chrome">
       <span id="g-cptruegreedy-stage">step 0 &middot; initial deficit</span>
       <span class="right step-label">step <b id="g-cptruegreedy-cur">0</b> / <span id="g-cptruegreedy-total">0</span></span>
     </div>
-    <div class="side-caption">
-      <span class="st">left</span>same priority-driven picks as true_greedy, candidate filter gated by (block, block) budget &middot; <span class="st">right</span>row state shifts as in-budget partners run out for some sources.
-    </div>
-    <div class="side-body">
-      <div class="graph-canvas" id="g-cptruegreedy-cy"></div>
-      <div class="side-right">
-        <svg id="g-cptruegreedy-bars" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet"></svg>
-      </div>
-    </div>
+    <div class="graph-canvas" id="g-cptruegreedy-cy"></div>
     <div class="widget-row tight">
       <button class="btn" id="g-cptruegreedy-rand-step" type="button" title="replay this step's animation">random step</button>
       <button class="btn" id="g-cptruegreedy-rand-all" type="button" title="replay every step's animation from the start">random all</button>
@@ -342,20 +281,12 @@
   <h2>Pick both endpoints by weighted random draw.</h2>
   <p>Same outer loop, but every choice is a weighted random draw. The source node is sampled with probability proportional to its current deficit; among the valid candidates the partner is sampled the same way. The two random picks are independent, both keyed off the same seed.</p>
   <p>This family exists mostly to measure how much of greedy and true_greedy's output is artifact of their tie-break rules. Running random_greedy with several different seeds and comparing the spread is the cleanest way to see which output features are pinned by the input deficit and which are pinned by the deterministic ordering. Gridlock is logged. Step count varies between seeds because the order in which nodes get starved changes.</p>
-  <div class="graph g-with-side" id="g-randgreedy">
+  <div class="graph" id="g-randgreedy">
     <div class="graph-chrome">
       <span id="g-randgreedy-stage">step 0 &middot; initial deficit</span>
       <span class="right step-label">step <b id="g-randgreedy-cur">0</b> / <span id="g-randgreedy-total">0</span></span>
     </div>
-    <div class="side-caption">
-      <span class="st">left</span>weighted-random source + weighted-random partner (both proportional to current deficit) &middot; <span class="st">right</span>row order tracks the active queue; reseed for a fresh draw.
-    </div>
-    <div class="side-body">
-      <div class="graph-canvas" id="g-randgreedy-cy"></div>
-      <div class="side-right">
-        <svg id="g-randgreedy-bars" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet"></svg>
-      </div>
-    </div>
+    <div class="graph-canvas" id="g-randgreedy-cy"></div>
     <div class="widget-row tight">
       <button class="btn" id="g-randgreedy-rand-step" type="button" title="re-randomize this step's pick only">random step</button>
       <button class="btn" id="g-randgreedy-rand-all" type="button" title="reseed every pick from the start through this step">random all</button>
@@ -372,20 +303,12 @@
 
   <h3>cluster-preserving twin</h3>
   <p>Same weighted-random source and partner draws, but the partner draw is restricted to candidates whose (block, block) bucket has remaining budget. The weighting still uses each candidate's deficit. Each accepted edge consumes one unit from the corresponding bucket. When the in-budget candidate set is empty for the chosen source, gridlock is logged and that source is abandoned.</p>
-  <div class="graph g-with-side" id="g-cprandgreedy">
+  <div class="graph" id="g-cprandgreedy">
     <div class="graph-chrome">
       <span id="g-cprandgreedy-stage">step 0 &middot; initial deficit</span>
       <span class="right step-label">step <b id="g-cprandgreedy-cur">0</b> / <span id="g-cprandgreedy-total">0</span></span>
     </div>
-    <div class="side-caption">
-      <span class="st">left</span>weighted-random source + weighted-random partner restricted to in-budget (block, block) candidates &middot; <span class="st">right</span>budget exhaustion shows up as abandoned rows.
-    </div>
-    <div class="side-body">
-      <div class="graph-canvas" id="g-cprandgreedy-cy"></div>
-      <div class="side-right">
-        <svg id="g-cprandgreedy-bars" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet"></svg>
-      </div>
-    </div>
+    <div class="graph-canvas" id="g-cprandgreedy-cy"></div>
     <div class="widget-row tight">
       <button class="btn" id="g-cprandgreedy-rand-step" type="button" title="re-randomize this step's pick only">random step</button>
       <button class="btn" id="g-cprandgreedy-rand-all" type="button" title="reseed every weighted draw">random all</button>
@@ -408,20 +331,12 @@
   <p>The configuration-model approach. The matcher imagines a small bag of half-edges, called stubs: each node contributes one stub for every edge it is still missing. The whole bag is shuffled and stubs are paired up two-at-a-time, each pair becoming an edge. Some pairs are invalid — a self-loop, a duplicate of an edge that already exists, or a duplicate within this same pairing. Those land in a repair queue.</p>
   <p>The repair phase is a 2-opt swap. For every invalid pair the matcher pulls a random valid edge from the existing pile and tries the four endpoint recombinations: if any of them produces two valid edges, the swap is accepted and both pairs join the valid pile. If none works the pair goes back on the queue for a later attempt. The phase runs for a fixed retry budget; whatever still conflicts at the end is logged and dropped.</p>
   <p>The shuffle is the only source of variation across seeds. On dense inputs almost every pairing is valid on the first pass and the repair queue stays short. On long-tailed inputs with hubs, several pairs land invalid (the same hub gets two stubs that pair together) and the repair pass walks them.</p>
-  <div class="graph g-with-side" id="g-rewire">
+  <div class="graph" id="g-rewire">
     <div class="graph-chrome">
       <span id="g-rewire-stage">step 0 &middot; stubs ready, no pairs yet</span>
       <span class="right step-label">step <b id="g-rewire-cur">0</b> / <span id="g-rewire-total">0</span></span>
     </div>
-    <div class="side-caption">
-      <span class="st">left</span>stubs around each deficit node, paired adjacent after shuffle; invalid pairs go red and the 2-opt repair animates as a stub-pair swap &middot; <span class="st">right</span>per-node deficit bars; ID-asc row order reflects the stub list.
-    </div>
-    <div class="side-body">
-      <div class="graph-canvas" id="g-rewire-cy"></div>
-      <div class="side-right">
-        <svg id="g-rewire-bars" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet"></svg>
-      </div>
-    </div>
+    <div class="graph-canvas" id="g-rewire-cy"></div>
     <div class="widget-row tight">
       <button class="btn" id="g-rewire-rand-step" type="button" title="re-randomize the shuffle for this step only">random step</button>
       <button class="btn" id="g-rewire-rand-all" type="button" title="reseed the shuffle from the start through this step">random all</button>
@@ -439,20 +354,12 @@
   <h3>cluster-preserving twin</h3>
   <p>Same idea, but the stub bag is partitioned by (block, block) bucket up front: each bucket's budget tells the matcher how many edges that pair is allowed to receive, and stubs are drawn from each bucket independently. The 2-opt repair phase respects the partition, only swapping endpoints in ways that keep both repaired pairs inside their original buckets. Whatever still conflicts at the retry budget is logged and dropped, just as in the global rewire.</p>
   <p class="muted small">The walker is <em>algorithmically</em> faithful to the production code but does <strong>not</strong> byte-equal it: production delegates the per-bucket stub draw to graph-tool, whose random number generator is not portable to a browser. The page uses a JavaScript-native weighted draw with the same control flow, so the per-step decisions read identically even when the seeds do not.</p>
-  <div class="graph g-with-side" id="g-cprewire">
+  <div class="graph" id="g-cprewire">
     <div class="graph-chrome">
       <span id="g-cprewire-stage">step 0 &middot; initial deficit</span>
       <span class="right step-label">step <b id="g-cprewire-cur">0</b> / <span id="g-cprewire-total">0</span></span>
     </div>
-    <div class="side-caption">
-      <span class="st">left</span>same stub-pair shuffle as rewire, partitioned by (block, block) bucket; 2-opt repair only swaps within a bucket &middot; <span class="st">right</span>per-node deficit bars.
-    </div>
-    <div class="side-body">
-      <div class="graph-canvas" id="g-cprewire-cy"></div>
-      <div class="side-right">
-        <svg id="g-cprewire-bars" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet"></svg>
-      </div>
-    </div>
+    <div class="graph-canvas" id="g-cprewire-cy"></div>
     <div class="widget-row tight">
       <button class="btn" id="g-cprewire-rand-step" type="button" title="re-randomize this step's pick only">random step</button>
       <button class="btn" id="g-cprewire-rand-all" type="button" title="reseed the whole rewire pass">random all</button>
@@ -792,39 +699,38 @@ window.MathJax = {
       makeKernelPayloadCP(),
       { rng: makeLCG(seed), initialState, keepResidual });
   }
-  // ── Deficit-only bars renderer ──
-  // Renders only the rows for nodes that started with deficit > 0 (the
-  // priority queue nodes). Row order is decided by orderMode:
-  //   'static': initial residual desc, id-asc tiebreak (greedy)
-  //   'dynamic': current residual desc, id-asc tiebreak (true_greedy /
-  //              random_greedy / hybrid phase 2)
-  //   'id': id-ascending (rewire / hybrid phase 1)
-  // Rows for nodes with current residual == 0 are dimmed (already drained
-  // or abandoned).
-  function renderBars(svgId, residual, matchEdges, orderMode, unplaced, exitOrder) {
+  // ── Deficit bars renderer (d3-join + tween, sbm g4 idiom) ──
+  // First call lays down the static chrome (root group, divider, footer
+  // label) and seeds one row per deficit node. Subsequent calls reuse
+  // the same DOM via keyed join + d3 transition so widths / positions /
+  // counts tween between steps. snap=true skips tween (used by to-start /
+  // to-end / random-all paths so the reset is instant).
+  // orderMode picks the row order:
+  //   'static':  initial residual desc, id-asc tiebreak (greedy)
+  //   'dynamic': active rows by current residual desc, exit rows in
+  //              exitOrder, then dropped rest by id-asc (true_greedy /
+  //              random_greedy)
+  //   'id':      id-ascending (rewire / cprewire)
+  const BARS_DUR = 540;
+  const BARS_W = 340, BARS_H = 360;
+  const BARS_PAD = { top: 14, right: 56, bottom: 22, left: 56 };
+  function renderBars(svgId, residual, matchEdges, orderMode, unplaced, exitOrder, snap) {
     const barSvg = d3.select("#" + svgId);
-    barSvg.selectAll("*").remove();
-    const W = 340, H = 360;
-    const PAD = { top: 14, right: 56, bottom: 22, left: 56 };
-    const iw = W - PAD.left - PAD.right;
-    const ih = H - PAD.top - PAD.bottom;
+    if (!barSvg.node()) return;
     unplaced = unplaced || {};
     exitOrder = exitOrder || [];
-    function activeDef(n) { return (residual[n] || 0); }
-    function abandonedDef(n) { return (unplaced[n] || 0); }
-    function totalDef(n) { return activeDef(n) + abandonedDef(n); }
-    // Row layout: active rows first (in queue order per orderMode), then
-    // exited rows below in the order they left the queue. Stable layout
-    // keeps drained rows from reshuffling at the very end.
+    const iw = BARS_W - BARS_PAD.left - BARS_PAD.right;
+    const ih = BARS_H - BARS_PAD.top - BARS_PAD.bottom;
+    const activeDef = n => (residual[n] || 0);
+    const abandonedDef = n => (unplaced[n] || 0);
+    const totalDef = n => activeDef(n) + abandonedDef(n);
+
     let rows;
     if (orderMode === "static") {
       rows = DEFICIT_NODES.slice().sort((a, b) => (DEFICIT[b] - DEFICIT[a]) || (a - b));
     } else if (orderMode === "id") {
       rows = DEFICIT_NODES.slice().sort((a, b) => a - b);
     } else {
-      // dynamic: active rows on top sorted by current residual desc + id-asc;
-      // drained rows below in exit order; any deficit node not in exitOrder
-      // and with residual=0 (rare race) tails after by id-asc.
       const exited = exitOrder.filter(n => DEFICIT_NODES.includes(n));
       const active = DEFICIT_NODES.filter(n => activeDef(n) > 0)
         .sort((a, b) => (activeDef(b) - activeDef(a)) || (a - b));
@@ -833,150 +739,156 @@ window.MathJax = {
         .sort((a, b) => a - b);
       rows = active.concat(exited).concat(rest);
     }
-    const rowH = ih / rows.length;
+    const rowH = ih / Math.max(1, rows.length);
     const cBase = {};
     NODES.forEach(n => { cBase[n] = (DEGREES[n] || 0); });
     const cMatch = {};
     matchEdges.forEach(([u, v]) => { cMatch[u] = (cMatch[u] || 0) + 1; cMatch[v] = (cMatch[v] || 0) + 1; });
-    const maxAchieved = Math.max(...rows.map(n => (cBase[n] || 0) + (cMatch[n] || 0)));
+    const maxAchieved = Math.max(0, ...rows.map(n => (cBase[n] || 0) + (cMatch[n] || 0)));
     const maxDeficit = Math.max(1, ...rows.map(n => totalDef(n) || DEFICIT[n] || 0));
     const totalUnits = maxAchieved + maxDeficit;
-    const scale = iw / totalUnits;
+    const scale = totalUnits > 0 ? iw / totalUnits : 0;
     const dividerX = maxAchieved * scale;
-    const g = barSvg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
     const anyActive = rows.some(n => activeDef(n) > 0);
 
-    rows.forEach((n, i) => {
-      const y = i * rowH;
+    barSvg.attr("viewBox", `0 0 ${BARS_W} ${BARS_H}`);
+    let root = barSvg.select("g.bars-root");
+    if (root.empty()) {
+      root = barSvg.append("g").attr("class", "bars-root")
+        .attr("transform", `translate(${BARS_PAD.left},${BARS_PAD.top})`);
+      root.append("line").attr("class", "divider")
+        .attr("y1", -2).attr("y2", ih + 2)
+        .attr("stroke", "#6b6a54").attr("stroke-width", 0.8)
+        .attr("stroke-dasharray", "2 2").attr("opacity", 0.7);
+      root.append("text").attr("class", "divider-label")
+        .attr("y", -4).attr("text-anchor", "middle")
+        .attr("font-family", "Special Elite, Courier New, monospace")
+        .attr("font-size", "9.5px").attr("fill", "#6b6a54")
+        .text("← filled · deficit →");
+      barSvg.append("text").attr("class", "footer-label")
+        .attr("x", BARS_W / 2).attr("y", BARS_H - 6)
+        .attr("text-anchor", "middle")
+        .attr("font-family", "Special Elite, Courier New, monospace")
+        .attr("font-size", "10px").attr("fill", "#6b6a54")
+        .style("letter-spacing", ".1em");
+    }
+    const T = sel => snap ? sel : sel.transition("bars").duration(BARS_DUR).ease(d3.easeCubicInOut);
+    T(root.select("line.divider")).attr("x1", dividerX).attr("x2", dividerX);
+    T(root.select("text.divider-label")).attr("x", dividerX);
+    barSvg.select("text.footer-label").text(
+      orderMode === "static" ? "queue: initial residual desc"
+      : orderMode === "dynamic" ? "queue: current residual desc"
+      : "stub list (id-asc)"
+    );
+
+    const rowSel = root.selectAll("g.bar-row").data(rows, d => d);
+    rowSel.exit().remove();
+    const rowEnter = rowSel.enter().append("g")
+      .attr("class", "bar-row")
+      .attr("data-id", d => String(d))
+      .attr("transform", (d, i) => `translate(0,${i * rowH})`);
+    rowEnter.append("rect").attr("class", "row-hl")
+      .attr("x", -2).attr("width", iw + 4).attr("fill", "#f6e15a");
+    rowEnter.append("rect").attr("class", "left-pill")
+      .attr("x", -52).attr("width", 4).attr("rx", 1.5);
+    rowEnter.append("text").attr("class", "id-label")
+      .attr("x", -10).attr("text-anchor", "end")
+      .attr("font-family", "Special Elite, Courier New, monospace")
+      .attr("font-size", "10.5px").text(d => d);
+    rowEnter.append("rect").attr("class", "achieved-base").attr("fill", COL.edge_stage2);
+    rowEnter.append("rect").attr("class", "achieved-match").attr("fill", COL.edge_stage4);
+    rowEnter.append("rect").attr("class", "active-deficit")
+      .attr("fill", COL.signal).attr("opacity", 0.85);
+    rowEnter.append("rect").attr("class", "abandoned-deficit-fill")
+      .attr("fill", COL.signal).attr("opacity", 0.18);
+    rowEnter.append("rect").attr("class", "abandoned-deficit-stroke")
+      .attr("fill", "none").attr("stroke", COL.signal)
+      .attr("stroke-width", 1).attr("stroke-dasharray", "3 2");
+    rowEnter.append("text").attr("class", "readout")
+      .attr("font-family", "Special Elite, Courier New, monospace")
+      .attr("font-size", "10.5px");
+
+    const merged = rowEnter.merge(rowSel);
+    T(merged).attr("transform", (d, i) => `translate(0,${i * rowH})`);
+
+    merged.each(function (n) {
+      const sel = d3.select(this);
       const t = targetDeg(n);
       const aBase = cBase[n] || 0;
       const aMatch = cMatch[n] || 0;
       const aDef = activeDef(n);
       const bDef = abandonedDef(n);
       const ach = aBase + aMatch;
-      // Three states for this row:
-      //   active: residual > 0 → still owing, in queue
-      //   abandoned: residual = 0, unplaced > 0 → algorithm gave up
-      //   processed: both 0 → drained cleanly
       const isActive = aDef > 0;
       const isAbandoned = !isActive && bDef > 0;
       const isProcessed = !isActive && !isAbandoned;
-      // Dim only mid-walk drained rows (processed before others). Active
-      // and abandoned rows always read at full opacity. End-state shows
-      // every row at full opacity (mint for processed, red for abandoned).
       const dimRow = anyActive && isProcessed;
       const opAdj = dimRow ? 0.35 : 1;
-      if (isActive) {
-        g.append("rect")
-          .attr("x", -2).attr("y", y + 1)
-          .attr("width", iw + 4).attr("height", rowH - 2)
-          .attr("fill", "#f6e15a").attr("opacity", 0.10);
-        g.append("rect")
-          .attr("x", -52).attr("y", y + rowH * 0.12)
-          .attr("width", 4).attr("height", rowH * 0.76)
-          .attr("fill", COL.signal).attr("opacity", 0.85)
-          .attr("rx", 1.5);
-      } else if (isAbandoned) {
-        // Abandoned: still has visible deficit, keep red left pill.
-        g.append("rect")
-          .attr("x", -52).attr("y", y + rowH * 0.12)
-          .attr("width", 4).attr("height", rowH * 0.76)
-          .attr("fill", COL.signal).attr("opacity", 0.85)
-          .attr("rx", 1.5);
-      } else if (!dimRow) {
-        // End-state drained: mint left pill.
-        g.append("rect")
-          .attr("x", -52).attr("y", y + rowH * 0.12)
-          .attr("width", 4).attr("height", rowH * 0.76)
-          .attr("fill", COL.mint).attr("opacity", 0.85)
-          .attr("rx", 1.5);
-      }
-      g.append("text").attr("x", -10).attr("y", y + rowH / 2 + 3)
-        .attr("text-anchor", "end")
-        .attr("font-family", "Special Elite, Courier New, monospace")
-        .attr("font-size", "10.5px")
+
+      T(sel.select("rect.row-hl"))
+        .attr("y", 1).attr("height", rowH - 2)
+        .attr("opacity", isActive ? 0.10 : 0);
+
+      const pillFill = isProcessed ? COL.mint : COL.signal;
+      const pillOp = isProcessed && dimRow ? 0 : 0.85;
+      T(sel.select("rect.left-pill"))
+        .attr("y", rowH * 0.12).attr("height", rowH * 0.76)
+        .attr("fill", pillFill).attr("opacity", pillOp);
+
+      T(sel.select("text.id-label"))
+        .attr("y", rowH / 2 + 3)
         .attr("fill", isAbandoned ? COL.signal : "#2f3a54")
         .attr("font-weight", isProcessed ? "normal" : "bold")
-        .attr("opacity", dimRow ? 0.45 : 1)
-        .text(n);
-      if (ach > 0) {
-        const baseW = aBase * scale;
-        const matchW = aMatch * scale;
-        const filledLeft = dividerX - (baseW + matchW);
-        g.append("rect").attr("x", filledLeft).attr("y", y + rowH * 0.18)
-          .attr("height", rowH * 0.64).attr("width", baseW)
-          .attr("fill", COL.edge_stage2).attr("opacity", 0.9 * opAdj);
-        if (matchW > 0) {
-          g.append("rect").attr("x", filledLeft + baseW).attr("y", y + rowH * 0.18)
-            .attr("height", rowH * 0.64).attr("width", matchW)
-            .attr("fill", COL.edge_stage4).attr("opacity", 0.95 * opAdj);
-        }
-      }
-      // Active deficit: solid saturated red.
-      if (aDef > 0) {
-        g.append("rect").attr("x", dividerX).attr("y", y + rowH * 0.18)
-          .attr("height", rowH * 0.64).attr("width", aDef * scale)
-          .attr("fill", COL.signal).attr("opacity", 0.85);
-      }
-      // Abandoned deficit: hatched red so it reads as "permanent shortfall"
-      // distinct from active deficit.
-      if (bDef > 0) {
-        const xStart = dividerX + (aDef * scale);
-        g.append("rect").attr("x", xStart).attr("y", y + rowH * 0.18)
-          .attr("height", rowH * 0.64).attr("width", bDef * scale)
-          .attr("fill", "none")
-          .attr("stroke", COL.signal).attr("stroke-width", 1)
-          .attr("stroke-dasharray", "3 2");
-        g.append("rect").attr("x", xStart).attr("y", y + rowH * 0.18)
-          .attr("height", rowH * 0.64).attr("width", bDef * scale)
-          .attr("fill", COL.signal).attr("opacity", 0.18);
-      }
-      const rightX = dividerX + (totalDef(n) * scale) + 6;
-      const fillColour = isAbandoned ? COL.signal
-                       : isProcessed ? (dimRow ? "#6b6a54" : COL.mint)
-                       : COL.signal;
-      // Right-edge readout: ach/target. Bar styling already shows
-      // active vs abandoned vs processed; no need for a verbose suffix.
-      const suffix = `${ach}/${t}`;
-      g.append("text").attr("x", rightX).attr("y", y + rowH / 2 + 3)
-        .attr("font-family", "Special Elite, Courier New, monospace")
-        .attr("font-size", "10.5px")
-        .attr("fill", fillColour)
+        .attr("opacity", dimRow ? 0.45 : 1);
+
+      const baseW = aBase * scale;
+      const matchW = aMatch * scale;
+      const filledLeft = dividerX - (baseW + matchW);
+      T(sel.select("rect.achieved-base"))
+        .attr("x", filledLeft).attr("y", rowH * 0.18)
+        .attr("width", baseW).attr("height", rowH * 0.64)
+        .attr("opacity", 0.9 * opAdj);
+      T(sel.select("rect.achieved-match"))
+        .attr("x", filledLeft + baseW).attr("y", rowH * 0.18)
+        .attr("width", matchW).attr("height", rowH * 0.64)
+        .attr("opacity", matchW > 0 ? 0.95 * opAdj : 0);
+
+      T(sel.select("rect.active-deficit"))
+        .attr("x", dividerX).attr("y", rowH * 0.18)
+        .attr("width", aDef * scale).attr("height", rowH * 0.64)
+        .attr("opacity", aDef > 0 ? 0.85 : 0);
+
+      const xAbandon = dividerX + (aDef * scale);
+      T(sel.select("rect.abandoned-deficit-fill"))
+        .attr("x", xAbandon).attr("y", rowH * 0.18)
+        .attr("width", bDef * scale).attr("height", rowH * 0.64)
+        .attr("opacity", bDef > 0 ? 0.18 : 0);
+      T(sel.select("rect.abandoned-deficit-stroke"))
+        .attr("x", xAbandon).attr("y", rowH * 0.18)
+        .attr("width", bDef * scale).attr("height", rowH * 0.64)
+        .attr("opacity", bDef > 0 ? 1 : 0);
+
+      const readoutFill = isAbandoned ? COL.signal
+        : isProcessed ? (dimRow ? "#6b6a54" : COL.mint)
+        : COL.signal;
+      const readoutSel = sel.select("text.readout");
+      const readoutX = dividerX + (totalDef(n) * scale) + 6;
+      const readoutTrans = T(readoutSel)
+        .attr("x", readoutX).attr("y", rowH / 2 + 3)
+        .attr("fill", readoutFill)
         .attr("font-weight", isProcessed ? "normal" : "bold")
-        .attr("opacity", dimRow ? 0.45 : 1)
-        .text(suffix);
+        .attr("opacity", dimRow ? 0.45 : 1);
+      if (snap) {
+        readoutSel.text(`${ach}/${t}`);
+      } else {
+        readoutTrans.tween("readout-text", function () {
+          const node = this;
+          const startAch = parseInt((node.textContent || "0").split("/")[0], 10) || 0;
+          const interp = d3.interpolateNumber(startAch, ach);
+          return function (k) { node.textContent = `${Math.round(interp(k))}/${t}`; };
+        });
+      }
     });
-
-    // Vertical divider line at the deficit point. Solid segment for the
-    // shared "filled ↔ deficit" boundary.
-    g.append("line")
-      .attr("x1", dividerX).attr("x2", dividerX)
-      .attr("y1", -2).attr("y2", ih + 2)
-      .attr("stroke", "#6b6a54").attr("stroke-width", 0.8)
-      .attr("stroke-dasharray", "2 2").attr("opacity", 0.7);
-    g.append("text")
-      .attr("x", dividerX).attr("y", -4)
-      .attr("text-anchor", "middle")
-      .attr("font-family", "Special Elite, Courier New, monospace")
-      .attr("font-size", "9.5px")
-      .attr("fill", "#6b6a54")
-      .text("← filled · deficit →");
-
-    // Header label naming the queue ordering rule.
-    const orderLabel = (orderMode === "static")
-      ? "queue: initial residual desc"
-      : (orderMode === "dynamic")
-      ? "queue: current residual desc"
-      : "stub list (id-asc)";
-    barSvg.append("text")
-      .attr("x", W / 2).attr("y", H - 6)
-      .attr("text-anchor", "middle")
-      .attr("font-family", "Special Elite, Courier New, monospace")
-      .attr("font-size", "10px")
-      .attr("fill", "#6b6a54")
-      .style("letter-spacing", ".1em")
-      .text(orderLabel);
-    barSvg.attr("viewBox", "0 0 " + W + " " + H);
   }
 
   // ── Per-section setup helper ──
@@ -996,13 +908,18 @@ window.MathJax = {
       showLabels: true,
       edges: baseEdges,
       pinned: true,
-      pad: 40,
+      pad: 40, padRight: 340,
       nodeColor: (id) => {
         const c = CLUSTER_OF[id];
         return COL[c] || COL.paper_3;
       },
     });
     NETGEN.makeTooltip(viz, document.getElementById(`g-${prefix}`));
+    NETGEN.mountGxPanel({
+      viz, hostId: cyId, prefix: `g-${prefix}-bars-pnl`,
+      title: "deficit", maxWidth: "26rem",
+      bodyHTML: `<svg id="${barsId}" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet" style="display:block;width:18rem;height:auto"></svg>`,
+    });
     // Spoke layer applies pick + dim during the active animation by
     // default. On settle, it strips both classes; this onSettle
     // restores the matcher's deficit-driven baseline (deficit-zero
@@ -1156,7 +1073,7 @@ window.MathJax = {
       totEl.textContent = String(steps.length - 1);
       descEl.innerHTML = `<span class="st">step ${stepIdx}</span> &middot; ${s.msg}`;
       NETGEN.retypeset(descEl);
-      renderBars(barsId, s.residual, s.edges, orderMode, s.unplaced, s.exitOrder);
+      renderBars(barsId, s.residual, s.edges, orderMode, s.unplaced, s.exitOrder, !!snap);
       // Graph dim layered on top of base styling:
       //   non-deficit nodes (no stubs to begin with): always dim. They
       //     never participate in the matcher.
@@ -1265,18 +1182,23 @@ window.MathJax = {
     showLabels: true,
     edges: baseEdges,
     pinned: true,
-    pad: 40,
+    pad: 40, padRight: 340,
     nodeColor: (id) => {
       const c = CLUSTER_OF[id];
       return COL[c] || COL.paper_3;
     },
   });
   NETGEN.makeTooltip(inputViz, document.getElementById("g-input"));
+  NETGEN.mountGxPanel({
+    viz: inputViz, hostId: "g-input-cy", prefix: "g-input-bars-pnl",
+    title: "deficit", maxWidth: "26rem",
+    bodyHTML: '<svg id="g-input-bars" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet" style="display:block;width:18rem;height:auto"></svg>',
+  });
 
   function renderInputPanel() {
     // Right panel: deficit bars rendered as the "initial residual" state
     // via the same renderBars pipeline as the walkers.
-    renderBars("g-input-bars", { ...DEFICIT }, [], "static", {}, []);
+    renderBars("g-input-bars", { ...DEFICIT }, [], "static", {}, [], true);
     // Left panel: dim non-deficit nodes.
     inputViz.clearAllNodeClass("dim");
     NODES.forEach(n => {
