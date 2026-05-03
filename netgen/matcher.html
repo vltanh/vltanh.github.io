@@ -98,7 +98,7 @@
 <section class="hook">
   <p>Every generator in this project ends with an output that is "close to" the input degree sequence but not exact. Dedup, rewire, and outlier handling each remove a few stubs from each node's target. The matcher's job is the last one in line: pop the node still missing the most edges, find a partner that also still has room and is not already connected to it, drop the edge in. Repeat until either the deficit list is empty or every remaining pair is blocked.</p>
   <p>That last word, "blocked", is where the algorithm choices matter. The same residual can be drained several different ways, and they disagree on which pairs to try, in what order, and what to do when a deficit cannot be closed cleanly. The choices show up in the output degree sequence and in how many stubs end up unplaced. On top of that, each algorithm has a cluster-preserving twin that adds a second budget — a per-(block, block) edge cap derived from the reference clustering — so the matcher cannot trade block-level structure for closing the degree gap.</p>
-  <p>The original code shipped with two two-step "hybrid" variants (rewire then true-greedy, both global and cluster-preserving). Those are now exposed as a more general feature: <strong>any sequence of matchers can be stacked</strong>. The next pass picks up whatever stubs the previous pass could not place. The same hybrid behaviour is recovered as a two-element stack, and new useful chains become available — for instance, a cluster-preserving pass first to anchor block structure, then a plain pass to close the residual that the budget gate refused.</p>
+  <p><strong>Any sequence of matchers can be stacked.</strong> The CLI accepts a comma-separated list; each algorithm runs in turn on the residual the previous one left behind. A single name is a one-step stack. Two-step chains pair a stochastic bulk drain with a deterministic tail; longer chains compose cluster-preserving and plain passes when degree mass and cluster structure both matter.</p>
 </section>
 
 <!-- ─────────── input deficit ─────────── -->
@@ -131,7 +131,7 @@
   <p>The matcher is selected by name. A single name picks one algorithm; a comma-separated list picks a stack — each algorithm runs in turn on the residual the previous one left behind. Cluster-preserving algorithms additionally consume the reference clustering and a derived per-(block, block) edge budget; non-cluster-preserving ones do not need it. The pipelines that wrap the matcher take care of attaching the clustering files when any step in the stack is cluster-preserving.</p>
   <div class="callout">
     <div class="tag">when each generator calls it</div>
-    <p>EC-SBM-v1 uses <code>greedy</code> for byte-compatibility with the original paper. EC-SBM-v2 and EC-SBM-v3 default to <code>cluster_preserving_true_greedy</code>. The standalone SBM generator defaults to the same. ABCD, ABCD+o, LFR, and nPSO leave the matcher off by default; their pipelines turn it on as an opt-in step, usually paired with the <em>--remap</em> mode covered at the bottom of the page (their output node IDs do not align with the input's).</p>
+    <p>EC-SBM-v1 uses <code>greedy</code> for byte-stable output against its reference implementation. EC-SBM-v2 and EC-SBM-v3 default to <code>cluster_preserving_true_greedy</code>. The standalone SBM generator defaults to the same. ABCD, ABCD+o, LFR, and nPSO leave the matcher off by default; their pipelines turn it on as an opt-in step, usually paired with the <em>--remap</em> mode covered at the bottom of the page (their output node IDs do not align with the input's).</p>
   </div>
 </section>
 
@@ -184,15 +184,11 @@
     </div>
     <div class="graph-canvas" id="g-greedy-cy"></div>
     <div class="widget-row tight">
-      <button class="btn" id="g-greedy-rand-step" type="button" title="replay this step's animation">random step</button>
-      <button class="btn" id="g-greedy-rand-all" type="button" title="replay every step's animation from the start">random all</button>
-      <span class="step-label" id="g-greedy-real">deterministic &middot; step: replay this step &middot; all: replay from start</span>
-    </div>
-    <div class="widget-row tight">
       <button class="btn" id="g-greedy-start" type="button">to start</button>
       <button class="btn" id="g-greedy-prev" type="button">back</button>
       <button class="btn primary" id="g-greedy-next" type="button">next</button>
       <button class="btn" id="g-greedy-end" type="button">to end</button>
+      <span class="step-label" id="g-greedy-real">deterministic; same output every run</span>
     </div>
     <div class="step-desc" id="g-greedy-desc">click <em>next</em> to advance.</div>
   </div>
@@ -211,15 +207,11 @@
     </div>
     <div class="graph-canvas" id="g-cpgreedy-cy"></div>
     <div class="widget-row tight">
-      <button class="btn" id="g-cpgreedy-rand-step" type="button" title="replay this step's animation">random step</button>
-      <button class="btn" id="g-cpgreedy-rand-all" type="button" title="replay every step's animation from the start">random all</button>
-      <span class="step-label" id="g-cpgreedy-real">deterministic &middot; step: replay this step &middot; all: replay from start</span>
-    </div>
-    <div class="widget-row tight">
       <button class="btn" id="g-cpgreedy-start" type="button">to start</button>
       <button class="btn" id="g-cpgreedy-prev" type="button">back</button>
       <button class="btn primary" id="g-cpgreedy-next" type="button">next</button>
       <button class="btn" id="g-cpgreedy-end" type="button">to end</button>
+      <span class="step-label" id="g-cpgreedy-real">deterministic; same output every run</span>
     </div>
     <div class="step-desc" id="g-cpgreedy-desc">click <em>next</em> to advance.</div>
   </div>
@@ -238,15 +230,11 @@
     </div>
     <div class="graph-canvas" id="g-truegreedy-cy"></div>
     <div class="widget-row tight">
-      <button class="btn" id="g-truegreedy-rand-step" type="button" title="replay this step's animation">random step</button>
-      <button class="btn" id="g-truegreedy-rand-all" type="button" title="replay every step's animation from the start">random all</button>
-      <span class="step-label" id="g-truegreedy-real">deterministic &middot; step: replay this step &middot; all: replay from start</span>
-    </div>
-    <div class="widget-row tight">
       <button class="btn" id="g-truegreedy-start" type="button">to start</button>
       <button class="btn" id="g-truegreedy-prev" type="button">back</button>
       <button class="btn primary" id="g-truegreedy-next" type="button">next</button>
       <button class="btn" id="g-truegreedy-end" type="button">to end</button>
+      <span class="step-label" id="g-truegreedy-real">deterministic; same output every run</span>
     </div>
     <div class="step-desc" id="g-truegreedy-desc">click <em>next</em> to advance.</div>
   </div>
@@ -261,15 +249,11 @@
     </div>
     <div class="graph-canvas" id="g-cptruegreedy-cy"></div>
     <div class="widget-row tight">
-      <button class="btn" id="g-cptruegreedy-rand-step" type="button" title="replay this step's animation">random step</button>
-      <button class="btn" id="g-cptruegreedy-rand-all" type="button" title="replay every step's animation from the start">random all</button>
-      <span class="step-label" id="g-cptruegreedy-real">deterministic &middot; step: replay this step &middot; all: replay from start</span>
-    </div>
-    <div class="widget-row tight">
       <button class="btn" id="g-cptruegreedy-start" type="button">to start</button>
       <button class="btn" id="g-cptruegreedy-prev" type="button">back</button>
       <button class="btn primary" id="g-cptruegreedy-next" type="button">next</button>
       <button class="btn" id="g-cptruegreedy-end" type="button">to end</button>
+      <span class="step-label" id="g-cptruegreedy-real">deterministic; same output every run</span>
     </div>
     <div class="step-desc" id="g-cptruegreedy-desc">click <em>next</em> to advance.</div>
   </div>
@@ -379,14 +363,23 @@
 <section class="stage">
   <div class="stage-num">stackable matchers</div>
   <h2>Chain matchers. Each one cleans up what the previous left behind.</h2>
-  <p>The four families above and their cluster-preserving twins are not exclusive. The matcher CLI accepts a comma-separated list of algorithm names, runs them in order, and feeds whatever stubs are still unplaced from one step into the next. A single name is a one-element stack — the legacy single-algorithm behaviour. A two-name list reproduces the original "hybrid" shape: the first algorithm drains the bulk of the deficit, the second mops up the tail. Three or more elements are a more flexible chain.</p>
+  <p>The four families above and their cluster-preserving twins are not exclusive. The matcher CLI accepts a comma-separated list of algorithm names, runs them in order, and feeds whatever stubs are still unplaced from one step into the next. A single name is a one-element stack. A two-name list pairs a bulk drain with a finishing pass: the first algorithm closes the easy edges, the second mops up the tail. Three or more elements are a longer chain.</p>
   <p>Each step uses its own random seed, derived from the matcher's overall seed, so randomness in one step does not bleed into the priorities of the next. The shared state across steps is the running graph itself plus the deficit dictionary, both updated as edges land. Cluster-preserving steps additionally share the per-(block, block) edge budget, which every cluster-preserving step in the chain decrements; non-cluster-preserving steps ignore the budget entirely. Putting a non-cluster-preserving step <em>after</em> a cluster-preserving one is the way to recover degree mass that the budget gate refused, at the cost of letting that final step place a few edges in buckets the cluster-preserving steps would have refused.</p>
   <div class="callout">
     <div class="tag">stacks worth knowing</div>
-    <p><b>rewire, true_greedy</b> &mdash; replaces the old global "hybrid". Stochastic bulk drain, deterministic tail.</p>
-    <p><b>cluster_preserving_rewire, cluster_preserving_true_greedy</b> &mdash; replaces the old "cluster_preserving_hybrid". Same shape, every step gated by the bucket budget.</p>
-    <p><b>cluster_preserving_true_greedy, true_greedy</b> &mdash; cluster-preserving first, then plain. Anchors block structure on the bulk of the residual; the plain pass at the end places only the few edges the budget gate refused, so degree mass closes without giving up the bulk of the cluster-level fidelity.</p>
+    <p><b>rewire, true_greedy</b> &mdash; stochastic bulk drain, deterministic tail.</p>
+    <p><b>cluster_preserving_rewire, cluster_preserving_true_greedy</b> &mdash; same shape, every step gated by the bucket budget.</p>
+    <p><b>cluster_preserving_true_greedy, true_greedy</b> &mdash; cluster-preserving first, then plain. Closes the residual degree gap that the budget gate refused, at a measurable cost to cluster-shape stats (see the warning below).</p>
     <p><b>cluster_preserving_rewire, cluster_preserving_true_greedy, true_greedy</b> &mdash; the most thorough chain. Stochastic bulk drain inside the buckets, deterministic in-bucket cleanup, then a plain finishing pass on whatever the buckets refused.</p>
+  </div>
+  <div class="callout warn">
+    <div class="tag">stacking is not a free win</div>
+    <p>A 33-network sweep on EC-SBM v2 against <code>leiden-cpm-0.0001</code> (full report at <code>examples/bench_ecsbm_stack/report.md</code>) found:</p>
+    <ul>
+      <li>The two-step stack closes degree mass &mdash; n_edges gap drops from ~0.5% (single CP-TG) to ~0.4% &mdash; but conductance EMD goes 5x worse, mixing-parameter EMD 2x worse, and connected-component sizes drift away from the reference. Paired Wilcoxon p &lt; 1e-4 on every cluster-shape metric.</li>
+      <li>The three-step stack does not improve the trade-off; it is faster (CP-rewire batches stub draws) but regresses the same cluster-shape stats further.</li>
+    </ul>
+    <p>Use the single <code>cluster_preserving_true_greedy</code> when cluster-shape fidelity is the priority and a 0.5% degree-mass gap is acceptable. Use the stack when degree exactness matters more than cluster boundaries (for example, downstream code that asserts on exact m, or generators with heavily-refined clusterings where the budget gate disconnects small clusters &mdash; see the douban / piecewise note in <code>examples/bench_ecsbm/report.md</code>).</p>
   </div>
 </section>
 
@@ -427,8 +420,13 @@
       </tr>
     </tbody>
   </table>
-  <p>The trade-off is visible at a glance. Plain <code>true_greedy</code> always closes the deficit but is blind to clusters. The cluster-preserving variant nails clusters but leaves a few percent of the deficit unplaced. The stack recovers most of what the budget refused without giving up the cluster fidelity for the bulk of the edges. The three-step stack adds a small amount of stochastic mixing that helps on hub-heavy inputs.</p>
-  <p class="muted small">Numbers come from running <code>run_generator.sh --generator sbm</code> on dnc with seed 1 and toggling <code>--degree-matcher</code> across the four configurations above; the SBM output is identical across all four runs (same graph-tool seed) so the differences are purely matcher behaviour.</p>
+  <p>The dnc table makes stacking look like a clean win on closing the deficit. The 33-network bench in <code>examples/bench_ecsbm_stack/report.md</code> shows a different picture: the cleanup edges land outside the reference clustering's per-block budgets, which is exactly what the budget gate was trying to prevent. Conductance EMD goes 5x worse, mixing-parameter EMD 2x worse, and connected-component sizes drift away from the reference. So the stack closes degree mass at a meaningful cost to the very cluster-shape stats the cluster-preserving family was designed for.</p>
+  <p>The dnc fixture is small enough that the cleanup spike does not dominate the per-net averages. On real benchmark networks (10K&ndash;200K nodes) the regression on cluster-shape stats is significant at α = 0.01 across nearly every relevant metric. Default to the single <code>cluster_preserving_true_greedy</code> matcher; reach for the stack only when one of these holds:</p>
+  <ul>
+    <li><strong>Downstream contract on exact n_edges</strong> &mdash; e.g., a comparator that asserts on m. The 0.5% deficit becomes blocking.</li>
+    <li><strong>Heavily-refined clusterings (piecewise CM and similar)</strong> &mdash; small refined clusters can have tiny per-block budgets that the gate exhausts before the matcher can bridge them, leaving the cluster disconnected. The stack closes those bridge edges. See the douban / piecewise case in <code>examples/bench_ecsbm/report.md</code> where single CP-TG produced n_concomp SRD = 0.99 on douban; the stack closes it.</li>
+  </ul>
+  <p class="muted small">Numbers come from running <code>run_generator.sh --generator sbm</code> on dnc with seed 1 and toggling <code>--degree-matcher</code> across the four configurations above; the SBM output is identical across all four runs (same graph-tool seed) so the differences are purely matcher behaviour. The 33-network bench results referenced above use EC-SBM v2 + 5 seeds per cell with paired Wilcoxon over networks within each bucket.</p>
 </section>
 
 <!-- ─────────── --remap mode ─────────── -->
@@ -505,7 +503,7 @@ window.MathJax = {
     title: "callers",
     siblings: [
       { gen: "ec-sbm-v1", label: "EC-SBM v1",
-        diff: "Hardcodes <code>greedy</code> in stage 4. Inherited from the legacy paper implementation; switching to <code>true_greedy</code> is a v2 design choice." },
+        diff: "Stage 4 fixed to <code>greedy</code> for byte-stable output against the reference implementation; v2 picks <code>cluster_preserving_true_greedy</code> instead." },
       { gen: "ec-sbm-v2", label: "EC-SBM v2",
         diff: "Default <code>true_greedy</code>, with the dropdown above as the menu. Stage 4 in the v2 page is a thin wrapper over this tool." },
     ],
@@ -699,202 +697,179 @@ window.MathJax = {
       makeKernelPayloadCP(),
       { rng: makeLCG(seed), initialState, keepResidual });
   }
-  // ── Deficit bars renderer (d3-join + tween, sbm g4 idiom) ──
-  // First call lays down the static chrome (root group, divider, footer
-  // label) and seeds one row per deficit node. Subsequent calls reuse
-  // the same DOM via keyed join + d3 transition so widths / positions /
-  // counts tween between steps. snap=true skips tween (used by to-start /
-  // to-end / random-all paths so the reset is instant).
-  // orderMode picks the row order:
-  //   'static':  initial residual desc, id-asc tiebreak (greedy)
-  //   'dynamic': active rows by current residual desc, exit rows in
-  //              exitOrder, then dropped rest by id-asc (true_greedy /
-  //              random_greedy)
-  //   'id':      id-ascending (rewire / cprewire)
+  // ── Deficit bars renderer (sbm g4 idiom) ──
+  // Mirrors sbm.html's renderDegBars (lines 1250–1336): one row per
+  // node, stable target-desc + id-asc order, dividerX pivot with
+  // achieved (mint) extending leftward and the deficit (red) extending
+  // rightward. d3 keyed join + merged.transition ensures every row
+  // attribute (transform, x, width, opacity) tweens between renders;
+  // the readout integer interpolates via d3.interpolateNumber. The
+  // matcher-specific extension is splitting the deficit bar into an
+  // active stripe (solid red) and an abandoned stripe (faint red +
+  // dashed stroke) when the algo logs gridlock for a node.
+  //
+  // No snap toggle: every render after the first lays its updates
+  // through a transition, matching sbm/abcd's "always animate" pattern.
+  // The first render finds an empty SVG, the enter() join paints in
+  // place at the final attrs, and the next render is the first that
+  // sees a non-empty rowSel and starts tweening.
   const BARS_DUR = 540;
   const BARS_W = 340, BARS_H = 360;
-  const BARS_PAD = { top: 14, right: 56, bottom: 22, left: 56 };
-  function renderBars(svgId, residual, matchEdges, orderMode, unplaced, exitOrder, snap) {
+  const BARS_PAD = { top: 12, right: 50, bottom: 22, left: 38 };
+  function renderBars(svgId, residual, matchEdges, unplaced) {
     const barSvg = d3.select("#" + svgId);
     if (!barSvg.node()) return;
+    barSvg.attr("viewBox", `0 0 ${BARS_W} ${BARS_H}`);
     unplaced = unplaced || {};
-    exitOrder = exitOrder || [];
+    residual = residual || {};
     const iw = BARS_W - BARS_PAD.left - BARS_PAD.right;
     const ih = BARS_H - BARS_PAD.top - BARS_PAD.bottom;
-    const activeDef = n => (residual[n] || 0);
-    const abandonedDef = n => (unplaced[n] || 0);
-    const totalDef = n => activeDef(n) + abandonedDef(n);
 
-    let rows;
-    if (orderMode === "static") {
-      rows = DEFICIT_NODES.slice().sort((a, b) => (DEFICIT[b] - DEFICIT[a]) || (a - b));
-    } else if (orderMode === "id") {
-      rows = DEFICIT_NODES.slice().sort((a, b) => a - b);
-    } else {
-      const exited = exitOrder.filter(n => DEFICIT_NODES.includes(n));
-      const active = DEFICIT_NODES.filter(n => activeDef(n) > 0)
-        .sort((a, b) => (activeDef(b) - activeDef(a)) || (a - b));
-      const rest = DEFICIT_NODES
-        .filter(n => activeDef(n) === 0 && !exited.includes(n))
-        .sort((a, b) => a - b);
-      rows = active.concat(exited).concat(rest);
-    }
-    const rowH = ih / Math.max(1, rows.length);
+    // Row order: sbm g4's "target desc + id asc" — stable across rerolls
+    // and across matcher steps so the eye can track the same node.
+    const orderedNodes = NODES.slice()
+      .sort((a, b) => (targetDeg(b) - targetDeg(a)) || (a - b));
+    const y = d3.scaleBand()
+      .domain(orderedNodes.map(String)).range([0, ih]).padding(0.24);
+
     const cBase = {};
     NODES.forEach(n => { cBase[n] = (DEGREES[n] || 0); });
     const cMatch = {};
-    matchEdges.forEach(([u, v]) => { cMatch[u] = (cMatch[u] || 0) + 1; cMatch[v] = (cMatch[v] || 0) + 1; });
-    const maxAchieved = Math.max(0, ...rows.map(n => (cBase[n] || 0) + (cMatch[n] || 0)));
-    const maxDeficit = Math.max(1, ...rows.map(n => totalDef(n) || DEFICIT[n] || 0));
-    const totalUnits = maxAchieved + maxDeficit;
-    const scale = totalUnits > 0 ? iw / totalUnits : 0;
-    const dividerX = maxAchieved * scale;
-    const anyActive = rows.some(n => activeDef(n) > 0);
+    matchEdges.forEach(([u, v]) => {
+      cMatch[u] = (cMatch[u] || 0) + 1; cMatch[v] = (cMatch[v] || 0) + 1;
+    });
+    const achOf = n => (cBase[n] || 0) + (cMatch[n] || 0);
+    const activeDef = n => (residual[n] || 0);
+    const abandonedDef = n => (unplaced[n] || 0);
+    const lossOf = n => Math.max(0, targetDeg(n) - achOf(n));
 
-    barSvg.attr("viewBox", `0 0 ${BARS_W} ${BARS_H}`);
+    const maxAchieved = d3.max(orderedNodes, achOf) || 1;
+    const maxLoss = d3.max(orderedNodes, lossOf) || 0;
+    const totalUnits = maxAchieved + maxLoss + 1;
+    const scale = iw / totalUnits;
+    const dividerX = maxAchieved * scale;
+
+    // Static chrome — created once. Header label, footer label, axis,
+    // divider line, divider caption.
     let root = barSvg.select("g.bars-root");
+    let yAxisG, gBars;
     if (root.empty()) {
       root = barSvg.append("g").attr("class", "bars-root")
         .attr("transform", `translate(${BARS_PAD.left},${BARS_PAD.top})`);
+      yAxisG = root.append("g").attr("class", "bars-yaxis");
+      gBars = root.append("g").attr("class", "bars-rows");
       root.append("line").attr("class", "divider")
         .attr("y1", -2).attr("y2", ih + 2)
         .attr("stroke", "#6b6a54").attr("stroke-width", 0.8)
         .attr("stroke-dasharray", "2 2").attr("opacity", 0.7);
-      root.append("text").attr("class", "divider-label")
-        .attr("y", -4).attr("text-anchor", "middle")
-        .attr("font-family", "Special Elite, Courier New, monospace")
-        .attr("font-size", "9.5px").attr("fill", "#6b6a54")
-        .text("← filled · deficit →");
-      barSvg.append("text").attr("class", "footer-label")
-        .attr("x", BARS_W / 2).attr("y", BARS_H - 6)
-        .attr("text-anchor", "middle")
-        .attr("font-family", "Special Elite, Courier New, monospace")
-        .attr("font-size", "10px").attr("fill", "#6b6a54")
-        .style("letter-spacing", ".1em");
+      barSvg.append("text").attr("class", "node-cap")
+        .attr("x", BARS_PAD.left - 26).attr("y", BARS_PAD.top - 4)
+        .style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace")
+        .style("font-size", "10px").text("node");
+      barSvg.append("text").attr("class", "footer-cap")
+        .attr("x", BARS_W / 2).attr("y", BARS_H - 4)
+        .attr("text-anchor", "middle").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace")
+        .style("font-size", "10.5px")
+        .text("degree (mint = achieved, red = deficit)");
+    } else {
+      yAxisG = root.select("g.bars-yaxis");
+      gBars = root.select("g.bars-rows");
     }
-    const T = sel => snap ? sel : sel.transition("bars").duration(BARS_DUR).ease(d3.easeCubicInOut);
-    T(root.select("line.divider")).attr("x1", dividerX).attr("x2", dividerX);
-    T(root.select("text.divider-label")).attr("x", dividerX);
-    barSvg.select("text.footer-label").text(
-      orderMode === "static" ? "queue: initial residual desc"
-      : orderMode === "dynamic" ? "queue: current residual desc"
-      : "stub list (id-asc)"
-    );
 
-    const rowSel = root.selectAll("g.bar-row").data(rows, d => d);
-    rowSel.exit().remove();
-    const rowEnter = rowSel.enter().append("g")
+    y.domain(orderedNodes.map(String));
+    yAxisG.call(d3.axisLeft(y).tickSize(0).tickPadding(6));
+    yAxisG.selectAll("text").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace")
+      .style("font-size", "10px");
+    root.selectAll(".domain").style("stroke", "#b9a263");
+    root.selectAll(".tick line").style("stroke", "#cdbf8d");
+
+    // Row join — keyed by node id so the merged transition fires across
+    // step transitions (same DOM survives, attrs tween).
+    const rows = gBars.selectAll(".bar-row").data(orderedNodes, d => d);
+    rows.exit().remove();
+    const enter = rows.enter().append("g")
       .attr("class", "bar-row")
-      .attr("data-id", d => String(d))
-      .attr("transform", (d, i) => `translate(0,${i * rowH})`);
-    rowEnter.append("rect").attr("class", "row-hl")
-      .attr("x", -2).attr("width", iw + 4).attr("fill", "#f6e15a");
-    rowEnter.append("rect").attr("class", "left-pill")
-      .attr("x", -52).attr("width", 4).attr("rx", 1.5);
-    rowEnter.append("text").attr("class", "id-label")
-      .attr("x", -10).attr("text-anchor", "end")
-      .attr("font-family", "Special Elite, Courier New, monospace")
-      .attr("font-size", "10.5px").text(d => d);
-    rowEnter.append("rect").attr("class", "achieved-base").attr("fill", COL.edge_stage2);
-    rowEnter.append("rect").attr("class", "achieved-match").attr("fill", COL.edge_stage4);
-    rowEnter.append("rect").attr("class", "active-deficit")
+      .attr("data-id", d => String(d));
+    enter.append("rect").attr("class", "achieved-base")
+      .attr("y", 0).attr("height", y.bandwidth())
+      .attr("fill", COL.edge_stage2).attr("opacity", 0.9);
+    enter.append("rect").attr("class", "achieved-match")
+      .attr("y", 0).attr("height", y.bandwidth())
+      .attr("fill", COL.mint).attr("opacity", 0.92);
+    enter.append("rect").attr("class", "active-deficit")
+      .attr("y", 0).attr("height", y.bandwidth())
       .attr("fill", COL.signal).attr("opacity", 0.85);
-    rowEnter.append("rect").attr("class", "abandoned-deficit-fill")
+    enter.append("rect").attr("class", "abandoned-fill")
+      .attr("y", 0).attr("height", y.bandwidth())
       .attr("fill", COL.signal).attr("opacity", 0.18);
-    rowEnter.append("rect").attr("class", "abandoned-deficit-stroke")
+    enter.append("rect").attr("class", "abandoned-stroke")
+      .attr("y", 0).attr("height", y.bandwidth())
       .attr("fill", "none").attr("stroke", COL.signal)
       .attr("stroke-width", 1).attr("stroke-dasharray", "3 2");
-    rowEnter.append("text").attr("class", "readout")
+    enter.append("text").attr("class", "dlbl")
+      .attr("dominant-baseline", "central")
+      .attr("y", y.bandwidth() / 2)
       .attr("font-family", "Special Elite, Courier New, monospace")
-      .attr("font-size", "10.5px");
+      .attr("font-size", "10px")
+      .attr("fill", "#2f3a54");
 
-    const merged = rowEnter.merge(rowSel);
-    T(merged).attr("transform", (d, i) => `translate(0,${i * rowH})`);
+    const merged = enter.merge(rows);
+    const ease = d3.easeCubicInOut;
+    const tform = d => `translate(0,${y(String(d))})`;
+    merged.transition("bars-row").duration(BARS_DUR).ease(ease)
+      .attr("transform", tform);
 
-    merged.each(function (n) {
-      const sel = d3.select(this);
-      const t = targetDeg(n);
-      const aBase = cBase[n] || 0;
-      const aMatch = cMatch[n] || 0;
-      const aDef = activeDef(n);
-      const bDef = abandonedDef(n);
-      const ach = aBase + aMatch;
-      const isActive = aDef > 0;
-      const isAbandoned = !isActive && bDef > 0;
-      const isProcessed = !isActive && !isAbandoned;
-      const dimRow = anyActive && isProcessed;
-      const opAdj = dimRow ? 0.35 : 1;
+    // Achieved base segment (input degrees, faint).
+    const baseW = d => (cBase[d] || 0) * scale;
+    const matchW = d => (cMatch[d] || 0) * scale;
+    const filledLeft = d => dividerX - (baseW(d) + matchW(d));
+    merged.select("rect.achieved-base")
+      .transition("bars-row").duration(BARS_DUR).ease(ease)
+      .attr("x", filledLeft).attr("width", baseW);
+    merged.select("rect.achieved-match")
+      .transition("bars-row").duration(BARS_DUR).ease(ease)
+      .attr("x", d => filledLeft(d) + baseW(d)).attr("width", matchW);
+    merged.select("rect.active-deficit")
+      .transition("bars-row").duration(BARS_DUR).ease(ease)
+      .attr("x", dividerX)
+      .attr("width", d => activeDef(d) * scale);
+    merged.select("rect.abandoned-fill")
+      .transition("bars-row").duration(BARS_DUR).ease(ease)
+      .attr("x", d => dividerX + activeDef(d) * scale)
+      .attr("width", d => abandonedDef(d) * scale);
+    merged.select("rect.abandoned-stroke")
+      .transition("bars-row").duration(BARS_DUR).ease(ease)
+      .attr("x", d => dividerX + activeDef(d) * scale)
+      .attr("width", d => abandonedDef(d) * scale)
+      .attr("opacity", d => abandonedDef(d) > 0 ? 1 : 0);
 
-      T(sel.select("rect.row-hl"))
-        .attr("y", 1).attr("height", rowH - 2)
-        .attr("opacity", isActive ? 0.10 : 0);
+    // Readout: ach/target, integer-tweened.
+    const lblX = d => dividerX + (activeDef(d) + abandonedDef(d)) * scale + 5;
+    merged.select("text.dlbl")
+      .transition("bars-row").duration(BARS_DUR).ease(ease)
+      .attr("x", lblX)
+      .tween("dlbl-text", function (d) {
+        const node = this;
+        const startAch = parseInt((node.textContent || "0").split("/")[0], 10) || 0;
+        const endAch = achOf(d);
+        const tgt = targetDeg(d);
+        const i = d3.interpolateNumber(startAch, endAch);
+        return function (k) { node.textContent = Math.round(i(k)) + "/" + tgt; };
+      });
 
-      const pillFill = isProcessed ? COL.mint : COL.signal;
-      const pillOp = isProcessed && dimRow ? 0 : 0.85;
-      T(sel.select("rect.left-pill"))
-        .attr("y", rowH * 0.12).attr("height", rowH * 0.76)
-        .attr("fill", pillFill).attr("opacity", pillOp);
-
-      T(sel.select("text.id-label"))
-        .attr("y", rowH / 2 + 3)
-        .attr("fill", isAbandoned ? COL.signal : "#2f3a54")
-        .attr("font-weight", isProcessed ? "normal" : "bold")
-        .attr("opacity", dimRow ? 0.45 : 1);
-
-      const baseW = aBase * scale;
-      const matchW = aMatch * scale;
-      const filledLeft = dividerX - (baseW + matchW);
-      T(sel.select("rect.achieved-base"))
-        .attr("x", filledLeft).attr("y", rowH * 0.18)
-        .attr("width", baseW).attr("height", rowH * 0.64)
-        .attr("opacity", 0.9 * opAdj);
-      T(sel.select("rect.achieved-match"))
-        .attr("x", filledLeft + baseW).attr("y", rowH * 0.18)
-        .attr("width", matchW).attr("height", rowH * 0.64)
-        .attr("opacity", matchW > 0 ? 0.95 * opAdj : 0);
-
-      T(sel.select("rect.active-deficit"))
-        .attr("x", dividerX).attr("y", rowH * 0.18)
-        .attr("width", aDef * scale).attr("height", rowH * 0.64)
-        .attr("opacity", aDef > 0 ? 0.85 : 0);
-
-      const xAbandon = dividerX + (aDef * scale);
-      T(sel.select("rect.abandoned-deficit-fill"))
-        .attr("x", xAbandon).attr("y", rowH * 0.18)
-        .attr("width", bDef * scale).attr("height", rowH * 0.64)
-        .attr("opacity", bDef > 0 ? 0.18 : 0);
-      T(sel.select("rect.abandoned-deficit-stroke"))
-        .attr("x", xAbandon).attr("y", rowH * 0.18)
-        .attr("width", bDef * scale).attr("height", rowH * 0.64)
-        .attr("opacity", bDef > 0 ? 1 : 0);
-
-      const readoutFill = isAbandoned ? COL.signal
-        : isProcessed ? (dimRow ? "#6b6a54" : COL.mint)
-        : COL.signal;
-      const readoutSel = sel.select("text.readout");
-      const readoutX = dividerX + (totalDef(n) * scale) + 6;
-      const readoutTrans = T(readoutSel)
-        .attr("x", readoutX).attr("y", rowH / 2 + 3)
-        .attr("fill", readoutFill)
-        .attr("font-weight", isProcessed ? "normal" : "bold")
-        .attr("opacity", dimRow ? 0.45 : 1);
-      if (snap) {
-        readoutSel.text(`${ach}/${t}`);
-      } else {
-        readoutTrans.tween("readout-text", function () {
-          const node = this;
-          const startAch = parseInt((node.textContent || "0").split("/")[0], 10) || 0;
-          const interp = d3.interpolateNumber(startAch, ach);
-          return function (k) { node.textContent = `${Math.round(interp(k))}/${t}`; };
-        });
-      }
-    });
+    // Divider line stays put across renders (dividerX may shift if a
+    // node's achieved jumps past the prior max). Tween it too.
+    root.select("line.divider")
+      .transition("bars-row").duration(BARS_DUR).ease(ease)
+      .attr("x1", dividerX).attr("x2", dividerX);
   }
 
   // ── Per-section setup helper ──
-  // orderMode: 'static' | 'dynamic' | 'id'
   function setupAlgoSection(opts) {
-    const { prefix, algoFn, orderMode } = opts;
+    const { prefix, algoFn } = opts;
     const cyId   = `g-${prefix}-cy`;
     const barsId = `g-${prefix}-bars`;
     const stageEl = document.getElementById(`g-${prefix}-stage`);
@@ -950,153 +925,115 @@ window.MathJax = {
     let seed = 1;
     let steps = algoFn(seed);
     let stepIdx = 0;
-    let swapAnim = null;
     let lastRenderIdx = -1;
-    // Bumped each render() call. Combined with stepIdx into the spoke
-    // layer's justSeq so repeat-renders of the same step still register
-    // as a fresh handoff and re-trigger the bridge animation. Also lets
-    // the deterministic walkers' RandStep / RandAll fire a visual replay
-    // even though the algorithm output is unchanged.
-    let renderEpoch = 0;
-    function isLocked() { return spokeLockHeld || !!swapAnim; }
+    let lastRendered = [];
+    let firstRender = true;
+    function isLocked() { return spokeLockHeld; }
 
-    function render(snap) {
-      renderEpoch++;
-      const seqBase = stepIdx + renderEpoch * 1000000;
-      const s = steps[stepIdx];
-      // Replace match edges with the snapshot for this step.
-      viz.removeEdges(id => String(id).startsWith(`m-${prefix}-`));
-      if (swapAnim) { swapAnim.cancel(); swapAnim = null; }
-      const phase1Color = COL.edge_stage4;
-      // Spoke layer owns match edges. byNode[n].count = initial
-      // deficit. just is the active pair when the action places or
-      // attempts an edge; bridge red on invalid / fail.
-      const cfg = {};
-      DEFICIT_NODES.forEach(n => {
-        cfg[n] = { count: DEFICIT[n] || 0, color: phase1Color };
+    const matchColor = COL.edge_stage4;
+    const dropColor = COL.edge_drop;
+    const pairKey = (u, v) => u < v ? `${u}-${v}` : `${v}-${u}`;
+    function placedEntry(e) {
+      // Always copy through e.bad / e.color so playMany retains the
+      // bad-flagged appearance for failed pair attempts.
+      return Object.assign({}, e, {
+        color: e.bad ? dropColor : matchColor,
+        badColor: dropColor,
       });
-      // For repair_swap: place every cumulative edge, with the most-
-      // recently-added shown as the active just (mint bridge).
-      const placed = [];
-      const upto = Math.max(0, s.edges.length - (s.action === "add" || s.action === "repair_swap" ? 1 : 0));
-      for (let i = 0; i < upto; i++) {
-        const [u, v] = s.edges[i];
-        placed.push({ u, v, color: phase1Color, id: `m-${prefix}-${i}` });
-      }
-      let just = null;
-      let bridgeColor = phase1Color;
-      if (s.action === "add") {
-        const last = s.edges[s.edges.length - 1];
-        if (last) {
-          just = { u: last[0], v: last[1], color: phase1Color };
-          bridgeColor = phase1Color;
-        }
-      } else if (s.action === "pair_invalid" || s.action === "repair_fail" || s.action === "repair_skip") {
-        if (s.u != null && s.v != null) {
-          just = { u: s.u, v: s.v, color: COL.edge_drop, bad: true };
-          bridgeColor = COL.edge_drop;
-        }
-      }
-      // repair_swap is the 2-opt rewire: cut e1 (invalid) + e2
-      // (sacrificed valid), place newE1 + newE2. Drive it as the
-      // shared SBM-style swap animation: cuts retract into the 4
-      // affected stubs, stubs orbit to their new partner aim, new
-      // bridges grow. Triggered only on a forward step from the
-      // previous index so back / jump renders settle directly.
-      const isForwardSwap = !snap
-        && s.action === "repair_swap"
-        && lastRenderIdx === stepIdx - 1
-        && stepIdx > 0;
-      if (s.action === "repair_swap" && !isForwardSwap) {
-        // Settle directly into the post-swap state.
-        for (let i = upto; i < s.edges.length; i++) {
-          const [u, v] = s.edges[i];
-          placed.push({ u, v, color: phase1Color, id: `m-${prefix}-${i}` });
-        }
-        spokes.syncState({ byNode: cfg, placed, just: null, justSeq: seqBase, bridgeColor: phase1Color });
-      } else if (isForwardSwap) {
-        // Snap to the pre-swap state without e2 (e1 was never placed),
-        // then drive the parallel cut + parallel place animation via
-        // spokeLayer.playMany, then commit to the post-swap state.
-        const e1 = [s.u, s.v];
-        const e2 = [s.x, s.y];
-        const newE1 = s.edges[s.edges.length - 2];
-        const newE2 = s.edges[s.edges.length - 1];
-        const isE2 = (e) =>
-          (e.u === e2[0] && e.v === e2[1]) || (e.u === e2[1] && e.v === e2[0]);
-        const prePlaced = placed.filter(e => !isE2(e));
-        spokes.syncState({
-          byNode: cfg, placed: prePlaced, just: null,
-          justSeq: seqBase * 100, bridgeColor: phase1Color,
-        });
-        const e2Entry = placed.find(isE2);
-        const e2Id = (e2Entry && e2Entry.id) || `m-${prefix}-e2`;
-        const removes = [
-          // e1 is the failed pair currently surfaced in red; it was
-          // never placed so playMany treats it as a phantom remove
-          // and animates only its dissolution into stubs.
-          { u: e1[0], v: e1[1], id: `m-${prefix}-e1`, bad: true,
-            color: COL.edge_drop, badColor: COL.edge_drop },
-          { u: e2[0], v: e2[1], id: e2Id, bad: false,
-            color: phase1Color },
-        ];
-        const adds = [
-          { u: newE1[0], v: newE1[1], id: `m-${prefix}-${s.edges.length - 2}`,
-            color: phase1Color },
-          { u: newE2[0], v: newE2[1], id: `m-${prefix}-${s.edges.length - 1}`,
-            color: phase1Color },
-        ];
-        swapAnim = { cancel: () => {} };
-        spokes.playMany(removes, adds, () => {
-          swapAnim = null;
-          // Re-sync to the canonical post-swap placed list so ids
-          // stay stable for any subsequent step.
-          const finalPlaced = [];
-          for (let i = 0; i < s.edges.length; i++) {
-            const [u, v] = s.edges[i];
-            finalPlaced.push({ u, v, color: phase1Color, id: `m-${prefix}-${i}` });
-          }
-          spokes.syncState({
-            byNode: cfg, placed: finalPlaced, just: null,
-            justSeq: seqBase * 100 + 1, bridgeColor: phase1Color,
-          });
-          refreshButtons();
-        });
-        refreshButtons();
-      } else {
-        spokes.syncState({
-          byNode: cfg, placed, just, justSeq: seqBase, bridgeColor,
+    }
+    // Build the placed list at step k: every committed edge plus an
+    // optional bad-flagged virtual entry for the steps that surface a
+    // failed pair (pair_invalid / repair_fail / repair_skip). Stable id
+    // = canonical pair key so playManyDiff treats a node-rewire-style
+    // splice (repair_swap drops e2 and pushes newE1, newE2) as one
+    // remove + two adds, not three positional shifts.
+    function buildPlaced(s) {
+      const out = (s.edges || []).map(([u, v]) => ({
+        u, v, id: `m-${prefix}-${pairKey(u, v)}`,
+      }));
+      if ((s.action === "pair_invalid"
+           || s.action === "repair_fail"
+           || s.action === "repair_skip")
+          && s.u != null && s.v != null) {
+        out.push({
+          u: s.u, v: s.v, bad: true,
+          id: `m-${prefix}-bad-${stepIdx}`,
         });
       }
+      return out;
+    }
+    function byNodeFor(placedList) {
+      // Stub count per node = its incidence in the placed list. Spoke
+      // layer reads count for the rim count and re-uses node colour for
+      // stub stroke. Same idiom as abcd's byNodeFromList wrapper.
+      return NETGEN.spokeLayer.byNodeFromEdges(viz, placedList,
+        n => COL[CLUSTER_OF[parseInt(n.id, 10)]] || COL.paper_3);
+    }
+
+    function paintCaption(s) {
       stageEl.textContent = `step ${stepIdx} · ${s.action}`;
       curEl.textContent = String(stepIdx);
       totEl.textContent = String(steps.length - 1);
       descEl.innerHTML = `<span class="st">step ${stepIdx}</span> &middot; ${s.msg}`;
       NETGEN.retypeset(descEl);
-      renderBars(barsId, s.residual, s.edges, orderMode, s.unplaced, s.exitOrder, !!snap);
-      // Graph dim layered on top of base styling:
-      //   non-deficit nodes (no stubs to begin with): always dim. They
-      //     never participate in the matcher.
-      //   deficit nodes drained mid-walk (residual=0, unplaced=0): dim
-      //     while at least one other deficit node is still active.
-      //   abandoned (unplaced > 0): never dim. Their shortfall stays
-      //     visible.
-      //   end-state: when nothing is active any more, un-dim drained
-      //     deficit nodes (they read as "completed"), keep non-deficit
-      //     nodes dimmed.
-      // Spoke layer drives pick + dim during animation; on settle it
-      // calls applyBaseDim via onSettle. Cache the snapshot so that
-      // applyBaseDim sees this step's residual/unplaced. Skip the
-      // settled re-dim while an animation is in flight (the layer
-      // owns the dim during the just-fade) so we don't fight it.
+    }
+
+    function render(snap) {
+      const s = steps[stepIdx];
+      paintCaption(s);
+      renderBars(barsId, s.residual, s.edges, s.unplaced);
       lastResidual = s.residual;
       lastUnplaced = s.unplaced;
-      if (!spokes || !spokes.isAnimating || !spokes.isAnimating()) {
-        viz.clearAllNodeClass("dim");
+
+      const placedList = buildPlaced(s).map(placedEntry);
+      const byNode = byNodeFor(placedList);
+
+      if (firstRender) {
+        spokes.snapToState({
+          byNode, placed: placedList, just: null, justSeq: stepIdx,
+        });
+        firstRender = false;
+        lastRendered = placedList;
+        lastRenderIdx = stepIdx;
         applyBaseDim();
+        refreshButtons();
+        return;
       }
-      refreshButtons();
+
+      const adjacent = stepIdx === lastRenderIdx + 1
+                    || stepIdx === lastRenderIdx - 1;
+      if (snap || !adjacent) {
+        // Multi-step jump (to-start / to-end / random-all): chain the
+        // diff into a single playManyDiff so every changed entry runs
+        // its full cut/place animation concurrently — same idiom abcd's
+        // makeRewireRender uses for non-adjacent navigation.
+        NETGEN.playManyDiff(spokes, lastRendered, placedList, {
+          placedEntry: e => e, byNode,
+          onEmpty: () => spokes.snapToState({
+            byNode, placed: placedList, just: null, justSeq: stepIdx,
+          }),
+          onDone: () => { applyBaseDim(); refreshButtons(); },
+        });
+      } else {
+        // Adjacent forward / back step: spokes.playMany drives the
+        // shared orbit → grow → fan → colorize sequence on every diff
+        // entry. For "add" actions that's one add, for "repair_swap"
+        // that's one remove + two adds, for action types with no
+        // graph-side delta (gridlock_silent / done) the diff is empty
+        // and we snap so the bars still update under their own tween.
+        const fired = NETGEN.playManyDiff(spokes, lastRendered, placedList, {
+          placedEntry: e => e, byNode,
+          onEmpty: () => spokes.snapToState({
+            byNode, placed: placedList, just: null, justSeq: stepIdx,
+          }),
+          onDone: () => { applyBaseDim(); refreshButtons(); },
+        });
+        if (!fired) { applyBaseDim(); refreshButtons(); }
+      }
+      lastRendered = placedList;
       lastRenderIdx = stepIdx;
+      lastResidual = s.residual;
+      lastUnplaced = s.unplaced;
     }
 
     function spliceFromIdx(newSeed, idx) {
@@ -1118,32 +1055,22 @@ window.MathJax = {
       totId: `g-${prefix}-total`,
       getLocked: isLocked,
       onRender: (idx, snap) => { stepIdx = idx; render(snap); },
-      // For stochastic walkers, RandStep splices a new tail from the
-      // current step and RandAll reruns from scratch with a fresh seed.
-      // For deterministic walkers, both buttons are visual-replay only:
-      // the algorithm output is fixed by the deficit pile, so RandStep
-      // re-renders the current step (bumping renderEpoch makes the
-      // spoke layer re-trigger its bridge animation) and RandAll jumps
-      // back to step 0 so the user can re-watch the walker drain.
+      // Stochastic walkers reroll their seed: RandStep splices a fresh
+      // tail from the current step, RandAll restarts the trace from
+      // scratch. Deterministic walkers omit the random row in HTML so
+      // the controller never wires those buttons.
       onRandStep: stochastic ? (idx) => {
         if (idx <= 0) return;
         const newSeed = Math.floor(Math.random() * 1e9);
         spliceFromIdx(newSeed, idx);
         if (realEl) realEl.textContent = "rerolled from current step";
-      } : (idx) => {
-        if (idx <= 0) return;
-        if (realEl) realEl.textContent = "deterministic · replayed this step";
-      },
+      } : undefined,
       onRandAll: stochastic ? (idx) => {
         if (idx <= 0) return;
         const newSeed = Math.floor(Math.random() * 1e9);
         steps = algoFn(newSeed);
         if (realEl) realEl.textContent = "fresh roll · all picks reseeded";
-      } : (idx) => {
-        if (idx <= 0) return;
-        if (realEl) realEl.textContent = "deterministic · replaying from start";
-        ctl.set(0);
-      },
+      } : undefined,
     });
     return {
       reset: () => {
@@ -1159,19 +1086,17 @@ window.MathJax = {
   }
 
   // Wire one section per family + its cluster-preserving twin; collect
-  // reset handles for the input-reroll. The hybrid + cphybrid bindings
-  // were removed alongside their HTML sections; the equivalent
-  // composition is now exposed via the stack-driver page section, not
-  // a single-step viz here.
+  // reset handles for the input-reroll. Hybrid composition is exposed
+  // via the stack section on the page rather than as a single-step viz.
   const sectionHandles = [];
-  sectionHandles.push(setupAlgoSection({ prefix: "greedy",     algoFn: runGreedy,       orderMode: "static" }));
-  sectionHandles.push(setupAlgoSection({ prefix: "truegreedy", algoFn: runTrueGreedy,   orderMode: "dynamic" }));
-  sectionHandles.push(setupAlgoSection({ prefix: "randgreedy", algoFn: runRandomGreedy, orderMode: "dynamic", stochastic: true }));
-  sectionHandles.push(setupAlgoSection({ prefix: "rewire",     algoFn: runRewire,       orderMode: "id", stochastic: true }));
-  sectionHandles.push(setupAlgoSection({ prefix: "cpgreedy",       algoFn: runClusterPreservingGreedy,       orderMode: "static" }));
-  sectionHandles.push(setupAlgoSection({ prefix: "cptruegreedy",   algoFn: runClusterPreservingTrueGreedy,   orderMode: "dynamic" }));
-  sectionHandles.push(setupAlgoSection({ prefix: "cprandgreedy",   algoFn: runClusterPreservingRandomGreedy, orderMode: "dynamic", stochastic: true }));
-  sectionHandles.push(setupAlgoSection({ prefix: "cprewire",       algoFn: runClusterPreservingRewire,       orderMode: "id", stochastic: true }));
+  sectionHandles.push(setupAlgoSection({ prefix: "greedy",     algoFn: runGreedy, }));
+  sectionHandles.push(setupAlgoSection({ prefix: "truegreedy", algoFn: runTrueGreedy }));
+  sectionHandles.push(setupAlgoSection({ prefix: "randgreedy", algoFn: runRandomGreedy, stochastic: true }));
+  sectionHandles.push(setupAlgoSection({ prefix: "rewire",     algoFn: runRewire,       stochastic: true }));
+  sectionHandles.push(setupAlgoSection({ prefix: "cpgreedy",       algoFn: runClusterPreservingGreedy, }));
+  sectionHandles.push(setupAlgoSection({ prefix: "cptruegreedy",   algoFn: runClusterPreservingTrueGreedy }));
+  sectionHandles.push(setupAlgoSection({ prefix: "cprandgreedy",   algoFn: runClusterPreservingRandomGreedy, stochastic: true }));
+  sectionHandles.push(setupAlgoSection({ prefix: "cprewire",       algoFn: runClusterPreservingRewire,       stochastic: true }));
 
   // ── Input deficit panel: graph + bars + re-roll ──
   // Mirrors the per-algorithm walker layout: graph on the left with
@@ -1198,7 +1123,7 @@ window.MathJax = {
   function renderInputPanel() {
     // Right panel: deficit bars rendered as the "initial residual" state
     // via the same renderBars pipeline as the walkers.
-    renderBars("g-input-bars", { ...DEFICIT }, [], "static", {}, [], true);
+    renderBars("g-input-bars", { ...DEFICIT }, [], {});
     // Left panel: dim non-deficit nodes.
     inputViz.clearAllNodeClass("dim");
     NODES.forEach(n => {
