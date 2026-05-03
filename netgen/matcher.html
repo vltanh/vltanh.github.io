@@ -241,7 +241,7 @@
 
   <h3>cluster-preserving twin</h3>
   <p>Same priority-driven source pick and partner pick as the global true_greedy. The twin filters the candidate list before scanning it: any candidate whose (block, block) bucket has zero edges left in its budget is excluded. The first candidate that maximises remaining deficit and respects the budget gets the edge, and the budget for that bucket goes down by one. Gridlock now triggers when no in-budget candidate with positive deficit is left, and is logged.</p>
-  <p>Because the source still pulls the most-needy node first and re-shuffles after every accept, the twin loses fewer stubs to starvation than the cluster-preserving greedy does. On the bench in <code>examples/bench_ecsbm/</code>, this is the algorithm EC-SBM v2 uses, and its loss to budget exhaustion is around 0.5% of total edges on networks in the 100K–200K node range. Where that 0.5% matters, the stack section below shows how to recover it without giving up cluster-level fidelity.</p>
+  <p>Because the source still pulls the most-needy node first and re-shuffles after every accept, the twin loses fewer stubs to starvation than the cluster-preserving greedy does. On the bench in <code>externals/ec-sbm/examples/bench/</code>, this is the algorithm EC-SBM v2 uses, and its loss to budget exhaustion is around 0.5% of total edges on networks in the 100K–200K node range. Where that 0.5% matters, the stack section below shows how to recover it without giving up cluster-level fidelity.</p>
   <div class="graph" id="g-cptruegreedy">
     <div class="graph-chrome">
       <span id="g-cptruegreedy-stage">step 0 &middot; initial deficit</span>
@@ -374,12 +374,12 @@
   </div>
   <div class="callout warn">
     <div class="tag">stacking is not a free win</div>
-    <p>A 33-network sweep on EC-SBM v2 against <code>leiden-cpm-0.0001</code> (full report at <code>examples/bench_ecsbm_stack/report.md</code>) found:</p>
+    <p>A 33-network sweep on EC-SBM v2 against <code>leiden-cpm-0.0001</code> (full report at <code>externals/ec-sbm/examples/bench_stack/report.md</code>) found:</p>
     <ul>
       <li>The two-step stack closes degree mass &mdash; n_edges gap drops from ~0.5% (single CP-TG) to ~0.4% &mdash; but conductance EMD goes 5x worse, mixing-parameter EMD 2x worse, and connected-component sizes drift away from the reference. Paired Wilcoxon p &lt; 1e-4 on every cluster-shape metric.</li>
       <li>The three-step stack does not improve the trade-off; it is faster (CP-rewire batches stub draws) but regresses the same cluster-shape stats further.</li>
     </ul>
-    <p>Use the single <code>cluster_preserving_true_greedy</code> when cluster-shape fidelity is the priority and a 0.5% degree-mass gap is acceptable. Use the stack when degree exactness matters more than cluster boundaries (for example, downstream code that asserts on exact m, or generators with heavily-refined clusterings where the budget gate disconnects small clusters &mdash; see the douban / piecewise note in <code>examples/bench_ecsbm/report.md</code>).</p>
+    <p>Use the single <code>cluster_preserving_true_greedy</code> when cluster-shape fidelity is the priority and a 0.5% degree-mass gap is acceptable. Use the stack when degree exactness matters more than cluster boundaries (for example, downstream code that asserts on exact m, or generators with heavily-refined clusterings where the budget gate disconnects small clusters &mdash; see the douban / piecewise note in <code>externals/ec-sbm/examples/bench/report.md</code>).</p>
   </div>
 </section>
 
@@ -420,11 +420,11 @@
       </tr>
     </tbody>
   </table>
-  <p>The dnc table makes stacking look like a clean win on closing the deficit. The 33-network bench in <code>examples/bench_ecsbm_stack/report.md</code> shows a different picture: the cleanup edges land outside the reference clustering's per-block budgets, which is exactly what the budget gate was trying to prevent. Conductance EMD goes 5x worse, mixing-parameter EMD 2x worse, and connected-component sizes drift away from the reference. So the stack closes degree mass at a meaningful cost to the very cluster-shape stats the cluster-preserving family was designed for.</p>
+  <p>The dnc table makes stacking look like a clean win on closing the deficit. The 33-network bench in <code>externals/ec-sbm/examples/bench_stack/report.md</code> shows a different picture: the cleanup edges land outside the reference clustering's per-block budgets, which is exactly what the budget gate was trying to prevent. Conductance EMD goes 5x worse, mixing-parameter EMD 2x worse, and connected-component sizes drift away from the reference. So the stack closes degree mass at a meaningful cost to the very cluster-shape stats the cluster-preserving family was designed for.</p>
   <p>The dnc fixture is small enough that the cleanup spike does not dominate the per-net averages. On real benchmark networks (10K&ndash;200K nodes) the regression on cluster-shape stats is significant at α = 0.01 across nearly every relevant metric. Default to the single <code>cluster_preserving_true_greedy</code> matcher; reach for the stack only when one of these holds:</p>
   <ul>
     <li><strong>Downstream contract on exact n_edges</strong> &mdash; e.g., a comparator that asserts on m. The 0.5% deficit becomes blocking.</li>
-    <li><strong>Heavily-refined clusterings (piecewise CM and similar)</strong> &mdash; small refined clusters can have tiny per-block budgets that the gate exhausts before the matcher can bridge them, leaving the cluster disconnected. The stack closes those bridge edges. See the douban / piecewise case in <code>examples/bench_ecsbm/report.md</code> where single CP-TG produced n_concomp SRD = 0.99 on douban; the stack closes it.</li>
+    <li><strong>Heavily-refined clusterings (piecewise CM and similar)</strong> &mdash; small refined clusters can have tiny per-block budgets that the gate exhausts before the matcher can bridge them, leaving the cluster disconnected. The stack closes those bridge edges. See the douban / piecewise case in <code>externals/ec-sbm/examples/bench/report.md</code> where single CP-TG produced n_concomp SRD = 0.99 on douban; the stack closes it.</li>
   </ul>
   <p class="muted small">Numbers come from running <code>run_generator.sh --generator sbm</code> on dnc with seed 1 and toggling <code>--degree-matcher</code> across the four configurations above; the SBM output is identical across all four runs (same graph-tool seed) so the differences are purely matcher behaviour. The 33-network bench results referenced above use EC-SBM v2 + 5 seeds per cell with paired Wilcoxon over networks within each bucket.</p>
 </section>
