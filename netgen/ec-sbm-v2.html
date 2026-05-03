@@ -426,16 +426,17 @@
     </thead>
     <tbody>
       <tr><th>N</th><td class="val">906</td><td class="val">906</td><td class="desc">Exact.</td></tr>
-      <tr><th>edges</th><td class="val">10,429</td><td class="val">10,431</td><td class="desc">Within 0.02%. The block-aware top-up closes the residual budget near-exactly while the block-pair filter holds the block-pair distribution loyal to the reference.</td></tr>
-      <tr><th>mean degree</th><td class="val">23.02</td><td class="val">23.03</td><td class="desc">Follows the edge count.</td></tr>
-      <tr><th>global cc</th><td class="val">0.548</td><td class="val">0.513</td><td class="desc">Highest in the SBM family on this input (SBM 0.341, v1 0.424). Cores do most of the work; the overlay-free residual SBM keeps more of the core's triangles intact.</td></tr>
+      <tr><th>edges</th><td class="val">10,429</td><td class="val">10,191</td><td class="desc">Off by 2.3%. The block-pair-aware top-up spends edges only where the reference \(e_{rs}\) has budget left; once every eligible block-pair is full or every viable partner is already a neighbour, leftover stubs are logged and the run stops.</td></tr>
+      <tr><th>mean degree</th><td class="val">23.02</td><td class="val">22.50</td><td class="desc">Follows the edge count.</td></tr>
+      <tr><th>global cc</th><td class="val">0.548</td><td class="val">0.555</td><td class="desc">A hair above the reference. The \(K_{k+1}\) cores carry the bulk of the triangles and the block-pair-aware top-up adds most of its edges where the input's \(e_{rs}\) concentrates, on the dense diagonals. v1 sits at 0.424 because its overlay dedup shaves intra-block density that v2's rewire keeps intact.</td></tr>
       <tr><th>clusters</th><td class="val">87</td><td class="val">87</td><td class="desc">Profile-stage passthrough.</td></tr>
     </tbody>
   </table>
-  <p>The provenance shift from v1 is the main visible difference. Same input, same mincut distribution, wildly different edge ownership.</p>
+  <p>v1 and v2 share the same \(K_{k+1}\) cores edge-for-edge; everything else gets reshuffled. The flow chart below pairs each edge with the stage that placed it on each side.</p>
   <div class="disk-panel provenance-bar">
-    <div class="step-desc" style="margin-bottom:.55rem"><span class="st">edge provenance · v1 vs v2</span> &middot; counts from each version's <code>sources.json</code>. v1 and v2 split provenance differently: v1's "clustered" band is stage 2's kec_core + SBM overlay and "outlier" is the separate outlier SBM, while v2's "kec_core" is just stage 2's constructive cores and "residual SBM" is stage 3's single SBM call over every block. Match_degree shrinks 2.4&times; in v2 because the block-preserving rewire does more work upstream.</div>
-    <svg id="prov-bar" viewBox="0 0 640 320" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="step-desc" style="margin-bottom:.55rem"><span class="st">edge provenance flow · v1 &rarr; v2</span> &middot; ribbons join edges by their stage on each side. Top-to-bottom on each bar follows pipeline stage order: kec_core, then the SBM phase (overlay vs residual), then match_degree. Bottom segments are marginals: edges that exist on one side only.</div>
+    <svg id="prov-bar" viewBox="0 0 720 420" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="step-desc" style="margin-top:.55rem">v1 kec_core (2,202 edges) maps cleanly onto v2 kec_core. v1's SBM overlay (5,089) splits across all three v2 stages: about half lands in v2's residual SBM, a fifth re-emerges in match_degree, and the rest gets dropped. v1's separate outlier SBM (1,007) and v1's match_degree (2,127) get redistributed similarly. v2 also adds 3,460 edges that v1 never produced; v1 carried 3,694 edges that v2 doesn't.</div>
   </div>
   <div class="callout">
     <div class="tag">why v2's global cc beats v1's on this input</div>
@@ -1545,144 +1546,156 @@ window.MathJax = {
     render();
   })();
 
-  // ── Case study · dnc v1 vs v2 provenance comparison bar ──
-  // Vertical stacked bars (one column per version) with a side legend that
-  // lists each band by colour swatch + version-specific name + count. Avoids
-  // the misleading shared-label trap: v1's stage-2 "clustered" is kec_core +
-  // SBM overlay, v2's is just kec_core; v1's stage-3 "outlier" is the
-  // separate outlier SBM, v2's stage-3 "residual SBM" is one call over every
-  // block.
+  // ── Case study · dnc v1 → v2 provenance flow ──
+  // Two stacked bars joined by ribbons. Each ribbon = edges (u,v) present in
+  // both v1.edge.csv and v2.edge.csv, attributed to the stage that placed it
+  // on each side. Bottom ghost segments carry marginals: v2-only edges
+  // ("added in v2") on the left bar feeding into v2's stages, v1-only edges
+  // ("dropped in v2") on the right bar receiving from v1's stages. Both
+  // columns sum to 13,885 = |v1 ∪ v2|.
+  //
+  // Counts come from intersecting sources.json on each side, computed once
+  // offline. Refresh by running the v1+v2 dnc pipeline at seed 1 and
+  // re-running the helper that emits the (v1_stage, v2_stage) histogram.
   (function () {
     const svg = d3.select("#prov-bar");
     svg.selectAll("*").remove();
-    const W = 640, H = 320;
-    const PAD = { top: 36, right: 18, bottom: 38, left: 60 };
+    const W = 720, H = 420;
+    const PAD = { top: 56, right: 16, bottom: 48, left: 16 };
     const ih = H - PAD.top - PAD.bottom;
-    const cols = [
-      { label: "v1", bands: [
-        { stage: "stage 2", k: "clustered (kec_core + SBM overlay)", c: 7286, col: COL.edge_stage2 },
-        { stage: "stage 3", k: "outlier SBM (separate pass)",        c: 1016, col: COL.edge_stage3 },
-        { stage: "stage 4", k: "match_degree (heap-greedy)",         c: 2120, col: COL.edge_stage4 },
-      ]},
-      { label: "v2", bands: [
-        { stage: "stage 2", k: "kec_core (constructive only)",       c: 2202, col: COL.edge_stage2 },
-        { stage: "stage 3", k: "residual SBM (all blocks + rewire)", c: 7366, col: COL.edge_stage3 },
-        { stage: "stage 4", k: "match_degree (hybrid)",              c:  778, col: COL.edge_stage4 },
-      ]},
+    const xL = 200, xR = 520, barW = 36;
+
+    const COL_KEC  = COL.edge_stage2;
+    const COL_SBM  = COL.edge_stage3;
+    const COL_MD   = COL.edge_stage4;
+    const COL_MARG = "#a89c7a";
+
+    const v1Segs = [
+      { id: "v1_kec",     name: "kec_core",                    c: 2202, col: COL_KEC },
+      { id: "v1_overlay", name: "SBM overlay",                 c: 5089, col: COL_SBM },
+      { id: "v1_outlier", name: "outlier SBM",                 c: 1007, col: COL_SBM },
+      { id: "v1_md",      name: "match_degree (greedy)",       c: 2127, col: COL_MD  },
+      { id: "added",      name: "added in v2",                 c: 3460, col: COL_MARG, ghost: true },
     ];
-    const maxTotal = d3.max(cols, c => d3.sum(c.bands, b => b.c));
-    const yScale = d3.scaleLinear().domain([0, maxTotal]).range([ih, 0]);
+    const v2Segs = [
+      { id: "v2_kec",     name: "kec_core",                    c: 2202, col: COL_KEC },
+      { id: "v2_resid",   name: "residual SBM",                c: 5967, col: COL_SBM },
+      { id: "v2_md",      name: "match_degree (cluster-pres.)", c: 2022, col: COL_MD  },
+      { id: "dropped",    name: "dropped in v2",               c: 3694, col: COL_MARG, ghost: true },
+    ];
 
-    const barWidth = 70;
-    const colGap = 26;
-    const colsTotalWidth = cols.length * barWidth + (cols.length - 1) * colGap;
-    const xStart = PAD.left + 14;
+    const flows = [
+      { s: "v1_kec",     d: "v2_kec",   c: 2202, col: COL_KEC  },
+      { s: "v1_overlay", d: "v2_resid", c: 2312, col: COL_SBM  },
+      { s: "v1_overlay", d: "v2_md",    c: 1056, col: COL_SBM  },
+      { s: "v1_overlay", d: "dropped",  c: 1721, col: COL_MARG },
+      { s: "v1_outlier", d: "v2_resid", c:  235, col: COL_SBM  },
+      { s: "v1_outlier", d: "v2_md",    c:   69, col: COL_SBM  },
+      { s: "v1_outlier", d: "dropped",  c:  703, col: COL_MARG },
+      { s: "v1_md",      d: "v2_resid", c:  577, col: COL_MD   },
+      { s: "v1_md",      d: "v2_md",    c:  280, col: COL_MD   },
+      { s: "v1_md",      d: "dropped",  c: 1270, col: COL_MARG },
+      { s: "added",      d: "v2_resid", c: 2843, col: COL_MARG },
+      { s: "added",      d: "v2_md",    c:  617, col: COL_MARG },
+    ];
 
-    // y-axis (edge count)
-    const yAxisG = svg.append("g")
-      .attr("transform", `translate(${PAD.left},${PAD.top})`);
-    yAxisG.call(d3.axisLeft(yScale).ticks(5).tickSize(-(colsTotalWidth + 14)).tickFormat(d => d.toLocaleString()))
-      .call(g => g.selectAll(".tick line").attr("stroke", "#cfc6a0").attr("stroke-dasharray", "2 3"))
-      .call(g => g.selectAll(".tick text")
-        .style("fill", "#6b6a54")
-        .style("font-family", "Special Elite, Courier New, monospace")
-        .style("font-size", "10px"))
-      .call(g => g.select(".domain").remove());
-    yAxisG.append("text")
-      .attr("transform", "rotate(-90)")
-      .attr("x", -ih / 2).attr("y", -44)
-      .attr("text-anchor", "middle")
-      .attr("font-family", "Special Elite, Courier New, monospace")
-      .attr("font-size", "10px")
-      .attr("fill", "#6b6a54")
-      .style("letter-spacing", ".12em").style("text-transform", "uppercase")
-      .text("edges");
+    const totalUnion = 13885;
+    const yScale = d3.scaleLinear().domain([0, totalUnion]).range([0, ih]);
 
-    // Per-version stacked column.
-    cols.forEach((col, ci) => {
-      const x = xStart + ci * (barWidth + colGap);
-      let yacc = PAD.top + ih;
-      const total = d3.sum(col.bands, b => b.c);
-      col.bands.forEach((b) => {
-        const segH = (b.c / maxTotal) * ih;
-        const yTop = yacc - segH;
-        svg.append("rect")
-          .attr("x", x).attr("y", yTop)
-          .attr("width", barWidth).attr("height", segH)
-          .attr("fill", b.col).attr("opacity", 0.92)
-          .attr("stroke", "#2f3a54").attr("stroke-width", 0.7);
-        if (segH > 22) {
-          svg.append("text")
-            .attr("x", x + barWidth / 2)
-            .attr("y", yTop + segH / 2 + 4)
-            .attr("text-anchor", "middle")
-            .attr("font-family", "Special Elite, Courier New, monospace")
-            .attr("font-size", "11px")
-            .attr("fill", "#f3ecd7")
-            .text(b.c.toLocaleString());
-        }
-        yacc -= segH;
-      });
-      svg.append("text")
-        .attr("x", x + barWidth / 2).attr("y", PAD.top + ih + 18)
-        .attr("text-anchor", "middle")
-        .attr("font-family", "Special Elite, Courier New, monospace")
-        .attr("font-size", "12px")
-        .attr("fill", "#2f3a54")
-        .text(col.label);
-      svg.append("text")
-        .attr("x", x + barWidth / 2).attr("y", PAD.top + ih + 32)
-        .attr("text-anchor", "middle")
-        .attr("font-family", "Special Elite, Courier New, monospace")
-        .attr("font-size", "10px")
-        .attr("fill", "#6b6a54")
-        .text(`= ${total.toLocaleString()}`);
+    const segMap = {};
+    let yacc = PAD.top;
+    v1Segs.forEach(s => { s.y0 = yacc; s.h = yScale(s.c); yacc += s.h; segMap[s.id] = s; });
+    yacc = PAD.top;
+    v2Segs.forEach(s => { s.y0 = yacc; s.h = yScale(s.c); yacc += s.h; segMap[s.id] = s; });
+
+    const offsets = {};
+    [...v1Segs, ...v2Segs].forEach(s => offsets[s.id] = 0);
+    flows.forEach(f => {
+      const src = segMap[f.s], dst = segMap[f.d];
+      f.ySrc0 = src.y0 + offsets[f.s];
+      f.yDst0 = dst.y0 + offsets[f.d];
+      f.fh = yScale(f.c);
+      offsets[f.s] += f.fh;
+      offsets[f.d] += f.fh;
     });
 
-    // Right-side legend, grouped by stage. Within each stage, list the v1
-    // and v2 names side by side so the difference reads cleanly.
-    const legX = xStart + colsTotalWidth + 36;
-    const legY0 = PAD.top + 4;
-    const stages = ["stage 2", "stage 3", "stage 4"];
-    let lyAcc = legY0;
-    stages.forEach((stg) => {
-      const v1band = cols[0].bands.find(b => b.stage === stg);
-      const v2band = cols[1].bands.find(b => b.stage === stg);
+    flows.forEach(f => {
+      const x1 = xL + barW, x2 = xR;
+      const y1a = f.ySrc0,       y1b = f.ySrc0 + f.fh;
+      const y2a = f.yDst0,       y2b = f.yDst0 + f.fh;
+      const cx = (x1 + x2) / 2;
+      const path = d3.path();
+      path.moveTo(x1, y1a);
+      path.bezierCurveTo(cx, y1a, cx, y2a, x2, y2a);
+      path.lineTo(x2, y2b);
+      path.bezierCurveTo(cx, y2b, cx, y1b, x1, y1b);
+      path.closePath();
+      svg.append("path")
+        .attr("d", path.toString())
+        .attr("fill", f.col).attr("opacity", f.col === COL_MARG ? 0.22 : 0.34)
+        .attr("stroke", "none");
+    });
+
+    function drawBar(seg, x) {
       svg.append("rect")
-        .attr("x", legX).attr("y", lyAcc)
-        .attr("width", 14).attr("height", 14)
-        .attr("fill", v1band.col).attr("opacity", 0.92)
-        .attr("stroke", "#2f3a54").attr("stroke-width", 0.6);
+        .attr("x", x).attr("y", seg.y0)
+        .attr("width", barW).attr("height", seg.h)
+        .attr("fill", seg.col).attr("opacity", seg.ghost ? 0.30 : 0.92)
+        .attr("stroke", "#2f3a54").attr("stroke-width", 0.7);
+      if (seg.ghost) {
+        svg.append("rect")
+          .attr("x", x).attr("y", seg.y0).attr("width", barW).attr("height", seg.h)
+          .attr("fill", "none").attr("stroke", COL_MARG).attr("stroke-width", 1)
+          .attr("stroke-dasharray", "3 3");
+      }
+    }
+    v1Segs.forEach(s => drawBar(s, xL));
+    v2Segs.forEach(s => drawBar(s, xR));
+
+    v1Segs.forEach(s => {
       svg.append("text")
-        .attr("x", legX + 22).attr("y", lyAcc + 11)
-        .attr("font-family", "Special Elite, Courier New, monospace")
-        .attr("font-size", "10.5px")
-        .attr("fill", "#2f3a54")
-        .style("letter-spacing", ".08em").style("text-transform", "uppercase")
-        .text(stg);
+        .attr("x", xL - 8).attr("y", s.y0 + s.h / 2 + 4)
+        .attr("text-anchor", "end")
+        .attr("font-family", "IBM Plex Sans, sans-serif").attr("font-size", "10.5px")
+        .attr("fill", s.ghost ? "#9a947a" : "#2f3a54")
+        .text(`${s.name} · ${s.c.toLocaleString()}`);
+    });
+    v2Segs.forEach(s => {
       svg.append("text")
-        .attr("x", legX + 22).attr("y", lyAcc + 26)
-        .attr("font-family", "IBM Plex Sans, sans-serif")
-        .attr("font-size", "10.5px")
-        .attr("fill", "#3559a0")
-        .text(`v1: ${v1band.k}`);
-      svg.append("text")
-        .attr("x", legX + 22).attr("y", lyAcc + 40)
-        .attr("font-family", "IBM Plex Sans, sans-serif")
-        .attr("font-size", "10.5px")
-        .attr("fill", "#3559a0")
-        .text(`v2: ${v2band.k}`);
-      lyAcc += 60;
+        .attr("x", xR + barW + 8).attr("y", s.y0 + s.h / 2 + 4)
+        .attr("text-anchor", "start")
+        .attr("font-family", "IBM Plex Sans, sans-serif").attr("font-size", "10.5px")
+        .attr("fill", s.ghost ? "#9a947a" : "#2f3a54")
+        .text(`${s.name} · ${s.c.toLocaleString()}`);
     });
 
     svg.append("text")
-      .attr("x", PAD.left).attr("y", 18)
-      .attr("text-anchor", "start")
-      .attr("font-family", "Special Elite, Courier New, monospace")
-      .attr("font-size", "10.5px")
+      .attr("x", xL + barW / 2).attr("y", PAD.top - 14)
+      .attr("text-anchor", "middle")
+      .attr("font-family", "Special Elite, Courier New, monospace").attr("font-size", "12px")
+      .attr("fill", "#2f3a54")
+      .text("v1 · 10,425 edges");
+    svg.append("text")
+      .attr("x", xR + barW / 2).attr("y", PAD.top - 14)
+      .attr("text-anchor", "middle")
+      .attr("font-family", "Special Elite, Courier New, monospace").attr("font-size", "12px")
+      .attr("fill", "#2f3a54")
+      .text("v2 · 10,191 edges");
+
+    svg.append("text")
+      .attr("x", W / 2).attr("y", 22)
+      .attr("text-anchor", "middle")
+      .attr("font-family", "Special Elite, Courier New, monospace").attr("font-size", "10.5px")
       .attr("fill", "#6b6a54")
       .style("letter-spacing", ".12em").style("text-transform", "uppercase")
-      .text("edge provenance · dnc · seed 1");
+      .text("edge provenance flow · dnc · seed 1");
+
+    svg.append("text")
+      .attr("x", W / 2).attr("y", H - 14)
+      .attr("text-anchor", "middle")
+      .attr("font-family", "IBM Plex Sans, sans-serif").attr("font-size", "10.5px")
+      .attr("fill", "#6b6a54")
+      .text("6,731 shared · 3,694 v1-only · 3,460 v2-only");
   })();
 
 })();

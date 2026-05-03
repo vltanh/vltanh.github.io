@@ -346,17 +346,17 @@ g.viz-node-group:has(.viz-node.future) { opacity: 0; pointer-events: none; }
     </thead>
     <tbody>
       <tr><th># nodes</th><td class="val">906</td><td class="val">906</td><td class="desc">Exact: the disk is built node by node up to \(N\).</td></tr>
-      <tr><th># clusters</th><td class="val">87</td><td class="val">161</td><td class="desc">Argmin reassignment redistributes nodes across 442 mixture components (87 real + 355 singleton outliers); singleton outliers can catch stray nodes and graduate, real clusters can fragment.</td></tr>
+      <tr><th># clusters</th><td class="val">87</td><td class="val">168</td><td class="desc">Argmin reassignment redistributes nodes across 442 mixture components (87 real + 355 singleton outliers); singleton outliers can catch stray nodes and graduate, real clusters can fragment.</td></tr>
       <tr><th># edges</th><td class="val">10,429</td><td class="val">10,794</td><td class="desc">Within \(3.5\%\). Fixed at \(m(m+1)/2 + m(N - m - 1)\), where \(m = \lfloor \text{mean deg} / 2 \rceil = 12\); independent of \(T\) and search outcome.</td></tr>
-      <tr><th>global cc</th><td class="val">0.548</td><td class="val">0.098</td><td class="desc"><strong>Did not converge.</strong> On this single seed the search stalls at \(T_{\mathrm{best}} = 0.125\) with residual \(0.450\); could be a poor roll, or the achievable \(cc\) ceiling on \((N, m, \gamma, C)\) really sits below the target.</td></tr>
-      <tr><th>char. time</th><td class="val">40.41</td><td class="val">6.14</td><td class="desc">Early-arrival hubs sit near the disk centre and connect to most later nodes, so they shortcut walks across angular sectors.</td></tr>
+      <tr><th>global cc</th><td class="val">0.548</td><td class="val">0.106</td><td class="desc"><strong>Did not converge.</strong> The search bisects down to \(T = 0.00391\) with \(cc = 0.106\), residual \(0.443\); MATLAB's <code>datasample</code> blows up below that, so the walk hits a numerical wall before the secant can rule out a lower-\(T\) ceiling.</td></tr>
+      <tr><th>char. time</th><td class="val">40.41</td><td class="val">8.15</td><td class="desc">Early-arrival hubs sit near the disk centre and connect to most later nodes, so they shortcut walks across angular sectors.</td></tr>
       <tr><th>pseudo-diameter</th><td class="val">8</td><td class="val">3</td><td class="desc">Same hub effect: rank-1 connects to almost every later node, so most pairs are within two hops through the centre.</td></tr>
     </tbody>
   </table>
-  <p>nPSO with \((N = 906, m = 12, \gamma = 2.0, C = 442)\) peaks at \(cc \approx 0.098\) across the full \([0, 1]\) range: the hyperbolic disk with these parameters cannot generate clustering as high as \(0.548\). The search walks down the left half of the bracket by pure bisection, stalls after \(5\) iters at \(T_{\mathrm{best}} = 0.125\) with \(cc = 0.098\) and residual \(0.450\).</p>
+  <p>nPSO with \((N = 906, m = 12, \gamma = 2.0, C = 442)\) peaks at \(cc \approx 0.106\) across the sampled \(T\) range: the hyperbolic disk with these parameters cannot generate clustering as high as \(0.548\). The search bisects down the bracket from \(T = 0.5\) to \(T = 0.00391\) over 9 iters, picks up \(cc\) only from \(0.099\) to \(0.106\), then hits MATLAB's <code>datasample</code> failure at \(T \approx 0.001\); the secant never fires because residuals stay same-signed.</p>
   <div class="disk-panel">
     <svg id="dnc-traj" viewBox="0 0 640 300" preserveAspectRatio="xMidYMid meet"></svg>
-    <div class="step-desc"><span class="st">dnc trajectory</span> &middot; mint dashed line = target \(0.548\). Blue dots = sampled iters (log-spaced \(T\) on the x-axis so the bisection halving reads as evenly spaced). The sampled curve hovers around \(cc \approx 0.098\) for every sampled \(T\); residuals stay same-signed so the secant never fires.</div>
+    <div class="step-desc"><span class="st">dnc trajectory</span> &middot; mint dashed line = target \(0.548\). Blue dots = sampled iters (log-spaced \(T\) on the x-axis so the bisection halving reads as evenly spaced). The sampled curve hovers around \(cc \approx 0.10\) for every sampled \(T\); residuals stay same-signed so the secant never fires.</div>
   </div>
 </section>
 
@@ -3119,13 +3119,17 @@ window.MathJax = {
   (function () {
     const TARGET = 0.548;
     const iters = [
-      { T: 0.5,     cc: 0.0960 },
-      { T: 0.25,    cc: 0.0977 },
-      { T: 0.125,   cc: 0.0981 },  // best
-      { T: 0.0625,  cc: 0.0978 },
-      { T: 0.03125, cc: 0.0977 },
+      { T: 0.5,         cc: 0.0988 },
+      { T: 0.25,        cc: 0.1001 },
+      { T: 0.125,       cc: 0.1008 },
+      { T: 0.0625,      cc: 0.1027 },
+      { T: 0.03125,     cc: 0.0988 },
+      { T: 0.015625,    cc: 0.1052 },
+      { T: 0.0078125,   cc: 0.1046 },
+      { T: 0.00390625,  cc: 0.1055 },  // best
+      { T: 0.001953125, cc: 0.1019 },
     ];
-    const BEST_I = 2;
+    const BEST_I = 7;
     const svg = d3.select("#dnc-traj");
     if (svg.empty()) return;
     const W = 640, H = 300;
@@ -3135,7 +3139,7 @@ window.MathJax = {
     const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
 
     // Log-x so the bisection halving reads as evenly spaced points.
-    const x = d3.scaleLog().domain([0.02, 1]).range([0, iw]);
+    const x = d3.scaleLog().domain([0.001, 1]).range([0, iw]);
     const y = d3.scaleLinear().domain([0, 0.65]).range([ih, 0]);
 
     g.append("g").attr("transform", `translate(0,${ih})`)
@@ -3183,7 +3187,7 @@ window.MathJax = {
       .attr("x", x(iters[BEST_I].T) + 12).attr("y", y(iters[BEST_I].cc) - 16)
       .attr("fill", COL.mint)
       .attr("font-family", "Caveat Brush, cursive").attr("font-size", 16)
-      .text("best: T=0.125, cc=0.098");
+      .text("best: T=0.00391, cc=0.106");
   })();
 
   // ── Sync every T slider on the page ──

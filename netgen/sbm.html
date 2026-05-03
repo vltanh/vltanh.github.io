@@ -314,12 +314,12 @@
       <tr><th>stat</th><th>input</th><th>sbm output</th><th>note</th></tr>
     </thead>
     <tbody>
-      <tr><th># nodes</th><td class="val">906</td><td class="val">906</td><td class="desc">Top-up re-attaches the four post-simplify isolates.</td></tr>
+      <tr><th># nodes</th><td class="val">906</td><td class="val">904</td><td class="desc">The block-pair-aware top-up re-attaches two of the four post-simplify isolates; the other two stay isolated because no eligible partner remains in any block-pair the input had budget for.</td></tr>
       <tr><th># clusters</th><td class="val">87</td><td class="val">87</td><td class="desc">Passes through the input clustering, minus size-1 clusters (the input has none).</td></tr>
-      <tr><th># edges</th><td class="val">10,429</td><td class="val">10,429</td><td class="desc">Sampler emits 7,438; top-up adds 2,991 to close the deficit. The L1 distance against the reference degree sequence is 0 on dnc; harder inputs may leave residual stubs.</td></tr>
-      <tr><th>global cc</th><td class="val">0.548</td><td class="val">0.422</td><td class="desc">Top-up adds edges without a triangle target, so cc rises above the sampler-only 0.341 but stays well below the reference.</td></tr>
-      <tr><th>char. time</th><td class="val">40.41</td><td class="val">11.49</td><td class="desc">Random-walk mixing time. Top-up edges land mostly between high-degree hubs and act as shortcuts, so the output mixes ~3.5x faster than the input. Without the top-up the sampler returns 33.14, close to the input rate; see caveat 3 below.</td></tr>
-      <tr><th>pseudo-diameter</th><td class="val">8</td><td class="val">8</td><td class="desc">Preserved with the top-up. Without it the graph is sparser and the diameter is 9.</td></tr>
+      <tr><th># edges</th><td class="val">10,429</td><td class="val">10,155</td><td class="desc">Sampler emits 7,438; the top-up adds 2,717 edges by spending the per-block-pair budget read from the reference \(e_{rs}\), and stops with 274 stubs gridlocked when no eligible partner remains in budget.</td></tr>
+      <tr><th>global cc</th><td class="val">0.548</td><td class="val">0.557</td><td class="desc">The top-up spends budget where the input had \(e_{rs}\) left over, so most new edges land on the dense diagonals where simplify also bit. Cc lifts from the sampler-only 0.341 to a hair above the reference.</td></tr>
+      <tr><th>char. time</th><td class="val">40.41</td><td class="val">42.26</td><td class="desc">Random-walk mixing time. Top-up edges follow the input's \(e_{rs}\) shape rather than running long cross-graph shortcuts, so mixing barely shifts from the sampler-only 33.14; see caveat 3 below.</td></tr>
+      <tr><th>pseudo-diameter</th><td class="val">8</td><td class="val">9</td><td class="desc">One hop wider than the input. Top-up edges follow the input's \(e_{rs}\) shape, so they don't shorten any cross-cluster paths and the sampler's 9 stays.</td></tr>
     </tbody>
   </table>
   <p>The edge count matrix on <code>dnc</code> has 696 non-zero cells over 88 blocks. The largest one sits on the diagonal of cluster C<sub>2</sub> (50 nodes, 2,450 half-edges, 1,225 intra-edges). Simplify lands hardest there: 894 half-edges collide, so 447 of those 1,225 intra-edges vanish. The outlier pseudo-block (355 nodes, 278 intra-edges before simplify) is next, losing 108.</p>
@@ -348,26 +348,26 @@
   </div>
   <div class="callout warn">
     <div class="tag">caveat 1: simplify loss clusters on dense blocks</div>
-    <p>The red heatmap above is the sampler story. Parallels collide where stubs concentrate, so loss clusters on the diagonal of dense blocks and on the outlier pseudo-block; most off-diagonal cells keep their edges. On <code>dnc</code>, the worst-hit cell alone loses 894 half-edges out of 2,450, and the outlier block loses 108 of its 278 intra-edges. The top-up closes the per-node deficit, but it picks pairs without looking at \(e_{rs}\), so the new edges leak off-diagonal and block-matrix fidelity weakens exactly where simplify hit hardest.</p>
+    <p>The red heatmap above is the sampler story. Parallels collide where stubs concentrate, so loss clusters on the diagonal of dense blocks and on the outlier pseudo-block; most off-diagonal cells keep their edges. On <code>dnc</code>, the worst-hit cell alone loses 894 half-edges out of 2,450, and the outlier block loses 108 of its 278 intra-edges. The top-up reads the input's \(e_{rs}\) and spends edges only where a block-pair still has unfilled budget, so it primarily refills diagonal cells where loss concentrated; off-diagonal cells get partial patching where their reference \(e_{rs}\) left room.</p>
   </div>
   <div class="callout warn">
     <div class="tag">caveat 2: global cc is not a target</div>
-    <p>The micro constraint pins \(e_{rs}\) and \(k_i\) but says nothing about triangles. Output cc 0.422 sits well below input 0.548 even after the top-up restores the degree sequence. DC-SBM lands near the input cc when most of the input's triangles were degree-driven; on structured graphs like <code>dnc</code> where triangles live inside dense communities, the sampler misses by a lot. If triangles matter, ec-sbm-v1 and ec-sbm-v2 add that structure on top.</p>
+    <p>The micro constraint pins \(e_{rs}\) and \(k_i\) but says nothing about triangles. The sampler alone delivers cc 0.341, well below input 0.548. The block-pair-aware top-up lifts cc to 0.557 because the input's \(e_{rs}\) concentrates on dense diagonals, so most new edges land where triangle probability is already high; this is a side effect, not a target, and on inputs whose simplify deficit sits off-diagonal or whose \(e_{rs}\) is flatter, cc can still miss by a wide margin. If triangles need a real handle, ec-sbm-v1 and ec-sbm-v2 add that structure on top.</p>
   </div>
   <div class="callout warn">
-    <div class="tag">caveat 3: top-up reshapes random-walk dynamics</div>
+    <div class="tag">caveat 3: top-up follows \(e_{rs}\), not random walks</div>
     <p>Two SBM runs side by side, same seed, same input:</p>
     <table class="profile-table dnc-stats">
       <thead>
         <tr><th>stat</th><th>input</th><th>without top-up</th><th>with top-up</th></tr>
       </thead>
       <tbody>
-        <tr><th># edges</th><td class="val">10,429</td><td class="val">7,438</td><td class="val">10,429</td></tr>
-        <tr><th>char. time</th><td class="val">40.41</td><td class="val">33.14</td><td class="val">11.49</td></tr>
-        <tr><th>pseudo-diameter</th><td class="val">8</td><td class="val">9</td><td class="val">8</td></tr>
+        <tr><th># edges</th><td class="val">10,429</td><td class="val">7,438</td><td class="val">10,155</td></tr>
+        <tr><th>char. time</th><td class="val">40.41</td><td class="val">33.14</td><td class="val">42.26</td></tr>
+        <tr><th>pseudo-diameter</th><td class="val">8</td><td class="val">9</td><td class="val">9</td></tr>
       </tbody>
     </table>
-    <p>The sampler-only graph mixes at roughly the input rate (40 vs 33) and is one hop wider because it is sparser. The top-up adds about 3,000 edges picked by degree alone, with no preference for staying inside a block. Most land between high-degree hubs that sit on opposite sides of the graph, and they act as shortcuts: mixing time collapses to about a third of the input, and the diameter snaps back to the input value.</p>
+    <p>The sampler-only graph mixes near the input rate (33 vs 40) and is one hop wider because it is sparser. The top-up adds 2,717 edges to whichever block-pairs the reference \(e_{rs}\) still has budget for; that follows the input's block shape rather than picking long cross-graph shortcuts, so mixing time stays near the sampler-only rate (42 vs 33) and the diameter holds at 9. The trade is \(e_{rs}\)-faithful densification (cc lifts) for no cross-cluster shape change.</p>
   </div>
 </section>
 
@@ -1389,8 +1389,28 @@ window.MathJax = {
       postAchievedDeg = Object.assign({}, sample.achievedDeg);
       postUnplacedSum = 0;
       if (iids.length === 0) return [];
-      const steps = window.MatchDegreeKernel.runTrueGreedy(
-        { iids, deficit, baseAdj }, {}
+      const b = {};
+      NODES.forEach(n => { b[n] = blockIdx(n); });
+      const stubs = {};
+      for (const k in deficit) {
+        const u = parseInt(k, 10);
+        if (deficit[u] > 0) stubs[b[u]] = (stubs[b[u]] || 0) + deficit[u];
+      }
+      const totalStubs = Object.values(stubs).reduce((a, c) => a + c, 0);
+      const bpBudget = {};
+      if (totalStubs >= 2) {
+        const bks = Object.keys(stubs).map(Number).sort((a, c) => a - c);
+        for (let i = 0; i < bks.length; i++) {
+          for (let j = i; j < bks.length; j++) {
+            const bi = bks[i], bj = bks[j];
+            const si = stubs[bi], sj = stubs[bj];
+            const exp = (bi === bj) ? si * (si - 1) / (2 * totalStubs) : si * sj / totalStubs;
+            bpBudget[bi + "-" + bj] = Math.max(1, Math.round(exp));
+          }
+        }
+      }
+      const steps = window.MatchDegreeKernel.runClusterPreservingTrueGreedy(
+        { iids, deficit, baseAdj, b, bpBudget }, {}
       );
       const final = steps[steps.length - 1];
       final.edges.forEach(([u, v]) => {
