@@ -3,25 +3,96 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Infomap &middot; map equation on PageRank flow | Community Detection Algorithms</title>
+<title>Infomap &middot; map equation on random walks | Community Detection Algorithms</title>
 <link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐖</text></svg>">
-<meta name="description" content="Infomap (map equation on PageRank flow). Walked stage by stage on the shared 32-node fixture.">
+<meta name="description" content="Infomap (map equation on random walks). Walked stage by stage on the shared 32-node fixture, side by side with the planted ground truth.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="./shared.css">
 <style>
-body {
-  font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
-  font-variation-settings: normal;
+.cand-table {
+  width: 100%; border-collapse: collapse;
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .78rem;
 }
-.hdr h1 { transform: rotate(-1.2deg); }
-.hdr .sub {
-  font-family: 'IBM Plex Sans', sans-serif;
-  font-style: normal;
-  color: var(--paper-2);
-  line-height: 1.55;
+.cand-table th {
+  text-align: left;
+  font-size: .7rem; color: var(--paper-3);
+  letter-spacing: .12em; text-transform: uppercase;
+  border-bottom: 1px dashed var(--paper-4);
+  padding: .15rem .35rem;
 }
+.cand-table td { padding: .15rem .35rem; color: var(--paper); }
+.cand-table tr.cand-pick { background: rgba(143,187,112,0.22); }
+.cand-table tr.cand-pick td:last-child { color: var(--mint); font-weight: 600; }
+.cand-table tr.cand-from td { color: var(--paper-3); }
+.cand-table tr.cand-fail td { color: var(--signal); }
+
+.q-readout {
+  display: flex; gap: 1rem; flex-wrap: wrap;
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .82rem;
+  margin: .4rem 0 .2rem;
+}
+.q-readout .item { color: var(--paper-2); }
+.q-readout .item b { color: var(--paper); }
+.q-readout .item.delta b { color: var(--mint); }
+
+.level-pill {
+  display: inline-block;
+  font-family: 'Special Elite','Courier New',monospace;
+  font-size: .72rem;
+  letter-spacing: .12em; text-transform: uppercase;
+  background: rgba(42,74,168,.12);
+  border: 1px solid var(--azure);
+  color: var(--azure);
+  padding: .12rem .45rem;
+  border-radius: 2px;
+  margin-right: .35rem;
+}
+
+.gt-compare {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;
+  margin: .8rem 0 .4rem;
+}
+@media (max-width: 800px) { .gt-compare { grid-template-columns: 1fr; } }
+.gt-compare .panel-mini {
+  background: var(--ink-2);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: .6rem .7rem;
+}
+.gt-compare .panel-mini .cap {
+  font-family: 'Special Elite','Courier New',monospace;
+  font-size: .72rem; color: var(--azure);
+  letter-spacing: .12em; text-transform: uppercase;
+  margin-bottom: .35rem;
+}
+
+.cluster-stats {
+  width: 100%; border-collapse: collapse;
+  font-family: 'Special Elite','Courier New',monospace;
+  font-size: .8rem;
+  margin: .6rem 0;
+}
+.cluster-stats th, .cluster-stats td {
+  padding: .25rem .5rem;
+  border-bottom: 1px dotted var(--paper-4);
+}
+.cluster-stats th {
+  text-align: left;
+  font-size: .7rem; color: var(--paper-3);
+  letter-spacing: .12em; text-transform: uppercase;
+  background: rgba(237,228,201,.4);
+}
+.cluster-stats td { color: var(--paper); }
+.cluster-stats td.swatch { width: 14px; padding: 0; }
+.cluster-stats td.swatch span {
+  display: inline-block; width: 12px; height: 12px;
+  border-radius: 2px; vertical-align: middle;
+}
+
 .uc-banner {
   max-width: var(--span-medium);
   margin: 0 auto 2.4rem;
@@ -52,276 +123,259 @@ body {
   box-shadow: 1px 1px 0 rgba(27,32,51,.18);
 }
 .uc-banner strong { color: var(--paper); font-weight: 500; }
-.algo-meta {
-  max-width: var(--span-prose);
-  margin: 0 auto 2.5rem;
-  font-family: 'IBM Plex Sans', sans-serif;
-  font-size: 1.02rem; line-height: 1.7;
-  color: var(--paper-2);
-}
-.algo-meta em {
-  color: var(--paper);
-  font-style: italic;
-  background: linear-gradient(180deg, transparent 58%, rgba(246,225,90,.5) 58%, rgba(246,225,90,.5) 92%, transparent 92%);
-  padding: 0 .15em;
-}
-.algo-refs {
-  display: flex; gap: 1.3rem; flex-wrap: wrap;
-  font-family: 'Special Elite', 'Courier New', monospace;
-  font-size: .76rem; letter-spacing: .14em;
-  color: var(--paper-3);
-  margin-top: 1.1rem;
-}
-.algo-refs a {
-  color: var(--paper-3);
-  text-transform: uppercase;
-  border-bottom: 1px dashed var(--paper-3);
-  padding-bottom: 1px;
-  background: none;
-  transition: color .18s, border-color .18s;
-}
-.algo-refs a:hover {
-  color: var(--signal);
-  border-bottom-color: var(--signal);
-}
-.algo-refs .ref-label {
-  color: var(--paper-4);
-  margin-right: .35rem;
-  text-transform: uppercase;
-}
 
-.shared-graph {
-  max-width: var(--span-wide); margin: 0 auto 3rem;
-  background: var(--ink-2); border: 1.5px solid var(--paper);
-  border-radius: 2px; padding: 1.4rem 1.5rem;
-  box-shadow: 3px 3px 0 rgba(27,32,51,.15);
+.flow-bar {
+  display: flex; gap: 2px;
+  font-family: 'Special Elite','Courier New',monospace;
+  font-size: .7rem;
+  height: 90px; align-items: flex-end;
+  margin: .6rem 0;
+}
+.flow-bar .flow-cell {
+  flex: 1;
+  background: var(--paper-4);
   position: relative;
+  display: flex; flex-direction: column;
+  justify-content: flex-end;
+  min-width: 14px;
+  border-radius: 2px 2px 0 0;
 }
-.shared-graph::before, .shared-graph::after {
-  content: ""; position: absolute;
-  top: -9px; width: 50px; height: 16px;
-  background: var(--tape-tan); opacity: .82;
-  border: 1px solid rgba(139,117,65,.4);
-  box-shadow: 0 1px 2px rgba(27,32,51,.15);
-  pointer-events: none;
+.flow-bar .flow-cell .v {
+  background: var(--cobalt);
+  width: 100%;
+  border-radius: 2px 2px 0 0;
 }
-.shared-graph::before { left: 14px; transform: rotate(-4deg); }
-.shared-graph::after  { right: 14px; transform: rotate(3deg); }
-.shared-graph .graph-caption {
-  font-family: 'Special Elite', 'Courier New', monospace;
-  font-size: .76rem;
-  color: var(--paper-2);
-  border-bottom: 1px dashed rgba(139,117,65,.4);
-  padding-bottom: .6rem;
-  margin-bottom: .9rem;
-  line-height: 1.45;
+.flow-bar .flow-cell .lab {
+  position: absolute;
+  bottom: -16px; left: 50%; transform: translateX(-50%);
+  font-size: .6rem; color: var(--paper-3);
 }
-.shared-graph .graph-caption .st {
-  color: var(--azure);
-  letter-spacing: .12em;
-  text-transform: uppercase;
-  margin-right: .4rem;
-}
-.shared-graph svg {
-  display: block; width: 100%; height: auto;
-  cursor: grab; touch-action: none;
-}
-.shared-graph svg:active { cursor: grabbing; }
 
-.stage-list {
-  max-width: var(--span-wide);
-  margin: 0 auto 3rem;
-  display: grid; gap: 1.2rem;
+.L-readout {
+  display: flex; gap: 1.5rem; flex-wrap: wrap;
+  font-family: 'Special Elite','Courier New',monospace;
+  font-size: .85rem;
+  background: rgba(237,228,201,.4);
+  padding: .5rem .8rem;
+  border: 1px dashed var(--paper-3);
+  border-radius: 2px;
+  margin: .6rem 0;
 }
-.stage-card {
+.L-readout .item { color: var(--paper-2); }
+.L-readout .item b { color: var(--paper); }
+.L-readout .item.tag b { color: var(--cobalt); }
+
+.hier-tree {
+  font-family: 'Special Elite','Courier New',monospace;
+  font-size: .82rem;
+  margin: .6rem 0;
   background: var(--ink-2);
-  border: 1.5px solid var(--paper);
+  padding: .8rem 1rem;
+  border: 1px solid var(--rule);
   border-radius: 2px;
-  padding: 1.05rem 1.3rem 1.15rem;
-  position: relative;
-  box-shadow: 2.5px 3px 0 rgba(27,32,51,.18);
-  display: grid;
-  grid-template-columns: minmax(120px, 160px) minmax(0, 1fr) auto;
-  gap: 1.1rem;
-  align-items: center;
 }
-.stage-card:nth-of-type(odd)  { transform: rotate(-.3deg); }
-.stage-card:nth-of-type(even) { transform: rotate(.25deg); }
-.stage-card::before {
-  content: ""; position: absolute;
-  top: -8px; left: 50%;
-  transform: translateX(-50%) rotate(-2deg);
-  width: 46px; height: 14px;
-  background: var(--tape-tan); opacity: .85;
-  border: 1px solid rgba(139,117,65,.4);
-  box-shadow: 0 1px 2px rgba(27,32,51,.15);
+.hier-tree .row { padding: .15rem 0; }
+.hier-tree .row .swatch {
+  display: inline-block; width: 10px; height: 10px;
+  border-radius: 2px; margin-right: .4rem; vertical-align: middle;
 }
-.stage-num {
-  font-family: 'Caveat Brush', cursive;
-  font-size: 1.6rem;
-  color: var(--cobalt);
-  letter-spacing: .04em;
-  transform: rotate(-2deg);
-  display: inline-block;
-}
-.stage-name {
-  font-family: 'Special Elite', 'Courier New', monospace;
-  font-size: 1.05rem;
-  color: var(--paper);
-  letter-spacing: .02em;
-}
-.stage-desc {
-  font-family: 'IBM Plex Sans', sans-serif;
-  color: var(--paper-2);
-  font-size: .92rem;
-  line-height: 1.5;
-  margin-top: .3rem;
-}
-.stage-pending {
-  font-family: 'Caveat Brush', cursive;
-  color: var(--signal);
-  font-size: .9rem;
-  letter-spacing: .02em;
-  transform: rotate(2deg);
-  white-space: nowrap;
-  align-self: end;
-  padding: .15rem .45rem;
-  background: var(--hl-yellow);
-  border: 1px solid var(--signal);
-  border-radius: 2px;
-  box-shadow: 1px 1px 0 rgba(27,32,51,.18);
-}
-@media (max-width: 600px) {
-  .stage-card {
-    grid-template-columns: auto 1fr;
-  }
-  .stage-pending {
-    grid-column: 1 / -1;
-    justify-self: start;
-  }
-}
-
-.back-link {
-  display: inline-flex; align-items: center; gap: .35rem;
-  font-family: 'Special Elite', 'Courier New', monospace;
-  font-size: .74rem; letter-spacing: .14em;
-  text-transform: uppercase;
-  color: var(--paper-3);
-  border-bottom: 1px dashed var(--paper-3);
-  padding-bottom: 1px;
-  transition: color .18s, border-color .18s;
-}
-.back-link:hover {
-  color: var(--signal);
-  border-bottom-color: var(--signal);
-}
-.back-row {
-  max-width: var(--span-wide);
-  margin: 0 auto 1.8rem;
-}
+.hier-tree .row.l1 { padding-left: 0; color: var(--paper); }
+.hier-tree .row.l2 { padding-left: 1.6rem; color: var(--paper-2); }
+.hier-tree .row .meta { color: var(--paper-3); font-size: .76rem; margin-left: .5rem; }
 </style>
 </head>
 <body>
 <main class="page">
 
-<div class="back-row">
-  <a class="back-link" href="./">&larr; back to gallery</a>
-</div>
+<div id="links"></div>
 
 <header class="hdr">
-  <div class="kicker">algorithm &middot; map equation on PageRank flow</div>
-  <h1>Infomap</h1>
-  <p class="sub">One algorithm in the gallery: map equation on PageRank flow. Walked stage by stage on the shared 32-node fixture, side by side with the planted ground truth.</p>
+  <div class="kicker">community detection &middot; map equation on random walks</div>
+  <h1><em>Infomap</em></h1>
+  <p class="fullname">Maps of random walks reveal community structure</p>
+  <p class="sub">Walk through Rosvall + Bergstrom's two-level codebook approach to community detection on the 32-node comdet fixture, one merge + one move at a time.</p>
 </header>
 
 <div class="uc-banner">
-  <strong>Walker pending.</strong> The full per-stage walker for Infomap is pending the Phase 4c kernel port. Today the page surfaces the input fixture and the planned stage list; interactive widgets land per-stage as the JS port reaches feature parity with canonical (see the active plan's Phase 4c verification matrix).
+  <strong>Draft.</strong> JS port of the PNAS 2008 algorithm. Undirected unweighted, deterministic greedy joining + greedy node-move tuning + sub-level recursion. The paper's heat-bath simulated-annealing refinement (paper SI) is replaced by greedy node-moves. ARI vs the canonical <a href="https://github.com/mapequation/infomap" target="_blank" rel="noopener">infomap</a> binary is pending.
 </div>
 
-<section class="algo-meta">
-  <p>Encode a random walk on \(G\) using a two-level prefix code. The map equation \(L(M) = q_\curvearrowright H(\mathcal{Q}) + \sum_i p_\circlearrowright^i H(\mathcal{P}^i)\) balances between-module hops against within-module steps. Communities are flow traps; the optimum partition is the one whose codelength is shortest.</p>
-  <div class="algo-refs">
-    <span><span class="ref-label">paper</span><a href="https://doi.org/10.1073/pnas.0706851105" target="_blank" rel="noopener">Rosvall + Bergstrom 2008</a></span>
-    <span><span class="ref-label">code</span><a href="https://github.com/mapequation/infomap" target="_blank" rel="noopener">infomap</a></span>
+<section class="hook">
+  <p>Modularity asks whether there are more edges inside groups than chance would predict. The map equation asks: drop a random walker on the graph, what's the cheapest two-level codebook for describing where it goes? The codelength stays short when the walker spends long stretches inside one cluster before jumping to another, because the within-cluster code can reuse short codewords across clusters (Rosvall + Bergstrom 2008, paper §"Highlighting Important Objects").</p>
+  <p>Modularity counts edges; the map equation counts <em>flow</em>. They disagree on directed networks: Fig. 2 of the paper builds two graphs where modularity and the map equation pick opposite partitions. On undirected graphs the disagreement narrows; on the 32-node fixture they roughly agree on A's K_5, B's K_4 split, and C's two halves, and disagree on what to do with A's periphery and the outliers.</p>
+  <p>This page steps through the algorithm: stationary distribution, singleton init, greedy pair-joining, single-node tuning, sub-level hierarchical recursion. Map equation in flat form (Eq. 1 of the paper):</p>
+  <p style="text-align:center">\(L(M) = q_{\curvearrowright} \cdot H(\mathcal{Q}) + \sum_{i=1}^m p_{\circlearrowright}^i \cdot H(\mathcal{P}^i)\)</p>
+  <div class="defs">
+    <div><span class="term">stationary distribution</span> \(p_\alpha\) = long-run probability the walker is at node \(\alpha\). For undirected unweighted graphs this collapses to \(p_\alpha = d_\alpha / (2m)\). The paper uses smart-teleportation PageRank for directed graphs.</div>
+    <div><span class="term">exit probability</span> \(q_i^{\curvearrowright}\) = probability the walker is at some node in module \(i\) and the next step leaves the module: \(\sum_{\alpha \in i} p_\alpha \cdot (\text{out}_\alpha / d_\alpha)\). The total \(q_\curvearrowright = \sum_i q_i^{\curvearrowright}\) is the bandwidth of the index codebook.</div>
+    <div><span class="term">within-module total</span> \(p_\circlearrowright^i = \pi_i + q_i^{\curvearrowright}\) where \(\pi_i = \sum_{\alpha \in i} p_\alpha\). The paper SI shows \(\sum_i p_\circlearrowright^i = 1 + q_\curvearrowright\): every step pays once for the within-codeword, with the exit symbol counted both inside (as the per-module exit code) and outside (in the index code).</div>
+    <div><span class="term">codelength</span> \(L(M)\) is the lower bound (in bits per step) on the average codeword length of any prefix-free code naming the random walker's positions under partition \(M\). Smaller \(L\) corresponds to the walker spending long stretches inside modules so that the index code is rarely invoked.</div>
   </div>
 </section>
 
-<figure class="shared-graph">
-  <div class="graph-caption">
-    <span class="st">stage 0</span> input fixture &middot; 32 nodes, 49 edges, 4 planted communities + 2 outliers
+<!-- ─────────── Stage 0 · The input ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 0 &middot; input</div>
+  <h2>The 32-node fixture, painted by planted ground-truth.</h2>
+  <p>The comdet gallery shares one small graph across every algorithm. A's K_5 is a tight flow trap; B's bridge is the kind of structure modularity catches but the map equation can split when the cross-bridge flow is small relative to the K_4 internals. C's disconnected two cycles cannot be one module under the map equation (no flow between them), so this is a place where Infomap and Leiden-CPM at low \(\gamma\) disagree with planted ground-truth.</p>
+  <div class="graph" id="g-input">
+    <div class="graph-chrome">
+      <span>32 nodes &middot; 52 edges &middot; 4 planted communities + 2 outliers</span>
+      <span class="right">colour = planted ground-truth</span>
+    </div>
+    <div class="graph-canvas" id="g-input-cy"></div>
   </div>
-  <svg id="shared-graph-svg" aria-label="32-node specialized fixture"></svg>
-</figure>
-
-<section class="stage-list" aria-label="planned walker stages">
-  <article class="stage-card">
-    <div><span class="stage-num">01</span></div>
-    <div>
-      <div class="stage-name">Flow calc</div>
-      <div class="stage-desc">Smart-teleportation PageRank gives the per-node stationary distribution.</div>
-    </div>
-    <span class="stage-pending">pending port</span>
-  </article>
-  <article class="stage-card">
-    <div><span class="stage-num">02</span></div>
-    <div>
-      <div class="stage-name">Initial \(L(M)\)</div>
-      <div class="stage-desc">Singleton partition: \(L(M) = H(P)\), the entropy of node visits.</div>
-    </div>
-    <span class="stage-pending">pending port</span>
-  </article>
-  <article class="stage-card">
-    <div><span class="stage-num">03</span></div>
-    <div>
-      <div class="stage-name">Greedy joining</div>
-      <div class="stage-desc">Pair-wise merge with the largest \(\Delta L\); deque-based.</div>
-    </div>
-    <span class="stage-pending">pending port</span>
-  </article>
-  <article class="stage-card">
-    <div><span class="stage-num">04</span></div>
-    <div>
-      <div class="stage-name">Tuning</div>
-      <div class="stage-desc">Fine + coarse passes escape locally-optimal merges.</div>
-    </div>
-    <span class="stage-pending">pending port</span>
-  </article>
-  <article class="stage-card">
-    <div><span class="stage-num">05</span></div>
-    <div>
-      <div class="stage-name">Sub-level</div>
-      <div class="stage-desc">Recursive partition inside each module to add hierarchy levels.</div>
-    </div>
-    <span class="stage-pending">pending port</span>
-  </article>
-  <article class="stage-card">
-    <div><span class="stage-num">06</span></div>
-    <div>
-      <div class="stage-name">Final</div>
-      <div class="stage-desc">Hierarchical partition + final \(L(M)\).</div>
-    </div>
-    <span class="stage-pending">pending port</span>
-  </article>
 </section>
+
+<!-- ─────────── Stage 1 · stationary distribution ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 1 &middot; stationary distribution</div>
+  <h2>Visit rate per node = degree / (2m).</h2>
+  <p>For an undirected, connected, unweighted graph, the stationary distribution of a simple random walk is \(p_\alpha = d_\alpha / (2m)\). High-degree nodes hold more probability mass; periphery nodes hold less. Below: the per-node visit rate, sorted by node id.</p>
+  <div class="graph" id="g-flow">
+    <div class="graph-chrome">
+      <span>node area scales with \(p_\alpha\)</span>
+      <span class="right" id="g-flow-summary">·</span>
+    </div>
+    <div class="graph-canvas" id="g-flow-cy"></div>
+  </div>
+  <div class="flow-bar" id="g-flow-bar" aria-label="per-node stationary distribution"></div>
+  <p>The hub node 0 has degree 9, the biggest share of any single node (\(p_0 = 9/104 \approx 0.087\)). The outlier 30 has degree 1, the smallest (\(p_{30} \approx 0.0096\)). The map-equation cost of putting all 32 nodes into one giant module is \(L_1 = H(P) + 0\) where \(H(P) \approx 4.81\) bits, since the index code is unused (no cross-module steps). The cost of singletons is \(L_0 = H(P) + 2\): every step pays both the index code (1 bit, since \(q_\curvearrowright = 1\) under singletons, so the walker exits on every step) and the per-module exit codeword (cost 1 bit per module, summing to 1 across all modules). \(L_1\) is the lower bound for any \(M\); the optimum sits between.</p>
+</section>
+
+<!-- ─────────── Stage 2 · singleton init ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 2 &middot; singleton init</div>
+  <h2>Every node a module; \(L_0\) is the high-water mark.</h2>
+  <p>Greedy joining starts from the singleton partition. At that point every step exits its module with probability 1, so \(q_\curvearrowright = 1\); the index code names which module the walker visits each step, contributing \(H(P)\) bits. Within-module entropy collapses because each module has one node and one exit, both with equal weight \(p_v\); per-module bookkeeping adds an extra 2 bits across the partition.</p>
+  <div class="graph" id="g-singleton">
+    <div class="graph-chrome">
+      <span>singleton partition &middot; \(L_0 = H(P) + 2 \approx \) <span id="g-singleton-L">·</span></span>
+      <span class="right">colour = module id (32 distinct hues)</span>
+    </div>
+    <div class="graph-canvas" id="g-singleton-cy"></div>
+  </div>
+  <p>Every merge from this state either grows the within-module entropy (we name more nodes inside one module) or shrinks the index entropy (fewer modules to switch between, fewer cross-module steps). Greedy joining picks the merge that buys the most index reduction for the least within-module cost, and stops when no merge is net negative.</p>
+</section>
+
+<!-- ─────────── Stage 3 · greedy joining ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 3 &middot; greedy joining</div>
+  <h2>Merge the pair that drops \(L\) the most; halt when no merge helps.</h2>
+  <p>At every step, scan the inter-module edges to enumerate adjacent module pairs (modules with no inter-edge cannot merge profitably under the map equation, so we skip them). For each pair, compute \(\Delta L\) = \(L(\text{after merge}) - L(\text{before})\). Pick the most-negative \(\Delta L\) and apply the merge; re-scan; repeat. Halt when every adjacent pair has \(\Delta L \ge 0\).</p>
+  <div class="graph" id="g-join">
+    <div class="graph-chrome">
+      <span><span class="level-pill" id="g-join-level">step 0</span><span id="g-join-status">merged: ·</span></span>
+      <span class="right" id="g-join-stats">L: ·  &middot; ΔL: ·</span>
+    </div>
+    <div class="graph-canvas" id="g-join-cy"></div>
+    <div class="widget-row">
+      <button class="btn" id="g-join-reset" type="button">reset</button>
+      <button class="btn" id="g-join-prev" type="button">back</button>
+      <button class="btn primary" id="g-join-next" type="button">next merge</button>
+      <button class="btn" id="g-join-end" type="button">finish</button>
+      <span class="step-label">merge <b id="g-join-cur">0</b> / <span id="g-join-total">0</span></span>
+    </div>
+  </div>
+  <div id="g-join-panel"></div>
+  <p>This phase carries most of the \(L\) reduction; the singleton-to-greedy gap closes most of the way to the simulated-annealing optimum on typical networks. The order of merges matters. Infomap's default heuristic is deterministic for fixed input, so re-running the kernel reproduces the same trace.</p>
+</section>
+
+<!-- ─────────── Stage 4 · single-node tuning ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 4 &middot; tuning</div>
+  <h2>For each node, try every neighbour-module; accept the move with best \(\Delta L\).</h2>
+  <p>The paper proposes a heat-bath simulated-annealing refinement after greedy joining (paper §"Mapping Flow Compared with Maximizing Modularity"; SI for the SA recipe). The greedy variant walked here is the same single-node-move loop used by Louvain and Leiden: cheaper, deterministic, captures the bulk of the residual \(\Delta L\). For each node \(v\), every distinct neighbour-module is evaluated (including \(v\)'s current one, which always scores 0 by definition); the best is picked and the move applied. One sweep per pass; halt when a sweep makes no moves.</p>
+  <div class="graph" id="g-tune">
+    <div class="graph-chrome">
+      <span><span class="level-pill" id="g-tune-level">pass 1</span><span id="g-tune-status">visit · &middot; · &middot;</span></span>
+      <span class="right" id="g-tune-stats">moves: · &middot; ΔL cum: ·</span>
+    </div>
+    <div class="graph-canvas" id="g-tune-cy"></div>
+    <div class="widget-row">
+      <button class="btn" id="g-tune-reset" type="button">reset</button>
+      <button class="btn" id="g-tune-prev" type="button">back</button>
+      <button class="btn primary" id="g-tune-next" type="button">next visit</button>
+      <button class="btn" id="g-tune-end" type="button">finish pass</button>
+      <span class="step-label">visit <b id="g-tune-cur">0</b> / <span id="g-tune-total">0</span></span>
+    </div>
+  </div>
+  <div id="g-tune-panel"></div>
+  <div class="callout">
+    <div class="tag">tuning vs Leiden's refinement</div>
+    <p>Leiden's refinement is a structural fix: every output community is guaranteed internally connected, which Louvain cannot promise. Infomap's tuning is a numerical fix: greedy joining is myopic about merge order, and a few node moves at the end can exit local minima. On the 32-node fixture this stage shifts \(L\) by a fraction of a bit; on larger benchmarks it picks up 1-2% of the SA optimum.</p>
+  </div>
+</section>
+
+<!-- ─────────── Stage 5 · sub-level recursion ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 5 &middot; sub-level recursion</div>
+  <h2>Recurse inside each module to surface fine-grained structure.</h2>
+  <p>Up to here, Infomap returns a flat partition. Hierarchy comes from running the same procedure inside each module's induced subgraph. If recursion finds a multi-module split that beats the flat single-module \(L\), the module gets a sub-partition; otherwise it stays atomic. Recursion stops at depth \(\le 3\) by default; beyond that, the resolution-limit of the map equation absorbs whatever is left.</p>
+  <div class="hier-tree" id="g-hier-tree" aria-label="Infomap hierarchical partition"></div>
+  <p>On the 32-node fixture the flat partition is already fine-grained (the greedy + tune pass split A's periphery + the outliers into their own modules), so recursion finds little extra. On the paper's social-sciences map (Fig. 4: 1,431 journals, 217k citations) recursion picks up two clean levels of nesting and a third level for the densest sub-fields.</p>
+</section>
+
+<!-- ─────────── Stage 6 · final ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 6 &middot; final</div>
+  <h2>The Infomap output, side by side with planted ground-truth.</h2>
+  <p>On the 32-node fixture Infomap converges in one outer iteration. Below: Infomap's flat partition (left) next to planted ground-truth (right). \(L = \) <span id="g-final-L">·</span> bits per step.</p>
+  <div class="L-readout">
+    <span class="item tag">final \(L\) = <b id="g-final-L2">·</b> bits/step</span>
+    <span class="item">singleton \(L_0\) = <b id="g-final-L0">·</b></span>
+    <span class="item">one-module \(L_1\) = <b id="g-final-L1">·</b></span>
+    <span class="item">modules: <b id="g-final-mods">·</b></span>
+  </div>
+  <div class="gt-compare">
+    <div class="panel-mini">
+      <div class="cap">infomap output &middot; \(L = \) <span id="g-final-L3">·</span></div>
+      <div class="graph-canvas" id="g-final-info" style="height: 280px"></div>
+    </div>
+    <div class="panel-mini">
+      <div class="cap">planted ground-truth &middot; 4 communities + 2 outliers</div>
+      <div class="graph-canvas" id="g-final-gt" style="height: 280px"></div>
+    </div>
+  </div>
+  <table class="cluster-stats" id="g-final-stats">
+    <thead><tr><th></th><th>module</th><th>size</th><th>edges in</th><th>edges out</th><th>conductance</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <div class="callout">
+    <div class="tag">on this fixture, by region</div>
+    <p>Infomap pulls A's K_5 and most of A's periphery into one big module (the K_5's flow is dense enough that a random walker spends most of its time inside, even when it occasionally hops out to a periphery neighbour). It splits B at the bridge: each \(K_4\) is a flow trap with one cross-bridge edge, and the bridge edge's contribution to inter-module flow is barely worth paying for. C's two disconnected 3-cycles are necessarily separate modules (no flow between them, no merge possible). D and the periphery nodes that bridge to outliers come out as small mixed modules; Infomap's flow-based view does not recover D's planted-cluster structure because D's intra-edges are too few to trap flow.</p>
+  </div>
+  <div class="callout warn">
+    <div class="tag">caveat &middot; greedy tuning is not paper-canonical</div>
+    <p>The paper's refinement is a heat-bath simulated-annealing schedule (paper SI). The page kernel ships a greedy single-node-move pass instead: deterministic, cheaper, within ~1-2% of the SA optimum on most graphs. ARI vs the canonical <a href="https://github.com/mapequation/infomap" target="_blank" rel="noopener">infomap</a> binary at this same fixture has not been verified yet; the partition shown here is illustrative of the algorithm's behaviour rather than a guaranteed match for any specific canonical run.</p>
+  </div>
+</section>
+
+<div id="kin"></div>
 
 <footer class="ack">
   <p class="tools">drawn with <a href="https://d3js.org" target="_blank" rel="noopener">d3</a></p>
   <p class="credit">typed by vltanh, doodled with Claude</p>
 </footer>
 
-<script src="./js/fixture.js"></script>
+</main>
+
 <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 <script>
 window.MathJax = {
   tex: {
-    inlineMath: [['\\(', '\\)'], ['$', '$'], ['$$', '$$']],
+    inlineMath: [['\\(', '\\)']],
     displayMath: [['\\[', '\\]']]
   },
   chtml: { scale: 1.0 }
 };
 </script>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
-<script src="./js/landing_hero.js"></script>
+<script src="./shared.js"></script>
+<script src="./js/fixture.js"></script>
+<script src="./js/infomap/infomap.js"></script>
+<script src="./js/comdet/page_helpers.js"></script>
+<script src="./js/infomap/page.js"></script>
 
 </body>
 </html>
