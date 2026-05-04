@@ -226,12 +226,91 @@
       b[v] = s;
     }
 
+    // Subset-entropy: sum over only the entropy terms that involve
+    // blocks r or s. Since moveVertex(v, s) with v in r changes only
+    // er[r], er[s], nr[r], nr[s], e_rr, e_ss, e_rs, and e_rt / e_st
+    // for every t, every other vterm/eterm is unchanged. Δ = subset
+    // (after) - subset (before) is therefore exact for the sparse
+    // entropy + degree-DL parts. partition_dl + edges_dl are computed
+    // analytically below since they have closed-form O(1) deltas.
+    function subsetEntropy(r, s) {
+      let S = 0;
+      // vterm(r) + vterm(s).
+      if (nr[r] > 0) S += degCorr ? lgamma(er[r] + 1) : er[r] * safelog(nr[r]);
+      if (nr[s] > 0) S += degCorr ? lgamma(er[s] + 1) : er[s] * safelog(nr[s]);
+      // eterm(r,r), eterm(s,s).
+      if (nr[r] > 0) {
+        const e_rr_half = ers[r * B + r] / 2;
+        S -= e_rr_half * LOG2 + lgamma(e_rr_half + 1);
+      }
+      if (nr[s] > 0 && s !== r) {
+        const e_ss_half = ers[s * B + s] / 2;
+        S -= e_ss_half * LOG2 + lgamma(e_ss_half + 1);
+      }
+      // eterm(r,s) (counted once, off-diagonal).
+      if (r !== s) S -= lgamma(ers[r * B + s] + 1);
+      // eterm(r,t) + eterm(s,t) for every other non-empty t.
+      for (let t = 0; t < B; t++) {
+        if (t === r || t === s) continue;
+        if (nr[t] === 0) continue;
+        S -= lgamma(ers[r * B + t] + 1);
+        S -= lgamma(ers[s * B + t] + 1);
+      }
+      return S;
+    }
+
+    function partitionDlSubset(rA, sA) {
+      // partitionDl = lgamma(N+1) + lbinom(N-1, Bne-1) + log(N)
+      //                                    - sum_r lgamma(nr[r]+1)
+      // Capture only the rA + sA contributions to the final sum + the
+      // closed-form Bne-dependent prefix. The constant lgamma(N+1) +
+      // log(N) cancels in delta.
+      let S = lbinom(N - 1, Bne - 1);
+      if (nr[rA] > 0) S -= lgamma(nr[rA] + 1);
+      if (nr[sA] > 0 && sA !== rA) S -= lgamma(nr[sA] + 1);
+      return S;
+    }
+
+    function edgesDlSubset() {
+      // edges_dl depends only on Bne (NB = Bne*(Bne+1)/2) + E. So Δ is
+      // captured by Bne.
+      const NB = (Bne * (Bne + 1)) / 2;
+      return logChooseRep(NB, E);
+    }
+
+    function degreeDlSubset(rA, sA) {
+      // degree_dl_uniform = sum over r of logChooseRep(nr[r], er[r]).
+      // Only rA + sA contributions change.
+      let S = 0;
+      if (nr[rA] > 0) S += logChooseRep(nr[rA], Math.round(er[rA]));
+      if (nr[sA] > 0 && sA !== rA) S += logChooseRep(nr[sA], Math.round(er[sA]));
+      return S;
+    }
+
+    function ppSubset() {
+      // PP entropy is global (depends on Σ_r e_rr / nr nationwide); no
+      // closed-form analytic delta. Fall back to the full ppLikelihood
+      // + ppEdgesDl recompute.
+      let S = ppLikelihood() + ppEdgesDl();
+      if (usePartitionDl) S += partitionDl();
+      return S;
+    }
+
+    function subsetSE(rA, sA) {
+      if (mode === MODES.PP) return ppSubset();
+      let S = subsetEntropy(rA, sA);
+      if (useEdgesDl) S += edgesDlSubset();
+      if (usePartitionDl) S += partitionDlSubset(rA, sA);
+      if (useDegreeDl)    S += degreeDlSubset(rA, sA);
+      return S;
+    }
+
     function virtualMove(v, s) {
       if (s === b[v]) return 0;
-      const before = entropy();
       const fromR = b[v];
+      const before = subsetSE(fromR, s);
       moveVertex(v, s);
-      const after = entropy();
+      const after = subsetSE(fromR, s);
       moveVertex(v, fromR);
       return after - before;
     }

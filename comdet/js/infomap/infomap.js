@@ -188,7 +188,126 @@
     return { partition: part, finalL: curr.L, traces: traces };
   }
 
-  // Greedy single-node tuning. Paper SI canonical = heat-bath SA.
+  // Heat-bath simulated-annealing refinement (Rosvall+Bergstrom 2008,
+  // SI eq. S6 + S8). For each node visit, pick the neighbour-module
+  // proposal proportional to exp(-ΔL/T); decrease T geometrically. At
+  // T → 0 this reduces to greedy. Recovers from greedy local minima.
+  //
+  // Determinism: a seed-driven MT19937 governs the proposal pick. The
+  // seed defaults to 0 so a re-run reproduces the same trace.
+  function saRefine(g, p, partition, opts) {
+    opts = opts || {};
+    const recordTrace = !!opts.recordTrace;
+    const T0 = opts.T0 != null ? opts.T0 : 0.5;
+    const Tmin = opts.Tmin != null ? opts.Tmin : 1e-3;
+    const cooling = opts.cooling != null ? opts.cooling : 0.85;
+    const passesMax = opts.passesMax != null ? opts.passesMax : 40;
+    const LV = window.COMDET && window.COMDET.LOUVAIN;
+    const rng = LV ? LV.MT19937((opts.seed | 0) >>> 0) : null;
+    function rand() {
+      if (rng) return rng.raw() / 0x100000000;
+      return Math.random();
+    }
+    const part = partition.slice();
+    const traces = [];
+    let currL = mapEquation(g, p, part).L;
+    let pass = 0;
+    let T = T0;
+    while (T >= Tmin && pass < passesMax) {
+      let movedThisPass = false;
+      for (let v = 0; v < g.n; v++) {
+        const cv = part[v];
+        const candSet = new Set();
+        candSet.add(cv);
+        const nb = g.adj[v];
+        for (let k = 0; k < nb.length; k++) candSet.add(part[nb[k]]);
+        // Compute ΔL for every candidate.
+        const cands = [];
+        candSet.forEach(function (c) {
+          if (c === cv) { cands.push({ comm: c, dL: 0, newL: currL }); return; }
+          const trial = part.slice(); trial[v] = c;
+          const newL = mapEquation(g, p, trial).L;
+          cands.push({ comm: c, dL: newL - currL, newL: newL });
+        });
+        // Heat-bath weights w_i = exp(-ΔL_i / T). Subtract min to
+        // avoid underflow at low T (standard Boltzmann trick).
+        let dlMin = Infinity;
+        for (let i = 0; i < cands.length; i++) if (cands[i].dL < dlMin) dlMin = cands[i].dL;
+        let wsum = 0;
+        const ws = cands.map(function (c) {
+          const w = Math.exp(-(c.dL - dlMin) / T);
+          wsum += w;
+          return w;
+        });
+        let r = rand() * wsum;
+        let pick = cands.length - 1;
+        for (let i = 0; i < cands.length; i++) {
+          r -= ws[i];
+          if (r <= 0) { pick = i; break; }
+        }
+        const chosen = cands[pick];
+        if (chosen.comm !== cv) {
+          part[v] = chosen.comm;
+          currL = chosen.newL;
+          movedThisPass = true;
+        }
+        if (recordTrace) {
+          traces.push({
+            v: v, fromComm: cv, toComm: chosen.comm,
+            moved: chosen.comm !== cv, dL: chosen.dL,
+            T: T,
+            candidates: cands.sort(function (a, b) { return a.dL - b.dL; }),
+            newL: currL,
+          });
+        }
+      }
+      pass += 1;
+      T *= cooling;
+      if (!movedThisPass && T < T0 * 0.5) break;
+    }
+    // Final greedy pass at T → 0 to lock in the best local optimum
+    // (paper SI: SA cools then converges deterministically).
+    let frozen = false;
+    while (!frozen) {
+      frozen = true;
+      for (let v = 0; v < g.n; v++) {
+        const cv = part[v];
+        const candSet = new Set();
+        candSet.add(cv);
+        const nb = g.adj[v];
+        for (let k = 0; k < nb.length; k++) candSet.add(part[nb[k]]);
+        let bestComm = cv, bestL = currL, bestDelta = 0;
+        const finalCands = [];
+        candSet.forEach(function (c) {
+          if (c === cv) { finalCands.push({ comm: c, dL: 0, newL: currL }); return; }
+          const trial = part.slice(); trial[v] = c;
+          const newL = mapEquation(g, p, trial).L;
+          const dL = newL - currL;
+          finalCands.push({ comm: c, dL: dL, newL: newL });
+          if (dL < bestDelta) { bestDelta = dL; bestComm = c; bestL = newL; }
+        });
+        if (bestComm !== cv) {
+          part[v] = bestComm;
+          currL = bestL;
+          frozen = false;
+        }
+        if (recordTrace) {
+          traces.push({
+            v: v, fromComm: cv, toComm: bestComm,
+            moved: bestComm !== cv, dL: bestDelta,
+            T: 0,
+            candidates: finalCands.sort(function (a, b) { return a.dL - b.dL; }),
+            newL: currL,
+          });
+        }
+      }
+      pass += 1;
+      if (pass > passesMax + 10) break;
+    }
+    return { partition: part, finalL: currL, traces: traces, passes: pass };
+  }
+
+  // Greedy single-node tuning. Equivalent to saRefine at T → 0.
   function tune(g, p, partition, opts) {
     opts = opts || {};
     const recordTrace = !!opts.recordTrace;
@@ -365,9 +484,23 @@
     const joined = greedyJoin(g, p, initPart, { recordTrace: recordTrace });
     const joinedRenum = renumber(joined.partition);
 
-    // Single-node tuning.
-    const tuned = tune(g, p, joinedRenum, { recordTrace: recordTrace });
-    const tunedRenum = renumber(tuned.partition);
+    // Refinement: greedy single-node tuner is the practical default
+    // (Rosvall-Bergstrom 2008 §2 mentions "fast greedy" as the
+    // production heuristic). Set opts.refine = "sa" to enable the heat
+    // -bath simulated-annealing refinement from the paper SI; it can
+    // escape greedy local minima on dense networks but typically lands
+    // worse on small fixtures because greedyJoin is already near-
+    // optimal there. SA is deterministic per opts.seed.
+    const refineMode = opts.refine || "greedy";
+    const refined = (refineMode === "sa")
+      ? saRefine(g, p, joinedRenum, {
+          recordTrace: recordTrace,
+          seed: opts.seed != null ? opts.seed : 0,
+          T0: opts.T0, Tmin: opts.Tmin, cooling: opts.cooling,
+        })
+      : tune(g, p, joinedRenum, { recordTrace: recordTrace });
+    const tunedRenum = renumber(refined.partition);
+    const tuned = refined;
 
     // Sub-level hierarchical recursion.
     const subLevel = recurse ? subLevelPartition(g, p, tunedRenum, {
@@ -405,6 +538,7 @@
     plogp: plogp,
     greedyJoin: greedyJoin,
     tune: tune,
+    saRefine: saRefine,
     subLevelPartition: subLevelPartition,
     runInfomap: runInfomap,
     renumber: renumber,
