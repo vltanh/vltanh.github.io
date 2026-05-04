@@ -219,6 +219,7 @@ body {
   max-width: var(--span-wide);
   margin: 0 auto 1.8rem;
 }
+
 </style>
 </head>
 <body>
@@ -229,25 +230,39 @@ body {
 </div>
 
 <header class="hdr">
-  <div class="kicker">algorithm &middot; connected-component split</div>
-  <h1>CC</h1>
-  <p class="sub">One algorithm in the gallery: connected-component split. Walked stage by stage on the shared 32-node fixture, side by side with the planted ground truth.</p>
+  <div class="kicker">community detection &middot; post-proc &middot; connected-component split</div>
+  <h1><em>CC</em></h1>
+  <p class="fullname">connected components &middot; Park 2025 / Vu-Le 2026</p>
+  <p class="sub">Cheapest of the three connectivity post-procs. One BFS per cluster; every connected piece becomes its own output cluster. No threshold, no parameters: a sanity pass that catches partitions whose clusters are not actually connected.</p>
 </header>
 
 <div class="uc-banner">
-  <strong>Walker pending.</strong> The full per-stage walker for CC is pending the Phase 4c kernel port. Today the page surfaces the input fixture and the planned stage list; interactive widgets land per-stage as the JS port reaches feature parity with canonical (see the active plan's Phase 4c verification matrix).
+  <strong>Walker pending.</strong> The per-stage walker for CC waits on the Phase 4c JS kernel port. Today the page surfaces the input fixture and the planned stage list; interactive widgets land per-stage as the port catches up to canonical. The technical companion at <a href="https://github.com/vlttnh/community-detection/blob/main/docs/algorithms/cc.md">docs/algorithms/cc.md</a> covers source pointers, CLI flags, and determinism guarantees.
 </div>
 
+<section class="hook">
+  <p>Some clustering algorithms emit a label per node and call it a day. They do not check whether the nodes carrying that label are actually reachable from each other. SBM is the usual offender: stochastic block models care about edge density between blocks, not about whether each block is internally connected. So a cluster can have, say, two disconnected halves with the same label, and the output looks like one community when it is really two.</p>
+  <p><em>CC</em> is the patch. For each cluster <code>C</code> in the input partition, take the subgraph induced by <code>C</code>'s nodes (drop every edge crossing out to a different cluster), run a BFS, and replace <code>C</code> with one new cluster per connected piece. If <code>C</code> was already connected, nothing changes.</p>
+  <p>The cost is one BFS per cluster: \(O(|V| + |E|)\) over the whole graph. There are no parameters and no model.</p>
+  <div class="callout">
+    <div class="tag">why this matters &middot; Park 2025 / Vu-Le 2026</div>
+    <p>On graph-tool's flat and nested SBMs (every variant tested: degree-corrected, non-degree-corrected, planted-partition, plus PySBM), internally disconnected clusters show up across both real and synthetic benchmarks. Splitting them with CC <em>improves</em> accuracy on most of those benchmarks. WCC adds a threshold on top and gains more; CM adds a re-clustering pass on top of that and gains the most. CC is the cheapest correction of the three.</p>
+  </div>
+  <p>The shipped binary is <code>constrained_clustering MincutOnly --connectedness-criterion 0</code>. The <code>0</code> selects the <em>Simple</em> branch in <a href="https://github.com/MinhyukPark/constrained-clustering/blob/main/src/mincut_only.cpp">mincut_only.cpp</a>: short-circuit the recursive cut + threshold loop and emit each component directly. Same code path as WCC, just with the cut step disabled.</p>
+</section>
+
 <section class="algo-meta">
-  <p>Walk every cluster's induced subgraph; split each into weakly-connected components; each component becomes its own cluster in the output. No threshold, no model parameters: purely structural BFS that catches algorithms which assigned a label without checking connectivity (SBM is the usual culprit).</p>
   <div class="algo-refs">
-    <span><span class="ref-label">code</span><a href="https://igraph.org" target="_blank" rel="noopener">igraph weakly_connected_components</a></span>
+    <span><span class="ref-label">paper</span><a href="https://doi.org/10.1007/978-3-031-82435-7_9" target="_blank" rel="noopener">Park 2025</a></span>
+    <span><span class="ref-label">paper</span><a href="https://doi.org/10.1007/s41109-025-00747-2" target="_blank" rel="noopener">Vu-Le 2026</a></span>
+    <span><span class="ref-label">code</span><a href="https://github.com/MinhyukPark/constrained-clustering" target="_blank" rel="noopener">constrained-clustering MincutOnly</a></span>
+    <span><span class="ref-label">docs</span><a href="https://github.com/vlttnh/community-detection/blob/main/docs/algorithms/cc.md" target="_blank" rel="noopener">technical companion</a></span>
   </div>
 </section>
 
 <figure class="shared-graph">
   <div class="graph-caption">
-    <span class="st">stage 0</span> input fixture &middot; 32 nodes, 49 edges, 4 planted communities + 2 outliers
+    <span class="st">stage 0</span> input fixture &middot; 32 nodes, 52 edges, 4 planted communities + 2 outliers
   </div>
   <svg id="shared-graph-svg" aria-label="32-node specialized fixture"></svg>
 </figure>
