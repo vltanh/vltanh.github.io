@@ -321,9 +321,11 @@
             if (cother === old) { totalWeightInComm[old] -= w; deltaInAll -= w; }
           }
         } else {
+          // Mirror rebuildAdmin's undirected single-write convention:
+          // intra contributes -w to to[old] only; inter contributes -w
+          // each to to[old] and to[cother].
           totalWeightToComm[old] -= w;
           if (cother === old) {
-            totalWeightToComm[old] -= w;
             totalWeightInComm[old] -= w;
             deltaInAll -= w;
           } else {
@@ -383,7 +385,6 @@
         } else {
           totalWeightToComm[target] += w;
           if (cother === target) {
-            totalWeightToComm[target] += w;
             totalWeightInComm[target] += w;
             deltaInAll += w;
           } else {
@@ -416,7 +417,9 @@
       cnodes = grow(cnodes, newId + 1);
       totalWeightInComm = grow(totalWeightInComm, newId + 1);
       totalWeightToComm = grow(totalWeightToComm, newId + 1);
-      totalWeightFromComm = grow(totalWeightFromComm, newId + 1);
+      totalWeightFromComm = graph.isDirected()
+        ? grow(totalWeightFromComm, newId + 1)
+        : totalWeightToComm;
       ncomm += 1;
       empties.add(newId);
       totalPossibleEdgesInAllComms += graph.possibleEdges(0);
@@ -479,7 +482,7 @@
       csize = newCsize; cnodes = newCnodes;
       totalWeightInComm = newIn;
       totalWeightToComm = newTo;
-      totalWeightFromComm = newFrom;
+      totalWeightFromComm = graph.isDirected() ? newFrom : newTo;
       ncomm = newN;
       empties.clear();
       // totalWeightInAllComms + totalPossibleEdgesInAllComms unchanged
