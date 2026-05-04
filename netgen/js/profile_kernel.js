@@ -373,18 +373,71 @@
     // emitted by externals/ec-sbm/src/profile.py via PyGraph + extra ledger
     // bookkeeping and live outside profile_common, so the kernel does not emit
     // them. Pages keep mincut as NETGEN.MINCUTS.
+    //
+    // method='pso' (v3) additionally emits cluster_ccoeff.csv: per-cluster
+    // global ccoeff on the empirical intra-induced subgraph, in cluster_iid
+    // order. Mirrors externals/ec-sbm/src/profile.py::compute_cluster_ccoeff.
     "ec-sbm": {
-      outputs: (state, neighbors) => {
+      outputs: (state, neighbors, ctx) => {
         const { nodeDegSorted } = computeNodeDegree(state, neighbors);
         const { commSizeSorted, clusterId2iid } = computeCommSize(state);
         const edgeCounts = computeEdgeCount(state, neighbors, clusterId2iid);
-        return {
+        const files = {
           "node_id.csv": exportNodeId(nodeDegSorted),
           "cluster_id.csv": exportClusterId(commSizeSorted),
           "assignment.csv": exportAssignment(nodeDegSorted, state.node2com, clusterId2iid),
           "degree.csv": exportDegree(nodeDegSorted),
           "edge_counts.csv": exportEdgeCount(edgeCounts),
         };
+        if (ctx && ctx.method === "pso") {
+          const clustersById = new Map();
+          for (const [u, c] of state.node2com) {
+            if (!clustersById.has(c)) clustersById.set(c, []);
+            clustersById.get(c).push(u);
+          }
+          for (const arr of clustersById.values()) arr.sort();
+          const ccs = [];
+          for (const [cid] of commSizeSorted) {
+            const cnodes = clustersById.get(cid) || [];
+            const nC = cnodes.length;
+            if (nC < 3) { ccs.push(0.0); continue; }
+            const cset = new Set(cnodes);
+            const adj = new Map();
+            for (const u of cnodes) {
+              const nbrs = neighbors.get(u) || new Set();
+              const filt = [];
+              for (const v of nbrs) if (cset.has(v) && v !== u) filt.push(v);
+              filt.sort();
+              adj.set(u, filt);
+            }
+            let triplets = 0;
+            for (const u of cnodes) {
+              const d = adj.get(u).length;
+              triplets += d * (d - 1) / 2;
+            }
+            if (triplets === 0) { ccs.push(0.0); continue; }
+            let triangles = 0;
+            for (const u of cnodes) {
+              const nu = adj.get(u);
+              for (const v of nu) {
+                if (v <= u) continue;
+                const nv = adj.get(v);
+                let i = 0, j = 0;
+                while (i < nu.length && j < nv.length) {
+                  const a = nu[i], b = nv[j];
+                  if (a === b) {
+                    if (a > v) triangles += 1;
+                    i++; j++;
+                  } else if (a < b) i++;
+                  else j++;
+                }
+              }
+            }
+            ccs.push(3.0 * triangles / triplets);
+          }
+          files["cluster_ccoeff.csv"] = ccs.map(x => pyFloatStr(x)).join("\n") + "\n";
+        }
+        return files;
       },
     },
   };
@@ -397,7 +450,9 @@
     const outliers = identifyOutliers(state);
     const preApplyOutlierCount = outliers.size;
     applyOutlierMode(state, neighbors, outliers, payload.outlier_mode, !!payload.drop_oo);
-    const files = REGISTRY[gen].outputs(state, neighbors, { preApplyOutlierCount });
+    const files = REGISTRY[gen].outputs(state, neighbors, {
+      preApplyOutlierCount, method: payload.method,
+    });
     return { files, state, neighbors, outliers, preApplyOutlierCount };
   }
 

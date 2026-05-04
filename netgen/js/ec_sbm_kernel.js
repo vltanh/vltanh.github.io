@@ -392,6 +392,208 @@
     return { kept, dropped: invalidEdges.slice(), ops: ops || [] };
   }
 
+  // ── PSO branch (v3) ─────────────────────────────────────────
+  // Faithful port of externals/ec-sbm/src/gen_pso_core.py: uniform-angular
+  // PSO on a hyperbolic disk with `m` attachments per arrival. Used by v3's
+  // stage-2 walker. Not byte-equal to canonical (different RNG; canonical
+  // uses np.random.default_rng), but the construction logic — radial
+  // schedule, hyperbolic distance, T==0 nearest-m branch, T>0 connection
+  // probability + Efraimidis-Spirakis weighted sample — is identical.
+  function hyperbolicDist(thetaI, rI, thetasJ, rsJ) {
+    const out = new Array(thetasJ.length);
+    const PI = Math.PI;
+    for (let j = 0; j < thetasJ.length; j++) {
+      const A = PI - Math.abs(PI - Math.abs(thetaI - thetasJ[j]));
+      let arg = Math.cosh(rI) * Math.cosh(rsJ[j])
+              - Math.sinh(rI) * Math.sinh(rsJ[j]) * Math.cos(A);
+      if (arg < 1.0) arg = 1.0;
+      out[j] = Math.acosh(arg);
+    }
+    return out;
+  }
+
+  // Efraimidis-Spirakis weighted sample without replacement: pick the k
+  // indices with the smallest -log(U)/w keys. Falls back on uniform when
+  // no positive weight; returns all positives when fewer than k exist.
+  function efraimidisSample(weights, k, rng) {
+    const n = weights.length;
+    const pos = [];
+    for (let i = 0; i < n; i++) if (weights[i] > 0) pos.push(i);
+    if (pos.length === 0) {
+      const idxs = [];
+      const seen = new Set();
+      while (idxs.length < Math.min(k, n)) {
+        const r = Math.floor(rng() * n);
+        if (!seen.has(r)) { seen.add(r); idxs.push(r); }
+      }
+      return idxs.sort((a, b) => a - b);
+    }
+    if (pos.length <= k) return pos.slice().sort((a, b) => a - b);
+    const keys = new Array(n).fill(Infinity);
+    for (const i of pos) {
+      const u = rng();
+      const ui = u <= 0 ? 1e-300 : u;
+      keys[i] = -Math.log(ui) / weights[i];
+    }
+    const idxs = pos.slice().sort((a, b) => keys[a] - keys[b]).slice(0, k);
+    return idxs.sort((a, b) => a - b);
+  }
+
+  function psoClusterEdges(N, m, T, gamma, rng) {
+    if (N <= 1) return [];
+    if (m < 1) throw new Error("m must be >= 1");
+    if (gamma < 2) throw new Error("gamma must be >= 2");
+    if (T < 0) throw new Error("T must be >= 0");
+    m = Math.min(m, N - 1);
+
+    const PI = Math.PI;
+    const thetas = new Array(N);
+    for (let i = 0; i < N; i++) thetas[i] = rng() * 2.0 * PI;
+    const rs = new Array(N).fill(0);
+
+    const beta = 1.0 / (gamma - 1.0);
+    const edges = [];
+
+    for (let t = 2; t <= N; t++) {
+      for (let i = 1; i < t; i++) {
+        rs[i - 1] = beta * (2.0 * Math.log(i)) + (1.0 - beta) * (2.0 * Math.log(t));
+      }
+      rs[t - 1] = 2.0 * Math.log(t);
+
+      if (t - 1 <= m) {
+        for (let v = 0; v < t - 1; v++) edges.push([v, t - 1]);
+        continue;
+      }
+
+      const thetaT = thetas[t - 1], rT = rs[t - 1];
+      const thetasJ = thetas.slice(0, t - 1);
+      const rsJ = rs.slice(0, t - 1);
+      const d = hyperbolicDist(thetaT, rT, thetasJ, rsJ);
+
+      let partners;
+      if (T === 0) {
+        const idxs = d.map((_, i) => i).sort((a, b) => d[a] - d[b]).slice(0, m);
+        partners = idxs.sort((a, b) => a - b);
+      } else {
+        const logT = Math.log(t);
+        const sinTpi = Math.sin(T * PI);
+        if (sinTpi === 0) {
+          const idxs = d.map((_, i) => i).sort((a, b) => d[a] - d[b]).slice(0, m);
+          partners = idxs.sort((a, b) => a - b);
+        } else {
+          let Rt;
+          if (beta === 1.0) {
+            Rt = 2.0 * logT - 2.0 * Math.log((2.0 * T * logT) / (sinTpi * m));
+          } else {
+            const inner = (2.0 * T * (1.0 - Math.exp(-(1.0 - beta) * logT)))
+                        / (sinTpi * m * (1.0 - beta));
+            Rt = 2.0 * logT - 2.0 * Math.log(inner);
+          }
+          const p = new Array(d.length);
+          for (let i = 0; i < d.length; i++) {
+            let z = (d[i] - Rt) / (2.0 * T);
+            if (z > 700) z = 700;
+            if (z < -700) z = -700;
+            p[i] = 1.0 / (1.0 + Math.exp(z));
+          }
+          partners = efraimidisSample(p, m, rng);
+        }
+      }
+      for (const v of partners) edges.push([v, t - 1]);
+    }
+    return edges;
+  }
+
+  function inducedGlobalCcoeff(N, edges) {
+    if (N <= 2) return 0.0;
+    const adj = [];
+    for (let i = 0; i < N; i++) adj.push(new Set());
+    for (const [u, v] of edges) {
+      if (u === v) continue;
+      adj[u].add(v); adj[v].add(u);
+    }
+    let triplets = 0;
+    for (const s of adj) {
+      const d = s.size;
+      triplets += d * (d - 1) / 2;
+    }
+    if (triplets === 0) return 0.0;
+    let triangles = 0;
+    for (let u = 0; u < N; u++) {
+      for (const v of adj[u]) {
+        if (v <= u) continue;
+        for (const w of adj[v]) {
+          if (w > v && adj[u].has(w)) triangles += 1;
+        }
+      }
+    }
+    return 3.0 * triangles / triplets;
+  }
+
+  // Per-cluster bisection-and-secant T search. Mirrors src/npso/gen.py +
+  // gen_clustered._search_T_secant: at each step, drive the simulated cc
+  // toward target by shrinking the [t_min, t_max] bracket. Returns
+  // { bestT, bestCc, bestEdges, iters } where iters is the [{T, cc, diff}]
+  // record (one entry per evaluated T).
+  function nextT(minT, maxT, fMinT, fMaxT) {
+    const mid = minT + (maxT - minT) / 2.0;
+    if (fMinT == null || fMaxT == null) return mid;
+    if (fMinT * fMaxT > 0) return mid;
+    const denom = fMaxT - fMinT;
+    if (denom === 0) return mid;
+    const Tsec = minT - fMinT * (maxT - minT) / denom;
+    const margin = 0.05 * (maxT - minT);
+    if (Tsec <= minT + margin || Tsec >= maxT - margin) return mid;
+    return Tsec;
+  }
+
+  function searchTForCluster(args) {
+    // n, m, gamma, target, rngFor(t,iter), maxIters, diffTol, stepTol,
+    //   tMin, tMax, initialT
+    const {
+      n, m, gamma, target,
+      maxIters = 30, diffTol = 0.01, stepTol = 1e-4,
+      tMin = 0.01, tMax = 0.99, initialT = 0.5,
+      rngFactory,
+    } = args;
+    if (n <= 1 || m < 1) {
+      return { bestT: null, bestCc: 0, bestEdges: [], iters: [], m: 0 };
+    }
+    if (n <= m + 1) {
+      const rng = rngFactory(initialT, 0);
+      const edges = psoClusterEdges(n, m, initialT, gamma, rng);
+      const cc = inducedGlobalCcoeff(n, edges);
+      return {
+        bestT: initialT, bestCc: cc, bestEdges: edges, m,
+        iters: [{ T: initialT, ccoeff: cc, diff: Math.abs(cc - target),
+                  note: "complete_graph" }],
+      };
+    }
+    let fMin = null, fMax = null;
+    let bestT = null, bestCc = null, bestDiff = null, bestEdges = null;
+    let prevCc = null;
+    let curMin = tMin, curMax = tMax;
+    const iters = [];
+    for (let it = 0; it < maxIters; it++) {
+      const T = nextT(curMin, curMax, fMin, fMax);
+      const rng = rngFactory(T, it);
+      const edges = psoClusterEdges(n, m, T, gamma, rng);
+      const cc = inducedGlobalCcoeff(n, edges);
+      const diff = Math.abs(cc - target);
+      iters.push({ T, ccoeff: cc, diff });
+      if (bestCc === null || diff < bestDiff) {
+        bestT = T; bestCc = cc; bestDiff = diff; bestEdges = edges;
+      }
+      if (bestDiff < diffTol) break;
+      if (prevCc !== null && Math.abs(prevCc - cc) < stepTol) break;
+      const fT = cc - target;
+      if (fT < 0) { curMax = T; fMax = fT; }
+      else        { curMin = T; fMin = fT; }
+      prevCc = cc;
+    }
+    return { bestT, bestCc, bestEdges, iters, m };
+  }
+
   window.ECSBMKernel = {
     normalizeEdge,
     edgeKey,
@@ -401,5 +603,8 @@
     generateInternalEdges,
     prepareV2SBMInputs,
     rewireInvalidEdges,
+    psoClusterEdges,
+    inducedGlobalCcoeff,
+    searchTForCluster,
   };
 })();
