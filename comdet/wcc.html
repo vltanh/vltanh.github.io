@@ -219,6 +219,7 @@ body {
   max-width: var(--span-wide);
   margin: 0 auto 1.8rem;
 }
+
 </style>
 </head>
 <body>
@@ -229,26 +230,48 @@ body {
 </div>
 
 <header class="hdr">
-  <div class="kicker">algorithm &middot; well-connected components</div>
-  <h1>WCC</h1>
-  <p class="sub">One algorithm in the gallery: well-connected components. Walked stage by stage on the shared 32-node fixture, side by side with the planted ground truth.</p>
+  <div class="kicker">community detection &middot; post-proc &middot; well-connected components</div>
+  <h1><em>WCC</em></h1>
+  <p class="fullname">well-connected components &middot; Park 2025 / Vu-Le 2026, threshold per Park 2024</p>
+  <p class="sub">A step up from <a href="./cc.html">CC</a>. Each cluster has to clear a mincut threshold or it gets cut + recursed. Catches the case where a cluster is connected but only by a thin edge bridge: the kind of cluster that passes CC and still looks suspect to anyone who eyeballs it.</p>
 </header>
 
 <div class="uc-banner">
-  <strong>Walker pending.</strong> The full per-stage walker for WCC is pending the Phase 4c kernel port. Today the page surfaces the input fixture and the planned stage list; interactive widgets land per-stage as the JS port reaches feature parity with canonical (see the active plan's Phase 4c verification matrix).
+  <strong>Walker pending.</strong> The per-stage walker for WCC waits on the Phase 4c JS kernel port (mincut backend = a faithful VieCut-cactus port). Today the page surfaces the input fixture and the planned stage list; interactive widgets land per-stage as the port catches up. The technical companion at <a href="https://github.com/vlttnh/community-detection/blob/main/docs/algorithms/wcc.md">docs/algorithms/wcc.md</a> covers source pointers, threshold formulas, and determinism guarantees.
 </div>
 
+<section class="hook">
+  <p><a href="./cc.html">CC</a> only asks whether a cluster is connected. That misses the case where a cluster is connected but only just: two large dense halves linked by a single bridge edge are formally connected, yet anyone eyeballing the graph would call them two communities. The cluster's mincut is 1, and 1 is suspiciously small.</p>
+  <p><em>WCC</em> turns "is the cluster connected" into "is the cluster <em>well-</em>connected", with a sliding threshold that scales with cluster size. A cluster passes iff its minimum edge cut strictly exceeds <code>f(n)</code>, where <code>n</code> is the cluster's node count and <code>f</code> is one of:</p>
+  <p style="text-align:center">\( f(n) = C \log_x(n) \quad \text{or} \quad f(n) = C\,n^x \quad \text{or piecewise bands of } n \)</p>
+  <p>The shipped default in <a href="https://github.com/MinhyukPark/constrained-clustering"><code>constrained-clustering</code></a> is \( f(n) = \log_{10}(n) \) (Park 2024's choice). Sqrt and \(\log_2\) alternates exist; the binary parses the criterion string straight from the CLI.</p>
+  <p>If a cluster passes, leave it. If not, find its minimum edge cut, remove those edges, and recurse on each side. The recursion terminates because every cut strictly shrinks the cluster.</p>
+  <div class="defs">
+    <div><span class="term">mincut</span> the smallest edge set whose removal disconnects the cluster. Computed exactly by <a href="https://github.com/VieCut/VieCut">VieCut's cactus algorithm</a> in (near-)linear time per cluster (Henzinger, Noe, Schulz, Strash 2018), so even on graphs with thousands of clusters the post-proc stays cheap. Park 2024's mild bound \(f(n) = \log_{10}(n)\) maxes out around 3.3 even for clusters of 2000 nodes.</div>
+    <div><span class="term">balanced cut</span> when ties exist (multiple edge sets of the same cut size), the binary picks the most balanced one (<code>find_most_balanced_cut = true</code> in <code>mincut_custom.cpp</code>). This matters: a balanced cut means each recursive half has work to do; an imbalanced cut would peel one node at a time and stall the recursion.</div>
+    <div><span class="term">threshold tie-handling</span> the comparison is <em>strict</em> (cut > threshold) with a 1e-9 epsilon guard. Cluster sizes where \(\log_{10}(n)\) equals an integer (n=10, 100, 1000) treat cuts that match the threshold exactly as fail, not pass.</div>
+  </div>
+  <div class="callout">
+    <div class="tag">why WCC over CC &middot; Vu-Le 2026 §4</div>
+    <p>On graph-tool's flat + nested SBMs (every variant tested), WCC's gain over the unprocessed clustering is <em>uniformly larger</em> than CC's. CC catches the disconnected-cluster case; WCC also catches the bridge-only case, which is the more common failure mode for SBMs that fit a partition based on edge density between blocks rather than within. The cost: WCC may over-split a sparse-by-design cluster (a tree-like community whose mincut is genuinely 1). The paper observes WCC's gain holds when the input clustering is suspected to over-merge.</p>
+  </div>
+  <p>The <a href="./cm.html">CM</a> page covers the heavier sibling: same cut, plus a re-cluster of each half via the base algorithm. WCC just cuts.</p>
+</section>
+
 <section class="algo-meta">
-  <p>Stronger than CC. A cluster passes only if its mincut exceeds a connectedness threshold (\(\log_{10} n\) on the log criterion, \(0.2\sqrt{n}\) on sqrt). Anything weaker gets recursively mincut and split. VieCut's cactus algorithm runs the cuts in a single pass per cluster.</p>
   <div class="algo-refs">
-    <span><span class="ref-label">paper</span><a href="https://doi.org/10.1007/s41109-024-00658-8" target="_blank" rel="noopener">Park et al. 2024</a></span>
+    <span><span class="ref-label">paper</span><a href="https://doi.org/10.1007/978-3-031-82435-7_9" target="_blank" rel="noopener">Park 2025</a></span>
+    <span><span class="ref-label">paper</span><a href="https://doi.org/10.1007/s41109-025-00747-2" target="_blank" rel="noopener">Vu-Le 2026</a></span>
+    <span><span class="ref-label">paper</span><a href="https://doi.org/10.1371/journal.pcsy.0000009" target="_blank" rel="noopener">Park 2024 (threshold)</a></span>
     <span><span class="ref-label">code</span><a href="https://github.com/MinhyukPark/constrained-clustering" target="_blank" rel="noopener">constrained-clustering MincutOnly</a></span>
+    <span><span class="ref-label">mincut</span><a href="https://github.com/VieCut/VieCut" target="_blank" rel="noopener">VieCut</a></span>
+    <span><span class="ref-label">docs</span><a href="https://github.com/vlttnh/community-detection/blob/main/docs/algorithms/wcc.md" target="_blank" rel="noopener">technical companion</a></span>
   </div>
 </section>
 
 <figure class="shared-graph">
   <div class="graph-caption">
-    <span class="st">stage 0</span> input fixture &middot; 32 nodes, 49 edges, 4 planted communities + 2 outliers
+    <span class="st">stage 0</span> input fixture &middot; 32 nodes, 52 edges, 4 planted communities + 2 outliers
   </div>
   <svg id="shared-graph-svg" aria-label="32-node specialized fixture"></svg>
 </figure>
