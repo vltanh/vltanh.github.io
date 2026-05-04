@@ -591,13 +591,16 @@ window.MathJax = {
     return out;
   }
   // Mutable DEFICIT so the input-reroll button can swap a fresh draw in
-  // and reset every walker. Seed 263 picked from a sweep over [1, 500]:
-  // 18 stubs over 12 nodes with deficit on every block (C1, C2, C3, OUT)
-  // and a clean separation between every algorithm: plain true_greedy
-  // closes the deficit (0 unplaced); plain greedy strands 2 stubs to
-  // silent gridlock; cluster_preserving_greedy strands 4 to budget
-  // exhaustion; cluster_preserving_true_greedy halves that to 2.
-  let DEFICIT = generateSBMDeficit(263);
+  // and reset every walker. Seed 94 picked from a sweep over [1, 2000]
+  // for the cleanest CP-TG-default story: 14 deficit stubs spread
+  // across every block. plain greedy strands 2 stubs to silent
+  // gridlock; plain true_greedy logs 2 stubs as gridlocked; cp_greedy
+  // hits the bp gate and strands 2 stubs; cp_true_greedy is the only
+  // deterministic walker that closes the deficit completely (0
+  // unplaced). The CP gate stops cp_greedy because greedy commits to
+  // a partner before the bp can be considered, but the dynamic re-pick
+  // in cp_true_greedy reroutes around exhausted bp's.
+  let DEFICIT = generateSBMDeficit(94);
   let DEFICIT_NODES = Object.keys(DEFICIT).map(n => parseInt(n, 10));
   function targetDeg(n) { return (DEGREES[n] || 0) + (DEFICIT[n] || 0); }
 
@@ -768,19 +771,26 @@ window.MathJax = {
   const BARS_DUR = 540;
   const BARS_W = 340, BARS_H = 360;
   const BARS_PAD = { top: 12, right: 50, bottom: 22, left: 38 };
-  function renderBars(svgId, residual, matchEdges, unplaced) {
+  function renderBars(svgId, residual, matchEdges, unplaced, orderMode) {
     const barSvg = d3.select("#" + svgId);
     if (!barSvg.node()) return;
     barSvg.attr("viewBox", `0 0 ${BARS_W} ${BARS_H}`);
     unplaced = unplaced || {};
     residual = residual || {};
+    orderMode = orderMode || "target";
     const iw = BARS_W - BARS_PAD.left - BARS_PAD.right;
     const ih = BARS_H - BARS_PAD.top - BARS_PAD.bottom;
 
-    // Row order: sbm g4's "target desc + id asc": stable across rerolls
-    // and across matcher steps so the eye can track the same node.
-    const orderedNodes = NODES.slice()
-      .sort((a, b) => (targetDeg(b) - targetDeg(a)) || (a - b));
+    // Row order. "target" (default): sbm g4 idiom, target deg desc +
+    // id asc; stable across rerolls. "queue": greedy's static heap
+    // pop order, initial deficit desc + id asc; rows at the top are
+    // popped first, drained rows stay in place as the burst proceeds.
+    const orderedNodes = NODES.slice().sort((a, b) => {
+      if (orderMode === "queue") {
+        return ((DEFICIT[b] || 0) - (DEFICIT[a] || 0)) || (a - b);
+      }
+      return (targetDeg(b) - targetDeg(a)) || (a - b);
+    });
     const y = d3.scaleBand()
       .domain(orderedNodes.map(String)).range([0, ih]).padding(0.24);
 
@@ -965,6 +975,12 @@ window.MathJax = {
   // ── Per-section setup helper ──
   function setupAlgoSection(opts) {
     const { prefix, algoFn } = opts;
+    // Greedy + cluster_preserving_greedy use a static max-heap on
+    // initial residual; their bar rows follow that pop order so the
+    // eye reads top-down as the burst progresses. Other walkers use
+    // the default target-degree ordering.
+    const orderMode = (prefix === "greedy" || prefix === "cpgreedy")
+      ? "queue" : "target";
     const cyId   = `g-${prefix}-cy`;
     const barsId = `g-${prefix}-bars`;
     const stageEl = document.getElementById(`g-${prefix}-stage`);
@@ -1123,7 +1139,7 @@ window.MathJax = {
     function render(snap) {
       const s = steps[stepIdx];
       paintCaption(s);
-      renderBars(barsId, s.residual, s.edges, s.unplaced);
+      renderBars(barsId, s.residual, s.edges, s.unplaced, orderMode);
       if (isCp) {
         const adjacentForward = stepIdx === lastRenderIdx + 1;
         const justBp = adjacentForward && s.action === "add" ? s.bp : null;
