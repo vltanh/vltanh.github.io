@@ -102,14 +102,20 @@
     [26, 5], [28, 7],
     // Inter-community: B↔D (2 edges)
     [27, 13], [29, 17],
+    // Inter-community: A↔C (1 edge, connects C-cycle-1 into the main component)
+    [20, 7],
+    // Inter-community: B↔C (1 edge, connects C-cycle-2 into the main component)
+    [23, 13],
     // Outlier 31 pendant on A periphery
     [31, 5],
-    // Outlier 30 fully isolated (no edges)
+    // Outlier 30 pendant on outlier 31 (chains 30 into the main component
+    // while keeping it labelled as an outlier in the ground truth).
+    [30, 31],
   ];
 
   // Sanity check.
-  if (EDGES.length !== 49) {
-    console.warn(`[comdet fixture] expected 49 edges, got ${EDGES.length}`);
+  if (EDGES.length !== 52) {
+    console.warn(`[comdet fixture] expected 52 edges, got ${EDGES.length}`);
   }
 
   COMDET.FIXTURE = {
