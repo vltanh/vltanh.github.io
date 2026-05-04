@@ -234,20 +234,12 @@
     e_{rr} \;=\; 2 \cdot \bigl| \{\, \{u, v\} \in E \,:\, b_u = b_v = r \,\} \bigr|.
   \]
   <p>At profile time v2's matrix is the same compact 3x3 as v1 (outliers excluded). Stage 3 then rebuilds a 4x4 by re-reading the original edgelist and adding the combined outlier block on the fourth row/column.</p>
-  <div class="graph g-with-side" id="g-mat">
+  <div class="graph" id="g-mat">
     <div class="graph-chrome">
       <span>input G &middot; hover an edge or a cell</span>
       <span class="right" id="g-mat-cell">cell: (none)</span>
     </div>
-    <div class="side-caption">
-      <span class="st">left</span>input graph (outliers excluded) &middot; <span class="st">right</span>block matrix \(e\), diagonal cells doubled. Hover an edge to find its cell, or a cell to light every edge that contributes to its count.
-    </div>
-    <div class="side-body">
-      <div class="graph-canvas" id="g-mat-cy"></div>
-      <div class="side-right">
-        <div class="blockmat" id="g-mat-grid"></div>
-      </div>
-    </div>
+    <div class="graph-canvas" id="g-mat-cy"></div>
   </div>
 </section>
 
@@ -304,20 +296,12 @@
   \]
   <p>where \(R_t\) is the temperature-dependent connection radius from the canonical PSO formula. Lower \(T\) concentrates picks on the closest predecessors (high cc); higher \(T\) flattens the distribution toward random (low cc).</p>
   <p>Around the PSO build, stage 2 runs a 1-D bisection-and-secant search over \(T \in [t_\text{min}, t_\text{max}]\). Each iteration evaluates PSO at one \(T\), measures the cluster's induced global cc, and shrinks the bracket using the sign of \(c - \hat c(C)\). The walker below steps through every search iteration across every cluster; the chosen \(T\) per cluster is whichever evaluated PSO realisation came closest to \(\hat c(C)\).</p>
-  <div class="graph g-with-side" id="g-pso">
+  <div class="graph" id="g-pso">
     <div class="graph-chrome">
       <span id="g-pso-stage">cluster C1 &middot; iter 0</span>
       <span class="right step-label">step <b id="g-pso-cur">0</b> / <span id="g-pso-total">0</span></span>
     </div>
-    <div class="side-caption">
-      <span class="st">left</span>cluster's PSO output for the iteration's \(T\) &middot; <span class="st">right</span>per-cluster (T, cc) trajectory; the chosen T is highlighted once each cluster's search closes.
-    </div>
-    <div class="side-body">
-      <div class="graph-canvas" id="g-pso-cy"></div>
-      <div class="side-right">
-        <svg id="pso-trace" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet"></svg>
-      </div>
-    </div>
+    <div class="graph-canvas" id="g-pso-cy"></div>
     <div class="widget-row tight">
       <button class="btn" id="g-pso-rand-all" type="button" title="re-spin the PSO + T-search across every cluster">random all</button>
       <span class="step-label" id="g-pso-real">realization · seed 1</span>
@@ -408,20 +392,12 @@
   <h2>Block-aware top-up by default. Logs gridlock; does not silently drop.</h2>
   <p>After the residual SBM + rewire, some nodes may still be short of their target. v2 hands the leftovers to a block-aware top-up that spends edges out of a per-block-pair budget read from the reference clustering, rather than letting stubs leak across cluster boundaries. Anything still unplaced is logged, never silently dropped the way <a href="./ec-sbm-v1.html">v1's plain greedy</a> does. The viz below runs the simpler global sibling so the heap mechanics stay readable; see the <a href="./matcher.html">degree matcher page</a> for the full menu.</p>
   <p>Toggle <code>apply match_degree</code> to watch the per-node deficit pile shrink. Click <code>random</code> for a different realization.</p>
-  <div class="graph g-with-side" id="g-match">
+  <div class="graph" id="g-match">
     <div class="graph-chrome">
       <span id="g-match-label">before match_degree &middot; residual deficits visible</span>
       <span class="right" id="g-match-count">placed: 0 &middot; gridlocked: 0</span>
     </div>
-    <div class="side-caption">
-      <span class="st">left</span>current graph; grey = match_degree edges &middot; <span class="st">right</span>per-node degree bars. Azure = core + attach, orchid = residual SBM (post-rewire), grey = match_degree, faint red tail = target minus achieved.
-    </div>
-    <div class="side-body">
-      <div class="graph-canvas" id="g-match-cy"></div>
-      <div class="side-right">
-        <svg id="match-bars" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet"></svg>
-      </div>
-    </div>
+    <div class="graph-canvas" id="g-match-cy"></div>
     <div class="widget-row">
       <label class="toggle">
         <input type="checkbox" id="g-match-toggle">
@@ -819,9 +795,10 @@ window.MathJax = {
     const host = document.getElementById("g-mat-cy");
     if (!host) return;
     host.innerHTML = "";
+    const padRight = 320;
     const svg = d3.select(host).append("svg")
       .attr("class", "viz-svg")
-      .attr("viewBox", NETGEN.fitViewBoxAttr())
+      .attr("viewBox", NETGEN.fitViewBoxAttr({ padRight, pad: 40 }))
       .attr("preserveAspectRatio", "xMidYMid meet");
     const syncRects = makeBlockRects(svg, { labelFn: (n) => n });
     const B = { C1: 0, C2: 1, C3: 2 };
@@ -834,6 +811,23 @@ window.MathJax = {
       const a = B[CLUSTER_OF[u]], b = B[CLUSTER_OF[v]];
       if (a == null || b == null) return;
       mat[a][b] += 1; mat[b][a] += 1;
+    });
+    const edges = EDGES.filter(e =>
+      CLUSTER_OF[e.u] !== "OUT" && CLUSTER_OF[e.v] !== "OUT"
+    ).map(e => ({
+      u: e.u, v: e.v, color: pickInputColor(e), w: 1.4,
+      id: "mat-e-" + edgeKey(e.u, e.v),
+      __cellKey: [CLUSTER_OF[e.u], CLUSTER_OF[e.v]].sort().join("-"),
+    }));
+    const viz = NETGEN.VIZ.init("g-mat-cy", {
+      svg, showLabels: true, includeOutliers: false, edges,
+      pad: 40, padRight,
+    });
+    NETGEN.makeTooltip(viz, document.getElementById("g-mat"));
+    NETGEN.mountGxPanel({
+      viz, hostId: "g-mat-cy", prefix: "g-mat",
+      title: "block matrix · e", maxWidth: "20rem",
+      bodyHTML: '<div class="blockmat" id="g-mat-grid"></div>',
     });
     const grid = document.getElementById("g-mat-grid");
     grid.innerHTML = "";
@@ -850,17 +844,6 @@ window.MathJax = {
         grid.appendChild(c);
       });
     });
-    const edges = EDGES.filter(e =>
-      CLUSTER_OF[e.u] !== "OUT" && CLUSTER_OF[e.v] !== "OUT"
-    ).map(e => ({
-      u: e.u, v: e.v, color: pickInputColor(e), w: 1.4,
-      id: "mat-e-" + edgeKey(e.u, e.v),
-      __cellKey: [CLUSTER_OF[e.u], CLUSTER_OF[e.v]].sort().join("-"),
-    }));
-    const viz = NETGEN.VIZ.init("g-mat-cy", {
-      svg, showLabels: true, includeOutliers: false, edges,
-    });
-    NETGEN.makeTooltip(viz, document.getElementById("g-mat"));
     syncRects(viz);
     viz.sim.on("tick.blockRects", () => syncRects(viz));
     const cellEl = document.getElementById("g-mat-cell");
@@ -964,8 +947,17 @@ window.MathJax = {
 
     const viz = NETGEN.VIZ.init("g-pso-cy", {
       showLabels: true, edges: [], includeOutliers: false,
+      pad: 40, padRight: 320,
     });
     NETGEN.makeTooltip(viz, document.getElementById("g-pso"));
+
+    NETGEN.mountGxPanel({
+      viz, hostId: "g-pso-cy", prefix: "g-pso-trace",
+      title: "T-search trace", maxWidth: "22rem",
+      bodyHTML:
+        '<div id="g-pso-trace-head" style="font-family:\'Special Elite\',\'Courier New\',monospace;font-size:.74rem;color:var(--paper-2);margin-bottom:.5rem;line-height:1.4"></div>' +
+        '<svg id="pso-trace" viewBox="0 0 320 220" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:auto"></svg>',
+    });
 
     const descEl  = document.getElementById("g-pso-desc");
     const stageEl = document.getElementById("g-pso-stage");
@@ -1081,77 +1073,137 @@ window.MathJax = {
       NETGEN.retypeset(descEl);
     }
 
+    function activeCidAt(step) {
+      if (step >= 1 && step <= STEPS.length) return STEPS[step - 1].cid;
+      return STEPS[0] ? STEPS[0].cid : null;
+    }
+
     function renderTrace(step) {
       const svg = d3.select("#pso-trace");
       svg.selectAll("*").remove();
-      const W = 340, H = 420;
-      const PAD = { top: 22, right: 28, bottom: 30, left: 38 };
-      const ih = H - PAD.top - PAD.bottom;
-      const numC = sortedCids.length;
-      const rowH = numC > 0 ? ih / numC : 0;
+      const cid = activeCidAt(step);
+      if (cid == null) return;
+      const pc = PSO_PER_CLUSTER[cid];
+      if (!pc) return;
+
+      const head = document.getElementById("g-pso-trace-head");
+      if (head) {
+        head.innerHTML =
+          `<b style="color:${BLOCK_COLOR[pc.label] || "var(--azure)"}">${pc.label}</b>` +
+          ` &middot; n=${pc.n}, k=${pc.k}, m=${pc.m}` +
+          ` &middot; target ĉ=${pc.target.toFixed(3)}` +
+          (pc.bestT != null
+            ? ` &middot; best T=${pc.bestT.toFixed(3)}, cc=${pc.bestCc.toFixed(3)}`
+            : "");
+      }
+
+      const W = 320, H = 220;
+      const PAD = { top: 18, right: 28, bottom: 32, left: 40 };
+      const innerW = W - PAD.left - PAD.right;
+      const innerH = H - PAD.top - PAD.bottom;
       const root = svg.append("g")
         .attr("transform", `translate(${PAD.left},${PAD.top})`);
 
       const activeS = step >= 1 ? STEPS[step - 1] : null;
+      const xT = T => (T - PSO_T_MIN) / (PSO_T_MAX - PSO_T_MIN) * innerW;
+      const yC = cc => innerH - Math.max(0, Math.min(1, cc)) * innerH;
 
-      sortedCids.forEach((cid, ci) => {
-        const pc = PSO_PER_CLUSTER[cid];
-        if (!pc || pc.iters.length === 0) return;
-        const y0 = ci * rowH;
-        const innerH = rowH * 0.8;
-        const innerW = W - PAD.left - PAD.right;
-        root.append("rect")
-          .attr("x", 0).attr("y", y0)
-          .attr("width", innerW).attr("height", innerH)
-          .attr("fill", "rgba(243, 236, 215, .04)")
-          .attr("stroke", "rgba(139, 117, 65, .25)")
-          .attr("stroke-dasharray", "2 3");
-        root.append("text")
-          .attr("x", -6).attr("y", y0 + innerH / 2 + 3)
-          .attr("text-anchor", "end")
-          .attr("font-family", "Special Elite, Courier New, monospace")
-          .attr("font-size", "10.5px")
-          .attr("fill", BLOCK_COLOR[pc.label] || "#2f3a54")
-          .text(pc.label);
-        const xT = T => (T - PSO_T_MIN) / (PSO_T_MAX - PSO_T_MIN) * innerW;
-        const yC = cc => y0 + innerH - Math.max(0, Math.min(1, cc)) * innerH;
+      // axis frame
+      root.append("rect")
+        .attr("x", 0).attr("y", 0)
+        .attr("width", innerW).attr("height", innerH)
+        .attr("fill", "rgba(243, 236, 215, .04)")
+        .attr("stroke", "rgba(139, 117, 65, .35)")
+        .attr("stroke-dasharray", "2 3");
+
+      // y-axis ticks 0, 0.5, 1.0
+      [0.0, 0.5, 1.0].forEach(t => {
         root.append("line")
           .attr("x1", 0).attr("x2", innerW)
-          .attr("y1", yC(pc.target)).attr("y2", yC(pc.target))
-          .attr("stroke", BLOCK_COLOR[pc.label] || "#2f3a54")
-          .attr("stroke-dasharray", "5 4")
-          .attr("opacity", 0.7);
+          .attr("y1", yC(t)).attr("y2", yC(t))
+          .attr("stroke", "rgba(139,117,65,.18)")
+          .attr("stroke-dasharray", "1 4");
         root.append("text")
-          .attr("x", innerW + 4).attr("y", yC(pc.target) + 3)
+          .attr("x", -6).attr("y", yC(t) + 3)
+          .attr("text-anchor", "end")
           .attr("font-family", "Special Elite, Courier New, monospace")
-          .attr("font-size", "8.5px")
-          .attr("fill", BLOCK_COLOR[pc.label] || "#2f3a54")
-          .attr("opacity", 0.85)
-          .text(pc.target.toFixed(2));
-        pc.iters.forEach((rec, j) => {
-          const isActive = activeS && activeS.cid === cid && activeS.iter === j;
-          root.append("circle")
-            .attr("cx", xT(rec.T)).attr("cy", yC(rec.ccoeff))
-            .attr("r", isActive ? 5.2 : 3.2)
-            .attr("fill", isActive ? COL.signal : (BLOCK_COLOR[pc.label] || "#2f3a54"))
-            .attr("opacity", isActive ? 0.95 : 0.55)
-            .attr("stroke", "#1b2033").attr("stroke-width", 0.7);
-        });
-        if (pc.bestT != null) {
-          root.append("line")
-            .attr("x1", xT(pc.bestT)).attr("x2", xT(pc.bestT))
-            .attr("y1", y0).attr("y2", y0 + innerH)
-            .attr("stroke", COL.mint || "#7fae6f")
-            .attr("stroke-width", 1.3).attr("opacity", 0.85);
-        }
+          .attr("font-size", "9px")
+          .attr("fill", "#6b6a54")
+          .text(t.toFixed(1));
+      });
+
+      // target line
+      root.append("line")
+        .attr("x1", 0).attr("x2", innerW)
+        .attr("y1", yC(pc.target)).attr("y2", yC(pc.target))
+        .attr("stroke", BLOCK_COLOR[pc.label] || COL.signal)
+        .attr("stroke-dasharray", "6 4")
+        .attr("stroke-width", 1.3)
+        .attr("opacity", 0.85);
+      root.append("text")
+        .attr("x", innerW + 4).attr("y", yC(pc.target) + 3)
+        .attr("font-family", "Special Elite, Courier New, monospace")
+        .attr("font-size", "9px")
+        .attr("fill", BLOCK_COLOR[pc.label] || COL.signal)
+        .attr("opacity", 0.85)
+        .text("ĉ");
+
+      // iterations: connect with thin polyline (search trajectory order)
+      const pts = pc.iters.map((rec) => [xT(rec.T), yC(rec.ccoeff)]);
+      if (pts.length >= 2) {
+        root.append("path")
+          .attr("d", "M" + pts.map(p => p.join(",")).join("L"))
+          .attr("fill", "none")
+          .attr("stroke", BLOCK_COLOR[pc.label] || "#2f3a54")
+          .attr("stroke-width", 0.9)
+          .attr("opacity", 0.45);
+      }
+      pc.iters.forEach((rec, j) => {
+        const isActive = activeS && activeS.cid === cid && activeS.iter === j;
+        root.append("circle")
+          .attr("cx", xT(rec.T)).attr("cy", yC(rec.ccoeff))
+          .attr("r", isActive ? 5.4 : 3.2)
+          .attr("fill", isActive ? COL.signal : (BLOCK_COLOR[pc.label] || "#2f3a54"))
+          .attr("opacity", isActive ? 0.95 : 0.6)
+          .attr("stroke", "#1b2033").attr("stroke-width", 0.7);
+        root.append("text")
+          .attr("x", xT(rec.T)).attr("y", yC(rec.ccoeff) - 7)
+          .attr("text-anchor", "middle")
+          .attr("font-family", "Special Elite, Courier New, monospace")
+          .attr("font-size", "8px")
+          .attr("fill", isActive ? COL.signal : "#6b6a54")
+          .attr("opacity", isActive ? 1 : 0.55)
+          .text(j + 1);
+      });
+
+      // chosen T marker
+      if (pc.bestT != null) {
+        root.append("line")
+          .attr("x1", xT(pc.bestT)).attr("x2", xT(pc.bestT))
+          .attr("y1", 0).attr("y2", innerH)
+          .attr("stroke", COL.mint || "#7fae6f")
+          .attr("stroke-width", 1.3)
+          .attr("stroke-dasharray", "3 3")
+          .attr("opacity", 0.9);
+      }
+
+      // x-axis ticks
+      [PSO_T_MIN, (PSO_T_MIN + PSO_T_MAX) / 2, PSO_T_MAX].forEach(t => {
+        root.append("text")
+          .attr("x", xT(t)).attr("y", innerH + 14)
+          .attr("text-anchor", "middle")
+          .attr("font-family", "Special Elite, Courier New, monospace")
+          .attr("font-size", "9px")
+          .attr("fill", "#6b6a54")
+          .text(t.toFixed(2));
       });
       root.append("text")
-        .attr("x", (W - PAD.left - PAD.right) / 2).attr("y", ih + 18)
+        .attr("x", innerW / 2).attr("y", innerH + 28)
         .attr("text-anchor", "middle")
         .attr("font-family", "Special Elite, Courier New, monospace")
         .attr("font-size", "9.5px")
         .attr("fill", "#6b6a54")
-        .text("T →");
+        .text("T");
     }
 
     NETGEN.rerollWalker({
@@ -1611,8 +1663,14 @@ window.MathJax = {
     rebuildBase();
     const viz = NETGEN.VIZ.init("g-match-cy", {
       showLabels: true, edges: baseEdges, pinned: true,
+      pad: 40, padRight: 320,
     });
     NETGEN.makeTooltip(viz, document.getElementById("g-match"));
+    NETGEN.mountGxPanel({
+      viz, hostId: "g-match-cy", prefix: "g-match-bars",
+      title: "degrees", maxWidth: "22rem",
+      bodyHTML: '<svg id="match-bars" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:auto"></svg>',
+    });
     const labelEl = document.getElementById("g-match-label");
     const countEl = document.getElementById("g-match-count");
     const realEl = document.getElementById("g-match-real");

@@ -197,20 +197,12 @@
     e_{rr} \;=\; 2 \cdot \bigl| \{\, \{u, v\} \in E \,:\, b_u = b_v = r \,\} \bigr|.
   \]
   <p>With outliers excluded, v1's matrix is a compact 3x3. Hover an edge to find its cell, or a cell to light up every edge that contributes to the count.</p>
-  <div class="graph g-with-side" id="g-mat">
+  <div class="graph" id="g-mat">
     <div class="graph-chrome">
       <span>input G &middot; hover an edge or a cell</span>
       <span class="right" id="g-mat-cell">cell: (none)</span>
     </div>
-    <div class="side-caption">
-      <span class="st">left</span>input graph (outliers excluded) &middot; <span class="st">right</span>block matrix \(e\), diagonal cells doubled. Hover an edge to find its cell, or a cell to light every edge that contributes to its count.
-    </div>
-    <div class="side-body">
-      <div class="graph-canvas" id="g-mat-cy"></div>
-      <div class="side-right">
-        <div class="blockmat" id="g-mat-grid"></div>
-      </div>
-    </div>
+    <div class="graph-canvas" id="g-mat-cy"></div>
   </div>
 </section>
 
@@ -352,20 +344,12 @@
     <li>If \(u\) ran out of partners first, the remaining stubs are silently dropped. No log line, no warning.</li>
   </ol>
   <p>Toggle <code>apply match_degree</code> to watch the deficit pile (the faint-red tail on each bar) drain. Click <code>random</code> for a different matcher realization.</p>
-  <div class="graph g-with-side" id="g-match">
+  <div class="graph" id="g-match">
     <div class="graph-chrome">
       <span id="g-match-label">before match_degree &middot; residual deficits visible</span>
       <span class="right" id="g-match-count">placed: 0 &middot; gridlocked: 0</span>
     </div>
-    <div class="side-caption">
-      <span class="st">left</span>current graph; grey = match_degree edges &middot; <span class="st">right</span>per-node degree bars. Azure = core + attach, orchid = outlier rescue, grey = match_degree, faint red tail = target minus achieved.
-    </div>
-    <div class="side-body">
-      <div class="graph-canvas" id="g-match-cy"></div>
-      <div class="side-right">
-        <svg id="match-bars" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet"></svg>
-      </div>
-    </div>
+    <div class="graph-canvas" id="g-match-cy"></div>
     <div class="widget-row">
       <label class="toggle">
         <input type="checkbox" id="g-match-toggle">
@@ -808,9 +792,10 @@ window.MathJax = {
     const host = document.getElementById("g-mat-cy");
     if (!host) return;
     host.innerHTML = "";
+    const padRight = 320;
     const svg = d3.select(host).append("svg")
       .attr("class", "viz-svg")
-      .attr("viewBox", NETGEN.fitViewBoxAttr())
+      .attr("viewBox", NETGEN.fitViewBoxAttr({ padRight, pad: 40 }))
       .attr("preserveAspectRatio", "xMidYMid meet");
     const syncRects = makeBlockRects(svg, { labelFn: (n) => n });
 
@@ -826,9 +811,27 @@ window.MathJax = {
       mat[a][b] += 1; mat[b][a] += 1;
     });
 
+    const edges = EDGES.filter(e =>
+      CLUSTER_OF[e.u] !== "OUT" && CLUSTER_OF[e.v] !== "OUT"
+    ).map(e => ({
+      u: e.u, v: e.v, color: pickInputColor(e), w: 1.4,
+      id: "mat-e-" + edgeKey(e.u, e.v),
+      __cellKey: [CLUSTER_OF[e.u], CLUSTER_OF[e.v]].sort().join("-"),
+    }));
+    const viz = NETGEN.VIZ.init("g-mat-cy", {
+      svg, showLabels: true, includeOutliers: false, edges,
+      pad: 40, padRight,
+    });
+    NETGEN.makeTooltip(viz, document.getElementById("g-mat"));
+    NETGEN.mountGxPanel({
+      viz, hostId: "g-mat-cy", prefix: "g-mat",
+      title: "block matrix · e", maxWidth: "20rem",
+      bodyHTML: '<div class="blockmat" id="g-mat-grid"></div>',
+    });
     const grid = document.getElementById("g-mat-grid");
     grid.innerHTML = "";
     function el(tag, cls, text) { const e = document.createElement(tag); e.className = cls; e.textContent = text; return e; }
+    grid.style.gridTemplateColumns = "repeat(4, minmax(0,1fr))";
     grid.appendChild(el("div", "cell head", ""));
     rows.forEach(r => grid.appendChild(el("div", "cell head", r)));
     rows.forEach((r, i) => {
@@ -840,18 +843,6 @@ window.MathJax = {
         grid.appendChild(c);
       });
     });
-
-    const edges = EDGES.filter(e =>
-      CLUSTER_OF[e.u] !== "OUT" && CLUSTER_OF[e.v] !== "OUT"
-    ).map(e => ({
-      u: e.u, v: e.v, color: pickInputColor(e), w: 1.4,
-      id: "mat-e-" + edgeKey(e.u, e.v),
-      __cellKey: [CLUSTER_OF[e.u], CLUSTER_OF[e.v]].sort().join("-"),
-    }));
-    const viz = NETGEN.VIZ.init("g-mat-cy", {
-      svg, showLabels: true, includeOutliers: false, edges,
-    });
-    NETGEN.makeTooltip(viz, document.getElementById("g-mat"));
     syncRects(viz);
     viz.sim.on("tick.blockRects", () => syncRects(viz));
 
@@ -1307,8 +1298,14 @@ window.MathJax = {
   (function () {
     const viz = NETGEN.VIZ.init("g-match-cy", {
       showLabels: true, edges: [],
+      pad: 40, padRight: 320,
     });
     NETGEN.makeTooltip(viz, document.getElementById("g-match"));
+    NETGEN.mountGxPanel({
+      viz, hostId: "g-match-cy", prefix: "g-match-bars",
+      title: "degrees", maxWidth: "22rem",
+      bodyHTML: '<svg id="match-bars" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:auto"></svg>',
+    });
 
     const labelEl = document.getElementById("g-match-label");
     const countEl = document.getElementById("g-match-count");

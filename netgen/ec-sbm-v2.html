@@ -234,20 +234,12 @@
     e_{rr} \;=\; 2 \cdot \bigl| \{\, \{u, v\} \in E \,:\, b_u = b_v = r \,\} \bigr|.
   \]
   <p>At profile time v2's matrix is the same compact 3x3 as v1 (outliers excluded). Stage 3 then rebuilds a 4x4 by re-reading the original edgelist and adding the combined outlier block on the fourth row/column.</p>
-  <div class="graph g-with-side" id="g-mat">
+  <div class="graph" id="g-mat">
     <div class="graph-chrome">
       <span>input G &middot; hover an edge or a cell</span>
       <span class="right" id="g-mat-cell">cell: (none)</span>
     </div>
-    <div class="side-caption">
-      <span class="st">left</span>input graph (outliers excluded) &middot; <span class="st">right</span>block matrix \(e\), diagonal cells doubled. Hover an edge to find its cell, or a cell to light every edge that contributes to its count.
-    </div>
-    <div class="side-body">
-      <div class="graph-canvas" id="g-mat-cy"></div>
-      <div class="side-right">
-        <div class="blockmat" id="g-mat-grid"></div>
-      </div>
-    </div>
+    <div class="graph-canvas" id="g-mat-cy"></div>
   </div>
 </section>
 
@@ -383,20 +375,12 @@
   <h2>Block-aware top-up by default. Logs gridlock; does not silently drop.</h2>
   <p>After the residual SBM + rewire, some nodes may still be short of their target. v2 hands the leftovers to a block-aware top-up that spends edges out of a per-block-pair budget read from the reference clustering, rather than letting stubs leak across cluster boundaries. Anything still unplaced is logged, never silently dropped the way <a href="./ec-sbm-v1.html">v1's plain greedy</a> does. The viz below runs the simpler global sibling so the heap mechanics stay readable; see the <a href="./matcher.html">degree matcher page</a> for the full menu.</p>
   <p>Toggle <code>apply match_degree</code> to watch the per-node deficit pile shrink. Click <code>random</code> for a different realization.</p>
-  <div class="graph g-with-side" id="g-match">
+  <div class="graph" id="g-match">
     <div class="graph-chrome">
       <span id="g-match-label">before match_degree &middot; residual deficits visible</span>
       <span class="right" id="g-match-count">placed: 0 &middot; gridlocked: 0</span>
     </div>
-    <div class="side-caption">
-      <span class="st">left</span>current graph; grey = match_degree edges &middot; <span class="st">right</span>per-node degree bars. Azure = core + attach, orchid = residual SBM (post-rewire), grey = match_degree, faint red tail = target minus achieved.
-    </div>
-    <div class="side-body">
-      <div class="graph-canvas" id="g-match-cy"></div>
-      <div class="side-right">
-        <svg id="match-bars" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet"></svg>
-      </div>
-    </div>
+    <div class="graph-canvas" id="g-match-cy"></div>
     <div class="widget-row">
       <label class="toggle">
         <input type="checkbox" id="g-match-toggle">
@@ -734,9 +718,10 @@ window.MathJax = {
     const host = document.getElementById("g-mat-cy");
     if (!host) return;
     host.innerHTML = "";
+    const padRight = 320;
     const svg = d3.select(host).append("svg")
       .attr("class", "viz-svg")
-      .attr("viewBox", NETGEN.fitViewBoxAttr())
+      .attr("viewBox", NETGEN.fitViewBoxAttr({ padRight, pad: 40 }))
       .attr("preserveAspectRatio", "xMidYMid meet");
     const syncRects = makeBlockRects(svg, { labelFn: (n) => n });
     const B = { C1: 0, C2: 1, C3: 2 };
@@ -749,6 +734,23 @@ window.MathJax = {
       const a = B[CLUSTER_OF[u]], b = B[CLUSTER_OF[v]];
       if (a == null || b == null) return;
       mat[a][b] += 1; mat[b][a] += 1;
+    });
+    const edges = EDGES.filter(e =>
+      CLUSTER_OF[e.u] !== "OUT" && CLUSTER_OF[e.v] !== "OUT"
+    ).map(e => ({
+      u: e.u, v: e.v, color: pickInputColor(e), w: 1.4,
+      id: "mat-e-" + edgeKey(e.u, e.v),
+      __cellKey: [CLUSTER_OF[e.u], CLUSTER_OF[e.v]].sort().join("-"),
+    }));
+    const viz = NETGEN.VIZ.init("g-mat-cy", {
+      svg, showLabels: true, includeOutliers: false, edges,
+      pad: 40, padRight,
+    });
+    NETGEN.makeTooltip(viz, document.getElementById("g-mat"));
+    NETGEN.mountGxPanel({
+      viz, hostId: "g-mat-cy", prefix: "g-mat",
+      title: "block matrix · e", maxWidth: "20rem",
+      bodyHTML: '<div class="blockmat" id="g-mat-grid"></div>',
     });
     const grid = document.getElementById("g-mat-grid");
     grid.innerHTML = "";
@@ -765,17 +767,6 @@ window.MathJax = {
         grid.appendChild(c);
       });
     });
-    const edges = EDGES.filter(e =>
-      CLUSTER_OF[e.u] !== "OUT" && CLUSTER_OF[e.v] !== "OUT"
-    ).map(e => ({
-      u: e.u, v: e.v, color: pickInputColor(e), w: 1.4,
-      id: "mat-e-" + edgeKey(e.u, e.v),
-      __cellKey: [CLUSTER_OF[e.u], CLUSTER_OF[e.v]].sort().join("-"),
-    }));
-    const viz = NETGEN.VIZ.init("g-mat-cy", {
-      svg, showLabels: true, includeOutliers: false, edges,
-    });
-    NETGEN.makeTooltip(viz, document.getElementById("g-mat"));
     syncRects(viz);
     viz.sim.on("tick.blockRects", () => syncRects(viz));
     const cellEl = document.getElementById("g-mat-cell");
@@ -1424,8 +1415,14 @@ window.MathJax = {
     rebuildBase();
     const viz = NETGEN.VIZ.init("g-match-cy", {
       showLabels: true, edges: baseEdges, pinned: true,
+      pad: 40, padRight: 320,
     });
     NETGEN.makeTooltip(viz, document.getElementById("g-match"));
+    NETGEN.mountGxPanel({
+      viz, hostId: "g-match-cy", prefix: "g-match-bars",
+      title: "degrees", maxWidth: "22rem",
+      bodyHTML: '<svg id="match-bars" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:auto"></svg>',
+    });
     const labelEl = document.getElementById("g-match-label");
     const countEl = document.getElementById("g-match-count");
     const realEl = document.getElementById("g-match-real");
