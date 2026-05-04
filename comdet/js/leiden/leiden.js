@@ -81,8 +81,8 @@
     const recordTrace = !!opts.recordTrace;
     const considerEmpty = opts.considerEmpty !== false;
     const n = P.n();
-    const order = [];
-    for (let v = 0; v < n; v++) order.push(v);
+    const order = new Array(n);
+    for (let v = 0; v < n; v++) order[v] = v;
     LV.shuffle(order, rng);
     const queue = order.slice();
     const isStable = new Uint8Array(n);
@@ -150,8 +150,8 @@
     opts = opts || {};
     const recordTrace = !!opts.recordTrace;
     const n = P.n();
-    const order = [];
-    for (let v = 0; v < n; v++) order.push(v);
+    const order = new Array(n);
+    for (let v = 0; v < n; v++) order[v] = v;
     LV.shuffle(order, rng);
     let totalImprov = 0;
     let nbMoves = 0;

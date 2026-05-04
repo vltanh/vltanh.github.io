@@ -249,9 +249,18 @@
   function recolour(viz, fixture, membership) {
     if (!viz) return;
     const idxById = indexById(fixture);
+    // Diff-based: only call setNodeStyle on nodes whose colour actually
+    // changed since the last recolour. setNodeStyle drives a 220ms d3
+    // transition on every call, so skipping no-op repaints is the
+    // visible-perf win.
+    if (!viz._lastColours) viz._lastColours = {};
+    const last = viz._lastColours;
     fixture.nodes.forEach(function (id) {
       const i = idxById[id];
-      viz.setNodeStyle(id, { color: partitionColor(membership[i]) });
+      const colour = partitionColor(membership[i]);
+      if (last[id] === colour) return;
+      last[id] = colour;
+      viz.setNodeStyle(id, { color: colour });
     });
   }
 

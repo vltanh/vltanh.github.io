@@ -182,7 +182,16 @@
     let totalWeightFromComm = new Float64Array(ncomm);
     let totalPossibleEdgesInAllComms = 0;
     let totalWeightInAllComms = 0;
-    const empties = [];
+    const empties = new Set();
+    // Per-node neighbour-comm cache: when caller asks about v's
+    // neighbour communities or weights repeatedly (which every
+    // diff_move loop does), populate once and reuse until v moves
+    // or the cache is invalidated. Mirrors libleidenalg
+    // cache_neigh_communities (MutableVertexPartition.cpp:799).
+    let cacheV = -1;
+    let cacheNeighComms = [];     // list of distinct neighbour comms of cacheV
+    const cacheWeightsTo = new Map();   // comm -> weight from neighbours in comm to v
+    const cacheWeightsFrom = new Map(); // comm -> weight from v to neighbours in comm
 
     function rebuildAdmin() {
       ncomm = 0;
@@ -218,11 +227,51 @@
       }
       totalPossibleEdgesInAllComms = 0;
       totalWeightInAllComms = 0;
-      empties.length = 0;
+      empties.clear();
       for (let c = 0; c < ncomm; c++) {
         totalWeightInAllComms += totalWeightInComm[c];
         totalPossibleEdgesInAllComms += graph.possibleEdges(csize[c]);
-        if (cnodes[c] === 0) empties.push(c);
+        if (cnodes[c] === 0) empties.add(c);
+      }
+      invalidateCache();
+    }
+
+    function invalidateCache() {
+      cacheV = -1;
+      cacheNeighComms.length = 0;
+      cacheWeightsTo.clear();
+      cacheWeightsFrom.clear();
+    }
+
+    function cacheNeighbours(v) {
+      if (cacheV === v) return;
+      cacheV = v;
+      cacheNeighComms.length = 0;
+      cacheWeightsTo.clear();
+      cacheWeightsFrom.clear();
+      const directed = graph.isDirected();
+      const adjE = graph.neighbourEdges(v);
+      const seen = new Set();
+      for (let i = 0; i < adjE.length; i++) {
+        const e = adjE[i];
+        const uv = graph.edge(e);
+        const other = (uv[0] === v) ? uv[1] : uv[0];
+        if (other === v) continue; // self-loop carried by node_self_weight
+        const c = membership[other];
+        if (!seen.has(c)) {
+          seen.add(c);
+          cacheNeighComms.push(c);
+        }
+        const w = graph.edgeWeight(e);
+        if (directed) {
+          if (uv[1] === v) {
+            cacheWeightsTo.set(c, (cacheWeightsTo.get(c) || 0) + w);
+          } else {
+            cacheWeightsFrom.set(c, (cacheWeightsFrom.get(c) || 0) + w);
+          }
+        } else {
+          cacheWeightsTo.set(c, (cacheWeightsTo.get(c) || 0) + w);
+        }
       }
     }
     rebuildAdmin();
@@ -232,6 +281,13 @@
       if (old === target) return;
       const directed = graph.isDirected();
       const adjE = graph.neighbourEdges(v);
+      // Track delta to totalWeightInAllComms = sum of totalWeightInComm[c] over c.
+      // Subtract every edge weight that leaves the in-comm sum (an edge with
+      // one endpoint at v and the other in `old`) and add every edge weight
+      // that joins it (other endpoint in `target`). On undirected graphs each
+      // such edge contributes its weight once to totalWeightInComm[c].
+      let deltaInAll = 0;
+      // Phase A: subtract v's contributions from `old` and any neighbour comms.
       for (let i = 0; i < adjE.length; i++) {
         const e = adjE[i];
         const uv = graph.edge(e);
@@ -242,17 +298,18 @@
           totalWeightInComm[old] -= w;
           totalWeightFromComm[old] -= w;
           totalWeightToComm[old] -= w;
+          deltaInAll -= w;
           continue;
         }
         if (directed) {
           if (uv[0] === v) {
             totalWeightFromComm[old] -= w;
             totalWeightToComm[cother] -= w;
-            if (cother === old) totalWeightInComm[old] -= w;
+            if (cother === old) { totalWeightInComm[old] -= w; deltaInAll -= w; }
           } else {
             totalWeightToComm[old] -= w;
             totalWeightFromComm[cother] -= w;
-            if (cother === old) totalWeightInComm[old] -= w;
+            if (cother === old) { totalWeightInComm[old] -= w; deltaInAll -= w; }
           }
         } else {
           totalWeightFromComm[old] -= w;
@@ -261,12 +318,15 @@
             totalWeightInComm[old] -= w;
             totalWeightFromComm[cother] -= w;
             totalWeightToComm[cother] -= w;
+            deltaInAll -= w;
           } else {
             totalWeightFromComm[cother] -= w;
             totalWeightToComm[cother] -= w;
           }
         }
       }
+      // Phase B: relocate v's csize / cnodes from `old` to `target`, growing
+      // arrays if `target` is a fresh community id.
       csize[old] -= graph.nodeSize(v);
       cnodes[old] -= 1;
       totalPossibleEdgesInAllComms -= graph.possibleEdges(csize[old] + graph.nodeSize(v));
@@ -286,6 +346,7 @@
       csize[target] += graph.nodeSize(v);
       cnodes[target] += 1;
       totalPossibleEdgesInAllComms += graph.possibleEdges(csize[target]);
+      // Phase C: add v's contributions to `target` and any neighbour comms.
       for (let i = 0; i < adjE.length; i++) {
         const e = adjE[i];
         const uv = graph.edge(e);
@@ -296,17 +357,18 @@
           totalWeightInComm[target] += w;
           totalWeightFromComm[target] += w;
           totalWeightToComm[target] += w;
+          deltaInAll += w;
           continue;
         }
         if (directed) {
           if (uv[0] === v) {
             totalWeightFromComm[target] += w;
             totalWeightToComm[cother] += w;
-            if (cother === target) totalWeightInComm[target] += w;
+            if (cother === target) { totalWeightInComm[target] += w; deltaInAll += w; }
           } else {
             totalWeightToComm[target] += w;
             totalWeightFromComm[cother] += w;
-            if (cother === target) totalWeightInComm[target] += w;
+            if (cother === target) { totalWeightInComm[target] += w; deltaInAll += w; }
           }
         } else {
           totalWeightFromComm[target] += w;
@@ -315,17 +377,17 @@
             totalWeightInComm[target] += w;
             totalWeightFromComm[cother] += w;
             totalWeightToComm[cother] += w;
+            deltaInAll += w;
           } else {
             totalWeightFromComm[cother] += w;
             totalWeightToComm[cother] += w;
           }
         }
       }
-      if (cnodes[old] === 0 && empties.indexOf(old) < 0) empties.push(old);
-      const idx = empties.indexOf(target);
-      if (idx >= 0) empties.splice(idx, 1);
-      totalWeightInAllComms = 0;
-      for (let c = 0; c < ncomm; c++) totalWeightInAllComms += totalWeightInComm[c];
+      if (cnodes[old] === 0) empties.add(old);
+      empties.delete(target);
+      totalWeightInAllComms += deltaInAll;
+      invalidateCache();
     }
 
     function grow(typedArr, newN) {
@@ -337,7 +399,11 @@
     }
 
     function getEmptyCommunity() {
-      if (empties.length > 0) return empties[0];
+      if (empties.size > 0) {
+        // Pick any empty id (insertion order via Set iterator).
+        const it = empties.values();
+        return it.next().value;
+      }
       const newId = ncomm;
       csize = grow(csize, newId + 1);
       cnodes = grow(cnodes, newId + 1);
@@ -345,43 +411,26 @@
       totalWeightToComm = grow(totalWeightToComm, newId + 1);
       totalWeightFromComm = grow(totalWeightFromComm, newId + 1);
       ncomm += 1;
-      empties.push(newId);
+      empties.add(newId);
       totalPossibleEdgesInAllComms += graph.possibleEdges(0);
+      // Cache lists comm ids; growing the comm list does not change v's
+      // neighbour comms, so the cache stays valid. No invalidation here.
       return newId;
     }
 
     function weightToComm(v, comm) {
-      let s = 0;
-      const adjE = graph.neighbourEdges(v);
-      for (let i = 0; i < adjE.length; i++) {
-        const e = adjE[i];
-        const uv = graph.edge(e);
-        const other = (uv[0] === v) ? uv[1] : uv[0];
-        if (other === v) continue;
-        if (membership[other] === comm) s += graph.edgeWeight(e);
-      }
-      return s;
+      cacheNeighbours(v);
+      return cacheWeightsTo.get(comm) || 0;
     }
     function weightFromComm(v, comm) {
       if (!graph.isDirected()) return weightToComm(v, comm);
-      let s = 0;
-      const adjE = graph.neighbourEdges(v);
-      for (let i = 0; i < adjE.length; i++) {
-        const e = adjE[i];
-        const uv = graph.edge(e);
-        if (uv[1] === v && uv[0] !== v && membership[uv[0]] === comm) s += graph.edgeWeight(e);
-      }
-      return s;
+      cacheNeighbours(v);
+      return cacheWeightsFrom.get(comm) || 0;
     }
 
     function getNeighComms(v) {
-      const adjN = graph.neighbours(v);
-      const seen = new Set();
-      for (let i = 0; i < adjN.length; i++) {
-        if (adjN[i] === v) continue;
-        seen.add(membership[adjN[i]]);
-      }
-      return Array.from(seen);
+      cacheNeighbours(v);
+      return cacheNeighComms;
     }
     function getNeighCommsConstrained(v, constrained) {
       const adjN = graph.neighbours(v);
@@ -397,13 +446,39 @@
     }
 
     function renumber() {
+      // Sort surviving comm ids by descending csize, then permute the
+      // admin tables in place. Avoids the full per-edge re-accumulation
+      // that rebuildAdmin would do.
       const order = [];
       for (let c = 0; c < ncomm; c++) if (cnodes[c] > 0) order.push(c);
       order.sort(function (a, b) { return csize[b] - csize[a]; });
       const remap = new Int32Array(ncomm);
       for (let i = 0; i < order.length; i++) remap[order[i]] = i;
       for (let v = 0; v < n; v++) membership[v] = remap[membership[v]];
-      rebuildAdmin();
+      const newN = order.length;
+      const newCsize = new Float64Array(newN);
+      const newCnodes = new Int32Array(newN);
+      const newIn = new Float64Array(newN);
+      const newTo = new Float64Array(newN);
+      const newFrom = new Float64Array(newN);
+      for (let i = 0; i < newN; i++) {
+        const oldId = order[i];
+        newCsize[i] = csize[oldId];
+        newCnodes[i] = cnodes[oldId];
+        newIn[i] = totalWeightInComm[oldId];
+        newTo[i] = totalWeightToComm[oldId];
+        newFrom[i] = totalWeightFromComm[oldId];
+      }
+      csize = newCsize; cnodes = newCnodes;
+      totalWeightInComm = newIn;
+      totalWeightToComm = newTo;
+      totalWeightFromComm = newFrom;
+      ncomm = newN;
+      empties.clear();
+      // totalWeightInAllComms + totalPossibleEdgesInAllComms unchanged
+      // by a permutation that drops empty communities only (those have
+      // csize=0, so possibleEdges(0) contribution is zero anyway).
+      invalidateCache();
     }
 
     return {
@@ -487,8 +562,8 @@
     opts = opts || {};
     const recordTrace = !!opts.recordTrace;
     const n = P.n();
-    const order = [];
-    for (let i = 0; i < n; i++) order.push(i);
+    const order = new Array(n);
+    for (let i = 0; i < n; i++) order[i] = i;
     shuffle(order, rng);
     let totalImprov = 0;
     let nbMoves = 0;
