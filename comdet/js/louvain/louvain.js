@@ -115,8 +115,10 @@
     for (let e = 0; e < m; e++) if (eu[e] === ev[e]) nodeSelfWeights[eu[e]] += ew[e];
     const strength = new Float64Array(n);
     for (let e = 0; e < m; e++) {
+      // Standard convention: undirected self-loop contributes 2*w to
+      // strength (the looped end counts at both endpoints).
       strength[eu[e]] += ew[e];
-      if (eu[e] !== ev[e]) strength[ev[e]] += ew[e];
+      strength[ev[e]] += ew[e];
     }
     let totalWeight = 0;
     for (let e = 0; e < m; e++) totalWeight += ew[e];
@@ -144,8 +146,7 @@
         for (let e = 0; e < m; e++) {
           const a = membership[eu[e]];
           const b = membership[ev[e]];
-          let w = ew[e];
-          if (eu[e] === ev[e] && !directed) w *= 0.5;
+          const w = ew[e];
           let lo = a, hi = b;
           if (!directed && lo > hi) { lo = b; hi = a; }
           const key = lo * ncomm + hi;
@@ -222,14 +223,14 @@
           totalWeightFromComm[cu] += w;
           totalWeightToComm[cv] += w;
         } else {
-          // Undirected single-write: each edge contributes its weight to
-          // the to-array slot of every endpoint comm it touches (intra
-          // counts once, inter counts once per distinct endpoint comm).
-          // from-comm aliases to-comm above, so a single write covers
-          // both reader views. Lands the same numbers as the original
-          // four-write canonical pattern.
+          // Per-endpoint convention: each edge endpoint contributes w
+          // to its comm's to-array slot. Intra ⇒ both endpoints in the
+          // same comm ⇒ to[c] += 2w. Inter ⇒ to[a] += w, to[b] += w.
+          // Result: totalWeightToComm[c] = strength_sum_c =
+          // 2*intra_c + inter_c, which is what Modularity().diffMove
+          // and quality treat as Kc.
           totalWeightToComm[cu] += w;
-          if (cu !== cv) totalWeightToComm[cv] += w;
+          totalWeightToComm[cv] += w;
         }
       }
       totalPossibleEdgesInAllComms = 0;
@@ -321,15 +322,15 @@
             if (cother === old) { totalWeightInComm[old] -= w; deltaInAll -= w; }
           }
         } else {
-          // Mirror rebuildAdmin's undirected single-write convention:
-          // intra contributes -w to to[old] only; inter contributes -w
-          // each to to[old] and to[cother].
+          // Per-endpoint convention (mirror rebuildAdmin): subtract w
+          // from to[old] for v's endpoint, and -w from to[cother] for
+          // the other endpoint. Intra (cother == old) ⇒ both writes
+          // hit to[old] ⇒ -2w net.
           totalWeightToComm[old] -= w;
+          totalWeightToComm[cother] -= w;
           if (cother === old) {
             totalWeightInComm[old] -= w;
             deltaInAll -= w;
-          } else {
-            totalWeightToComm[cother] -= w;
           }
         }
       }
@@ -384,11 +385,10 @@
           }
         } else {
           totalWeightToComm[target] += w;
+          totalWeightToComm[cother] += w;
           if (cother === target) {
             totalWeightInComm[target] += w;
             deltaInAll += w;
-          } else {
-            totalWeightToComm[cother] += w;
           }
         }
       }
