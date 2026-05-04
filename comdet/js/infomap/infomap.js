@@ -36,29 +36,40 @@
  */
 (function () {
   "use strict";
-  if (!window.COMDET) window.COMDET = {};
+  if (!window.COMDET || !window.COMDET.LOUVAIN) {
+    console.warn("[infomap] COMDET.LOUVAIN missing; load louvain.js first");
+    return;
+  }
   const C = window.COMDET;
+  const LV = C.LOUVAIN;
 
   function plogp(p) {
     if (p <= 0) return 0;
     return p * Math.log2(p);
   }
 
+  // Wrap LOUVAIN.Graph + add the {ids, idx, adj, deg, m, n} shim that
+  // greedyJoin/tune/subLevelPartition expect. LOUVAIN.Graph requires
+  // 0..n-1 integer nodes, so map external ids to compact indices.
   function buildGraph(nodeIds, edges) {
+    const n = nodeIds.length;
     const idx = new Map();
     nodeIds.forEach(function (id, i) { idx.set(id, i); });
-    const n = nodeIds.length;
-    const adj = []; // adj[i] = array of neighbour indices (no self-loops)
-    for (let i = 0; i < n; i++) adj.push([]);
+    const compactEdges = [];
     edges.forEach(function (e) {
-      if (e[0] === e[1]) return;
       const u = idx.get(e[0]); const v = idx.get(e[1]);
-      if (u == null || v == null) return;
-      adj[u].push(v); adj[v].push(u);
+      if (u == null || v == null || u === v) return;
+      compactEdges.push([u, v]);
     });
-    const deg = adj.map(function (a) { return a.length; });
-    const m = deg.reduce(function (s, d) { return s + d; }, 0) / 2;
-    return { n: n, ids: nodeIds, idx: idx, adj: adj, deg: deg, m: m };
+    const lg = LV.Graph(n, compactEdges, { correctSelfLoops: false });
+    const adj = new Array(n);
+    const deg = new Array(n);
+    for (let i = 0; i < n; i++) {
+      adj[i] = lg.neighbours(i);
+      deg[i] = lg.degree(i);
+    }
+    return { n: n, ids: nodeIds, idx: idx, adj: adj, deg: deg,
+             m: lg.totalWeight(), lg: lg };
   }
 
   // Stationary p_α = d_α / (2m) for connected undirected unweighted.

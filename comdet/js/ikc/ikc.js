@@ -7,17 +7,36 @@
  */
 (function () {
   "use strict";
-  if (!window.COMDET) window.COMDET = {};
+  if (!window.COMDET || !window.COMDET.LOUVAIN) {
+    console.warn("[ikc] COMDET.LOUVAIN missing; load louvain.js first");
+    return;
+  }
   const C = window.COMDET;
+  const LV = C.LOUVAIN;
 
+  // External node ids (potentially non-contiguous after IKC peels nodes
+  // out of the residual). Build LOUVAIN.Graph over compacted indices,
+  // then expose adjacency as a Map<originalId, Set<originalId>> shim
+  // since IKC's coreNumbers / connectedComponents / kValid all key off
+  // original ids.
   function buildAdj(nodeIds, edges) {
-    const adj = new Map();
-    nodeIds.forEach(function (id) { adj.set(id, new Set()); });
+    const n = nodeIds.length;
+    const idx = new Map();
+    nodeIds.forEach(function (id, i) { idx.set(id, i); });
+    const compactEdges = [];
     edges.forEach(function (e) {
       if (e[0] === e[1]) return;
-      if (!adj.has(e[0]) || !adj.has(e[1])) return;
-      adj.get(e[0]).add(e[1]);
-      adj.get(e[1]).add(e[0]);
+      const u = idx.get(e[0]), v = idx.get(e[1]);
+      if (u == null || v == null) return;
+      compactEdges.push([u, v]);
+    });
+    const lg = LV.Graph(n, compactEdges, { correctSelfLoops: false });
+    const adj = new Map();
+    nodeIds.forEach(function (id, i) {
+      const nb = lg.neighbours(i);
+      const set = new Set();
+      for (let k = 0; k < nb.length; k++) set.add(nodeIds[nb[k]]);
+      adj.set(id, set);
     });
     return adj;
   }
@@ -27,37 +46,53 @@
     return edges.filter(function (e) { return set.has(e[0]) && set.has(e[1]); });
   }
 
-  // Iterative-peel core decomposition (Batagelj-Zaversnik output).
+  // Batagelj-Zaversnik linear-time core decomposition. Bucket queue
+  // ordered by current degree; pop a node, assign its current degree
+  // as core number, decrement neighbour degrees and slide them down a
+  // bucket. O(V + E) total.
   function coreNumbers(nodeIds, edges) {
+    const n = nodeIds.length;
     const adj = buildAdj(nodeIds, edges);
     const deg = new Map();
-    nodeIds.forEach(function (id) { deg.set(id, adj.get(id).size); });
-    const remaining = new Set(nodeIds);
+    let maxDeg = 0;
+    nodeIds.forEach(function (id) {
+      const d = adj.get(id).size;
+      deg.set(id, d);
+      if (d > maxDeg) maxDeg = d;
+    });
+    const bin = new Array(maxDeg + 1).fill(0);
+    nodeIds.forEach(function (id) { bin[deg.get(id)] += 1; });
+    let start = 0;
+    for (let d = 0; d <= maxDeg; d++) {
+      const c = bin[d]; bin[d] = start; start += c;
+    }
+    const order = new Array(n);
+    const pos = new Map();
+    nodeIds.forEach(function (id) {
+      const d = deg.get(id);
+      order[bin[d]] = id;
+      pos.set(id, bin[d]);
+      bin[d] += 1;
+    });
+    for (let d = maxDeg; d > 0; d--) bin[d] = bin[d - 1];
+    bin[0] = 0;
     const core = new Map();
-    let k = 0;
-    while (remaining.size > 0) {
-      let m = Infinity;
-      remaining.forEach(function (v) {
-        const d = deg.get(v);
-        if (d < m) m = d;
+    for (let i = 0; i < n; i++) {
+      const v = order[i];
+      core.set(v, deg.get(v));
+      adj.get(v).forEach(function (u) {
+        if (deg.get(u) <= deg.get(v)) return;
+        const du = deg.get(u);
+        const pu = pos.get(u);
+        const pw = bin[du];
+        const w = order[pw];
+        if (u !== w) {
+          order[pu] = w; order[pw] = u;
+          pos.set(u, pw); pos.set(w, pu);
+        }
+        bin[du] += 1;
+        deg.set(u, du - 1);
       });
-      if (m > k) k = m;
-      const queue = [];
-      remaining.forEach(function (v) {
-        if (deg.get(v) <= k) queue.push(v);
-      });
-      while (queue.length) {
-        const v = queue.pop();
-        if (!remaining.has(v)) continue;
-        core.set(v, k);
-        remaining.delete(v);
-        adj.get(v).forEach(function (u) {
-          if (!remaining.has(u)) return;
-          const du = deg.get(u) - 1;
-          deg.set(u, du);
-          if (du <= k) queue.push(u);
-        });
-      }
     }
     let mx = 0;
     core.forEach(function (v) { if (v > mx) mx = v; });
@@ -121,6 +156,35 @@
     return (lS / L) - Math.pow(dS / (2 * L), 2);
   }
 
+  // Iteration-scoped batch modularity. One O(E_full) sweep over
+  // fullEdges bins each edge into the (compMembership[u], compMembership[v])
+  // cell; per-component (l_s, d_s) is then O(1). compMembership maps each
+  // component-member node to its component index; nodes outside any
+  // current component map to -1.
+  function batchModularities(components, fullEdges, fullL) {
+    if (fullL === 0) return components.map(function () { return 0; });
+    const memberOf = new Map();
+    components.forEach(function (comp, ci) {
+      comp.forEach(function (id) { memberOf.set(id, ci); });
+    });
+    const lS = new Float64Array(components.length);
+    const dS = new Float64Array(components.length);
+    fullEdges.forEach(function (e) {
+      const ca = memberOf.has(e[0]) ? memberOf.get(e[0]) : -1;
+      const cb = memberOf.has(e[1]) ? memberOf.get(e[1]) : -1;
+      if (ca === cb && ca !== -1) { lS[ca] += 1; dS[ca] += 2; }
+      else {
+        if (ca !== -1) dS[ca] += 1;
+        if (cb !== -1) dS[cb] += 1;
+      }
+    });
+    const out = new Array(components.length);
+    for (let i = 0; i < components.length; i++) {
+      out[i] = (lS[i] / fullL) - Math.pow(dS[i] / (2 * fullL), 2);
+    }
+    return out;
+  }
+
   // ── Outer loop ──────────────────────────────────────────────────
   function runIKC(nodeIds, fullEdges, opts) {
     opts = opts || {};
@@ -171,9 +235,10 @@
       itRec.kcoreEdges = kcoreEdges;
 
       const components = connectedComponents(kcoreNodes, kcoreEdges);
-      components.forEach(function (comp) {
+      const mods = batchModularities(components, fullEdges, fullEdges.length);
+      components.forEach(function (comp, cIdx) {
         const okK = kValid(comp, kcoreEdges, kFloor);
-        const mod = clusterModularity(comp, fullEdges);
+        const mod = mods[cIdx];
         const okMod = canonicalGate ? true : (mod > 0);
         const cRec = {
           nodes: comp.slice(),
