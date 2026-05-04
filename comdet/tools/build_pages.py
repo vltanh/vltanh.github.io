@@ -37,6 +37,7 @@ PAGES = [
             ("Repeat", "Local-move + refine + aggregate on the aggregated graph until \\(\\Delta H = 0\\)."),
             ("Final", "Side-by-side with planted ground-truth + per-cluster stats."),
         ],
+        "skip_render": True,  # hand-crafted blog page; do not regenerate
     },
     {
         "file": "leiden-mod.html",
@@ -312,6 +313,135 @@ PAGES = [
     },
 ]
 
+WALKER_CSS = """
+.walker-wrap {
+  max-width: var(--span-wide);
+  margin: 0 auto 1.5rem;
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(220px, 1fr);
+  gap: 1.4rem;
+}
+.walker-graph {
+  background: var(--ink-2);
+  border: 1.5px solid var(--paper);
+  border-radius: 2px;
+  padding: 1rem 1.1rem 1.2rem;
+  box-shadow: 3px 3px 0 rgba(27,32,51,.15);
+  position: relative;
+}
+.walker-graph::before, .walker-graph::after {
+  content: ""; position: absolute;
+  top: -9px; width: 50px; height: 16px;
+  background: var(--tape-tan); opacity: .82;
+  border: 1px solid rgba(139,117,65,.4);
+  box-shadow: 0 1px 2px rgba(27,32,51,.15);
+  pointer-events: none;
+}
+.walker-graph::before { left: 14px; transform: rotate(-4deg); }
+.walker-graph::after  { right: 14px; transform: rotate(3deg); }
+.walker-graph svg {
+  display: block; width: 100%; height: auto;
+  background: transparent;
+}
+.walker-side { display: flex; flex-direction: column; gap: 1rem; }
+.walker-info {
+  background: var(--ink-2);
+  border: 1.5px solid var(--paper);
+  border-radius: 2px;
+  padding: .85rem 1rem;
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: .92rem; line-height: 1.5;
+  color: var(--paper);
+  box-shadow: 2.5px 3px 0 rgba(27,32,51,.18);
+}
+.walker-info .winfo-line { margin: .15rem 0; }
+.walker-info .winfo-line .dim { color: var(--paper-3); }
+.walker-cand {
+  background: var(--ink-2);
+  border: 1.5px solid var(--paper);
+  border-radius: 2px;
+  padding: .8rem .95rem .9rem;
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .8rem;
+  color: var(--paper-2);
+  box-shadow: 2.5px 3px 0 rgba(27,32,51,.18);
+  max-height: 320px;
+  overflow-y: auto;
+}
+.walker-cand table.wcand { width: 100%; border-collapse: collapse; }
+.walker-cand table.wcand th {
+  text-align: left;
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .72rem; color: var(--paper-3);
+  letter-spacing: .12em; text-transform: uppercase;
+  border-bottom: 1px dashed var(--paper-4);
+  padding: .15rem .35rem;
+}
+.walker-cand table.wcand td {
+  padding: .15rem .35rem;
+  font-size: .82rem;
+  color: var(--paper);
+}
+.walker-cand table.wcand tr.wcand-pick { background: rgba(95,160,179,.25); }
+.walker-cand table.wcand tr.wcand-from { color: var(--paper-3); }
+.walker-controls {
+  max-width: var(--span-wide);
+  margin: 0 auto 2.5rem;
+  display: flex; gap: .55rem; align-items: center; flex-wrap: wrap;
+  font-family: 'Special Elite', 'Courier New', monospace;
+}
+.walker-controls .wbtn {
+  background: var(--ink-2);
+  border: 1.5px solid var(--paper);
+  color: var(--paper);
+  padding: .4rem .7rem;
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .8rem;
+  letter-spacing: .04em;
+  border-radius: 2px;
+  cursor: pointer;
+  box-shadow: 1.5px 1.8px 0 rgba(27,32,51,.18);
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+.walker-controls .wbtn:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 2.5px 2.8px 0 rgba(27,32,51,.22);
+}
+.walker-controls .wbtn:active {
+  transform: translate(0.5px, 0.5px);
+  box-shadow: 0.5px 0.8px 0 rgba(27,32,51,.18);
+}
+.walker-controls .wbtn.play {
+  background: var(--cobalt); color: white;
+}
+.walker-controls .wslider { flex: 1; min-width: 180px; accent-color: var(--cobalt); }
+.walker-controls .wres-wrap {
+  display: inline-flex; align-items: center; gap: .4rem;
+  margin-left: 1rem;
+  background: rgba(237,228,201,.55);
+  padding: .25rem .55rem;
+  border: 1px solid var(--paper-3);
+  border-radius: 2px;
+  font-size: .8rem;
+}
+.walker-controls .wres-val { color: var(--cobalt); }
+.walker-controls .wres-slider { width: 110px; accent-color: var(--cobalt); }
+@media (max-width: 760px) { .walker-wrap { grid-template-columns: 1fr; } }
+"""
+
+WALKER_BLOCK = """<div class="walker-wrap">
+  <div class="walker-graph">
+    <svg id="walker-svg" aria-label="{name} walker"></svg>
+  </div>
+  <div class="walker-side">
+    <div id="walker-info" class="walker-info"></div>
+    <div id="walker-cand" class="walker-cand"></div>
+  </div>
+</div>
+
+<div class="walker-controls" id="walker-controls"></div>"""
+
+
 PAGE_TPL = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -533,6 +663,7 @@ body {{
   max-width: var(--span-wide);
   margin: 0 auto 1.8rem;
 }}
+{walker_css}
 </style>
 </head>
 <body>
@@ -549,7 +680,7 @@ body {{
 </header>
 
 <div class="uc-banner">
-  <strong>Walker pending.</strong> {uc_text}
+  {uc_html}
 </div>
 
 <section class="algo-meta">
@@ -559,16 +690,7 @@ body {{
   </div>
 </section>
 
-<figure class="shared-graph">
-  <div class="graph-caption">
-    <span class="st">stage 0</span> input fixture &middot; 32 nodes, 49 edges, 4 planted communities + 2 outliers
-  </div>
-  <svg id="shared-graph-svg" aria-label="32-node specialized fixture"></svg>
-</figure>
-
-<section class="stage-list" aria-label="planned walker stages">
-  {stages_html}
-</section>
+{stage_section}
 
 <footer class="ack">
   <p class="tools">drawn with <a href="https://d3js.org" target="_blank" rel="noopener">d3</a></p>
@@ -587,7 +709,7 @@ window.MathJax = {{
 }};
 </script>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
-<script src="./js/landing_hero.js"></script>
+{tail_scripts}
 
 </body>
 </html>
@@ -618,10 +740,32 @@ def render_page(spec):
             f'<span><span class="ref-label">code</span><a href="{spec["code"][0]}" target="_blank" rel="noopener">{spec["code"][1]}</a></span>'
         )
     refs_html = "\n    ".join(refs)
-    stages = []
-    for i, (sname, sdesc) in enumerate(spec["stages"], 1):
-        stages.append(
-            f"""<article class="stage-card">
+
+    walker = spec.get("walker")
+    if walker:
+        # Draft walker — UC banner stays per feedback_keep_uc_banner.md.
+        uc_html = (
+            f'<strong>Walker draft.</strong> {walker.get("uc_text", "")}'
+        )
+        stage_section = WALKER_BLOCK.format(name=spec["name"])
+        kernel_scripts = "\n".join(
+            f'<script src="{s}"></script>' for s in walker.get("scripts", [])
+        )
+        mount_js = walker.get("mount_js", "")
+        tail_scripts = (
+            kernel_scripts
+            + "\n<script>\n"
+            "window.addEventListener(\"DOMContentLoaded\", function () {\n"
+            f"  {mount_js}\n"
+            "});\n</script>"
+        )
+        walker_css = WALKER_CSS
+    else:
+        uc_html = f'<strong>Walker pending.</strong> {UC_TEXT.format(name=spec["name"])}'
+        stages = []
+        for i, (sname, sdesc) in enumerate(spec["stages"], 1):
+            stages.append(
+                f"""<article class="stage-card">
     <div><span class="stage-num">{i:02d}</span></div>
     <div>
       <div class="stage-name">{sname}</div>
@@ -629,18 +773,35 @@ def render_page(spec):
     </div>
     <span class="stage-pending">pending port</span>
   </article>"""
+            )
+        stages_html = "\n  ".join(stages)
+        stage_section = (
+            '<figure class="shared-graph">\n'
+            '  <div class="graph-caption">\n'
+            '    <span class="st">stage 0</span> input fixture &middot; '
+            '32 nodes, 49 edges, 4 planted communities + 2 outliers\n'
+            '  </div>\n'
+            '  <svg id="shared-graph-svg" aria-label="32-node specialized fixture"></svg>\n'
+            '</figure>\n\n'
+            '<section class="stage-list" aria-label="planned walker stages">\n'
+            f'  {stages_html}\n'
+            '</section>'
         )
-    stages_html = "\n  ".join(stages)
+        tail_scripts = '<script src="./js/landing_hero.js"></script>'
+        walker_css = ""
+
     return PAGE_TPL.format(
         name=spec["name"],
         name_html=name_html,
         fullname=spec["fullname"],
         emoji=spec["emoji"],
         sub=sub,
-        uc_text=UC_TEXT.format(name=spec["name"]),
+        uc_html=uc_html,
         blurb=spec["blurb"],
         refs_html=refs_html,
-        stages_html=stages_html,
+        stage_section=stage_section,
+        tail_scripts=tail_scripts,
+        walker_css=walker_css,
     )
 
 
@@ -753,11 +914,16 @@ def main():
     js_dir.mkdir(exist_ok=True)
     (js_dir / "landing_hero.js").write_text(HERO_JS)
     print(f"Wrote {js_dir / 'landing_hero.js'}")
+    n = 0
     for spec in PAGES:
+        if spec.get("skip_render"):
+            print(f"Skipped {spec['file']} (hand-crafted)")
+            continue
         out = OUT_DIR / spec["file"]
         out.write_text(render_page(spec))
         print(f"Wrote {out}")
-    print(f"\n{len(PAGES)} pages generated.")
+        n += 1
+    print(f"\n{n} pages generated.")
 
 
 if __name__ == "__main__":
