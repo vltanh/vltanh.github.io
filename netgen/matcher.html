@@ -577,12 +577,9 @@ window.MathJax = {
   }
 
   // Cluster-preserving extension: map each cluster name to a small
-  // integer block id. Outliers fall under "OUT" → block 3. The bp budget
-  // is computed as the per-bp expected new edge count under random
-  // pairing of the residual stubs (size_i * size_j / total for inter,
-  // C(size_i, 2) / total for intra), rounded up to at least 1 so every
-  // currently-occupied bp can accept at least one matcher edge.
+  // integer block id. Outliers fall under "OUT" → block 3.
   const CLUSTER_TO_BLOCK = { C1: 0, C2: 1, C3: 2, OUT: 3 };
+  const BLOCK_COUNT = 4;
   function makeBlockArray() {
     const b = {};
     NODES.forEach(n => {
@@ -591,32 +588,28 @@ window.MathJax = {
     });
     return b;
   }
-  function makeBpBudget(deficit, b) {
-    const stubs = {};  // block → total residual stubs
-    for (const k in deficit) {
-      const u = parseInt(k, 10);
-      if (deficit[u] <= 0) continue;
-      stubs[b[u]] = (stubs[b[u]] || 0) + deficit[u];
-    }
-    const total = Object.values(stubs).reduce((a, c) => a + c, 0);
-    if (total < 2) return {};
-    const blocks = Object.keys(stubs).map(Number).sort((a, c) => a - c);
-    const budget = {};
-    for (let i = 0; i < blocks.length; i++) {
-      for (let j = i; j < blocks.length; j++) {
-        const bi = blocks[i], bj = blocks[j];
-        const si = stubs[bi], sj = stubs[bj];
-        const exp = (bi === bj) ? si * (si - 1) / (2 * total) : si * sj / total;
-        budget[bi + "-" + bj] = Math.max(1, Math.round(exp));
-      }
-    }
-    return budget;
+  // Reference clustering's per-(block, block) edge count, computed once
+  // from the fixture's EDGES under CLUSTER_TO_BLOCK. Used as the bp budget
+  // each CP runner enforces and as the heatmap's initial cell totals.
+  const REF_BLOCK = makeBlockArray();
+  const REF_BP_COUNTS = (function () {
+    const out = {};
+    EDGES.forEach(e => {
+      const a = REF_BLOCK[e.u], c = REF_BLOCK[e.v];
+      const key = (a < c) ? `${a}-${c}` : `${c}-${a}`;
+      out[key] = (out[key] || 0) + 1;
+    });
+    return out;
+  })();
+  function makeBpBudget() {
+    const out = {};
+    for (const k in REF_BP_COUNTS) out[k] = REF_BP_COUNTS[k];
+    return out;
   }
   function makeKernelPayloadCP() {
-    const b = makeBlockArray();
     return {
       iids: NODES, deficit: DEFICIT, baseAdj: adjBase,
-      b, bpBudget: makeBpBudget(DEFICIT, b),
+      b: REF_BLOCK, bpBudget: makeBpBudget(),
     };
   }
 
@@ -852,98 +845,161 @@ window.MathJax = {
       .attr("x1", dividerX).attr("x2", dividerX);
   }
 
-  // ── Budget bars renderer (per-(block, block) bucket) ──
-  // Stable bucket order, one row per non-zero bucket. Layout mirrors
-  // the deficit bars: dividerX = max budget across rows, used (red)
-  // extends rightward from 0, remaining (mint) extends rightward from
-  // the used edge. Values tween via merged.transition + integer
-  // interpolate, same idiom as renderBars.
+  // ── bp-budget heatmap renderer ──────────────────────────────
+  // 4x4 (block × block) grid mirrored across the diagonal. Cell text
+  // shows remaining/initial; cell fill interpolates COL.mint → COL.signal
+  // by the remaining/initial ratio and saturates to solid signal-red on
+  // zero. justBp is the bp key the latest accepted edge touched; that
+  // cell glows briefly via stroke + width transition. Bp keys missing
+  // from REF_BP_COUNTS render as inert (no edges allowed there at all).
   const BLOCK_NAMES = { 0: "C1", 1: "C2", 2: "C3", 3: "OUT" };
-  const BUDGET_W = 340, BUDGET_H = 200;
-  const BUDGET_PAD = { top: 12, right: 50, bottom: 22, left: 60 };
-  function renderBudget(svgId, budget0, used) {
+  const BUDGET_W = 340, BUDGET_H = 320;
+  const BUDGET_PAD = { top: 26, right: 16, bottom: 26, left: 56 };
+  function bpKeyPair(i, j) {
+    return (i < j) ? `${i}-${j}` : `${j}-${i}`;
+  }
+  function lerpHex(c1, c2, t) {
+    function hex(c) {
+      let h = c.replace("#", "");
+      if (h.length === 3) h = h.split("").map(s => s + s).join("");
+      return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+    }
+    const a = hex(c1), b = hex(c2);
+    const r = Math.round(a[0] + (b[0] - a[0]) * t);
+    const g = Math.round(a[1] + (b[1] - a[1]) * t);
+    const bl = Math.round(a[2] + (b[2] - a[2]) * t);
+    return "#" + [r, g, bl].map(v => v.toString(16).padStart(2, "0")).join("");
+  }
+  function renderBpHeatmap(svgId, budget0, used, justBp) {
     const svg = d3.select("#" + svgId);
     if (!svg.node()) return;
     svg.attr("viewBox", `0 0 ${BUDGET_W} ${BUDGET_H}`);
     used = used || {};
     const iw = BUDGET_W - BUDGET_PAD.left - BUDGET_PAD.right;
     const ih = BUDGET_H - BUDGET_PAD.top - BUDGET_PAD.bottom;
-    const buckets = Object.keys(budget0).sort();
-    if (buckets.length === 0) return;
-    const y = d3.scaleBand().domain(buckets).range([0, ih]).padding(0.24);
-    const maxB = d3.max(buckets, k => budget0[k]) || 1;
-    const x = d3.scaleLinear().domain([0, maxB]).range([0, iw]);
+    const cellW = iw / BLOCK_COUNT;
+    const cellH = ih / BLOCK_COUNT;
+
+    // Build a flat cell list: full BLOCK_COUNT x BLOCK_COUNT, mirrored
+    // across the diagonal via the canonical (min, max) bp key.
+    const cells = [];
+    for (let i = 0; i < BLOCK_COUNT; i++) {
+      for (let j = 0; j < BLOCK_COUNT; j++) {
+        const k = bpKeyPair(i, j);
+        const init = budget0[k] || 0;
+        const u = used[k] || 0;
+        cells.push({ i, j, key: k, init, used: u });
+      }
+    }
 
     let root = svg.select("g.budget-root");
-    let yAxisG, gRows;
+    let gCells, gRowLabels, gColLabels, gTitle;
     if (root.empty()) {
       root = svg.append("g").attr("class", "budget-root")
         .attr("transform", `translate(${BUDGET_PAD.left},${BUDGET_PAD.top})`);
-      yAxisG = root.append("g").attr("class", "budget-yaxis");
-      gRows = root.append("g").attr("class", "budget-rows");
+      gCells = root.append("g").attr("class", "budget-cells");
+      gRowLabels = root.append("g").attr("class", "budget-row-labels");
+      gColLabels = root.append("g").attr("class", "budget-col-labels");
       svg.append("text").attr("class", "budget-cap")
-        .attr("x", BUDGET_PAD.left - 26).attr("y", BUDGET_PAD.top - 4)
-        .style("fill", "#6b6a54")
+        .attr("x", BUDGET_PAD.left - 4).attr("y", BUDGET_PAD.top - 12)
+        .attr("text-anchor", "end").style("fill", "#6b6a54")
         .style("font-family", "Special Elite, Courier New, monospace")
-        .style("font-size", "10px").text("bucket");
-      svg.append("text").attr("class", "budget-foot")
-        .attr("x", BUDGET_W / 2).attr("y", BUDGET_H - 4)
+        .style("font-size", "10px").text("block ↓");
+      gTitle = svg.append("text").attr("class", "budget-foot")
+        .attr("x", BUDGET_W / 2).attr("y", BUDGET_H - 6)
         .attr("text-anchor", "middle").style("fill", "#6b6a54")
         .style("font-family", "Special Elite, Courier New, monospace")
         .style("font-size", "10.5px")
-        .text("(block, block) budget · red = used, mint = remaining");
+        .text("bp budget · cell = remaining/ref; red = exhausted");
     } else {
-      yAxisG = root.select("g.budget-yaxis");
-      gRows = root.select("g.budget-rows");
+      gCells = root.select("g.budget-cells");
+      gRowLabels = root.select("g.budget-row-labels");
+      gColLabels = root.select("g.budget-col-labels");
     }
-    yAxisG.call(d3.axisLeft(y).tickSize(0).tickPadding(6)
-      .tickFormat(k => {
-        const [a, b] = k.split("-").map(n => BLOCK_NAMES[+n] || n);
-        return a + "·" + b;
-      }));
-    yAxisG.selectAll("text").style("fill", "#6b6a54")
-      .style("font-family", "Special Elite, Courier New, monospace")
-      .style("font-size", "10px");
-    root.selectAll(".domain").style("stroke", "#b9a263");
-    root.selectAll(".tick line").style("stroke", "#cdbf8d");
 
-    const rows = gRows.selectAll(".bdg-row").data(buckets, d => d);
-    rows.exit().remove();
-    const enter = rows.enter().append("g").attr("class", "bdg-row");
-    enter.append("rect").attr("class", "used").attr("y", 0)
-      .attr("height", y.bandwidth())
-      .attr("fill", COL.signal).attr("opacity", 0.85);
-    enter.append("rect").attr("class", "remaining").attr("y", 0)
-      .attr("height", y.bandwidth())
-      .attr("fill", COL.mint).attr("opacity", 0.85);
-    enter.append("text").attr("class", "lbl")
-      .attr("dominant-baseline", "central").attr("y", y.bandwidth() / 2)
+    // Row + column labels (block names).
+    const blockIds = d3.range(BLOCK_COUNT);
+    const rowLabels = gRowLabels.selectAll("text.row-lbl").data(blockIds);
+    rowLabels.enter().append("text").attr("class", "row-lbl")
+      .attr("dominant-baseline", "central")
+      .attr("text-anchor", "end")
       .attr("font-family", "Special Elite, Courier New, monospace")
-      .attr("font-size", "10px").attr("fill", "#2f3a54");
+      .attr("font-size", "10.5px").attr("fill", "#6b6a54")
+      .merge(rowLabels)
+      .attr("x", -8).attr("y", d => d * cellH + cellH / 2)
+      .text(d => BLOCK_NAMES[d]);
+    const colLabels = gColLabels.selectAll("text.col-lbl").data(blockIds);
+    colLabels.enter().append("text").attr("class", "col-lbl")
+      .attr("text-anchor", "middle")
+      .attr("font-family", "Special Elite, Courier New, monospace")
+      .attr("font-size", "10.5px").attr("fill", "#6b6a54")
+      .merge(colLabels)
+      .attr("x", d => d * cellW + cellW / 2).attr("y", -10)
+      .text(d => BLOCK_NAMES[d]);
 
-    const merged = enter.merge(rows);
+    // Cell join. Stable key on (i, j) since the grid is constant.
+    const cellSel = gCells.selectAll("g.bp-cell")
+      .data(cells, d => `${d.i}-${d.j}`);
+    cellSel.exit().remove();
+    const enter = cellSel.enter().append("g").attr("class", "bp-cell")
+      .attr("transform", d => `translate(${d.j * cellW},${d.i * cellH})`);
+    enter.append("rect").attr("class", "fill")
+      .attr("x", 1.2).attr("y", 1.2)
+      .attr("width", cellW - 2.4).attr("height", cellH - 2.4)
+      .attr("rx", 3).attr("ry", 3)
+      .attr("fill", "#2a2c3a");
+    enter.append("rect").attr("class", "frame")
+      .attr("x", 1.2).attr("y", 1.2)
+      .attr("width", cellW - 2.4).attr("height", cellH - 2.4)
+      .attr("rx", 3).attr("ry", 3)
+      .attr("fill", "none").attr("stroke", "transparent")
+      .attr("stroke-width", 0).attr("pointer-events", "none");
+    enter.append("text").attr("class", "val")
+      .attr("text-anchor", "middle")
+      .attr("dominant-baseline", "central")
+      .attr("x", cellW / 2).attr("y", cellH / 2 - 4)
+      .attr("font-family", "Special Elite, Courier New, monospace")
+      .attr("font-size", "13px").attr("font-weight", "bold")
+      .attr("fill", "#1b2033");
+    enter.append("text").attr("class", "init")
+      .attr("text-anchor", "middle")
+      .attr("dominant-baseline", "central")
+      .attr("x", cellW / 2).attr("y", cellH / 2 + 10)
+      .attr("font-family", "Special Elite, Courier New, monospace")
+      .attr("font-size", "9.5px").attr("fill", "#3a3f55")
+      .attr("opacity", 0.75);
+    const merged = enter.merge(cellSel);
     const ease = d3.easeCubicInOut;
-    const usedW = d => x(used[d] || 0);
-    const remainW = d => x(Math.max(0, (budget0[d] || 0) - (used[d] || 0)));
-    merged.transition("budget").duration(BARS_DUR).ease(ease)
-      .attr("transform", d => `translate(0,${y(d)})`);
-    merged.select("rect.used")
-      .transition("budget").duration(BARS_DUR).ease(ease)
-      .attr("x", 0).attr("width", usedW);
-    merged.select("rect.remaining")
-      .transition("budget").duration(BARS_DUR).ease(ease)
-      .attr("x", usedW).attr("width", remainW);
-    merged.select("text.lbl")
-      .transition("budget").duration(BARS_DUR).ease(ease)
-      .attr("x", d => usedW(d) + remainW(d) + 5)
-      .tween("budget-text", function (d) {
-        const node = this;
-        const startU = parseInt((node.textContent || "0").split("/")[0], 10) || 0;
-        const endU = used[d] || 0;
-        const tot = budget0[d];
-        const i = d3.interpolateNumber(startU, endU);
-        return function (k) { node.textContent = Math.round(i(k)) + "/" + tot; };
-      });
+
+    function fillFor(d) {
+      const init = d.init;
+      const rem = Math.max(0, init - d.used);
+      if (init <= 0) return "#2a2c3a"; // inert (no ref edges in this bp)
+      if (rem <= 0) return COL.signal;
+      const ratio = rem / init;
+      // mint at full → orange-red interpolation as remaining drops.
+      return lerpHex(COL.signal, COL.mint, Math.pow(ratio, 0.7));
+    }
+    merged.select("rect.fill")
+      .transition("bdg-fill").duration(BARS_DUR).ease(ease)
+      .attr("fill", fillFor)
+      .attr("opacity", d => d.init <= 0 ? 0.35 : 0.92);
+    merged.select("text.val")
+      .attr("fill", d => d.init <= 0 ? "#5a5d70"
+                          : (d.init - d.used <= 0 ? "#fbf3da" : "#1b2033"))
+      .text(d => d.init <= 0 ? "·" : String(Math.max(0, d.init - d.used)));
+    merged.select("text.init")
+      .attr("fill", d => d.init <= 0 ? "#444a5e"
+                          : (d.init - d.used <= 0 ? "#f8d8c4" : "#3a3f55"))
+      .text(d => d.init <= 0 ? "" : `/${d.init}`);
+
+    // Just-touched flash: stroke pops on, transitions back over BARS_DUR.
+    merged.select("rect.frame")
+      .interrupt("bdg-flash")
+      .attr("stroke", d => (justBp && d.key === justBp) ? COL.azure : "transparent")
+      .attr("stroke-width", d => (justBp && d.key === justBp) ? 2.4 : 0)
+      .transition("bdg-flash").duration(BARS_DUR * 1.4).ease(ease)
+      .attr("stroke", "transparent").attr("stroke-width", 0);
   }
 
   // ── Per-section setup helper ──
@@ -978,11 +1034,11 @@ window.MathJax = {
     NETGEN.makeTooltip(viz, document.getElementById(`g-${prefix}`));
     const panelBody = isCp
       ? `<svg id="${barsId}" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet" style="display:block;width:18rem;height:auto"></svg>
-         <svg id="${budgetId}" viewBox="0 0 340 200" preserveAspectRatio="xMidYMid meet" style="display:block;width:18rem;height:auto;margin-top:.4rem"></svg>`
+         <svg id="${budgetId}" viewBox="0 0 340 320" preserveAspectRatio="xMidYMid meet" style="display:block;width:18rem;height:auto;margin-top:.4rem"></svg>`
       : `<svg id="${barsId}" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet" style="display:block;width:18rem;height:auto"></svg>`;
     NETGEN.mountGxPanel({
       viz, hostId: cyId, prefix: `g-${prefix}-bars-pnl`,
-      title: isCp ? "deficit + budget" : "deficit", maxWidth: "26rem",
+      title: isCp ? "deficit + bp budget" : "deficit", maxWidth: "26rem",
       bodyHTML: panelBody,
     });
     // CP walkers compute an initial per-bp budget once and render the
@@ -1108,7 +1164,13 @@ window.MathJax = {
       const s = steps[stepIdx];
       paintCaption(s);
       renderBars(barsId, s.residual, s.edges, s.unplaced);
-      if (isCp) renderBudget(budgetId, cpBudget0, bpUsedAt(s.edges));
+      if (isCp) {
+        // justBp: bp key the latest accepted edge touched. Forward step
+        // = current step's bp; back step = no flash (we're undoing).
+        const adjacentForward = stepIdx === lastRenderIdx + 1;
+        const justBp = adjacentForward && s.action === "add" ? s.bp : null;
+        renderBpHeatmap(budgetId, cpBudget0, bpUsedAt(s.edges), justBp);
+      }
       lastResidual = s.residual;
       lastUnplaced = s.unplaced;
 
