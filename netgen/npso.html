@@ -314,22 +314,22 @@ g.viz-node-group:has(.viz-node.future) { opacity: 0; pointer-events: none; }
 <section class="stage">
   <div class="stage-num">generation · the secant search</div>
   <h2>Bracket, then secant, with a margin guard.</h2>
-  <p>\(cc(T)\) trends downward in \(T\) but is noisy and not strictly monotone. The code nonetheless treats this as 1D root-finding. Start with \([T_{\min}, T_{\max}] = [0, 1]\) and bisect. Residual signs drive the bracket update backwards from the textbook: \(cc &gt; \mathrm{target}\) means \(T\) is too small, so \(T_{\min}\) moves right; \(cc &lt; \mathrm{target}\) means \(T\) is too large, so \(T_{\max}\) moves left.</p>
-  <p>Once both bracket ends have opposite-signed residuals, secant kicks in:</p>
+  <p>\(cc(T)\) trends downward in \(T\) but is noisy and not strictly monotone. The code treats this as 1D root-finding. Start with \([T_{\min}, T_{\max}] = [0, 1]\) and bisect. Residual signs drive the bracket update backwards from the textbook: \(cc &gt; \mathrm{target}\) means \(T\) is too small, so \(T_{\min}\) moves right; \(cc &lt; \mathrm{target}\) means \(T\) is too large, so \(T_{\max}\) moves left.</p>
+  <p>Once both bracket ends have opposite-signed residuals, secant fires:</p>
   \[
     T_{\mathrm{sec}} \;=\; T_{\min} \;-\; \frac{f_{\min}}{f_{\max} - f_{\min}} \cdot (T_{\max} - T_{\min}).
   \]
-  <p>Margin guard: if the secant iterate falls within \(5\%\) of the bracket width from either endpoint (i.e. \(T_{\mathrm{sec}} \leq T_{\min} + 0.05(T_{\max} - T_{\min})\) or \(T_{\mathrm{sec}} \geq T_{\max} - 0.05(T_{\max} - T_{\min})\)), the code falls back to the bracket midpoint for that iter. Without the guard, secant stalls hugging the endpoint when \(cc(T)\) flattens near a bracket edge.</p>
-  <p>Stop conditions: residual \(&lt; 0.005\), step \(&lt; 0.0001\), or \(100\) iters. The wrapper keeps the lowest-residual iterate regardless of whether convergence was formally reached.</p>
-  <p>Optionally <code>--search-samples-per-T S</code> draws \(S\) realisations per iter at the same \(T\) with distinct seeds; the residual driver becomes the sample mean. Noise on the mean shrinks like \(1/\sqrt{S}\), at \(S\times\) MATLAB cost per iter. The output edge list is the realisation closest to the mean.</p>
+  <p>Margin guard: if the secant iterate falls within \(5\%\) of the bracket width from either endpoint (\(T_{\mathrm{sec}} \leq T_{\min} + 0.05(T_{\max} - T_{\min})\) or \(T_{\mathrm{sec}} \geq T_{\max} - 0.05(T_{\max} - T_{\min})\)), the code falls back to the bracket midpoint for that iter. Without the guard, secant stalls hugging the endpoint when \(cc(T)\) flattens near a bracket edge.</p>
+  <p>Stop conditions: residual \(&lt; 0.005\), step \(&lt; 0.0001\), or \(100\) iters. The wrapper keeps the lowest-residual iterate even when no stop condition fired.</p>
+  <p>With <code>--search-samples-per-T S</code>, each iter draws \(S\) realisations at the same \(T\) with distinct seeds; the residual driver is the sample mean. Noise on the mean shrinks like \(1/\sqrt{S}\), at \(S\times\) MATLAB cost per iter. The output edge list is the realisation whose \(cc\) lands closest to the mean.</p>
   <div class="callout warn">
     <div class="tag">caveat 1: bisect + secant assumes monotone</div>
-    <p>The framework assumes \(cc(T)\) is monotone so residual signs carry information. The ghost band below shows the mean curve drifting downward but not strictly so, and the \(\pm 1\sigma\) / \(\pm 2\sigma\) bands show the single-shot noise that a real search iterate carries. The cobalt inner band tracks the mean's \(\pm \sigma/\sqrt{S}\) envelope at the current \(S\) — the residual the search actually sees. Equal-signed residuals can cluster on the wrong side, the secant never fires, and bisection walks into a local minimum.</p>
+    <p>The framework assumes \(cc(T)\) is monotone so residual signs carry information. The ghost band below shows the mean curve drifting downward but not strictly so, and the \(\pm 1\sigma\) / \(\pm 2\sigma\) bands show the single-shot noise on a real search iterate. The cobalt inner band tracks the mean's \(\pm \sigma/\sqrt{S}\) envelope at the current \(S\); that is the residual the search actually consumes. Equal-signed residuals can cluster on the wrong side, the secant never fires, and bisection walks into a local minimum.</p>
   </div>
   <div class="callout warn">
     <div class="tag">caveat 2: the target may be too high</div>
     <p>nPSO's achievable \(cc\) ceiling depends on \((N, m, \gamma, C)\). If the target line sits above the top of the \(\pm 2\sigma\) band at every \(T\), even driving \(T\) toward \(0\) cannot push \(cc(T)\) up to it. When that happens the search never crosses the target, residuals stay same-signed across the whole bracket, and bisection walks \(T \to 0\) until the step collapses.</p>
-    <p>On this \(20\)-node synthetic the target sits right at the top edge of the ghost band: reachable, but only barely. The DNC case study below is the extreme: target \(0.548\), ghost band top barely above \(0.1\).</p>
+    <p>On this \(20\)-node synthetic the target sits at the top edge of the ghost band: barely reachable. The DNC case study below is the extreme: target \(0.548\), ghost band top barely above \(0.1\).</p>
   </div>
   <div class="disk-panel">
     <div class="best-readout">
@@ -361,7 +361,7 @@ g.viz-node-group:has(.viz-node.future) { opacity: 0; pointer-events: none; }
     </div>
     <svg id="trajectory" viewBox="0 0 640 320" preserveAspectRatio="xMidYMid meet"></svg>
     <svg id="trajectory-brackets" viewBox="0 0 640 150" preserveAspectRatio="xMidYMid meet"></svg>
-    <div class="step-desc" style="margin-bottom:.6rem">Top: ghost <code>cc(T)</code> mean (\(64\) draws per \(T\)) with \(\pm 1\sigma\) and \(\pm 2\sigma\) shaded bands; mint dashed line is the target. Cobalt dashed envelope (only when \(S&gt;1\)) is the mean's \(\pm \sigma/\sqrt{S}\) — the residual the search actually consumes. Azure dots = mean cc per iter (current iter haloed, best-so-far ringed). Bottom: bracket heatmap per iter. Blue = cc below target, red = above. Red ring = sampled \(T\); mint dashed vertical = where mean cc crosses the target inside the bracket.</div>
+    <div class="step-desc" style="margin-bottom:.6rem">Top: ghost <code>cc(T)</code> mean (\(64\) draws per \(T\)) with \(\pm 1\sigma\) and \(\pm 2\sigma\) shaded bands; mint dashed line is the target. Cobalt dashed envelope (only when \(S&gt;1\)) is the mean's \(\pm \sigma/\sqrt{S}\), the residual the search actually consumes. Azure dots = mean cc per iter (current iter haloed, best-so-far ringed). Bottom: bracket heatmap per iter. Blue = cc below target, red = above. Red ring = sampled \(T\); mint dashed vertical = where mean cc crosses the target inside the bracket.</div>
     <div class="step-desc" id="traj-desc"></div>
   </div>
 </section>
