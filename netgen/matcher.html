@@ -357,12 +357,37 @@
   <h2>Chain matchers. Each one cleans up what the previous left behind.</h2>
   <p>Stacks compose any of the eight algorithms in a comma-separated list. Each step runs on the residual the previous step left behind. A single name is a one-step stack. Two-step chains pair a bulk drain with a finishing pass; longer chains compose cluster-preserving and plain passes when both block structure and degree mass matter.</p>
   <p>Each step uses its own random seed, derived from the matcher's overall seed, so randomness in one step does not bleed into the priorities of the next. The shared state across steps is the running graph itself plus the deficit dictionary, both updated as edges land. Cluster-preserving steps additionally share the per-(block, block) edge budget, which every cluster-preserving step in the chain decrements; non-cluster-preserving steps ignore the budget entirely. Putting a non-cluster-preserving step <em>after</em> a cluster-preserving one is the way to recover degree mass that the budget gate refused, at the cost of letting that final step place a few edges in buckets the cluster-preserving steps would have refused.</p>
-  <div class="callout">
-    <div class="tag">stacks worth knowing</div>
-    <p><b>rewire, true_greedy</b>: stochastic bulk drain, deterministic tail.</p>
-    <p><b>cluster_preserving_rewire, cluster_preserving_true_greedy</b>: same shape, every step gated by the bucket budget.</p>
-    <p><b>cluster_preserving_true_greedy, true_greedy</b>: cluster-preserving first, then plain. Closes the residual stubs the budget gate refused; the cleanup edges fall outside the reference's per-block buckets.</p>
-    <p><b>cluster_preserving_rewire, cluster_preserving_true_greedy, true_greedy</b>: stochastic bulk drain inside the buckets, deterministic in-bucket cleanup, then a plain finishing pass on whatever the buckets refused.</p>
+
+  <h3>Build a stack</h3>
+  <p>Pick algorithms one at a time. Each pick runs on whatever residual the previous picks left behind. <em>back</em> pops the most recent step and reverts its edges + budget. <em>rand step</em> rerolls the top stochastic frame; <em>rand all</em> rerolls every stochastic frame in the stack.</p>
+  <div class="graph" id="g-stack">
+    <div class="graph-chrome">
+      <span id="g-stack-stage">stack length 0 &middot; bare input deficit</span>
+      <span class="right step-label">picks: <b id="g-stack-len">0</b> &middot; residual <b id="g-stack-residual">&middot;</b></span>
+    </div>
+    <div class="graph-canvas" id="g-stack-cy"></div>
+    <div class="widget-row tight">
+      <button class="btn" data-algo="greedy" type="button">greedy</button>
+      <button class="btn" data-algo="truegreedy" type="button">true_greedy</button>
+      <button class="btn" data-algo="randgreedy" type="button">random_greedy</button>
+      <button class="btn" data-algo="rewire" type="button">rewire</button>
+      <span class="step-label">plain</span>
+    </div>
+    <div class="widget-row tight">
+      <button class="btn" data-algo="cpgreedy" type="button">cp_greedy</button>
+      <button class="btn" data-algo="cptruegreedy" type="button">cp_true_greedy</button>
+      <button class="btn" data-algo="cprandgreedy" type="button">cp_random_greedy</button>
+      <button class="btn" data-algo="cprewire" type="button">cp_rewire</button>
+      <span class="step-label">cluster-preserving (gated by bp budget)</span>
+    </div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-stack-back" type="button">back</button>
+      <button class="btn" id="g-stack-rand-step" type="button" title="reroll top stochastic frame">rand step</button>
+      <button class="btn" id="g-stack-rand-all" type="button" title="reroll every stochastic frame">rand all</button>
+      <button class="btn" id="g-stack-reset" type="button">reset</button>
+      <span class="step-label" id="g-stack-status">pick an algorithm to add the first step</span>
+    </div>
+    <div class="step-desc" id="g-stack-desc">stack is empty &middot; current state is the bare input deficit.</div>
   </div>
   <p>A plain step after a cluster-preserving one trades budget fidelity for residual closure: the new edges land in buckets the gated steps already exhausted, so block-shape stats drift while the degree gap closes. Pick the gated step alone when block fidelity is the priority and the residual stubs are tolerable; chain a plain step at the end when degree exactness matters more.</p>
 </section>
@@ -846,29 +871,17 @@ window.MathJax = {
   }
 
   // ── bp-budget heatmap renderer ──────────────────────────────
-  // 4x4 (block × block) grid mirrored across the diagonal. Cell text
-  // shows remaining/initial; cell fill interpolates COL.mint → COL.signal
-  // by the remaining/initial ratio and saturates to solid signal-red on
-  // zero. justBp is the bp key the latest accepted edge touched; that
-  // cell glows briefly via stroke + width transition. Bp keys missing
-  // from REF_BP_COUNTS render as inert (no edges allowed there at all).
+  // Compact 4x4 (block × block) grid mirrored across the diagonal,
+  // styled after sbm.html g3's half-edge budget table: neutral cell by
+  // default, mint highlight on the just-touched bp, dimmed on
+  // exhausted, faded on inert (no ref edges in that bp). Cell text
+  // shows remaining/initial. Designed to live in the `side-right` slot
+  // below the deficit bars at small footprint.
   const BLOCK_NAMES = { 0: "C1", 1: "C2", 2: "C3", 3: "OUT" };
-  const BUDGET_W = 340, BUDGET_H = 320;
-  const BUDGET_PAD = { top: 26, right: 16, bottom: 26, left: 56 };
+  const BUDGET_W = 220, BUDGET_H = 200;
+  const BUDGET_PAD = { top: 22, right: 8, bottom: 22, left: 36 };
   function bpKeyPair(i, j) {
     return (i < j) ? `${i}-${j}` : `${j}-${i}`;
-  }
-  function lerpHex(c1, c2, t) {
-    function hex(c) {
-      let h = c.replace("#", "");
-      if (h.length === 3) h = h.split("").map(s => s + s).join("");
-      return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
-    }
-    const a = hex(c1), b = hex(c2);
-    const r = Math.round(a[0] + (b[0] - a[0]) * t);
-    const g = Math.round(a[1] + (b[1] - a[1]) * t);
-    const bl = Math.round(a[2] + (b[2] - a[2]) * t);
-    return "#" + [r, g, bl].map(v => v.toString(16).padStart(2, "0")).join("");
   }
   function renderBpHeatmap(svgId, budget0, used, justBp) {
     const svg = d3.select("#" + svgId);
@@ -880,8 +893,6 @@ window.MathJax = {
     const cellW = iw / BLOCK_COUNT;
     const cellH = ih / BLOCK_COUNT;
 
-    // Build a flat cell list: full BLOCK_COUNT x BLOCK_COUNT, mirrored
-    // across the diagonal via the canonical (min, max) bp key.
     const cells = [];
     for (let i = 0; i < BLOCK_COUNT; i++) {
       for (let j = 0; j < BLOCK_COUNT; j++) {
@@ -893,113 +904,99 @@ window.MathJax = {
     }
 
     let root = svg.select("g.budget-root");
-    let gCells, gRowLabels, gColLabels, gTitle;
+    let gCells, gRowLabels, gColLabels;
     if (root.empty()) {
       root = svg.append("g").attr("class", "budget-root")
         .attr("transform", `translate(${BUDGET_PAD.left},${BUDGET_PAD.top})`);
       gCells = root.append("g").attr("class", "budget-cells");
       gRowLabels = root.append("g").attr("class", "budget-row-labels");
       gColLabels = root.append("g").attr("class", "budget-col-labels");
-      svg.append("text").attr("class", "budget-cap")
-        .attr("x", BUDGET_PAD.left - 4).attr("y", BUDGET_PAD.top - 12)
-        .attr("text-anchor", "end").style("fill", "#6b6a54")
-        .style("font-family", "Special Elite, Courier New, monospace")
-        .style("font-size", "10px").text("block ↓");
-      gTitle = svg.append("text").attr("class", "budget-foot")
-        .attr("x", BUDGET_W / 2).attr("y", BUDGET_H - 6)
+      svg.append("text").attr("class", "budget-foot")
+        .attr("x", BUDGET_W / 2).attr("y", BUDGET_H - 5)
         .attr("text-anchor", "middle").style("fill", "#6b6a54")
         .style("font-family", "Special Elite, Courier New, monospace")
-        .style("font-size", "10.5px")
-        .text("bp budget · cell = remaining/ref; red = exhausted");
+        .style("font-size", "9px")
+        .text("(block, block) bp budget · mint = just touched");
     } else {
       gCells = root.select("g.budget-cells");
       gRowLabels = root.select("g.budget-row-labels");
       gColLabels = root.select("g.budget-col-labels");
     }
 
-    // Row + column labels (block names).
     const blockIds = d3.range(BLOCK_COUNT);
     const rowLabels = gRowLabels.selectAll("text.row-lbl").data(blockIds);
     rowLabels.enter().append("text").attr("class", "row-lbl")
-      .attr("dominant-baseline", "central")
-      .attr("text-anchor", "end")
+      .attr("dominant-baseline", "central").attr("text-anchor", "end")
       .attr("font-family", "Special Elite, Courier New, monospace")
-      .attr("font-size", "10.5px").attr("fill", "#6b6a54")
+      .attr("font-size", "9.5px").attr("fill", "#6b6a54")
       .merge(rowLabels)
-      .attr("x", -8).attr("y", d => d * cellH + cellH / 2)
+      .attr("x", -6).attr("y", d => d * cellH + cellH / 2)
       .text(d => BLOCK_NAMES[d]);
     const colLabels = gColLabels.selectAll("text.col-lbl").data(blockIds);
     colLabels.enter().append("text").attr("class", "col-lbl")
       .attr("text-anchor", "middle")
       .attr("font-family", "Special Elite, Courier New, monospace")
-      .attr("font-size", "10.5px").attr("fill", "#6b6a54")
+      .attr("font-size", "9.5px").attr("fill", "#6b6a54")
       .merge(colLabels)
-      .attr("x", d => d * cellW + cellW / 2).attr("y", -10)
+      .attr("x", d => d * cellW + cellW / 2).attr("y", -7)
       .text(d => BLOCK_NAMES[d]);
 
-    // Cell join. Stable key on (i, j) since the grid is constant.
     const cellSel = gCells.selectAll("g.bp-cell")
       .data(cells, d => `${d.i}-${d.j}`);
     cellSel.exit().remove();
     const enter = cellSel.enter().append("g").attr("class", "bp-cell")
       .attr("transform", d => `translate(${d.j * cellW},${d.i * cellH})`);
     enter.append("rect").attr("class", "fill")
-      .attr("x", 1.2).attr("y", 1.2)
-      .attr("width", cellW - 2.4).attr("height", cellH - 2.4)
-      .attr("rx", 3).attr("ry", 3)
-      .attr("fill", "#2a2c3a");
-    enter.append("rect").attr("class", "frame")
-      .attr("x", 1.2).attr("y", 1.2)
-      .attr("width", cellW - 2.4).attr("height", cellH - 2.4)
-      .attr("rx", 3).attr("ry", 3)
-      .attr("fill", "none").attr("stroke", "transparent")
-      .attr("stroke-width", 0).attr("pointer-events", "none");
+      .attr("x", 0.6).attr("y", 0.6)
+      .attr("width", cellW - 1.2).attr("height", cellH - 1.2)
+      .attr("rx", 1.5).attr("ry", 1.5);
     enter.append("text").attr("class", "val")
-      .attr("text-anchor", "middle")
-      .attr("dominant-baseline", "central")
-      .attr("x", cellW / 2).attr("y", cellH / 2 - 4)
+      .attr("text-anchor", "middle").attr("dominant-baseline", "central")
+      .attr("x", cellW / 2).attr("y", cellH / 2)
       .attr("font-family", "Special Elite, Courier New, monospace")
-      .attr("font-size", "13px").attr("font-weight", "bold")
-      .attr("fill", "#1b2033");
-    enter.append("text").attr("class", "init")
-      .attr("text-anchor", "middle")
-      .attr("dominant-baseline", "central")
-      .attr("x", cellW / 2).attr("y", cellH / 2 + 10)
-      .attr("font-family", "Special Elite, Courier New, monospace")
-      .attr("font-size", "9.5px").attr("fill", "#3a3f55")
-      .attr("opacity", 0.75);
+      .attr("font-size", "11px");
     const merged = enter.merge(cellSel);
     const ease = d3.easeCubicInOut;
 
-    function fillFor(d) {
-      const init = d.init;
-      const rem = Math.max(0, init - d.used);
-      if (init <= 0) return "#2a2c3a"; // inert (no ref edges in this bp)
-      if (rem <= 0) return COL.signal;
-      const ratio = rem / init;
-      // mint at full → orange-red interpolation as remaining drops.
-      return lerpHex(COL.signal, COL.mint, Math.pow(ratio, 0.7));
+    // SBM-style discrete states: inert (no ref edges, faded gray),
+    // current (just-touched, mint), exhausted (dim opacity), default
+    // (neutral with subtle gold border). Magnitude is text-only.
+    function state(d) {
+      if (d.init <= 0) return "inert";
+      if (justBp && d.key === justBp) return "cur";
+      if (d.init - d.used <= 0) return "dim";
+      return "default";
     }
+    const fillByState = {
+      inert: "#1b2033",
+      cur: COL.mint,
+      dim: "#1b2033",
+      default: "#1b2033",
+    };
+    const strokeByState = {
+      inert: "rgba(139,117,65,.15)",
+      cur: COL.mint,
+      dim: "rgba(139,117,65,.25)",
+      default: "rgba(139,117,65,.45)",
+    };
+    const opacityByState = { inert: 0.5, cur: 1, dim: 0.45, default: 1 };
+    const textColorByState = {
+      inert: "#3a3f55", cur: "#1b2033", dim: "#bda77a", default: "#e9e1c4",
+    };
     merged.select("rect.fill")
+      .interrupt("bdg-fill")
       .transition("bdg-fill").duration(BARS_DUR).ease(ease)
-      .attr("fill", fillFor)
-      .attr("opacity", d => d.init <= 0 ? 0.35 : 0.92);
+      .attr("fill", d => fillByState[state(d)])
+      .attr("stroke", d => strokeByState[state(d)])
+      .attr("stroke-width", d => state(d) === "cur" ? 1.4 : 0.7)
+      .attr("opacity", d => opacityByState[state(d)]);
     merged.select("text.val")
-      .attr("fill", d => d.init <= 0 ? "#5a5d70"
-                          : (d.init - d.used <= 0 ? "#fbf3da" : "#1b2033"))
-      .text(d => d.init <= 0 ? "·" : String(Math.max(0, d.init - d.used)));
-    merged.select("text.init")
-      .attr("fill", d => d.init <= 0 ? "#444a5e"
-                          : (d.init - d.used <= 0 ? "#f8d8c4" : "#3a3f55"))
-      .text(d => d.init <= 0 ? "" : `/${d.init}`);
-
-    // Just-touched flash: stroke pops on, transitions back over BARS_DUR.
-    merged.select("rect.frame")
-      .interrupt("bdg-flash")
-      .attr("stroke", d => (justBp && d.key === justBp) ? COL.azure : "transparent")
-      .attr("stroke-width", d => (justBp && d.key === justBp) ? 2.4 : 0)
-      .transition("bdg-flash").duration(BARS_DUR * 1.4).ease(ease)
-      .attr("stroke", "transparent").attr("stroke-width", 0);
+      .attr("fill", d => textColorByState[state(d)])
+      .text(d => {
+        if (d.init <= 0) return "·";
+        const rem = Math.max(0, d.init - d.used);
+        return d.used > 0 ? `${rem}/${d.init}` : String(d.init);
+      });
   }
 
   // ── Per-section setup helper ──
@@ -1034,7 +1031,7 @@ window.MathJax = {
     NETGEN.makeTooltip(viz, document.getElementById(`g-${prefix}`));
     const panelBody = isCp
       ? `<svg id="${barsId}" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet" style="display:block;width:18rem;height:auto"></svg>
-         <svg id="${budgetId}" viewBox="0 0 340 320" preserveAspectRatio="xMidYMid meet" style="display:block;width:18rem;height:auto;margin-top:.4rem"></svg>`
+         <svg id="${budgetId}" viewBox="0 0 220 200" preserveAspectRatio="xMidYMid meet" style="display:block;width:13rem;height:auto;margin-top:.4rem"></svg>`
       : `<svg id="${barsId}" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet" style="display:block;width:18rem;height:auto"></svg>`;
     NETGEN.mountGxPanel({
       viz, hostId: cyId, prefix: `g-${prefix}-bars-pnl`,
@@ -1286,6 +1283,300 @@ window.MathJax = {
   sectionHandles.push(setupAlgoSection({ prefix: "cptruegreedy",   algoFn: runClusterPreservingTrueGreedy }));
   sectionHandles.push(setupAlgoSection({ prefix: "cprandgreedy",   algoFn: runClusterPreservingRandomGreedy, stochastic: true }));
   sectionHandles.push(setupAlgoSection({ prefix: "cprewire",       algoFn: runClusterPreservingRewire,       stochastic: true }));
+
+  // ── Stack builder ───────────────────────────────────────────
+  // Composer that lets the reader chain the eight matchers one frame
+  // at a time. Each frame resumes from the previous frame's residual
+  // via the kernel's initialState option; CP frames share a running
+  // bp-budget that decrements per accepted edge across frames, plain
+  // frames leave the budget untouched. Back pops the top frame and
+  // animates the inverse diff. RandStep rerolls the top stochastic
+  // frame; RandAll rerolls every stochastic frame in the stack.
+  function setupStackBuilderSection() {
+    const cyId = "g-stack-cy";
+    const barsId = "g-stack-bars";
+    const heatmapId = "g-stack-heatmap";
+
+    const algoMeta = {
+      greedy:        { label: "greedy",           cp: false, stochastic: false },
+      truegreedy:    { label: "true_greedy",      cp: false, stochastic: false },
+      randgreedy:    { label: "random_greedy",    cp: false, stochastic: true  },
+      rewire:        { label: "rewire",           cp: false, stochastic: true  },
+      cpgreedy:      { label: "cp_greedy",        cp: true,  stochastic: false },
+      cptruegreedy:  { label: "cp_true_greedy",   cp: true,  stochastic: false },
+      cprandgreedy:  { label: "cp_random_greedy", cp: true,  stochastic: true  },
+      cprewire:      { label: "cp_rewire",        cp: true,  stochastic: true  },
+    };
+
+    function runAlgoTrace(key, seed, initialState, bpBudget) {
+      const baseInit = {
+        residual: cloneResidual(initialState.residual),
+        unplaced: { ...initialState.unplaced },
+        edges: initialState.edges.slice(),
+        exitOrder: (initialState.exitOrder || []).slice(),
+      };
+      const plainPayload = { iids: NODES, deficit: DEFICIT, baseAdj: adjBase };
+      const cpPayload = { iids: NODES, deficit: DEFICIT, baseAdj: adjBase,
+                          b: REF_BLOCK, bpBudget: { ...bpBudget } };
+      switch (key) {
+        case "greedy":
+          return MatchDegreeKernel.runGreedy(plainPayload, { initialState: baseInit });
+        case "truegreedy":
+          return MatchDegreeKernel.runTrueGreedy(plainPayload, { initialState: baseInit });
+        case "randgreedy":
+          return MatchDegreeKernel.runRandomGreedy(plainPayload, { rng: makeLCG(seed), initialState: baseInit });
+        case "rewire":
+          return MatchDegreeKernel.runRewire(plainPayload, { rng: makeLCG(seed), initialState: baseInit, keepResidual: false });
+        case "cpgreedy":
+          return MatchDegreeKernel.runClusterPreservingGreedy(cpPayload, { initialState: baseInit });
+        case "cptruegreedy":
+          return MatchDegreeKernel.runClusterPreservingTrueGreedy(cpPayload, { initialState: baseInit });
+        case "cprandgreedy":
+          return MatchDegreeKernel.runClusterPreservingRandomGreedy(cpPayload, { rng: makeLCG(seed), initialState: baseInit });
+        case "cprewire":
+          return MatchDegreeKernel.runClusterPreservingRewire(cpPayload, { rng: makeLCG(seed), initialState: baseInit, keepResidual: false });
+      }
+      return [];
+    }
+
+    let stack = [];
+
+    function emptyState() {
+      const residual = {};
+      for (const k in DEFICIT) residual[k] = DEFICIT[k];
+      const unplaced = {};
+      NODES.forEach(n => { unplaced[n] = 0; });
+      return { residual, unplaced, edges: [], exitOrder: [],
+               bpBudget: { ...REF_BP_COUNTS } };
+    }
+    function currentState() {
+      return stack.length === 0 ? emptyState() : stack[stack.length - 1].stateAfter;
+    }
+    function bpUsedFromStack() {
+      const used = {};
+      stack.forEach(f => {
+        if (!f.bpDelta) return;
+        for (const k in f.bpDelta) used[k] = (used[k] || 0) + f.bpDelta[k];
+      });
+      return used;
+    }
+
+    const viz = NETGEN.VIZ.init(cyId, {
+      showLabels: true, edges: baseEdges, pinned: true,
+      pad: 40, padRight: 340,
+      nodeColor: (id) => COL[CLUSTER_OF[id]] || COL.paper_3,
+    });
+    NETGEN.makeTooltip(viz, document.getElementById("g-stack"));
+    NETGEN.mountGxPanel({
+      viz, hostId: cyId, prefix: "g-stack-pnl",
+      title: "deficit + bp budget", maxWidth: "26rem",
+      bodyHTML:
+        `<svg id="${barsId}" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet" style="display:block;width:18rem;height:auto"></svg>
+         <svg id="${heatmapId}" viewBox="0 0 220 200" preserveAspectRatio="xMidYMid meet" style="display:block;width:13rem;height:auto;margin-top:.4rem"></svg>`,
+    });
+
+    let lockHeld = false;
+    let lastResidual = {}, lastUnplaced = {};
+    function applyBaseDim() {
+      const anyActiveNow = DEFICIT_NODES.some(n => (lastResidual[n] || 0) > 0);
+      NODES.forEach(n => {
+        const inDeficit = (DEFICIT[n] || 0) > 0;
+        const aDef = lastResidual[n] || 0;
+        const bDef = (lastUnplaced && lastUnplaced[n]) || 0;
+        if (!inDeficit) viz.addNodeClass(n, "dim");
+        else if (anyActiveNow && aDef === 0 && bDef === 0) viz.addNodeClass(n, "dim");
+      });
+    }
+    const spokes = NETGEN.spokeLayer.attach(viz, {
+      onSettle: applyBaseDim,
+      onLockChange: (locked) => { lockHeld = locked; refreshButtons(); },
+    });
+
+    function matchEdgeColor(u, v) {
+      const cu = CLUSTER_OF[u], cv = CLUSTER_OF[v];
+      if (cu === cv) return COL.edge_intra[cu] || COL.edge_stage2;
+      return COL.edge_inter;
+    }
+    const pairKey = (u, v) => u < v ? `${u}-${v}` : `${v}-${u}`;
+    function placedFromState(state) {
+      return state.edges.map(([u, v]) => ({
+        u, v, color: matchEdgeColor(u, v), w: MATCH_EDGE_W,
+        id: `m-stack-${pairKey(u, v)}`,
+      }));
+    }
+    function byNodeFor() {
+      const cfg = {};
+      NODES.forEach(n => {
+        const def = DEFICIT[n] || 0;
+        if (def > 0) cfg[n] = { count: def, color: COL[CLUSTER_OF[n]] || COL.paper_3 };
+      });
+      return cfg;
+    }
+
+    let lastRendered = [];
+    let firstRender = true;
+    let pendingChain = null;
+
+    function paintStatus(justBp) {
+      const state = currentState();
+      const len = stack.length;
+      const totalRes = Object.values(state.residual).reduce((a, c) => a + c, 0);
+      const totalUnp = Object.values(state.unplaced).reduce((a, c) => a + c, 0);
+      document.getElementById("g-stack-len").textContent = String(len);
+      document.getElementById("g-stack-residual").textContent =
+        `${totalRes} (+${totalUnp} abandoned)`;
+      const stageEl = document.getElementById("g-stack-stage");
+      stageEl.textContent = len === 0
+        ? "stack length 0 · bare input deficit"
+        : `stack length ${len} · top: ${stack[len - 1].label}`;
+      const desc = document.getElementById("g-stack-desc");
+      if (len === 0) {
+        desc.innerHTML = "stack is empty · current state is the bare input deficit.";
+      } else {
+        const bullets = stack.map((f, i) => {
+          const t = Object.values(f.stateAfter.residual).reduce((a, c) => a + c, 0);
+          const u = Object.values(f.stateAfter.unplaced).reduce((a, c) => a + c, 0);
+          return `<span class="st">${i + 1}</span> ${f.label} → residual ${t}, abandoned ${u}`;
+        });
+        desc.innerHTML = bullets.join(" &middot; ");
+      }
+    }
+
+    function refreshButtons() {
+      const len = stack.length;
+      document.getElementById("g-stack-back").disabled = lockHeld || len === 0;
+      document.getElementById("g-stack-reset").disabled = lockHeld || len === 0;
+      const hasStochastic = stack.some(f => f.stochastic);
+      const topStochastic = len > 0 && stack[len - 1].stochastic;
+      document.getElementById("g-stack-rand-step").disabled = lockHeld || !topStochastic;
+      document.getElementById("g-stack-rand-all").disabled = lockHeld || !hasStochastic;
+      document.querySelectorAll("#g-stack [data-algo]").forEach(b => {
+        b.disabled = lockHeld;
+      });
+    }
+
+    function renderState(justBp) {
+      const state = currentState();
+      renderBars(barsId, state.residual, state.edges, state.unplaced);
+      renderBpHeatmap(heatmapId, REF_BP_COUNTS, bpUsedFromStack(), justBp);
+      lastResidual = state.residual;
+      lastUnplaced = state.unplaced;
+      paintStatus(justBp);
+
+      const placedList = placedFromState(state);
+      const byNode = byNodeFor();
+      if (firstRender) {
+        spokes.snapToState({ byNode, placed: placedList, just: null, justSeq: 0 });
+        firstRender = false;
+        lastRendered = placedList;
+        applyBaseDim();
+        refreshButtons();
+        if (pendingChain) { const c = pendingChain; pendingChain = null; c(); }
+        return;
+      }
+      const fired = NETGEN.playManyDiff(spokes, lastRendered, placedList, {
+        placedEntry: e => e, byNode,
+        onEmpty: () => spokes.snapToState({ byNode, placed: placedList, just: null, justSeq: stack.length }),
+        onDone: () => {
+          applyBaseDim(); refreshButtons();
+          if (pendingChain) { const c = pendingChain; pendingChain = null; c(); }
+        },
+      });
+      lastRendered = placedList;
+      if (!fired) {
+        applyBaseDim(); refreshButtons();
+        if (pendingChain) { const c = pendingChain; pendingChain = null; c(); }
+      }
+    }
+
+    function pushAlgo(key, seedOverride) {
+      if (lockHeld) return;
+      const meta = algoMeta[key];
+      const before = currentState();
+      const seed = (seedOverride !== undefined) ? seedOverride
+                 : Math.floor(Math.random() * 1e9);
+      const trace = runAlgoTrace(key, seed,
+        { residual: before.residual, unplaced: before.unplaced,
+          edges: before.edges, exitOrder: before.exitOrder },
+        before.bpBudget);
+      if (!trace.length) return;
+      const last = trace[trace.length - 1];
+      const newEdges = last.edges.slice(before.edges.length);
+      let bpDelta = null;
+      let bpBudgetAfter = before.bpBudget;
+      let lastBp = null;
+      if (meta.cp) {
+        bpDelta = {};
+        newEdges.forEach(([u, v]) => {
+          const k = bpKeyPair(REF_BLOCK[u], REF_BLOCK[v]);
+          bpDelta[k] = (bpDelta[k] || 0) + 1;
+        });
+        bpBudgetAfter = { ...before.bpBudget };
+        for (const k in bpDelta) {
+          bpBudgetAfter[k] = (bpBudgetAfter[k] || 0) - bpDelta[k];
+        }
+        // Pick last accepted bp from the trace's add steps for the flash.
+        for (let i = trace.length - 1; i >= 0; i--) {
+          if (trace[i].action === "add" && trace[i].bp) { lastBp = trace[i].bp; break; }
+        }
+      }
+      const stateAfter = {
+        residual: last.residual, unplaced: last.unplaced,
+        edges: last.edges, exitOrder: last.exitOrder,
+        bpBudget: bpBudgetAfter,
+      };
+      stack.push({
+        algoKey: key, label: meta.label, seed,
+        cp: meta.cp, stochastic: meta.stochastic,
+        bpDelta, stateAfter,
+      });
+      renderState(lastBp);
+    }
+
+    function popFrame(then) {
+      if (lockHeld || stack.length === 0) { if (then) then(); return; }
+      stack.pop();
+      pendingChain = then || null;
+      renderState(null);
+    }
+    function reset() {
+      if (lockHeld) return;
+      stack = [];
+      renderState(null);
+    }
+    function rerollTop() {
+      if (lockHeld || stack.length === 0) return;
+      const top = stack[stack.length - 1];
+      if (!top.stochastic) return;
+      const key = top.algoKey;
+      stack.pop();
+      pendingChain = () => pushAlgo(key);
+      renderState(null);
+    }
+    function rerollAll() {
+      if (lockHeld || stack.length === 0) return;
+      const keys = stack.map(f => f.algoKey);
+      stack = [];
+      function chain(i) {
+        if (i >= keys.length) return;
+        pendingChain = () => { pendingChain = () => chain(i + 1); pushAlgo(keys[i]); };
+        renderState(null);
+      }
+      chain(0);
+    }
+
+    document.querySelectorAll("#g-stack [data-algo]").forEach(btn => {
+      btn.addEventListener("click", () => pushAlgo(btn.getAttribute("data-algo")));
+    });
+    document.getElementById("g-stack-back").addEventListener("click", () => popFrame());
+    document.getElementById("g-stack-reset").addEventListener("click", reset);
+    document.getElementById("g-stack-rand-step").addEventListener("click", rerollTop);
+    document.getElementById("g-stack-rand-all").addEventListener("click", rerollAll);
+
+    renderState(null);
+    return { reset };
+  }
+  const stackHandle = setupStackBuilderSection();
 
   // ── Input deficit panel: graph + bars + re-roll ──
   // Mirrors the per-algorithm walker layout: graph on the left with
