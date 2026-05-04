@@ -82,6 +82,34 @@
    opacity; non-deficit nodes (background graph) also stay full. */
 .viz-node.dim{ opacity: 0.30; }
 .viz-label.dim{ opacity: 0.40; }
+/* Per-bp deficit budget table. Mirrors sbm.html g3-budget-tbl: paper-
+   tone defaults, mint highlight on the just-touched (r,s) pair, dim
+   opacity on a bucket whose remaining count hit zero. Upper-triangular
+   only; the lower triangle paints '·' in muted ink. */
+.bp-budget-tbl{
+  border-collapse:collapse; margin:.4rem auto 0;
+  font-family:'Special Elite','Courier New',monospace;
+}
+.bp-budget-tbl th{
+  font-weight:400; padding:2px 8px; color:var(--paper-3); font-size:.72rem;
+}
+.bp-budget-tbl tbody th{ text-align:right; }
+.bp-budget-tbl td{
+  padding:3px 10px; text-align:center; font-variant-numeric:tabular-nums;
+  min-width:2.4rem; font-size:.78rem; color:var(--paper);
+}
+.bp-budget-tbl td.lower{ color:var(--paper-4); }
+.bp-budget-tbl td.cell{
+  border:1px solid rgba(139,117,65,.32);
+  transition:background .35s, opacity .35s, color .35s;
+}
+.bp-budget-tbl td.cell.dim{ opacity:.35; }
+.bp-budget-tbl td.cell.cur{ background:var(--mint); color:var(--ink); }
+.bp-budget-cap{
+  margin-top:.35rem; font-family:'Special Elite','Courier New',monospace;
+  font-size:.66rem; color:var(--paper-3); line-height:1.35;
+  max-width:14rem; text-align:left;
+}
 </style>
 </head>
 <body>
@@ -170,7 +198,8 @@
     </tbody>
   </table>
   <p>Greedy and true_greedy are deterministic; random_greedy and rewire sample fresh draws per seed. Plain <code>true_greedy</code> is the bare-CLI default; clustered generators (<code>sbm</code>, <code>ec-sbm-v2</code>, <code>ec-sbm-v3</code>) override to <code>cluster_preserving_true_greedy</code>, the practical default whenever a clustering is available.</p>
-  <p>Each family has a <strong>cluster-preserving twin</strong>. The twin runs the same outer loop but rejects any candidate whose (block, block) bucket is exhausted. The budget is built once from the reference clustering's per-(block, block) edge counts minus what the current graph already has, and decrements on every accept. Family sections below show each algorithm's walker followed by its twin's walker; the stacking section composes them.</p>
+  <p>Each family has a <strong>cluster-preserving twin</strong>. The twin runs the same outer loop but rejects any candidate whose (block, block) bucket is exhausted. The bucket budget is the per-(block, block) deficit: how many extra edges each (r, s) pair is expected to absorb if the residual stubs paired up uniformly at random. Built once from the reference clustering at frame start; decrements on every accept. Family sections below show each algorithm's walker followed by its twin's walker; the stacking section composes them.</p>
+  <p class="muted small">Computation: total residual stubs in block \(r\) is \(\sigma_r = \sum_{u : b_u = r} r_u\). Expected new-edge count per bp under configuration-model pairing is \(\sigma_r \sigma_s / \sigma_{\text{tot}}\) for \(r \neq s\) and \((\sigma_r(\sigma_r - 1)) / (2\sigma_{\text{tot}})\) for \(r = s\), rounded with a floor of one on any bp the deficit can land in. The pipeline reads its bp budget straight off the reference edgelist on real inputs; this small fixture has no separate reference, so the page estimates the budget from the residual mass.</p>
 </section>
 
 <!-- ─────────── family · greedy + cluster_preserving_greedy ─────────── -->
@@ -613,28 +642,48 @@ window.MathJax = {
     });
     return b;
   }
-  // Reference clustering's per-(block, block) edge count, computed once
-  // from the fixture's EDGES under CLUSTER_TO_BLOCK. Used as the bp budget
-  // each CP runner enforces and as the heatmap's initial cell totals.
   const REF_BLOCK = makeBlockArray();
-  const REF_BP_COUNTS = (function () {
+  // Per-(block, block) deficit budget. The matcher's job is to place
+  // edges that cancel the residual stub pile. Under a configuration-
+  // model pairing of those stubs, expected per-(block, block) new-edge
+  // counts are k_i*k_j / total for i≠j and (k_i*(k_i-1))/(2*total) for
+  // i==j, where k_i = total residual stubs in block i. Round to the
+  // nearest integer (with a floor of 1 on any bp whose nodes carry a
+  // non-zero stub) so every bp the deficit can land in gets at least
+  // one edge of headroom. This is the "additional edges per bp the
+  // matcher is expected to place" — i.e. the per-bp deficit. The
+  // kernel's CP gate refuses partners whose bp budget is exhausted and
+  // decrements the budget on each accept.
+  function makeBpBudget(deficit, b) {
+    const stubs = {};
+    for (const k in deficit) {
+      const u = parseInt(k, 10);
+      if (deficit[u] <= 0) continue;
+      stubs[b[u]] = (stubs[b[u]] || 0) + deficit[u];
+    }
+    const total = Object.values(stubs).reduce((a, c) => a + c, 0);
+    if (total < 2) return {};
+    const blocks = Object.keys(stubs).map(Number).sort((a, c) => a - c);
     const out = {};
-    EDGES.forEach(e => {
-      const a = REF_BLOCK[e.u], c = REF_BLOCK[e.v];
-      const key = (a < c) ? `${a}-${c}` : `${c}-${a}`;
-      out[key] = (out[key] || 0) + 1;
-    });
-    return out;
-  })();
-  function makeBpBudget() {
-    const out = {};
-    for (const k in REF_BP_COUNTS) out[k] = REF_BP_COUNTS[k];
+    for (let i = 0; i < blocks.length; i++) {
+      for (let j = i; j < blocks.length; j++) {
+        const bi = blocks[i], bj = blocks[j];
+        const si = stubs[bi], sj = stubs[bj];
+        const exp = (bi === bj) ? si * (si - 1) / (2 * total) : si * sj / total;
+        out[`${bi}-${bj}`] = Math.max(1, Math.round(exp));
+      }
+    }
     return out;
   }
+  // Bp budget for the bare input deficit. Per-walker walkers each take
+  // a fresh copy at frame start; the stack builder threads this as the
+  // shared budget across cluster-preserving frames. Mutable so the
+  // input-reroll handler can swap a fresh draw in.
+  let REF_BP_BUDGET0 = makeBpBudget(DEFICIT, REF_BLOCK);
   function makeKernelPayloadCP() {
     return {
       iids: NODES, deficit: DEFICIT, baseAdj: adjBase,
-      b: REF_BLOCK, bpBudget: makeBpBudget(),
+      b: REF_BLOCK, bpBudget: { ...REF_BP_BUDGET0 },
     };
   }
 
@@ -870,133 +919,47 @@ window.MathJax = {
       .attr("x1", dividerX).attr("x2", dividerX);
   }
 
-  // ── bp-budget heatmap renderer ──────────────────────────────
-  // Compact 4x4 (block × block) grid mirrored across the diagonal,
-  // styled after sbm.html g3's half-edge budget table: neutral cell by
-  // default, mint highlight on the just-touched bp, dimmed on
-  // exhausted, faded on inert (no ref edges in that bp). Cell text
-  // shows remaining/initial. Designed to live in the `side-right` slot
-  // below the deficit bars at small footprint.
+  // ── bp-budget table renderer (sbm.html g3 idiom) ────────────
+  // Upper-triangular HTML table on the (r, s) bp grid. Default cell
+  // shows the remaining per-bp deficit; class "dim" on cells whose
+  // budget hit zero; class "cur" (mint) on the bp the latest accepted
+  // edge touched. Lower-triangle prints '·' in muted ink. The CSS lives
+  // in the page <style> block under the .bp-budget-tbl rule set.
   const BLOCK_NAMES = { 0: "C1", 1: "C2", 2: "C3", 3: "OUT" };
-  const BUDGET_W = 220, BUDGET_H = 200;
-  const BUDGET_PAD = { top: 22, right: 8, bottom: 22, left: 36 };
   function bpKeyPair(i, j) {
     return (i < j) ? `${i}-${j}` : `${j}-${i}`;
   }
-  function renderBpHeatmap(svgId, budget0, used, justBp) {
-    const svg = d3.select("#" + svgId);
-    if (!svg.node()) return;
-    svg.attr("viewBox", `0 0 ${BUDGET_W} ${BUDGET_H}`);
+  function renderBpBudgetTable(tblId, budget0, used, justBp) {
+    const tbl = document.getElementById(tblId);
+    if (!tbl) return;
     used = used || {};
-    const iw = BUDGET_W - BUDGET_PAD.left - BUDGET_PAD.right;
-    const ih = BUDGET_H - BUDGET_PAD.top - BUDGET_PAD.bottom;
-    const cellW = iw / BLOCK_COUNT;
-    const cellH = ih / BLOCK_COUNT;
-
-    const cells = [];
-    for (let i = 0; i < BLOCK_COUNT; i++) {
-      for (let j = 0; j < BLOCK_COUNT; j++) {
-        const k = bpKeyPair(i, j);
+    let html = "<thead><tr><th></th>";
+    for (let s = 0; s < BLOCK_COUNT; s++) {
+      html += `<th>${BLOCK_NAMES[s]}</th>`;
+    }
+    html += "</tr></thead><tbody>";
+    for (let r = 0; r < BLOCK_COUNT; r++) {
+      html += `<tr><th>${BLOCK_NAMES[r]}</th>`;
+      for (let s = 0; s < BLOCK_COUNT; s++) {
+        if (s < r) { html += '<td class="lower">&middot;</td>'; continue; }
+        const k = `${r}-${s}`;
         const init = budget0[k] || 0;
         const u = used[k] || 0;
-        cells.push({ i, j, key: k, init, used: u });
+        const rem = Math.max(0, init - u);
+        const cls = ["cell"];
+        if (init <= 0) { cls.push("lower"); }
+        else {
+          if (rem === 0) cls.push("dim");
+          if (justBp && k === justBp) cls.push("cur");
+        }
+        const title = init <= 0 ? "no deficit in this bp"
+                                : `init ${init}, used ${u}, remaining ${rem}`;
+        html += `<td class="${cls.join(" ")}" title="${title}">${init <= 0 ? "&middot;" : rem}</td>`;
       }
+      html += "</tr>";
     }
-
-    let root = svg.select("g.budget-root");
-    let gCells, gRowLabels, gColLabels;
-    if (root.empty()) {
-      root = svg.append("g").attr("class", "budget-root")
-        .attr("transform", `translate(${BUDGET_PAD.left},${BUDGET_PAD.top})`);
-      gCells = root.append("g").attr("class", "budget-cells");
-      gRowLabels = root.append("g").attr("class", "budget-row-labels");
-      gColLabels = root.append("g").attr("class", "budget-col-labels");
-      svg.append("text").attr("class", "budget-foot")
-        .attr("x", BUDGET_W / 2).attr("y", BUDGET_H - 5)
-        .attr("text-anchor", "middle").style("fill", "#6b6a54")
-        .style("font-family", "Special Elite, Courier New, monospace")
-        .style("font-size", "9px")
-        .text("(block, block) bp budget · mint = just touched");
-    } else {
-      gCells = root.select("g.budget-cells");
-      gRowLabels = root.select("g.budget-row-labels");
-      gColLabels = root.select("g.budget-col-labels");
-    }
-
-    const blockIds = d3.range(BLOCK_COUNT);
-    const rowLabels = gRowLabels.selectAll("text.row-lbl").data(blockIds);
-    rowLabels.enter().append("text").attr("class", "row-lbl")
-      .attr("dominant-baseline", "central").attr("text-anchor", "end")
-      .attr("font-family", "Special Elite, Courier New, monospace")
-      .attr("font-size", "9.5px").attr("fill", "#6b6a54")
-      .merge(rowLabels)
-      .attr("x", -6).attr("y", d => d * cellH + cellH / 2)
-      .text(d => BLOCK_NAMES[d]);
-    const colLabels = gColLabels.selectAll("text.col-lbl").data(blockIds);
-    colLabels.enter().append("text").attr("class", "col-lbl")
-      .attr("text-anchor", "middle")
-      .attr("font-family", "Special Elite, Courier New, monospace")
-      .attr("font-size", "9.5px").attr("fill", "#6b6a54")
-      .merge(colLabels)
-      .attr("x", d => d * cellW + cellW / 2).attr("y", -7)
-      .text(d => BLOCK_NAMES[d]);
-
-    const cellSel = gCells.selectAll("g.bp-cell")
-      .data(cells, d => `${d.i}-${d.j}`);
-    cellSel.exit().remove();
-    const enter = cellSel.enter().append("g").attr("class", "bp-cell")
-      .attr("transform", d => `translate(${d.j * cellW},${d.i * cellH})`);
-    enter.append("rect").attr("class", "fill")
-      .attr("x", 0.6).attr("y", 0.6)
-      .attr("width", cellW - 1.2).attr("height", cellH - 1.2)
-      .attr("rx", 1.5).attr("ry", 1.5);
-    enter.append("text").attr("class", "val")
-      .attr("text-anchor", "middle").attr("dominant-baseline", "central")
-      .attr("x", cellW / 2).attr("y", cellH / 2)
-      .attr("font-family", "Special Elite, Courier New, monospace")
-      .attr("font-size", "11px");
-    const merged = enter.merge(cellSel);
-    const ease = d3.easeCubicInOut;
-
-    // SBM-style discrete states: inert (no ref edges, faded gray),
-    // current (just-touched, mint), exhausted (dim opacity), default
-    // (neutral with subtle gold border). Magnitude is text-only.
-    function state(d) {
-      if (d.init <= 0) return "inert";
-      if (justBp && d.key === justBp) return "cur";
-      if (d.init - d.used <= 0) return "dim";
-      return "default";
-    }
-    const fillByState = {
-      inert: "#1b2033",
-      cur: COL.mint,
-      dim: "#1b2033",
-      default: "#1b2033",
-    };
-    const strokeByState = {
-      inert: "rgba(139,117,65,.15)",
-      cur: COL.mint,
-      dim: "rgba(139,117,65,.25)",
-      default: "rgba(139,117,65,.45)",
-    };
-    const opacityByState = { inert: 0.5, cur: 1, dim: 0.45, default: 1 };
-    const textColorByState = {
-      inert: "#3a3f55", cur: "#1b2033", dim: "#bda77a", default: "#e9e1c4",
-    };
-    merged.select("rect.fill")
-      .interrupt("bdg-fill")
-      .transition("bdg-fill").duration(BARS_DUR).ease(ease)
-      .attr("fill", d => fillByState[state(d)])
-      .attr("stroke", d => strokeByState[state(d)])
-      .attr("stroke-width", d => state(d) === "cur" ? 1.4 : 0.7)
-      .attr("opacity", d => opacityByState[state(d)]);
-    merged.select("text.val")
-      .attr("fill", d => textColorByState[state(d)])
-      .text(d => {
-        if (d.init <= 0) return "·";
-        const rem = Math.max(0, d.init - d.used);
-        return d.used > 0 ? `${rem}/${d.init}` : String(d.init);
-      });
+    html += "</tbody>";
+    tbl.innerHTML = html;
   }
 
   // ── Per-section setup helper ──
@@ -1031,20 +994,19 @@ window.MathJax = {
     NETGEN.makeTooltip(viz, document.getElementById(`g-${prefix}`));
     const panelBody = isCp
       ? `<svg id="${barsId}" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet" style="display:block;width:18rem;height:auto"></svg>
-         <svg id="${budgetId}" viewBox="0 0 220 200" preserveAspectRatio="xMidYMid meet" style="display:block;width:13rem;height:auto;margin-top:.4rem"></svg>`
+         <table id="${budgetId}" class="bp-budget-tbl"></table>
+         <div class="bp-budget-cap">cell = remaining (r, s) deficit. mint = current pair. dim = used up.</div>`
       : `<svg id="${barsId}" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet" style="display:block;width:18rem;height:auto"></svg>`;
     NETGEN.mountGxPanel({
       viz, hostId: cyId, prefix: `g-${prefix}-bars-pnl`,
       title: isCp ? "deficit + bp budget" : "deficit", maxWidth: "26rem",
       bodyHTML: panelBody,
     });
-    // CP walkers compute an initial per-bp budget once and render the
-    // bucket-by-bucket consumption from each step's edge list. cpPayload
-    // is the same payload the kernel ran on, so bpBudget0 matches the
-    // gate the kernel enforces.
-    const cpPayload = isCp ? makeKernelPayloadCP() : null;
-    const cpBudget0 = cpPayload ? Object.assign({}, cpPayload.bpBudget) : null;
-    const cpBlock = cpPayload ? cpPayload.b : null;
+    // CP walkers compute an initial per-bp deficit budget from DEFICIT
+    // and render the bucket-by-bucket consumption from each step's edge
+    // list. The same makeKernelPayloadCP feeds the kernel, so the table
+    // and the gate share an identical static budget.
+    const cpBlock = isCp ? REF_BLOCK : null;
     function bpKeyOf(u, v) {
       const bu = cpBlock[u], bv = cpBlock[v];
       return bu < bv ? `${bu}-${bv}` : `${bv}-${bu}`;
@@ -1057,6 +1019,7 @@ window.MathJax = {
       });
       return out;
     }
+    let cpBudget0 = isCp ? { ...REF_BP_BUDGET0 } : null;
     // Spoke layer applies pick + dim during the active animation by
     // default. On settle, it strips both classes; this onSettle
     // restores the matcher's deficit-driven baseline (deficit-zero
@@ -1162,11 +1125,9 @@ window.MathJax = {
       paintCaption(s);
       renderBars(barsId, s.residual, s.edges, s.unplaced);
       if (isCp) {
-        // justBp: bp key the latest accepted edge touched. Forward step
-        // = current step's bp; back step = no flash (we're undoing).
         const adjacentForward = stepIdx === lastRenderIdx + 1;
         const justBp = adjacentForward && s.action === "add" ? s.bp : null;
-        renderBpHeatmap(budgetId, cpBudget0, bpUsedAt(s.edges), justBp);
+        renderBpBudgetTable(budgetId, cpBudget0, bpUsedAt(s.edges), justBp);
       }
       lastResidual = s.residual;
       lastUnplaced = s.unplaced;
@@ -1262,6 +1223,7 @@ window.MathJax = {
       reset: () => {
         seed = 1;
         steps = algoFn(seed);
+        if (isCp) cpBudget0 = { ...REF_BP_BUDGET0 };
         if (realEl && stochastic) {
           realEl.textContent = "step: redo current pick · all: reseed every pick";
         }
@@ -1347,7 +1309,7 @@ window.MathJax = {
       const unplaced = {};
       NODES.forEach(n => { unplaced[n] = 0; });
       return { residual, unplaced, edges: [], exitOrder: [],
-               bpBudget: { ...REF_BP_COUNTS } };
+               bpBudget: { ...REF_BP_BUDGET0 } };
     }
     function currentState() {
       return stack.length === 0 ? emptyState() : stack[stack.length - 1].stateAfter;
@@ -1372,7 +1334,8 @@ window.MathJax = {
       title: "deficit + bp budget", maxWidth: "26rem",
       bodyHTML:
         `<svg id="${barsId}" viewBox="0 0 340 360" preserveAspectRatio="xMidYMid meet" style="display:block;width:18rem;height:auto"></svg>
-         <svg id="${heatmapId}" viewBox="0 0 220 200" preserveAspectRatio="xMidYMid meet" style="display:block;width:13rem;height:auto;margin-top:.4rem"></svg>`,
+         <table id="${heatmapId}" class="bp-budget-tbl"></table>
+         <div class="bp-budget-cap">cell = remaining (r, s) deficit. mint = current pair. dim = used up.</div>`,
     });
 
     let lockHeld = false;
@@ -1458,7 +1421,7 @@ window.MathJax = {
     function renderState(justBp) {
       const state = currentState();
       renderBars(barsId, state.residual, state.edges, state.unplaced);
-      renderBpHeatmap(heatmapId, REF_BP_COUNTS, bpUsedFromStack(), justBp);
+      renderBpBudgetTable(heatmapId, REF_BP_BUDGET0, bpUsedFromStack(), justBp);
       lastResidual = state.residual;
       lastUnplaced = state.unplaced;
       paintStatus(justBp);
@@ -1622,8 +1585,10 @@ window.MathJax = {
     const seed = Math.floor(Math.random() * 1e9);
     DEFICIT = generateSBMDeficit(seed);
     DEFICIT_NODES = Object.keys(DEFICIT).map(n => parseInt(n, 10));
+    REF_BP_BUDGET0 = makeBpBudget(DEFICIT, REF_BLOCK);
     renderInputPanel();
     sectionHandles.forEach(h => h.reset());
+    if (stackHandle) stackHandle.reset();
   });
 
   // ── --remap visualization ──
