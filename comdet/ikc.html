@@ -5,23 +5,107 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>IKC &middot; iterative k-core decomposition | Community Detection Algorithms</title>
 <link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐖</text></svg>">
-<meta name="description" content="IKC (iterative k-core decomposition). Walked stage by stage on the shared 32-node fixture.">
+<meta name="description" content="IKC (iterative k-core decomposition). Walked iteration by iteration on the shared 32-node fixture, side by side with the planted ground truth.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="./shared.css">
 <style>
-body {
-  font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
-  font-variation-settings: normal;
+.cand-table {
+  width: 100%; border-collapse: collapse;
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .78rem;
 }
-.hdr h1 { transform: rotate(-1.2deg); }
-.hdr .sub {
-  font-family: 'IBM Plex Sans', sans-serif;
-  font-style: normal;
-  color: var(--paper-2);
-  line-height: 1.55;
+.cand-table th {
+  text-align: left;
+  font-size: .7rem; color: var(--paper-3);
+  letter-spacing: .12em; text-transform: uppercase;
+  border-bottom: 1px dashed var(--paper-4);
+  padding: .15rem .35rem;
 }
+.cand-table td { padding: .15rem .35rem; color: var(--paper); }
+.cand-table tr.cand-pick { background: rgba(143,187,112,0.22); }
+.cand-table tr.cand-pick td:last-child { color: var(--mint); font-weight: 600; }
+.cand-table tr.cand-from td { color: var(--paper-3); }
+.cand-table tr.cand-fail td { color: var(--signal); }
+
+.q-readout {
+  display: flex; gap: 1rem; flex-wrap: wrap;
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .82rem;
+  margin: .4rem 0 .2rem;
+}
+.q-readout .item { color: var(--paper-2); }
+.q-readout .item b { color: var(--paper); }
+
+.level-pill {
+  display: inline-block;
+  font-family: 'Special Elite','Courier New',monospace;
+  font-size: .72rem;
+  letter-spacing: .12em; text-transform: uppercase;
+  background: rgba(42,74,168,.12);
+  border: 1px solid var(--azure);
+  color: var(--azure);
+  padding: .12rem .45rem;
+  border-radius: 2px;
+  margin-right: .35rem;
+}
+
+.k-control {
+  display: inline-flex; align-items: center; gap: .5rem;
+  background: rgba(237,228,201,.55);
+  padding: .3rem .65rem;
+  border: 1px solid var(--paper-3);
+  border-radius: 2px;
+  font-family: 'Special Elite','Courier New',monospace;
+  font-size: .8rem;
+  margin-left: 1rem;
+}
+.k-control .lbl { color: var(--paper-3); }
+.k-control .val { color: var(--cobalt); min-width: 2ch; text-align: right; }
+.k-control input[type="range"] { width: 130px; accent-color: var(--cobalt); }
+
+.gt-compare {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;
+  margin: .8rem 0 .4rem;
+}
+@media (max-width: 800px) { .gt-compare { grid-template-columns: 1fr; } }
+.gt-compare .panel-mini {
+  background: var(--ink-2);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: .6rem .7rem;
+}
+.gt-compare .panel-mini .cap {
+  font-family: 'Special Elite','Courier New',monospace;
+  font-size: .72rem; color: var(--azure);
+  letter-spacing: .12em; text-transform: uppercase;
+  margin-bottom: .35rem;
+}
+
+.cluster-stats {
+  width: 100%; border-collapse: collapse;
+  font-family: 'Special Elite','Courier New',monospace;
+  font-size: .8rem;
+  margin: .6rem 0;
+}
+.cluster-stats th, .cluster-stats td {
+  padding: .25rem .5rem;
+  border-bottom: 1px dotted var(--paper-4);
+}
+.cluster-stats th {
+  text-align: left;
+  font-size: .7rem; color: var(--paper-3);
+  letter-spacing: .12em; text-transform: uppercase;
+  background: rgba(237,228,201,.4);
+}
+.cluster-stats td { color: var(--paper); }
+.cluster-stats td.swatch { width: 14px; padding: 0; }
+.cluster-stats td.swatch span {
+  display: inline-block; width: 12px; height: 12px;
+  border-radius: 2px; vertical-align: middle;
+}
+
 .uc-banner {
   max-width: var(--span-medium);
   margin: 0 auto 2.4rem;
@@ -52,275 +136,180 @@ body {
   box-shadow: 1px 1px 0 rgba(27,32,51,.18);
 }
 .uc-banner strong { color: var(--paper); font-weight: 500; }
-.algo-meta {
-  max-width: var(--span-prose);
-  margin: 0 auto 2.5rem;
-  font-family: 'IBM Plex Sans', sans-serif;
-  font-size: 1.02rem; line-height: 1.7;
-  color: var(--paper-2);
-}
-.algo-meta em {
-  color: var(--paper);
-  font-style: italic;
-  background: linear-gradient(180deg, transparent 58%, rgba(246,225,90,.5) 58%, rgba(246,225,90,.5) 92%, transparent 92%);
-  padding: 0 .15em;
-}
-.algo-refs {
-  display: flex; gap: 1.3rem; flex-wrap: wrap;
-  font-family: 'Special Elite', 'Courier New', monospace;
-  font-size: .76rem; letter-spacing: .14em;
-  color: var(--paper-3);
-  margin-top: 1.1rem;
-}
-.algo-refs a {
-  color: var(--paper-3);
-  text-transform: uppercase;
-  border-bottom: 1px dashed var(--paper-3);
-  padding-bottom: 1px;
-  background: none;
-  transition: color .18s, border-color .18s;
-}
-.algo-refs a:hover {
-  color: var(--signal);
-  border-bottom-color: var(--signal);
-}
-.algo-refs .ref-label {
-  color: var(--paper-4);
-  margin-right: .35rem;
-  text-transform: uppercase;
-}
 
-.shared-graph {
-  max-width: var(--span-wide); margin: 0 auto 3rem;
-  background: var(--ink-2); border: 1.5px solid var(--paper);
-  border-radius: 2px; padding: 1.4rem 1.5rem;
-  box-shadow: 3px 3px 0 rgba(27,32,51,.15);
-  position: relative;
+.kcore-bar {
+  display: flex; gap: 4px;
+  font-family: 'Special Elite','Courier New',monospace;
+  font-size: .72rem;
+  margin: .4rem 0 .8rem;
 }
-.shared-graph::before, .shared-graph::after {
-  content: ""; position: absolute;
-  top: -9px; width: 50px; height: 16px;
-  background: var(--tape-tan); opacity: .82;
-  border: 1px solid rgba(139,117,65,.4);
-  box-shadow: 0 1px 2px rgba(27,32,51,.15);
-  pointer-events: none;
-}
-.shared-graph::before { left: 14px; transform: rotate(-4deg); }
-.shared-graph::after  { right: 14px; transform: rotate(3deg); }
-.shared-graph .graph-caption {
-  font-family: 'Special Elite', 'Courier New', monospace;
-  font-size: .76rem;
-  color: var(--paper-2);
-  border-bottom: 1px dashed rgba(139,117,65,.4);
-  padding-bottom: .6rem;
-  margin-bottom: .9rem;
-  line-height: 1.45;
-}
-.shared-graph .graph-caption .st {
-  color: var(--azure);
-  letter-spacing: .12em;
-  text-transform: uppercase;
-  margin-right: .4rem;
-}
-.shared-graph svg {
-  display: block; width: 100%; height: auto;
-  cursor: grab; touch-action: none;
-}
-.shared-graph svg:active { cursor: grabbing; }
-
-.stage-list {
-  max-width: var(--span-wide);
-  margin: 0 auto 3rem;
-  display: grid; gap: 1.2rem;
-}
-.stage-card {
+.kcore-bar .cell {
+  flex: 1;
   background: var(--ink-2);
-  border: 1.5px solid var(--paper);
+  border: 1px solid var(--paper-4);
+  padding: .25rem .35rem;
+  text-align: center;
   border-radius: 2px;
-  padding: 1.05rem 1.3rem 1.15rem;
-  position: relative;
-  box-shadow: 2.5px 3px 0 rgba(27,32,51,.18);
-  display: grid;
-  grid-template-columns: minmax(120px, 160px) minmax(0, 1fr) auto;
-  gap: 1.1rem;
-  align-items: center;
 }
-.stage-card:nth-of-type(odd)  { transform: rotate(-.3deg); }
-.stage-card:nth-of-type(even) { transform: rotate(.25deg); }
-.stage-card::before {
-  content: ""; position: absolute;
-  top: -8px; left: 50%;
-  transform: translateX(-50%) rotate(-2deg);
-  width: 46px; height: 14px;
-  background: var(--tape-tan); opacity: .85;
-  border: 1px solid rgba(139,117,65,.4);
-  box-shadow: 0 1px 2px rgba(27,32,51,.15);
-}
-.stage-num {
-  font-family: 'Caveat Brush', cursive;
-  font-size: 1.6rem;
-  color: var(--cobalt);
-  letter-spacing: .04em;
-  transform: rotate(-2deg);
-  display: inline-block;
-}
-.stage-name {
-  font-family: 'Special Elite', 'Courier New', monospace;
-  font-size: 1.05rem;
-  color: var(--paper);
-  letter-spacing: .02em;
-}
-.stage-desc {
-  font-family: 'IBM Plex Sans', sans-serif;
-  color: var(--paper-2);
-  font-size: .92rem;
-  line-height: 1.5;
-  margin-top: .3rem;
-}
-.stage-pending {
-  font-family: 'Caveat Brush', cursive;
-  color: var(--signal);
-  font-size: .9rem;
-  letter-spacing: .02em;
-  transform: rotate(2deg);
-  white-space: nowrap;
-  align-self: end;
-  padding: .15rem .45rem;
-  background: var(--hl-yellow);
-  border: 1px solid var(--signal);
-  border-radius: 2px;
-  box-shadow: 1px 1px 0 rgba(27,32,51,.18);
-}
-@media (max-width: 600px) {
-  .stage-card {
-    grid-template-columns: auto 1fr;
-  }
-  .stage-pending {
-    grid-column: 1 / -1;
-    justify-self: start;
-  }
-}
-
-.back-link {
-  display: inline-flex; align-items: center; gap: .35rem;
-  font-family: 'Special Elite', 'Courier New', monospace;
-  font-size: .74rem; letter-spacing: .14em;
-  text-transform: uppercase;
-  color: var(--paper-3);
-  border-bottom: 1px dashed var(--paper-3);
-  padding-bottom: 1px;
-  transition: color .18s, border-color .18s;
-}
-.back-link:hover {
-  color: var(--signal);
-  border-bottom-color: var(--signal);
-}
-.back-row {
-  max-width: var(--span-wide);
-  margin: 0 auto 1.8rem;
-}
+.kcore-bar .cell .lab { color: var(--paper-3); display: block; font-size: .65rem; }
+.kcore-bar .cell .n { color: var(--paper); font-weight: 600; }
+.kcore-bar .cell.active { border-color: var(--cobalt); background: rgba(42,74,168,.10); }
+.kcore-bar .cell.active .n { color: var(--cobalt); }
 </style>
 </head>
 <body>
 <main class="page">
 
-<div class="back-row">
-  <a class="back-link" href="./">&larr; back to gallery</a>
-</div>
+<div id="links"></div>
 
 <header class="hdr">
-  <div class="kicker">algorithm &middot; iterative k-core decomposition</div>
-  <h1>IKC</h1>
-  <p class="sub">One algorithm in the gallery: iterative k-core decomposition. Walked stage by stage on the shared 32-node fixture, side by side with the planted ground truth.</p>
+  <div class="kicker">community detection &middot; iterative k-core decomposition</div>
+  <h1><em>IKC</em></h1>
+  <p class="fullname">Iterative k-core Clustering</p>
+  <p class="sub">Walk through Wedell, Park, Korobskiy, Warnow + Chacko's IKC algorithm one iteration at a time on the 32-node comdet fixture.</p>
 </header>
 
 <div class="uc-banner">
-  <strong>Walker pending.</strong> The full per-stage walker for IKC is pending the Phase 4c kernel port. Today the page surfaces the input fixture and the planned stage list; interactive widgets land per-stage as the JS port reaches feature parity with canonical (see the active plan's Phase 4c verification matrix).
+  <strong>Draft.</strong> JS port of <a href="https://github.com/MinhyukPark/cm_pipeline" target="_blank" rel="noopener">community-detection/src/ikc/run_ikc.py</a> against the 32-node fixture; gate verdicts traced per iteration. Modularity gate is computed from the paper's formula \(\mathrm{mod}(s) = \ell_s/L - (d_s/2L)^2\) but defaults to canonical's pass-through (<code>POSITIVE_VALUE = 1</code> in <code>run_ikc.py:280</code>); enable the strict gate via the toggle in stage 3.
 </div>
 
-<section class="algo-meta">
-  <p>For decreasing \(k\): extract the \(k\)-core (maximal subgraph where every node has degree \(\ge k\)), peel its connected components, gate each on a modularity threshold. Surviving components are clusters; nodes that never qualify drop. Tightest of the bunch on coverage, loosest on recall.</p>
-  <div class="algo-refs">
-    <span><span class="ref-label">code</span><a href="https://networkit.github.io" target="_blank" rel="noopener">networkit CoreDecomposition</a></span>
+<section class="hook">
+  <p>Community detection by peeling. Pick a connectivity floor \(k\) (CM-paper default \(k = 10\); the page uses \(k = 4\) on this 32-node fixture so anything surfaces). Compute the \(k\)-core of the residual graph; split it into connected components; gate each component on \(k\)-validity (every node has degree \(\ge k\) inside the kcore) and a modularity check; emit the survivors as clusters; remove their nodes; iterate at \(k - 1\) on the residual until \(K^*\) drops below the floor.</p>
+  <p>The structure is dual to most CD methods. Louvain and Leiden grow communities by absorbing neighbours; IKC prunes communities by stripping their thinly-attached members. Coverage is loose: anything below \(k\)-validity drops out of the partition entirely (singletons or dropped nodes), so IKC's recall is the lowest in the gallery. Per-cluster <em>core density</em> is the highest: every accepted cluster's induced minimum degree is \(\ge k\) by construction, so it is the sturdiest in the gallery against further peeling. The Wedell paper situates IKC as Stage 1 of a four-stage <em>kmp-clustering</em> pipeline (\(k\)-validity, modularity, and \(p\)-validity for noncore augmentation); this page covers Stage 1 only.</p>
+  <div class="defs">
+    <div><span class="term">k-core</span> the maximal induced subgraph where every node has degree \(\ge k\). Computed by iterative peel: repeatedly remove every node currently below \(k\); whatever survives is the \(k\)-core.</div>
+    <div><span class="term">k-validity</span> a candidate cluster \(C\) is \(k\)-valid iff every node in \(C\) has \(\ge k\) other \(C\)-nodes among its neighbours <em>within</em> the kcore subgraph (run_ikc.py:264-275). Stricter than belonging to the \(k\)-core globally.</div>
+    <div><span class="term">modularity gate</span> paper formula \(\mathrm{mod}(s) = \ell_s/L - (d_s/2L)^2\) with \(L\) = total edges of the original graph. Canonical runs short-circuit to \(\mathrm{mod} = 1\) (<code>POSITIVE_VALUE</code> in <code>run_ikc.py:280</code>), so the gate is effectively a no-op in shipped IKC. The toggle below switches this off.</div>
   </div>
 </section>
 
-<figure class="shared-graph">
-  <div class="graph-caption">
-    <span class="st">stage 0</span> input fixture &middot; 32 nodes, 49 edges, 4 planted communities + 2 outliers
+<!-- ─────────── Stage 0 · The input ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 0 &middot; input</div>
+  <h2>The 32-node fixture, painted by planted ground-truth.</h2>
+  <p>The comdet gallery shares one small graph across every algorithm. <em>A</em> (12 nodes, blue) is a \(K_5\) on \(\{0..4\}\) plus a 7-node periphery hanging off the \(K_5\) vertices. <em>B</em> (8 nodes, ochre) is two \(K_4\)'s joined by the single bridge edge \((15, 16)\). <em>C</em> (6 nodes, green) is two disconnected 3-cycles. <em>D</em> (4 nodes, plum) is two 2-cliques bridged by \((27, 28)\). Outliers 30 + 31 dangle off A's periphery.</p>
+  <div class="graph" id="g-input">
+    <div class="graph-chrome">
+      <span>32 nodes &middot; 52 edges &middot; 4 planted communities + 2 outliers</span>
+      <span class="right">colour = planted ground-truth</span>
+    </div>
+    <div class="graph-canvas" id="g-input-cy"></div>
   </div>
-  <svg id="shared-graph-svg" aria-label="32-node specialized fixture"></svg>
-</figure>
-
-<section class="stage-list" aria-label="planned walker stages">
-  <article class="stage-card">
-    <div><span class="stage-num">01</span></div>
-    <div>
-      <div class="stage-name">k-core peel</div>
-      <div class="stage-desc">Compute \(k\)-core for the largest \(k\) with surviving nodes.</div>
-    </div>
-    <span class="stage-pending">pending port</span>
-  </article>
-  <article class="stage-card">
-    <div><span class="stage-num">02</span></div>
-    <div>
-      <div class="stage-name">Component split</div>
-      <div class="stage-desc">Weakly-connected components of the core become candidate clusters.</div>
-    </div>
-    <span class="stage-pending">pending port</span>
-  </article>
-  <article class="stage-card">
-    <div><span class="stage-num">03</span></div>
-    <div>
-      <div class="stage-name">k-validity gate</div>
-      <div class="stage-desc">Reject components whose induced minimum degree drops below \(k\).</div>
-    </div>
-    <span class="stage-pending">pending port</span>
-  </article>
-  <article class="stage-card">
-    <div><span class="stage-num">04</span></div>
-    <div>
-      <div class="stage-name">Modularity gate</div>
-      <div class="stage-desc">Reject components below the modularity threshold.</div>
-    </div>
-    <span class="stage-pending">pending port</span>
-  </article>
-  <article class="stage-card">
-    <div><span class="stage-num">05</span></div>
-    <div>
-      <div class="stage-name">Iterate</div>
-      <div class="stage-desc">Remove accepted clusters from the graph; decrement \(k\); repeat until empty.</div>
-    </div>
-    <span class="stage-pending">pending port</span>
-  </article>
-  <article class="stage-card">
-    <div><span class="stage-num">06</span></div>
-    <div>
-      <div class="stage-name">Final</div>
-      <div class="stage-desc">Surviving clusters + dropped nodes; per-cluster size + density.</div>
-    </div>
-    <span class="stage-pending">pending port</span>
-  </article>
+  <p>Core decomposition of this fixture has \(K^* = 4\) (the \(K_5\) in A); the 3-core adds B's two \(K_4\)'s; the 2-core picks up D's 2-cliques + C's 3-cycles + a chunk of A's periphery; the 1-core picks up the dangling pendants. So IKC visits exactly four iterations between \(k = K^*\) and \(k = 1\). For any \(k\)-floor \(\ge 5\) IKC bails on iteration 0; for \(k = 4\) it accepts only the \(K_5\); for \(k = 2\) it accepts four clusters (\(K_5\), B's full bridged 8-node block, both C cycles).</p>
 </section>
+
+<!-- ─────────── Stage 1 · k-core decomposition ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 1 &middot; core decomposition</div>
+  <h2>Every node has a core number; IKC walks it from the top down.</h2>
+  <p>Before any peeling iteration runs, every node has a fixed <em>core number</em>: the largest \(k\) such that the node belongs to the \(k\)-core. The 32-node fixture's distribution lives in the bar below. Each iteration of IKC's outer loop targets one \(k\) bin, in descending order.</p>
+  <div class="graph" id="g-cores">
+    <div class="graph-chrome">
+      <span>colour = core number; intensity scales with \(k\)</span>
+      <span class="right">slide to highlight one core level</span>
+    </div>
+    <div class="graph-canvas" id="g-cores-cy"></div>
+    <div class="widget-row">
+      <span class="step-label">show core \(k = \) <b id="g-cores-k">4</b></span>
+      <input type="range" id="g-cores-slider" min="1" max="4" step="1" value="4" style="width:200px;accent-color:var(--cobalt)"/>
+      <span class="step-label" style="margin-left:auto"><b id="g-cores-count">5</b> nodes in this core level</span>
+    </div>
+  </div>
+  <div class="kcore-bar" id="g-cores-bar"></div>
+  <p>A node with core number \(k\) belongs to <em>every</em> core down to \(k = 1\), so the \(k\)-core nests inside the \((k - 1)\)-core. IKC exploits the nesting by extracting the \(K^*\)-core first (here just nodes 0..4, the \(K_5\)), removing those nodes, then running core decomposition on the residual graph, where \(K^*\) of the residual drops to 3, and so on. The same nesting gives IKC its determinism: iteration order follows from the input graph and \(k\)-floor.</p>
+</section>
+
+<!-- ─────────── Stage 2 · IKC outer loop ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 2 &middot; outer loop</div>
+  <h2>Compute the residual's max-core, peel it, gate every component.</h2>
+  <p>The IKC outer loop walks the residual graph, not the original. At each iteration: compute \(K^*\) of the current residual; if \(K^* < k_{\mathrm{floor}}\), bail and dump the rest as singletons; otherwise extract the \(K^*\)-core, split it into connected components, and gate each component independently. Surviving components become clusters; their nodes drop out of the residual; the loop iterates with one fewer \(K^*\).</p>
+  <p>The walker below replays each iteration. The main canvas shows the residual graph for that iteration; the highlighted nodes are the current \(K^*\)-core; the side panel lists every connected component the gate visited, with its \(k\)-validity + modularity verdict.</p>
+  <div class="graph" id="g-loop">
+    <div class="graph-chrome">
+      <span><span class="level-pill" id="g-loop-level">it 0</span><span id="g-loop-status">iteration &middot; &middot;</span></span>
+      <span class="right" id="g-loop-stats">accepted: &middot; &middot; dropped: &middot;</span>
+    </div>
+    <div class="graph-canvas" id="g-loop-cy"></div>
+    <div class="widget-row">
+      <button class="btn" id="g-loop-reset" type="button">reset</button>
+      <button class="btn" id="g-loop-prev" type="button">back</button>
+      <button class="btn primary" id="g-loop-next" type="button">next iteration</button>
+      <button class="btn" id="g-loop-end" type="button">finish</button>
+      <span class="step-label">iteration <b id="g-loop-cur">0</b> / <span id="g-loop-total">0</span></span>
+      <label class="k-control">
+        <span class="lbl">\(k_{\mathrm{floor}} =\)</span>
+        <input type="range" id="g-loop-k" min="2" max="5" step="1" value="2"/>
+        <span class="val" id="g-loop-k-out">2</span>
+      </label>
+      <label class="k-control" title="When checked, modularity gate uses the paper formula mod(s) > 0; otherwise canonical run_ikc.py shortcuts to mod = 1 (always passes).">
+        <input type="checkbox" id="g-loop-strict-mod"/>
+        <span class="lbl">strict mod gate</span>
+      </label>
+    </div>
+  </div>
+  <div id="g-loop-panel"></div>
+  <div class="callout">
+    <div class="tag">why the residual matters</div>
+    <p>If IKC ran at every \(k\) on the original graph instead of the residual, every iteration would re-find the same \(K^*\)-core and the loop would not progress. Removing accepted clusters between iterations is what shifts the residual's \(K^*\) downward + lets lower-\(k\) structure surface. On this fixture: iteration 0 at \(k_{\mathrm{floor}} = 2\) yanks \(K_5\) out; iteration 1 sees the residual's max core = 3 (B's bridged 8-block); iteration 2 sees max core = 2 (C's two 3-cycles); iteration 3 finds max core = 1 and bails because that's below \(k_{\mathrm{floor}}\).</p>
+  </div>
+</section>
+
+<!-- ─────────── Stage 3 · Final ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 3 &middot; final</div>
+  <h2>The IKC partition, side by side with planted ground-truth.</h2>
+  <p>At default \(k_{\mathrm{floor}} = 2\) on the 32-node fixture, IKC accepts four clusters: the \(K_5\) (5 nodes, k = 4), B's bridged 8-block (8 nodes, k = 3), and both halves of C (3 nodes each, k = 2). 13 nodes drop into the singleton bucket (A's full periphery, D, the outliers). Compare with planted ground-truth: A's periphery + D's modular pair never make it back to their parent cluster; C's two halves are kept separate (planted GT keeps them merged, accepting the disconnect).</p>
+  <div class="gt-compare">
+    <div class="panel-mini">
+      <div class="cap">IKC output (\(k_{\mathrm{floor}}\) = <span id="g-final-k">2</span>) &middot; <span id="g-final-acc">·</span> clusters &middot; <span id="g-final-drop">·</span> dropped</div>
+      <div class="graph-canvas" id="g-final-ikc" style="height: 280px"></div>
+    </div>
+    <div class="panel-mini">
+      <div class="cap">planted ground-truth &middot; 4 communities + 2 outliers</div>
+      <div class="graph-canvas" id="g-final-gt" style="height: 280px"></div>
+    </div>
+  </div>
+  <table class="cluster-stats" id="g-final-stats">
+    <thead><tr><th></th><th>community</th><th>size</th><th>edges in</th><th>edges out</th><th>conductance</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <div class="callout">
+    <div class="tag">on this fixture, by region</div>
+    <p>At \(k_{\mathrm{floor}} = 2\): A's K_5 surfaces alone in iteration 0, leaving the periphery dangling on edges that no longer count toward k-validity (every periphery node has \(\le 1\) periphery neighbour). B's 8-block survives because the bridge edge \((15, 16)\) still gives every \(K_4\) member a 3rd intra-cluster neighbour. C's two 3-cycles each independently meet \(k = 2\) (every node has 2 neighbours within its triangle). D's two 2-cliques fail (each 2-clique node has only 1 internal neighbour, so they can't reach \(k = 2\)). Outliers 30 + 31 stay singletons by construction.</p>
+    <p>Slide \(k_{\mathrm{floor}}\) up: at \(k = 3\), B's 8-block survives but C's triangles fall through; at \(k = 4\), only the \(K_5\) makes it; at \(k = 5\), nothing does (the fixture has no 5-core). Slide it down to \(k = 2\) (the floor of this slider) is the sweet spot: maximally permissive while still rejecting D, the periphery, and the pendants.</p>
+  </div>
+  <div class="callout warn">
+    <div class="tag">caveat &middot; modularity gate is a no-op</div>
+    <p>The shipped <code>run_ikc.py</code> hard-codes the modularity gate to <code>POSITIVE_VALUE = 1</code> (line 280), short-circuiting the paper's \(\mathrm{mod}(s) = \ell_s/L - (d_s/2L)^2\) formula. In practice IKC's only filter is \(k\)-validity. The page computes and displays the paper's \(\mathrm{mod}(s)\) value in stage 2 for diagnostic interest; the "strict mod gate" toggle in that stage enforces \(\mathrm{mod}(s) > 0\). On the 32-node fixture every accepted cluster has positive modularity already, so the strict gate does not change the partition. On larger benchmarks it would.</p>
+  </div>
+</section>
+
+<div id="kin"></div>
 
 <footer class="ack">
   <p class="tools">drawn with <a href="https://d3js.org" target="_blank" rel="noopener">d3</a></p>
   <p class="credit">typed by vltanh, doodled with Claude</p>
 </footer>
 
-<script src="./js/fixture.js"></script>
+</main>
+
 <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 <script>
 window.MathJax = {
   tex: {
-    inlineMath: [['\\(', '\\)'], ['$', '$'], ['$$', '$$']],
+    inlineMath: [['\\(', '\\)']],
     displayMath: [['\\[', '\\]']]
   },
   chtml: { scale: 1.0 }
 };
 </script>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
-<script src="./js/landing_hero.js"></script>
+<script src="./shared.js"></script>
+<script src="./js/fixture.js"></script>
+<script src="./js/ikc/ikc.js"></script>
+<script src="./js/comdet/page_helpers.js"></script>
+<script src="./js/ikc/page.js"></script>
 
 </body>
 </html>

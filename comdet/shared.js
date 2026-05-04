@@ -2452,7 +2452,7 @@ function toggle(opts) {
 function linksRow(opts = {}) {
   const { gen } = opts;
   if (!gen) return "";
-  const REPO = "https://github.com/vltanh/network-generation";
+  const REPO = "https://github.com/vltanh/community-detection";
   const NOTES = `${REPO}/blob/main/docs/algorithms/${gen}.md`;
   return (
     '<div class="top-nav">'
