@@ -549,6 +549,54 @@
     });
   }
 
+  // ── Reusable candidate table renderer ────────────────────────────
+  // Three call sites (louvain/page.js moveCandPanel, leiden/page_cpm.js
+  // moveCandPanel, sbm/walker_page.js candPanel) render an essentially
+  // identical <table class="cand-table"> with metric-specific labels.
+  // This factory takes the per-row data + per-row classification hooks
+  // and emits the shared HTML.
+  function renderCandTable(opts) {
+    const rows = (opts.rows || []).slice();
+    if (opts.sort === "asc")  rows.sort(function (a, b) { return a._delta - b._delta; });
+    if (opts.sort === "desc") rows.sort(function (a, b) { return b._delta - a._delta; });
+    let html = "";
+    if (opts.headerText) html += '<div class="step-desc">' + opts.headerText + '</div>';
+    html += '<table class="cand-table"><thead><tr><th>' + (opts.entityHeader || "candidate")
+         + '</th><th>' + (opts.metricHeader || "Δ") + '</th><th>verdict</th></tr></thead><tbody>';
+    rows.forEach(function (r) {
+      const cls = (opts.classFor && opts.classFor(r)) || "";
+      const verdict = (opts.verdictFor && opts.verdictFor(r)) || "";
+      const label = opts.entityFor ? opts.entityFor(r) : String(r._label != null ? r._label : "");
+      const fmt = (opts.precision != null ? opts.precision : 4);
+      html += '<tr class="' + cls + '"><td>' + label + '</td><td>'
+            + r._delta.toFixed(fmt) + '</td><td>' + verdict + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    return html;
+  }
+
+  // ── Seed reroll wiring (sbm walker_page + sbm compare_page) ──────
+  // Identical pattern: button #<prefix>-reroll bumps seed by 1; input
+  // #<prefix>-seed accepts a manual value. onReroll receives the new
+  // seed integer.
+  function wireSeedReroll(opts) {
+    const prefix = opts.prefix || "g";
+    const btn = document.getElementById(prefix + "-reroll");
+    const inp = document.getElementById(prefix + "-seed");
+    let seed = (opts.initialSeed | 0) || 0;
+    if (inp) inp.value = String(seed);
+    function fire(newSeed) {
+      seed = (newSeed | 0) || 0;
+      if (inp) inp.value = String(seed);
+      if (typeof opts.onReroll === "function") opts.onReroll(seed);
+    }
+    if (btn) btn.addEventListener("click", function () { fire(seed + 1); });
+    if (inp) inp.addEventListener("change", function () {
+      fire(parseInt(inp.value, 10) | 0);
+    });
+    return { getSeed: function () { return seed; }, set: fire };
+  }
+
   C.PAGE = {
     partitionColor: partitionColor,
     indexById: indexById,
@@ -563,5 +611,7 @@
     computeClusterStats: computeClusterStats,
     renderStatsTable: renderStatsTable,
     buildLeidenGraph: buildLeidenGraph,
+    renderCandTable: renderCandTable,
+    wireSeedReroll: wireSeedReroll,
   };
 })();
