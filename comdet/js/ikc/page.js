@@ -1,4 +1,4 @@
-/* IKC page glue — wires every stage of ikc.html to the kernel trace. */
+/* IKC page glue: wires every stage of ikc.html to the kernel trace. */
 (function () {
   "use strict";
   if (!window.COMDET || !COMDET.PAGE || !COMDET.IKC || !COMDET.FIXTURE) {
@@ -7,11 +7,13 @@
   }
   const C = COMDET, P = C.PAGE, I = C.IKC, F = C.FIXTURE;
 
+  // Snapshot states (used by snapshotAt + renderIter).
+  const ST = { RESIDUAL: -2, DROPPED: -1 };
+
   if (C.linksRow && document.getElementById("links")) {
     document.getElementById("links").innerHTML = C.linksRow({ gen: "ikc" });
   }
 
-  // Run kernel once at default kFloor / canonical gate; rebuild on toggles.
   let kFloor = 2;
   let canonicalGate = true;
   let result = I.runFixture(kFloor, canonicalGate);
@@ -24,7 +26,6 @@
   const fullCoreOf = {};
   fullCN.core.forEach(function (v, k) { fullCoreOf[k] = v; });
 
-  // Palette for core levels: low core dim, high core saturated.
   const corePalette = ["#3a3f4a", "#7c8aa6", "#5fa0b3", "#e0a649", "#c97c7c", "#7b9bd6"];
   function coreColor(level, highlight) {
     const base = corePalette[Math.min(level, corePalette.length - 1)] || "#888";
@@ -87,26 +88,30 @@
   renderCoreBar();
 
   const coresSlider = document.getElementById("g-cores-slider");
-  if (coresSlider) {
+  const coresOut = document.getElementById("g-cores-k");
+  if (coresSlider && coresOut) {
     coresSlider.min = 1;
     coresSlider.max = fullCN.max;
     coresSlider.value = fullCN.max;
-    coresSlider.addEventListener("input", function () {
-      coreHighlight = +coresSlider.value;
-      coresRender();
-      renderCoreBar();
+    coresOut.textContent = fullCN.max;
+    C.scrubSlider({
+      input: coresSlider, output: coresOut,
+      onChange: function (v) {
+        coreHighlight = +v;
+        coresRender();
+        renderCoreBar();
+      },
     });
   }
 
   // ── Stage 2: outer-loop walker ──────────────────────────────────
-  // Per-iteration snapshot: each node either accepted into a prior or
-  // current cluster (cluster id), dropped (-1 ⇒ singleton), residual
-  // (-2), or being processed in current kcore (component id, encoded
-  // as 1000 + comp_idx for a temporary pseudo-cluster).
+  // Per-iteration snapshot encoding (per-node):
+  //   ST.RESIDUAL : not yet processed
+  //   ST.DROPPED  : k-validity fail / mod fail / bail singleton
+  //   >= 0        : accepted-cluster id
   function snapshotAt(idx) {
-    // idx = 0 means "before iteration 0"; idx = K means after iteration K-1.
     const snap = {};
-    F.nodes.forEach(function (id) { snap[id] = -2; });
+    F.nodes.forEach(function (id) { snap[id] = ST.RESIDUAL; });
     let acceptedSeen = 0;
     for (let i = 0; i < idx; i++) {
       const it = result.iterations[i];
@@ -116,12 +121,12 @@
       });
       it.components.forEach(function (cRec) {
         if (!cRec.accepted) {
-          cRec.nodes.forEach(function (id) { snap[id] = -1; });
+          cRec.nodes.forEach(function (id) { snap[id] = ST.DROPPED; });
         }
       });
       if (it.bailed) {
         it.residualNodes.forEach(function (id) {
-          if (snap[id] === -2) snap[id] = -1;
+          if (snap[id] === ST.RESIDUAL) snap[id] = ST.DROPPED;
         });
       }
     }
@@ -129,20 +134,19 @@
   }
 
   function colorForState(s) {
-    if (s === -2) return "#3a3f4a"; // residual
-    if (s === -1) return "#202533"; // dropped/singleton
+    if (s === ST.RESIDUAL) return "#3a3f4a";
+    if (s === ST.DROPPED)  return "#202533";
     return P.partitionColor(s);
   }
 
-  // Build viz host once.
-  const loopViz = P.renderFixture("g-loop-cy", { pinned: true,
+  const loopViz = P.renderFixture("g-loop-cy", {
+    pinned: true,
     colorFn: function () { return "#3a3f4a"; },
   });
 
   function renderIter(idx) {
     const ev = result.iterations[idx - 1] || null;
     const { snap, acceptedSoFar } = snapshotAt(idx);
-    // Decide which nodes belong to the "current iteration" highlight.
     const inKcore = new Set(ev ? ev.kcoreNodes : []);
     const compOf = new Map();
     if (ev) {
@@ -151,21 +155,20 @@
       });
     }
     F.nodes.forEach(function (id) {
+      const s = snap[id];
       let color;
-      if (snap[id] >= 0) color = colorForState(snap[id]);
-      else if (snap[id] === -1) color = colorForState(-1);
-      else if (inKcore.has(id) && ev) {
+      if (ev && inKcore.has(id) && s === ST.RESIDUAL) {
         const c = compOf.get(id);
-        if (c) {
-          color = c.rec.accepted ? P.partitionColor(acceptedSoFar + ev.accepted.indexOf(c.rec))
-                : "#9a947a";
-        } else color = "#3a3f4a";
-      } else color = colorForState(snap[id]);
+        color = (c && c.rec.accepted)
+          ? P.partitionColor(acceptedSoFar + ev.accepted.indexOf(c.rec))
+          : "#9a947a";
+      } else {
+        color = colorForState(s);
+      }
       loopViz.setNodeStyle(id, { color: color });
-      // Dim non-residual nodes that aren't part of an accepted cluster yet.
       loopViz.removeNodeClass(id, "dim");
       loopViz.removeNodeClass(id, "hi");
-      if (snap[id] === -1) loopViz.addNodeClass(id, "dim");
+      if (s === ST.DROPPED) loopViz.addNodeClass(id, "dim");
       if (ev && inKcore.has(id)) loopViz.addNodeClass(id, "hi");
     });
     // Status / stats / level pill.
@@ -292,10 +295,12 @@
   const kIn = document.getElementById("g-loop-k");
   const kOut = document.getElementById("g-loop-k-out");
   if (kIn && kOut) {
-    kIn.addEventListener("input", function () {
-      kFloor = +kIn.value;
-      kOut.textContent = kFloor;
-      rerun();
+    C.scrubSlider({
+      input: kIn, output: kOut,
+      onChange: function (v) {
+        kFloor = +v;
+        rerun();
+      },
     });
   }
 

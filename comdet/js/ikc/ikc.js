@@ -1,34 +1,15 @@
-/* IKC kernel — Iterative k-core Clustering (Wedell et al. 2022).
+/* IKC kernel: Iterative k-core Clustering (Wedell et al. 2022).
+ * Port of community-detection/src/ikc/run_ikc.py:103-204.
  *
- * Faithful port of community-detection/src/ikc/run_ikc.py against the
- * comdet 32-node fixture.
- *
- * Per-iteration loop (run_ikc.py:103-204):
- *   while remaining graph has nodes:
- *     compute max core number K* of remaining graph
- *     if K* < k_floor: bail; remaining nodes become singletons
- *     extract the (K*)-core subgraph
- *     connected-components split → candidate components
- *     for each component:
- *       k-validity gate: every node has subgraph-degree >= k_floor
- *       modularity gate: mod(C) > 0  [canonical short-circuits to 1
- *                                     in run_ikc.py:280; we ship the
- *                                     paper formula here, with a flag
- *                                     to mirror canonical's pass-through]
- *       on pass: emit cluster, remove its nodes from the residual graph
- *       on fail: drop nodes (k-valid fail) or singletons (mod fail)
- *     iterate
- *
- * Outputs a `result` object whose `.iterations[]` array carries the full
- * recorded trace (residual graph, max_k, kcore subgraph, components,
- * gate verdicts, accepted clusters); page.js consumes this directly.
+ * Modularity gate computes the paper formula but defaults to canonical
+ * pass-through (run_ikc.py:280 short-circuits to POSITIVE_VALUE = 1);
+ * `opts.canonicalGate = false` enforces mod(s) > 0 instead.
  */
 (function () {
   "use strict";
   if (!window.COMDET) window.COMDET = {};
   const C = window.COMDET;
 
-  // ── Adjacency utilities ─────────────────────────────────────────
   function buildAdj(nodeIds, edges) {
     const adj = new Map();
     nodeIds.forEach(function (id) { adj.set(id, new Set()); });
@@ -46,10 +27,7 @@
     return edges.filter(function (e) { return set.has(e[0]) && set.has(e[1]); });
   }
 
-  // ── k-core peel ─────────────────────────────────────────────────
-  // Iterative-peel core decomposition: assign each node the largest k
-  // such that the node belongs to the k-core. Equivalent to the standard
-  // Batagelj-Zaversnik output.
+  // Iterative-peel core decomposition (Batagelj-Zaversnik output).
   function coreNumbers(nodeIds, edges) {
     const adj = buildAdj(nodeIds, edges);
     const deg = new Map();
@@ -58,14 +36,12 @@
     const core = new Map();
     let k = 0;
     while (remaining.size > 0) {
-      // Bump k to the current minimum residual degree.
       let m = Infinity;
       remaining.forEach(function (v) {
         const d = deg.get(v);
         if (d < m) m = d;
       });
       if (m > k) k = m;
-      // Peel everything with degree <= k.
       const queue = [];
       remaining.forEach(function (v) {
         if (deg.get(v) <= k) queue.push(v);
@@ -88,7 +64,6 @@
     return { core: core, max: mx };
   }
 
-  // ── Connected components (BFS) ──────────────────────────────────
   function connectedComponents(nodeIds, edges) {
     const adj = buildAdj(nodeIds, edges);
     const seen = new Set();
@@ -110,9 +85,8 @@
     return comps;
   }
 
-  // ── k-validity gate ─────────────────────────────────────────────
-  // run_ikc.py:264-275. Within the kcore subgraph (already passed in as
-  // `subEdges`), every node of the component must have degree >= k_floor.
+  // Within the kcore subgraph (subEdges), every component node must
+  // have degree >= kFloor (run_ikc.py:264-275).
   function kValid(component, subEdges, kFloor) {
     const set = new Set(component);
     const deg = new Map();
@@ -128,13 +102,10 @@
     return pass;
   }
 
-  // ── Modularity gate ─────────────────────────────────────────────
-  // Paper formula (§2.2.2): mod(s) = l_s / L − (d_s / (2L))^2
-  // where l_s = intra-edges of cluster s, d_s = sum of intra-degrees,
-  // L = total edges of the *original* graph. Canonical run_ikc.py:280
-  // short-circuits to POSITIVE_VALUE = 1, so the modularity gate
-  // always passes in the shipped binary. We compute the paper value
-  // (for display) but follow canonical's pass-through by default.
+  // Paper formula (Wedell 2022 §2.2.2):
+  //   mod(s) = l_s / L - (d_s / (2L))^2
+  // l_s = intra-edges, d_s = sum of intra-degrees, L = original graph
+  // edge count. Canonical run_ikc.py:280 returns 1 instead.
   function clusterModularity(component, fullEdges) {
     const L = fullEdges.length;
     if (L === 0) return 0;

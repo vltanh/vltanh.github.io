@@ -1,4 +1,4 @@
-/* Infomap kernel — port of Rosvall + Bergstrom 2008 ("Maps of random
+/* Infomap kernel: port of Rosvall + Bergstrom 2008 ("Maps of random
  * walks on complex networks reveal community structure", PNAS 105(4)).
  *
  * Faithful to the paper's algorithm, undirected unweighted variant
@@ -12,7 +12,7 @@
  *   2. Singleton init: every node a module; initial L(M) = H(P).
  *   3. Greedy pair-joining: iteratively merge the (i, j) pair giving
  *      the largest L decrease; loop until no merge improves.
- *   4. Tuning: single-node move pass — for each node, try moving to
+ *   4. Tuning: single-node move pass; for each node, try moving to
  *      each neighbour-module, accept first move with ΔL < 0; loop
  *      until a sweep performs no moves. Greedy variant of the paper's
  *      heat-bath simulated-annealing refinement (paper §"Mapping
@@ -39,14 +39,11 @@
   if (!window.COMDET) window.COMDET = {};
   const C = window.COMDET;
 
-  // ── Math utilities ──────────────────────────────────────────────
-  // Shannon entropy bits: -p log2 p; defined as 0 when p == 0.
   function plogp(p) {
     if (p <= 0) return 0;
     return p * Math.log2(p);
   }
 
-  // ── Graph view ──────────────────────────────────────────────────
   function buildGraph(nodeIds, edges) {
     const idx = new Map();
     nodeIds.forEach(function (id, i) { idx.set(id, i); });
@@ -84,13 +81,11 @@
   }
 
   function moduleAggregates(g, p, partition) {
-    // Returns Map<commId, { pi, qExit }> + total q.
     const mods = modulesOf(partition);
     const agg = new Map();
     mods.forEach(function (members, c) {
       let pi = 0;
       members.forEach(function (v) { pi += p[v]; });
-      // q_c⤸ = sum over v in c, p_v * (out_v / d_v) where out_v = #neighbours not in c.
       let qExit = 0;
       members.forEach(function (v) {
         if (g.deg[v] === 0) return;
@@ -111,20 +106,14 @@
   function mapEquation(g, p, partition) {
     const out = moduleAggregates(g, p, partition);
     const { agg, qTotal } = out;
-    // Index-code entropy: -Σ_i (q_i⤸ / qTotal) log2(q_i⤸ / qTotal), times qTotal.
-    // Equivalent: qTotal * H(Q) = Σ_i plogp(q_i / qTotal) * (-1) * qTotal.
-    // Use the numerically stabler form in bits:
-    //   qTotal * H(Q) = -Σ_i plogp(q_i⤸) + plogp(qTotal)  (when qTotal > 0)
+    // Stable form: qTotal·H(Q) = -Σᵢ plogp(qᵢ⤸) + plogp(qTotal).
     let qH = 0;
     if (qTotal > 0) {
       let s = 0;
       agg.forEach(function (a) { s += plogp(a.qExit); });
       qH = -(s - plogp(qTotal));
-      // qH = qTotal * H(Q)
     }
-    // Within-module codeword entropies:
-    //   p⊙ⁱ = π_i + q_i⤸
-    //   p⊙ⁱ · H(Pⁱ) = -[ Σ_{v∈i} plogp(p_v) + plogp(q_i⤸) ] + plogp(p⊙ⁱ)
+    // p⊙ⁱ·H(Pⁱ) = -[Σ_{v∈i} plogp(p_v) + plogp(qᵢ⤸)] + plogp(p⊙ⁱ).
     let withinSum = 0;
     agg.forEach(function (a) {
       const pCircle = a.pi + a.qExit;
@@ -138,10 +127,6 @@
     return { L: L, qTotal: qTotal, agg: agg, withinSum: withinSum, indexSum: qH };
   }
 
-  // ── Greedy pair-joining ─────────────────────────────────────────
-  // At each step, find the (i, j) pair of modules with at least one
-  // edge between them whose merge gives the largest ΔL decrease;
-  // merge if ΔL < 0; halt otherwise. Returns the per-step trace.
   function greedyJoin(g, p, partition, opts) {
     opts = opts || {};
     const recordTrace = !!opts.recordTrace;
@@ -150,8 +135,7 @@
     let curr = mapEquation(g, p, part);
 
     while (true) {
-      // Build set of inter-module edges → unique unordered (a, b) pairs.
-      const pairKey = new Map(); // "a|b" → {a,b}
+      const pairKey = new Map();
       for (let v = 0; v < g.n; v++) {
         const cv = part[v];
         const nb = g.adj[v];
@@ -166,94 +150,77 @@
 
       let bestDelta = 0;
       let bestPair = null;
-      let bestL = curr.L;
+      let bestNewL = curr.L;
+      const cands = recordTrace ? [] : null;
       pairKey.forEach(function (pr) {
         const trial = part.slice();
         for (let v = 0; v < g.n; v++) if (trial[v] === pr.b) trial[v] = pr.a;
         const t = mapEquation(g, p, trial);
         const dL = t.L - curr.L;
-        if (dL < bestDelta) { bestDelta = dL; bestPair = pr; bestL = t.L; }
+        if (cands) cands.push({ a: pr.a, b: pr.b, dL: dL });
+        if (dL < bestDelta) { bestDelta = dL; bestPair = pr; bestNewL = t.L; }
       });
-
       if (!bestPair) break;
-      // Apply the merge.
-      const cands = [];
-      pairKey.forEach(function (pr) {
-        const trial = part.slice();
-        for (let v = 0; v < g.n; v++) if (trial[v] === pr.b) trial[v] = pr.a;
-        cands.push({ a: pr.a, b: pr.b, dL: mapEquation(g, p, trial).L - curr.L });
-      });
+
       for (let v = 0; v < g.n; v++) if (part[v] === bestPair.b) part[v] = bestPair.a;
-      const newL = mapEquation(g, p, part);
       if (recordTrace) {
         traces.push({
           merged: { a: bestPair.a, b: bestPair.b },
           dL: bestDelta,
-          newL: newL.L,
+          newL: bestNewL,
           candidates: cands.sort(function (x, y) { return x.dL - y.dL; }),
           partition: part.slice(),
         });
       }
-      curr = newL;
+      curr = { L: bestNewL };
     }
     return { partition: part, finalL: curr.L, traces: traces };
   }
 
-  // ── Single-node tuning ──────────────────────────────────────────
-  // Greedy node-move: for each node, try moving to each neighbour
-  // module, accept first move with ΔL < 0; sweep until idempotent.
-  // Greedy variant of paper's heat-bath SA tuning.
+  // Greedy single-node tuning. Paper SI canonical = heat-bath SA.
   function tune(g, p, partition, opts) {
     opts = opts || {};
     const recordTrace = !!opts.recordTrace;
     const part = partition.slice();
     const traces = [];
-    let curr = mapEquation(g, p, part);
+    let currL = mapEquation(g, p, part).L;
     let pass = 0;
     while (true) {
       let movedThisPass = false;
       for (let v = 0; v < g.n; v++) {
         const cv = part[v];
-        // Candidate set: distinct neighbour-module ids (including cv).
-        const cands = new Set();
-        cands.add(cv);
+        const candSet = new Set();
+        candSet.add(cv);
         const nb = g.adj[v];
-        for (let k = 0; k < nb.length; k++) cands.add(part[nb[k]]);
-        let bestDelta = 0; let bestComm = cv; let bestL = curr.L;
+        for (let k = 0; k < nb.length; k++) candSet.add(part[nb[k]]);
+        let bestDelta = 0; let bestComm = cv; let bestL = currL;
         const localCands = [];
-        cands.forEach(function (c) {
+        candSet.forEach(function (c) {
           if (c === cv) { localCands.push({ comm: c, dL: 0 }); return; }
           const trial = part.slice(); trial[v] = c;
-          const t = mapEquation(g, p, trial);
-          const dL = t.L - curr.L;
+          const newL = mapEquation(g, p, trial).L;
+          const dL = newL - currL;
           localCands.push({ comm: c, dL: dL });
-          if (dL < bestDelta) { bestDelta = dL; bestComm = c; bestL = t.L; }
+          if (dL < bestDelta) { bestDelta = dL; bestComm = c; bestL = newL; }
         });
         if (bestComm !== cv) {
           part[v] = bestComm;
-          curr = mapEquation(g, p, part);
+          currL = bestL;
           movedThisPass = true;
-          if (recordTrace) {
-            traces.push({
-              v: v, fromComm: cv, toComm: bestComm,
-              moved: true, dL: bestDelta,
-              candidates: localCands.sort(function (a, b) { return a.dL - b.dL; }),
-              newL: curr.L,
-            });
-          }
-        } else if (recordTrace) {
+        }
+        if (recordTrace) {
           traces.push({
-            v: v, fromComm: cv, toComm: cv,
-            moved: false, dL: 0,
+            v: v, fromComm: cv, toComm: bestComm,
+            moved: bestComm !== cv, dL: bestDelta,
             candidates: localCands.sort(function (a, b) { return a.dL - b.dL; }),
-            newL: curr.L,
+            newL: currL,
           });
         }
       }
       pass += 1;
       if (!movedThisPass || pass > 40) break;
     }
-    return { partition: part, finalL: curr.L, traces: traces, passes: pass };
+    return { partition: part, finalL: currL, traces: traces, passes: pass };
   }
 
   // ── Sub-level recursion ─────────────────────────────────────────
@@ -282,28 +249,73 @@
         }
       }
       const subG = buildGraph(subIds, subEdges);
-      const subP = stationary(subG);
-      const initSing = new Array(subG.n);
-      for (let i = 0; i < subG.n; i++) initSing[i] = i;
-      const j = greedyJoin(subG, subP, initSing, { recordTrace: false });
-      const t = tune(subG, subP, j.partition, { recordTrace: false });
-      // Renumber the sub-partition before recursing.
-      const renumbered = renumber(t.partition);
+      // Stationary p_α = d_α/(2m) is the random-walk fixed point only on
+      // a connected subgraph; on a reducible chain there is no unique
+      // stationary. Run greedy+tune per connected component, then stitch
+      // the sub-partitions into one labelling.
+      const comps = subgraphComponents(subG);
+      const subPartition = new Array(subG.n);
+      let nextSubId = 0;
+      let stitchedL = 0;
+      comps.forEach(function (compIdx) {
+        const compIds = compIdx.map(function (i) { return subG.ids[i]; });
+        const compIdSet = new Set(compIds);
+        const compEdges = subEdges.filter(function (e) {
+          return compIdSet.has(e[0]) && compIdSet.has(e[1]);
+        });
+        const compG = buildGraph(compIds, compEdges);
+        const compP = stationary(compG);
+        const initSing = new Array(compG.n);
+        for (let i = 0; i < compG.n; i++) initSing[i] = i;
+        const j = greedyJoin(compG, compP, initSing, { recordTrace: false });
+        const t = tune(compG, compP, j.partition, { recordTrace: false });
+        const compRenum = renumber(t.partition);
+        const startId = nextSubId;
+        compIdx.forEach(function (subIdx, k) {
+          subPartition[subIdx] = startId + compRenum[k];
+        });
+        let maxLocal = 0;
+        compRenum.forEach(function (x) { if (x > maxLocal) maxLocal = x; });
+        nextSubId += maxLocal + 1;
+        stitchedL += t.finalL;
+      });
       out[c] = {
         members: members.slice(),
         ids: subIds,
-        subPartition: renumbered,
-        subL: t.finalL,
+        subPartition: subPartition,
+        subL: stitchedL,
+        components: comps.length,
       };
-      // Recurse only if recursion produced a non-trivial split.
-      const distinct = new Set(renumbered);
+      const distinct = new Set(subPartition);
       if (distinct.size > 1 && depth + 1 < maxDepth) {
-        out[c].sub = subLevelPartition(subG, subP, renumbered, {
+        const subPdummy = stationary(subG);
+        out[c].sub = subLevelPartition(subG, subPdummy, subPartition, {
           maxDepth: maxDepth, depth: depth + 1,
         });
       }
     });
     return out;
+  }
+
+  function subgraphComponents(subG) {
+    const seen = new Uint8Array(subG.n);
+    const comps = [];
+    for (let s = 0; s < subG.n; s++) {
+      if (seen[s]) continue;
+      const comp = [];
+      const q = [s];
+      seen[s] = 1;
+      while (q.length) {
+        const v = q.shift();
+        comp.push(v);
+        const nb = subG.adj[v];
+        for (let k = 0; k < nb.length; k++) {
+          if (!seen[nb[k]]) { seen[nb[k]] = 1; q.push(nb[k]); }
+        }
+      }
+      comps.push(comp);
+    }
+    return comps;
   }
 
   function renumber(partition) {

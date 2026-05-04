@@ -1,4 +1,4 @@
-/* Infomap page glue — wires every stage of infomap.html via COMDET.PAGE
+/* Infomap page glue: wires every stage of infomap.html via COMDET.PAGE
  * primitives + the kernel's recorded trace.
  */
 (function () {
