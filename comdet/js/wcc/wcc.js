@@ -123,6 +123,12 @@
     if (!mincutFn) throw new Error("WCC: no mincut backend (load mincut.js first)");
     const trace = opts.trace ? [] : null;
     function tlog(line) { if (trace) trace.push(line); }
+    // Replay-mode: caller supplies an oracle that returns the canonical
+    // bipartition for a given cluster's nodeset (keyed by sorted node-id
+    // string). When set, the JS kernel skips Stoer-Wagner and reads the
+    // bipartition + cut value directly from the oracle. Used by the
+    // tools/viz_check/wcc kernel cross-check.
+    const cutOracle = opts.cutOracle || null;
 
     const nodeIdToIdx = new Map();
     F.nodes.forEach(function (id, i) { nodeIdToIdx.set(id, i); });
@@ -183,7 +189,9 @@
         const a = intraEdges[e][0], b = intraEdges[e][1];
         if (nSet.has(a) && nSet.has(b)) sub.push([a, b]);
       }
-      const cutResult = mincutFn(cur.slice(), sub);
+      const cutResult = cutOracle
+        ? cutOracle(cur, sub)
+        : mincutFn(cur.slice(), sub);
       const cutValue = cutResult.cutValue;
       const t = threshold(parsed, cur.length);
       const wellConn = isWellConnected(parsed, cur.length, cutValue);
