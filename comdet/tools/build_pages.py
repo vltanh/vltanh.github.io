@@ -61,6 +61,29 @@ PAGES = [
         ],
     },
     {
+        "file": "louvain.html",
+        "name": "Louvain",
+        "fullname": "fast modularity optimisation",
+        "emoji": "🐖",
+        "paper": ("https://doi.org/10.1088/1742-5468/2008/10/P10008", "Blondel et al. 2008"),
+        "code": ("https://sourceforge.net/projects/louvain/", "louvain-generic"),
+        "blurb": (
+            "The greedy ancestor of Leiden. Modularity \\(Q = \\frac{1}{2m}\\sum_{ij}\\big[A_{ij} - "
+            "\\frac{k_i k_j}{2m}\\big]\\delta(c_i, c_j)\\). Two-phase pass: per-node \\(\\Delta Q\\) "
+            "ascent until no positive single-node move remains, then collapse each community into a "
+            "super-node and repeat. No refinement phase, so Louvain may produce internally disconnected "
+            "communities (Traag et al. 2019, the gap Leiden fills)."
+        ),
+        "stages": [
+            ("Singleton init", "Every node a singleton; \\(Q\\) starts at \\(-\\sum_c (k_c/2m)^2\\)."),
+            ("Modularity sweep", "For each node in order: try every neighbour's community; greatest \\(\\Delta Q\\) wins; if no positive gain, stay. Repeat until no node moves."),
+            ("Aggregation", "One super-node per community; super-edge weight = sum of original edges between communities. Self-loops carry intra-community weight."),
+            ("Repeat", "Same sweep on the aggregated network. Iterate until \\(\\Delta Q = 0\\)."),
+            ("Final", "Output partition + \\(Q\\) + per-cluster stats. Note any internally-disconnected communities."),
+        ],
+        "skip_render": True,  # hand-crafted blog page; do not regenerate
+    },
+    {
         "file": "infomap.html",
         "name": "Infomap",
         "fullname": "map equation on PageRank flow",
