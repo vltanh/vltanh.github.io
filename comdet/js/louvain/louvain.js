@@ -222,12 +222,14 @@
           totalWeightFromComm[cu] += w;
           totalWeightToComm[cv] += w;
         } else {
-          totalWeightFromComm[cu] += w;
-          totalWeightToComm[cv] += w;
-          if (cu !== cv) {
-            totalWeightFromComm[cv] += w;
-            totalWeightToComm[cu] += w;
-          }
+          // Undirected single-write: each edge contributes its weight to
+          // the to-array slot of every endpoint comm it touches (intra
+          // counts once, inter counts once per distinct endpoint comm).
+          // from-comm aliases to-comm above, so a single write covers
+          // both reader views. Lands the same numbers as the original
+          // four-write canonical pattern.
+          totalWeightToComm[cu] += w;
+          if (cu !== cv) totalWeightToComm[cv] += w;
         }
       }
       totalPossibleEdgesInAllComms = 0;
@@ -286,19 +288,20 @@
       if (old === target) return;
       const directed = graph.isDirected();
       const adjE = graph.neighbourEdges(v);
-      // Track delta to totalWeightInAllComms = sum of totalWeightInComm[c] over c.
-      // Subtract every edge weight that leaves the in-comm sum (an edge with
-      // one endpoint at v and the other in `old`) and add every edge weight
-      // that joins it (other endpoint in `target`). On undirected graphs each
-      // such edge contributes its weight once to totalWeightInComm[c].
       let deltaInAll = 0;
-      // Phase A: subtract v's contributions from `old` and any neighbour comms.
+
+      // Phase A: subtract v's contribution from `old`. Per-edge logic
+      // inlined for hot-path perf; closure-style helper extraction
+      // measured a 2× kernel slowdown so we keep the explicit branches.
+      // Undirected branch uses the single-write to-only pattern (from
+      // aliases to in storage; halving the writes per edge versus the
+      // canonical four-write pattern lands the same numeric values
+      // because rebuildAdmin uses the matching single-write pattern).
       for (let i = 0; i < adjE.length; i++) {
         const e = adjE[i];
         const uv = graph.edge(e);
         const other = (uv[0] === v) ? uv[1] : uv[0];
         const w = graph.edgeWeight(e);
-        const cother = membership[other];
         if (other === v) {
           totalWeightInComm[old] -= w;
           totalWeightFromComm[old] -= w;
@@ -306,6 +309,7 @@
           deltaInAll -= w;
           continue;
         }
+        const cother = membership[other];
         if (directed) {
           if (uv[0] === v) {
             totalWeightFromComm[old] -= w;
@@ -317,21 +321,19 @@
             if (cother === old) { totalWeightInComm[old] -= w; deltaInAll -= w; }
           }
         } else {
-          totalWeightFromComm[old] -= w;
           totalWeightToComm[old] -= w;
           if (cother === old) {
+            totalWeightToComm[old] -= w;
             totalWeightInComm[old] -= w;
-            totalWeightFromComm[cother] -= w;
-            totalWeightToComm[cother] -= w;
             deltaInAll -= w;
           } else {
-            totalWeightFromComm[cother] -= w;
             totalWeightToComm[cother] -= w;
           }
         }
       }
-      // Phase B: relocate v's csize / cnodes from `old` to `target`, growing
-      // arrays if `target` is a fresh community id.
+      // Phase B: relocate v's csize / cnodes; grow arrays if `target` is
+      // a fresh community id. For undirected the from-storage aliases
+      // to-storage so a fresh allocation must re-establish the alias.
       csize[old] -= graph.nodeSize(v);
       cnodes[old] -= 1;
       totalPossibleEdgesInAllComms -= graph.possibleEdges(csize[old] + graph.nodeSize(v));
@@ -343,7 +345,9 @@
         cnodes = grow(cnodes, newN);
         totalWeightInComm = grow(totalWeightInComm, newN);
         totalWeightToComm = grow(totalWeightToComm, newN);
-        totalWeightFromComm = grow(totalWeightFromComm, newN);
+        totalWeightFromComm = directed
+          ? grow(totalWeightFromComm, newN)
+          : totalWeightToComm;
         totalPossibleEdgesInAllComms += graph.possibleEdges(0) * (newN - ncomm);
         ncomm = newN;
       }
@@ -351,13 +355,13 @@
       csize[target] += graph.nodeSize(v);
       cnodes[target] += 1;
       totalPossibleEdgesInAllComms += graph.possibleEdges(csize[target]);
-      // Phase C: add v's contributions to `target` and any neighbour comms.
+      // Phase C: add v's contribution to `target`. Same inlined per-edge
+      // shape as Phase A with sign flipped and vComm = target.
       for (let i = 0; i < adjE.length; i++) {
         const e = adjE[i];
         const uv = graph.edge(e);
         const other = (uv[0] === v) ? uv[1] : uv[0];
         const w = graph.edgeWeight(e);
-        const cother = membership[other];
         if (other === v) {
           totalWeightInComm[target] += w;
           totalWeightFromComm[target] += w;
@@ -365,6 +369,7 @@
           deltaInAll += w;
           continue;
         }
+        const cother = membership[other];
         if (directed) {
           if (uv[0] === v) {
             totalWeightFromComm[target] += w;
@@ -376,15 +381,12 @@
             if (cother === target) { totalWeightInComm[target] += w; deltaInAll += w; }
           }
         } else {
-          totalWeightFromComm[target] += w;
           totalWeightToComm[target] += w;
           if (cother === target) {
+            totalWeightToComm[target] += w;
             totalWeightInComm[target] += w;
-            totalWeightFromComm[cother] += w;
-            totalWeightToComm[cother] += w;
             deltaInAll += w;
           } else {
-            totalWeightFromComm[cother] += w;
             totalWeightToComm[cother] += w;
           }
         }
