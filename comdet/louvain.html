@@ -124,34 +124,34 @@
 <header class="hdr">
   <div class="kicker">community detection &middot; modularity optimisation</div>
   <h1><em>Louvain</em></h1>
-  <p class="fullname">fast unfolding of communities — Blondel, Guillaume, Lambiotte + Lefebvre 2008</p>
+  <p class="fullname">fast unfolding of communities — Blondel, Guillaume, Lambiotte, and Lefebvre 2008</p>
   <p class="sub">The greedy modularity optimiser that Leiden replaces. Two phases per pass: per-node \(\Delta Q\) ascent until no node moves, then collapse each community into a super-node and repeat.</p>
 </header>
 
 <div class="uc-banner">
-  <strong>Draft.</strong> First-pass walker over a JS port of Blondel et al. 2008 (J. Stat. Mech. P10008). Reuses the <code>COMDET.LOUVAIN</code> primitives shared by Leiden (<code>Graph</code>, <code>Partition</code>, <code>Modularity</code>); the kernel here owns the Phase 1 sweep + Phase 2 aggregation. Final partition flagged for any internally disconnected community (the Traag et al. 2019 failure mode).
+  <strong>Draft.</strong> First-pass walker over a JavaScript port of Blondel et al. 2008 (J. Stat. Mech. P10008). The kernel under this page owns the two phases of Louvain (modularity sweep, aggregation) and shares its graph and partition primitives with the Leiden pages. The final partition is checked for the failure mode Traag et al. 2019 named: communities that look like one label but no longer hold together as one connected piece. Implementation detail and source-code pointers live in the <a href="../../docs/algorithms/louvain.md">technical reference</a>.
 </div>
 
 <section class="hook">
-  <p>Louvain is the dominant heuristic for modularity-based community detection. Cited tens of thousands of times since 2008. The whole algorithm fits in two phases that you iterate until nothing improves.</p>
+  <p>Louvain is the workhorse of modularity-based community detection. The whole algorithm fits in two phases that you iterate until nothing improves: greedy single-node moves until everyone is locally happy, then collapse each community into one super-node and recurse. The reason Louvain dominates the field is the closed-form expression for the change in modularity from a single move, which lets the inner loop run in time proportional to the number of moves rather than to the size of the graph.</p>
   <p>The objective is <em>modularity</em> (Newman 2006, Blondel et al. 2008 eq. 1):</p>
   <p style="text-align:center">\(Q = \frac{1}{2m} \sum_{i,j} \big[ A_{ij} - \frac{k_i k_j}{2m} \big] \delta(c_i, c_j)\)</p>
-  <p>where \(A_{ij}\) is the (weighted) adjacency, \(k_i\) is the degree of \(i\), \(m\) is the total edge weight, and \(\delta(c_i, c_j) = 1\) iff \(i, j\) are in the same community. The first term rewards intra-community edges; the second term penalises by what you would expect under a configuration-model null. \(Q\) lives in \([-1, 1]\); typical good partitions sit around \(0.3\)–\(0.7\).</p>
+  <p>What this measures: walk every pair of nodes \(i, j\) that share a community label, score one point for each edge actually present between them, and subtract what you would have expected to see between two random nodes of degrees \(k_i\) and \(k_j\) under a degree-preserving null. Divide by total edge weight and you get a number in \([-1, 1]\) where \(0\) is the random-graph baseline. Real partitions on real networks tend to sit around \(0.3\) to \(0.7\). Two properties worth keeping in mind: a single edge can only contribute to \(Q\) if both endpoints share a label, so adding edges within a community is the only way to grow the first term; and the configuration-model penalty grows as the square of a community's total degree, which is the source of modularity's resolution limit on large sparse graphs.</p>
   <p>The change in \(Q\) from moving an isolated node \(i\) into community \(C\) has a closed form (paper eq. 2):</p>
   <p style="text-align:center">\(\Delta Q = \big[\frac{\Sigma_{in} + 2k_{i,in}}{2m} - \big(\frac{\Sigma_{tot} + k_i}{2m}\big)^2\big] - \big[\frac{\Sigma_{in}}{2m} - \big(\frac{\Sigma_{tot}}{2m}\big)^2 - \big(\frac{k_i}{2m}\big)^2\big]\)</p>
-  <p>where \(\Sigma_{in}\) is the sum of edge weights inside \(C\), \(\Sigma_{tot}\) is the sum incident to nodes in \(C\), \(k_{i,in}\) is the sum from \(i\) to nodes already in \(C\). The closed form is what makes Louvain fast: each candidate move is \(O(1)\) once you maintain those running sums. The kernel under this page does exactly that, via the <code>COMDET.LOUVAIN.Partition</code> admin tables.</p>
+  <p>Read as a difference of contributions: the new modularity attributable to \(C\) (after the move) minus the old one (before the move). \(\Sigma_{in}\) is the total edge weight already living inside \(C\); \(\Sigma_{tot}\) is the total weight incident to nodes in \(C\); \(k_{i,in}\) is the weight from \(i\) into \(C\). The interesting properties are operational. Every quantity in the formula is something a community can keep as a running sum, so a single move costs constant time once you have the right tables. Nothing in the formula needs the whole graph; only \(C\) and \(i\) appear. That locality is what made Louvain fast in 2008 and is the property both Leiden and the SBM family inherit.</p>
   <div class="defs">
-    <div><span class="term">Phase 1 — modularity sweep</span> Sweep every node in random order. Each visit: compute \(\Delta Q\) for moving the current node into every neighbour's community + into its own. Pick whichever is the biggest <em>strictly positive</em> gain; tie or no positive gain means stay put. Repeat the sweep until no node moves.</div>
-    <div><span class="term">Phase 2 — aggregation</span> Build a new graph where each community from Phase 1 becomes one super-node; super-edge weight = sum of original edges between the two communities; intra-community edges become self-loops on the super-node. Re-run Phase 1.</div>
-    <div><span class="term">stop</span> when an aggregation step doesn't shrink the graph (no super-node moves + no super-pair would merge).</div>
+    <div><span class="term">Phase 1 — modularity sweep</span> Sweep every node in random order. For each node, compute \(\Delta Q\) for moving it into every neighbour's community as well as into its own. Pick the candidate with the largest strictly positive gain; if no candidate has \(\Delta Q > 0\), leave the node where it is. Repeat the sweep until a full pass moves nobody.</div>
+    <div><span class="term">Phase 2 — aggregation</span> Build a new graph where each community from Phase 1 becomes one super-node. Edges between communities sum into a single weighted super-edge; edges inside a community fold into a self-loop on the super-node. Re-run Phase 1 on the smaller graph.</div>
+    <div><span class="term">stop</span> when an aggregation step does not shrink the graph: no super-node prefers any other super-community, and no super-pair would merge.</div>
   </div>
-  <p>What Louvain doesn't do: it never re-checks whether a community is internally connected. The local-move sweep can leave a community held together by a single bridge node; once that node moves out (locally optimal for itself), the rest of the community is internally disconnected but each remaining node may still be locally optimal under \(Q\). Louvain's output keeps the disconnected community as one label. Traag et al. 2019 measured this on six real-world networks: 1–17% of Louvain output was disconnected; up to 25% was "badly connected" (connected but with a tiny edge cut). <a href="./leiden-cpm.html">Leiden</a> patches this with a refinement phase.</p>
+  <p>The piece Louvain leaves out is connectivity. The algorithm never asks whether a community is internally one connected piece. A community can be held together by a single bridge node; the moment that node moves out for its own sake, the rest of the community is in two physically disconnected groups while still carrying one label. None of the remaining nodes individually wants to leave, so the disconnect persists into the output. Traag et al. 2019 measured this on six real-world networks and found that 1–17% of Louvain's communities were literally disconnected, with up to 25% "badly connected" (connected only by a tiny edge cut). <a href="./leiden-cpm.html">Leiden</a> patches the gap by inserting a refinement phase between the moving phase and aggregation.</p>
 </section>
 
 <section class="stage">
   <div class="stage-num">stage 0 &middot; input</div>
   <h2>The 32-node comdet fixture, painted by planted ground-truth.</h2>
-  <p>Same fixture every page in the gallery uses, so cross-algorithm comparisons land on the same canvas. <em>A</em> (12 nodes, blue) is a \(K_5\) on \(\{0..4\}\) plus a 7-node periphery. <em>B</em> (8 nodes, ochre) is two \(K_4\)s joined by the single edge \((15,16)\). <em>C</em> (6 nodes, green) is two disconnected 3-cycles, both labelled the same. <em>D</em> (4 nodes, plum) is two 2-cliques bridged by \((27,28)\). Outliers 30 + 31 dangle off the A periphery and carry the singleton label \(-1\).</p>
+  <p>Same fixture every page in the gallery uses, so cross-algorithm comparisons land on the same canvas. <em>A</em> (12 nodes, blue) is a \(K_5\) on nodes \(\{0,1,2,3,4\}\) with a 7-node periphery. <em>B</em> (8 nodes, ochre) is two \(K_4\)s joined by the single edge \((15, 16)\). <em>C</em> (6 nodes, green) is two disconnected 3-cycles, both labelled the same. <em>D</em> (4 nodes, plum) is two 2-cliques bridged by \((27, 28)\). Outliers 30 and 31 hang off the A periphery and carry the singleton label \(-1\).</p>
   <div class="graph" id="g-input">
     <div class="graph-chrome">
       <span>32 nodes &middot; 52 edges &middot; 4 planted communities + 2 outliers</span>
@@ -159,13 +159,15 @@
     </div>
     <div class="graph-canvas" id="g-input-cy"></div>
   </div>
-  <p>For modularity at this scale the resolution-limit issue (Fortunato + Barthélemy 2007) is loud: small communities below \(\sqrt{2m} \approx 10\) tend to merge into larger ones whether they want to or not. Louvain's multi-level structure mitigates the worst of it (per-level sweeps are local), but the deepest level on this fixture still collapses to a single community at the modularity optimum. Watch this happen in the higher-level pass table below.</p>
+  <p>Modularity's resolution limit shows up early on a graph this size. Fortunato and Barthélemy 2007 prove that any community whose total degree falls below \(\sqrt{2m}\) is at risk of being absorbed into a larger one, regardless of how clean the boundary actually is. On this fixture \(2m = 104\), so the threshold is around 10; every planted community here is at or below it. Louvain's per-level locality softens the worst of it, but the modularity optimum on this graph is still one community, and the higher-level pass table below tracks the merges as they happen.</p>
 </section>
 
 <section class="stage">
   <div class="stage-num">stage 1 &middot; singleton init</div>
   <h2>Every node starts in its own community.</h2>
-  <p>Phase 1 starts from singletons (paper Fig. 1, top-left). 32 nodes, 32 communities, one node each. The initial \(Q\) is \(-\sum_c (k_c/2m)^2\) since the first term of \(Q\) is zero for singletons (no intra-community edges yet). On this fixture: \(2m = 104\), so \(Q_0 \approx -0.027\) (a tiny negative pull from the configuration-model term).</p>
+  <p>Louvain's first move is to put every node in its own community (paper Fig. 1, top-left). With every community of size one, the first term of modularity is zero (no edge has both endpoints sharing a label), so the initial value reduces to:</p>
+  <p style="text-align:center">\(Q_0 = -\sum_c (k_c / 2m)^2\)</p>
+  <p>What this tells us: every node still pays the configuration-model penalty for the degree mass it brings in, even though no community has internal edges yet. On the 32-node fixture, \(2m = 104\), and the sum of squared per-node degrees works out to a small negative number, \(Q_0 \approx -0.027\). Two properties worth keeping in mind: a singleton partition is the worst possible \(Q\) for a connected graph (every other partition can only do better, since merging two nodes that share an edge always brings a positive contribution), and the magnitude of \(Q_0\) shrinks as the graph gets denser, so the algorithm has more headroom on sparse networks than on dense ones.</p>
   <div class="graph" id="g-singleton">
     <div class="graph-chrome">
       <span>singleton partition &middot; \(Q_0 \approx -0.027\)</span>
@@ -173,14 +175,14 @@
     </div>
     <div class="graph-canvas" id="g-singleton-cy"></div>
   </div>
-  <p>The next sweep evaluates one node at a time. Every move can either grow the intra-edge term (rewarding) or change the per-community degree sum (penalising). The sweep sequence below shows the very first pass.</p>
+  <p>From here every move either grows the intra-community edge total (which raises \(Q\)) or shifts a node into a community whose total degree is small enough that the penalty term softens (which also raises \(Q\)). The sweep below walks the very first pass.</p>
 </section>
 
 <section class="stage">
   <div class="stage-num">stage 2 &middot; phase 1 (modularity sweep)</div>
   <h2>One node at a time, full passes, repeat until quiet.</h2>
   <p>Louvain's local sweep is plain: shuffle the nodes, walk them in order, evaluate \(\Delta Q\) for moving the current node into every neighbour's community, pick the biggest <em>strictly positive</em> gain (paper §2: "only if this gain is positive"). If no candidate has \(\Delta Q > 0\), the node stays. After one pass over every node, if anything moved, run another full pass. Stop when a full pass made zero moves.</p>
-  <p>That tail of zero-move passes is Louvain's biggest inefficiency relative to Leiden. Once a node has stabilised, Louvain still revisits it on every subsequent sweep until the whole graph quiets down. <a href="./leiden-cpm.html">Leiden</a> replaces this with a FIFO queue + neighbour restabilisation: only nodes whose neighbourhood actually changed get a second look.</p>
+  <p>That tail of zero-move passes is Louvain's biggest inefficiency relative to Leiden. Once a node has stabilised, Louvain still revisits it on every subsequent sweep until the whole graph quiets down. <a href="./leiden-cpm.html">Leiden</a> replaces this with a queue plus neighbour restabilisation: only nodes whose neighbourhood actually changed get a second look.</p>
   <div class="graph" id="g-move">
     <div class="graph-chrome">
       <span><span class="level-pill" id="g-move-level">L0</span><span id="g-move-status">stage 0 · singleton init · 32 nodes alone</span></span>
@@ -195,11 +197,11 @@
       <span class="step-label">visit <b id="g-move-cur">0</b> / <span id="g-move-total">0</span> &middot; <span id="g-move-sweep">sweep 0 / 0</span></span>
     </div>
   </div>
-  <p>The candidate panel below shows the \(\Delta Q\) Louvain computes for every neighbour's community (plus the node's own). Pick = biggest strictly positive value; reject = anything ≤ 0. The phase keeps cycling sweeps until a full pass moves nobody. On this fixture that takes about five sweeps at level 0; only the first two are doing meaningful work.</p>
+  <p>The candidate panel below the graph lists every neighbour's community along with \(\Delta Q\) for moving the current node into it. The chosen target is the biggest strictly positive value; anything at or below zero is rejected. The phase cycles sweeps until a full pass makes zero moves. On this fixture that takes about five sweeps at level 0, with most of the moves landing in the first two.</p>
   <div id="g-move-panel"></div>
   <div class="callout">
     <div class="tag">tie-breaking + ordering</div>
-    <p>Blondel et al. note (paper §2) that the output depends on the order in which nodes are visited — not strongly on the final modularity, but visibly on the computation time. The kernel here shuffles via MT19937 seeded at <code>42</code>; rerunning at a different seed will land on a different (but generally similar-quality) partition. Ordering effects are one of the softest spots in Louvain's reproducibility story; Leiden inherits the same shuffle but partly cancels it out via the queue.</p>
+    <p>Blondel et al. flag in §2 of the paper that the output depends on the order in which nodes are visited. The dependence is weak on the final modularity but visible on the running time. The kernel here shuffles using a deterministic seeded random-number generator; rerun at a different seed and you get a different partition with similar quality. Ordering effects are one of the softest spots in Louvain's reproducibility story. Leiden inherits the same shuffle but partly cancels it out via its queue, since the queue order is also reshaped by which moves actually happen.</p>
   </div>
 </section>
 
@@ -219,26 +221,26 @@
       <span class="step-label">fine edges fade as super-edges aggregate by community pair</span>
     </div>
   </div>
-  <p>Note the simpler bookkeeping vs Leiden. Louvain just collapses on the post-Phase-1 partition: super-node id = community id from Phase 1, no two-headed labelling. Leiden's collapse is over the <em>refined sub-partition</em> but super-nodes are labelled by the <em>pre-refinement</em> community — that extra step is what carries the connectivity guarantee through the level boundary.</p>
+  <p>The bookkeeping is simpler than Leiden's. Louvain collapses directly on the post-Phase-1 partition, so a super-node carries the same community label as the community it came from. Leiden collapses on a refined sub-partition instead, but each super-node carries the pre-refinement community label so that the next round of moves continues working at the higher level. That label step is what carries Leiden's connectivity guarantee through every level boundary.</p>
 </section>
 
 <section class="stage">
   <div class="stage-num">stage 4 &middot; iterate until the graph stops shrinking</div>
   <h2>Louvain's hierarchy on this fixture.</h2>
-  <p>The level table below shows what Louvain finds at each successive aggregation. Each row = one pass through Phase 1 + Phase 2. <em>vc-before</em> = super-graph node count entering the level; <em>ncomm</em> = communities found in this level's Phase 1; <em>vc-after</em> = super-graph node count after Phase 2; <em>sweeps</em> = how many full sweeps Phase 1 needed to quiet down; <em>moves</em> = total node-moves at the level; <em>Δ Q</em> = quality gain accumulated.</p>
+  <p>The table below shows one row per level. Each row corresponds to one pass through Phase 1 followed by one Phase 2 collapse. The columns track the super-graph node count entering the level, the number of communities Phase 1 found inside it, the super-graph node count after the collapse, the number of sweeps Phase 1 needed to quiet down, the total node-moves accumulated at the level, and the quality gain.</p>
   <table class="level-stats">
     <thead>
       <tr><th>level</th><th>vc-before</th><th>ncomm</th><th>vc-after</th><th>sweeps</th><th>moves</th><th>Δ Q</th></tr>
     </thead>
     <tbody id="g-levels-tbody"></tbody>
   </table>
-  <p>On this small fixture modularity's resolution limit bites at every level: the algorithm keeps merging until everything is one community. That is a bug from a community-recovery perspective (the planted communities are gone) but a feature from a modularity-optimisation perspective (\(Q\) actually rises with each merge). The reported Q at the top is the quality of the deepest level — the modularity optimum the algorithm found. The level-0 partition is more meaningful as a community structure; Louvain doesn't tell you which level to keep.</p>
+  <p>The resolution limit catches up at every level on this fixture. The algorithm keeps merging until everything sits in one community. From a community-recovery angle this is wrong: the planted communities have been erased. From a modularity-optimisation angle it is the answer the algorithm was asked for: \(Q\) is genuinely higher at the deepest level than at any intermediate one. The partition at level 0 is the one that matches the planted structure, but Louvain does not know that and provides no rule for which level to stop at.</p>
 </section>
 
 <section class="stage">
   <div class="stage-num">stage 5 &middot; final</div>
   <h2>Louvain's deepest-level output vs planted ground-truth.</h2>
-  <p>Below: Louvain's deepest-level partition (left, the modularity optimum it found) next to the planted ground-truth (right). On this fixture they look very different: Louvain pushes everything together, ground-truth keeps four planted blocks plus outliers. That mismatch is the resolution-limit story in a single picture.</p>
+  <p>The two graphs below put Louvain's final partition next to the planted ground-truth. They disagree everywhere on this fixture: Louvain has pushed every node into one community, while the ground-truth keeps four planted blocks plus the outliers. That mismatch is the resolution-limit story in a single picture.</p>
   <div class="gt-compare">
     <div class="panel-mini">
       <div class="cap">Louvain output &middot; \(Q = \) <span id="g-final-Q">·</span></div>
@@ -258,8 +260,8 @@
     <p id="g-final-disconn">computing &hellip;</p>
   </div>
   <div class="callout">
-    <div class="tag">how to read this against Leiden</div>
-    <p>Run the same kernel logic but: replace the full-sweep Phase 1 with Leiden's queue moveNodes; insert a refinement phase between Phase 1 and Phase 2; collapse on the refined sub-partition. That's <a href="./leiden-cpm.html">Leiden-CPM</a> and <a href="./leiden-mod.html">Leiden-Mod</a>. The Leiden pages share the same <code>COMDET.LOUVAIN</code> primitives shown here (<code>Graph</code>, <code>Partition</code>, <code>Modularity</code>, MT19937); the difference between the two is purely in what the outer driver does with them.</p>
+    <div class="tag">how this compares to Leiden</div>
+    <p>The kernel under this page shares its graph, partition, and modularity primitives with the Leiden pages. The difference between the two algorithms is everything the outer driver does on top of those primitives. Leiden replaces Phase 1's full-sweep loop with a queue that touches each node only when its neighbourhood actually changed, and inserts a refinement step between Phase 1 and Phase 2 that re-partitions every community in isolation before the collapse. The <a href="./leiden-cpm.html">Leiden-CPM</a> and <a href="./leiden-mod.html">Leiden-Mod</a> pages walk the differences move by move, on the same fixture. Implementation pointers (file paths, line numbers, source-of-truth references) live in the <a href="../../docs/algorithms/louvain.md">technical reference</a>.</p>
   </div>
 </section>
 
