@@ -5,303 +5,179 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Leiden-Mod &middot; Leiden with modularity | Community Detection Algorithms</title>
 <link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐖</text></svg>">
-<meta name="description" content="Leiden-Mod (Leiden with modularity). Walked stage by stage on the shared 32-node fixture.">
+<meta name="description" content="Leiden with the modularity objective, walked through the move + refine + aggregate loop on a 32-node fixture. Same kernel as Leiden-CPM with the quality function swapped.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="./shared.css">
 <style>
-body {
-  font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
-  font-variation-settings: normal;
-}
-.hdr h1 { transform: rotate(-1.2deg); }
-.hdr .sub {
-  font-family: 'IBM Plex Sans', sans-serif;
-  font-style: normal;
-  color: var(--paper-2);
-  line-height: 1.55;
-}
-.uc-banner {
-  max-width: var(--span-medium);
-  margin: 0 auto 2.4rem;
-  padding: 1rem 1.3rem;
-  background: var(--hl-yellow);
-  border: 1.5px solid var(--signal);
-  border-radius: 2px;
-  position: relative;
-  transform: rotate(-.5deg);
-  box-shadow: 2px 2.5px 0 rgba(27,32,51,.18);
-  font-family: 'IBM Plex Sans', sans-serif;
-  font-size: .95rem; line-height: 1.55;
-  color: var(--paper-2);
-}
-.uc-banner::before {
-  content: "under construction";
-  position: absolute;
-  top: -10px; left: 16px;
-  transform: rotate(-2deg);
-  font-family: 'Caveat Brush', cursive;
-  font-size: .9rem;
-  color: var(--signal);
-  background: var(--hl-yellow);
-  padding: .15rem .55rem;
-  border: 1px solid var(--signal);
-  border-radius: 2px;
-  letter-spacing: .04em;
-  box-shadow: 1px 1px 0 rgba(27,32,51,.18);
-}
-.uc-banner strong { color: var(--paper); font-weight: 500; }
-.algo-meta {
-  max-width: var(--span-prose);
-  margin: 0 auto 2.5rem;
-  font-family: 'IBM Plex Sans', sans-serif;
-  font-size: 1.02rem; line-height: 1.7;
-  color: var(--paper-2);
-}
-.algo-meta em {
-  color: var(--paper);
-  font-style: italic;
-  background: linear-gradient(180deg, transparent 58%, rgba(246,225,90,.5) 58%, rgba(246,225,90,.5) 92%, transparent 92%);
-  padding: 0 .15em;
-}
-.algo-refs {
-  display: flex; gap: 1.3rem; flex-wrap: wrap;
-  font-family: 'Special Elite', 'Courier New', monospace;
-  font-size: .76rem; letter-spacing: .14em;
-  color: var(--paper-3);
-  margin-top: 1.1rem;
-}
-.algo-refs a {
-  color: var(--paper-3);
-  text-transform: uppercase;
-  border-bottom: 1px dashed var(--paper-3);
-  padding-bottom: 1px;
-  background: none;
-  transition: color .18s, border-color .18s;
-}
-.algo-refs a:hover {
-  color: var(--signal);
-  border-bottom-color: var(--signal);
-}
-.algo-refs .ref-label {
-  color: var(--paper-4);
-  margin-right: .35rem;
-  text-transform: uppercase;
-}
-
-.shared-graph {
-  max-width: var(--span-wide); margin: 0 auto 3rem;
-  background: var(--ink-2); border: 1.5px solid var(--paper);
-  border-radius: 2px; padding: 1.4rem 1.5rem;
-  box-shadow: 3px 3px 0 rgba(27,32,51,.15);
-  position: relative;
-}
-.shared-graph::before, .shared-graph::after {
-  content: ""; position: absolute;
-  top: -9px; width: 50px; height: 16px;
-  background: var(--tape-tan); opacity: .82;
-  border: 1px solid rgba(139,117,65,.4);
-  box-shadow: 0 1px 2px rgba(27,32,51,.15);
-  pointer-events: none;
-}
-.shared-graph::before { left: 14px; transform: rotate(-4deg); }
-.shared-graph::after  { right: 14px; transform: rotate(3deg); }
-.shared-graph .graph-caption {
-  font-family: 'Special Elite', 'Courier New', monospace;
-  font-size: .76rem;
-  color: var(--paper-2);
-  border-bottom: 1px dashed rgba(139,117,65,.4);
-  padding-bottom: .6rem;
-  margin-bottom: .9rem;
-  line-height: 1.45;
-}
-.shared-graph .graph-caption .st {
-  color: var(--azure);
-  letter-spacing: .12em;
-  text-transform: uppercase;
-  margin-right: .4rem;
-}
-.shared-graph svg {
-  display: block; width: 100%; height: auto;
-  cursor: grab; touch-action: none;
-}
-.shared-graph svg:active { cursor: grabbing; }
-
-.stage-list {
-  max-width: var(--span-wide);
-  margin: 0 auto 3rem;
-  display: grid; gap: 1.2rem;
-}
-.stage-card {
-  background: var(--ink-2);
-  border: 1.5px solid var(--paper);
-  border-radius: 2px;
-  padding: 1.05rem 1.3rem 1.15rem;
-  position: relative;
-  box-shadow: 2.5px 3px 0 rgba(27,32,51,.18);
-  display: grid;
-  grid-template-columns: minmax(120px, 160px) minmax(0, 1fr) auto;
-  gap: 1.1rem;
-  align-items: center;
-}
-.stage-card:nth-of-type(odd)  { transform: rotate(-.3deg); }
-.stage-card:nth-of-type(even) { transform: rotate(.25deg); }
-.stage-card::before {
-  content: ""; position: absolute;
-  top: -8px; left: 50%;
-  transform: translateX(-50%) rotate(-2deg);
-  width: 46px; height: 14px;
-  background: var(--tape-tan); opacity: .85;
-  border: 1px solid rgba(139,117,65,.4);
-  box-shadow: 0 1px 2px rgba(27,32,51,.15);
-}
-.stage-num {
-  font-family: 'Caveat Brush', cursive;
-  font-size: 1.6rem;
-  color: var(--cobalt);
-  letter-spacing: .04em;
-  transform: rotate(-2deg);
-  display: inline-block;
-}
-.stage-name {
-  font-family: 'Special Elite', 'Courier New', monospace;
-  font-size: 1.05rem;
-  color: var(--paper);
-  letter-spacing: .02em;
-}
-.stage-desc {
-  font-family: 'IBM Plex Sans', sans-serif;
-  color: var(--paper-2);
-  font-size: .92rem;
-  line-height: 1.5;
-  margin-top: .3rem;
-}
-.stage-pending {
-  font-family: 'Caveat Brush', cursive;
-  color: var(--signal);
-  font-size: .9rem;
-  letter-spacing: .02em;
-  transform: rotate(2deg);
-  white-space: nowrap;
-  align-self: end;
-  padding: .15rem .45rem;
-  background: var(--hl-yellow);
-  border: 1px solid var(--signal);
-  border-radius: 2px;
-  box-shadow: 1px 1px 0 rgba(27,32,51,.18);
-}
-@media (max-width: 600px) {
-  .stage-card {
-    grid-template-columns: auto 1fr;
-  }
-  .stage-pending {
-    grid-column: 1 / -1;
-    justify-self: start;
-  }
-}
-
-.back-link {
-  display: inline-flex; align-items: center; gap: .35rem;
-  font-family: 'Special Elite', 'Courier New', monospace;
-  font-size: .74rem; letter-spacing: .14em;
-  text-transform: uppercase;
-  color: var(--paper-3);
-  border-bottom: 1px dashed var(--paper-3);
-  padding-bottom: 1px;
-  transition: color .18s, border-color .18s;
-}
-.back-link:hover {
-  color: var(--signal);
-  border-bottom-color: var(--signal);
-}
-.back-row {
-  max-width: var(--span-wide);
-  margin: 0 auto 1.8rem;
-}
+.cand-table tr.cand-pick { background: rgba(95,160,179,.22); }
+.cand-table tr.cand-from td:last-child { font-style: italic; }
 </style>
 </head>
 <body>
 <main class="page">
 
-<div class="back-row">
-  <a class="back-link" href="./">&larr; back to gallery</a>
-</div>
+<div id="links"></div>
 
 <header class="hdr">
-  <div class="kicker">algorithm &middot; Leiden with modularity</div>
-  <h1>Leiden-Mod</h1>
-  <p class="sub">One algorithm in the gallery: Leiden with modularity. Walked stage by stage on the shared 32-node fixture, side by side with the planted ground truth.</p>
+  <div class="kicker">community detection &middot; partition optimisation</div>
+  <h1><em>Leiden-Mod</em></h1>
+  <p class="fullname">Leiden with the modularity objective</p>
+  <p class="sub">Same Leiden kernel as the CPM page, swapped to optimise modularity instead. Walked one node-visit at a time on the 32-node comdet fixture.</p>
 </header>
 
 <div class="uc-banner">
-  <strong>Walker pending.</strong> The full per-stage walker for Leiden-Mod is pending the Phase 4c kernel port. Today the page surfaces the input fixture and the planned stage list; interactive widgets land per-stage as the JS port reaches feature parity with canonical (see the active plan's Phase 4c verification matrix).
+  <strong>Draft.</strong> First-pass walker over a JS port of the leidenalg algorithm at version 0.12. Same kernel and walker primitives as the <a href="./leiden-cpm.html">Leiden-CPM</a> page; only the quality function is different. Bit-level cross-check against canonical Python output is still pending.
 </div>
 
-<section class="algo-meta">
-  <p>Same Leiden optimiser, modularity objective \(Q = \frac{1}{2m}\sum_{ij}\big(A_{ij} - \frac{k_i k_j}{2m}\big)\delta(c_i, c_j)\). Inherits modularity's resolution limit: communities below \(\sqrt{2m}\) get absorbed regardless of structure. Useful on small graphs, degrades on large sparse ones where the limit bites hardest.</p>
-  <div class="algo-refs">
-    <span><span class="ref-label">paper</span><a href="https://doi.org/10.1038/s41598-019-41695-z" target="_blank" rel="noopener">Traag et al. 2019</a></span>
-    <span><span class="ref-label">code</span><a href="https://github.com/vtraag/leidenalg" target="_blank" rel="noopener">leidenalg + libleidenalg</a></span>
+<section class="hook">
+  <p>This page runs Leiden under the <em>modularity</em> objective rather than CPM. The mechanics of the algorithm (local moving with a queue, refinement that re-partitions each community in isolation from singletons, aggregation that collapses refined sub-communities while carrying pre-refinement labels) are identical to <a href="./leiden-cpm.html">Leiden-CPM</a> and to <a href="./louvain.html">Louvain</a>. The only thing that changes is what number the inner loop tries to maximise.</p>
+  <p>Modularity (Newman 2006, Blondel et al. 2008 eq. 1):</p>
+  <p style="text-align:center">\(Q = \frac{1}{2m} \sum_{i,j} \big[ A_{ij} - \frac{k_i k_j}{2m} \big] \delta(c_i, c_j)\)</p>
+  <p>What this measures: walk every pair of nodes that share a community label, score one point for each edge actually present between them, and subtract what you would expect to see between two random nodes of degrees \(k_i\) and \(k_j\) under a degree-preserving null. Divide by total edge weight and you get a value in \([-1, 1]\) where \(0\) is the random-graph baseline. Two properties worth keeping in mind. The first term rewards intra-community edges only, so a partition that puts unrelated nodes together never gains from doing so. The second term penalises any community with high total degree, which is the source of modularity's <em>resolution limit</em>: communities whose total degree falls below \(\sqrt{2m}\) get absorbed into larger ones whether the network wants them to or not (Fortunato + Barthélemy 2007).</p>
+  <p>The resolution limit is the practical reason this page exists alongside <a href="./leiden-cpm.html">Leiden-CPM</a>. CPM has no logarithm-of-edge-count term in its formula, so it does not suffer the limit. Modularity is the older and more familiar objective, so it remains the default for many community-detection pipelines, and it is the only objective Louvain ships with. Leiden buys you connectivity guarantees that Louvain does not, but it cannot escape the resolution limit on its own; the limit is a property of modularity itself, not of the optimiser.</p>
+  <div class="defs">
+    <div><span class="term">local move</span> visit every node in random order; if moving the node to one of its neighbours' communities raises \(Q\), do it; then put any of its now-unhappy neighbours back in the queue.</div>
+    <div><span class="term">refinement</span> for each community from local-move, restart its members at singletons; sweep them once, allowing merges only within the original community and only when the node is still alone in its refined sub-community. Acceptance threshold is \(\Delta Q \ge 0\).</div>
+    <div><span class="term">aggregation</span> collapse each refined sub-community into a super-node; the new partition labels each super-node by its pre-refinement community. Edge weights between super-nodes sum the original edges that crossed sub-communities. Repeat from local move on the super-graph.</div>
   </div>
 </section>
 
-<figure class="shared-graph">
-  <div class="graph-caption">
-    <span class="st">stage 0</span> input fixture &middot; 32 nodes, 49 edges, 4 planted communities + 2 outliers
+<section class="stage">
+  <div class="stage-num">stage 0 &middot; input</div>
+  <h2>The 32-node fixture, painted by planted ground-truth.</h2>
+  <p>Same fixture every page in the gallery uses. <em>A</em> (12 nodes, blue) is a \(K_5\) on nodes \(\{0,1,2,3,4\}\) with a 7-node periphery. <em>B</em> (8 nodes, ochre) is two \(K_4\)s joined by the single bridge edge \((15, 16)\). <em>C</em> (6 nodes, green) is two 3-cycles with no edge between them, both labelled the same in ground-truth. <em>D</em> (4 nodes, plum) is two 2-cliques connected by \((27, 28)\). Outliers 30 and 31 hang off the A periphery and carry the singleton ground-truth label \(-1\).</p>
+  <div class="graph" id="g-input">
+    <div class="graph-chrome">
+      <span>32 nodes &middot; 52 edges &middot; 4 planted communities + 2 outliers</span>
+      <span class="right">colour = planted ground-truth</span>
+    </div>
+    <div class="graph-canvas" id="g-input-cy"></div>
   </div>
-  <svg id="shared-graph-svg" aria-label="32-node specialized fixture"></svg>
-</figure>
-
-<section class="stage-list" aria-label="planned walker stages">
-  <article class="stage-card">
-    <div><span class="stage-num">01</span></div>
-    <div>
-      <div class="stage-name">Singleton init</div>
-      <div class="stage-desc">Every node a singleton; initial \(Q = 0\).</div>
-    </div>
-    <span class="stage-pending">pending port</span>
-  </article>
-  <article class="stage-card">
-    <div><span class="stage-num">02</span></div>
-    <div>
-      <div class="stage-name">Local moving</div>
-      <div class="stage-desc">Greedy \(\Delta Q\) ascent over all single-node moves.</div>
-    </div>
-    <span class="stage-pending">pending port</span>
-  </article>
-  <article class="stage-card">
-    <div><span class="stage-num">03</span></div>
-    <div>
-      <div class="stage-name">Refinement</div>
-      <div class="stage-desc">Per-community re-partition under modularity.</div>
-    </div>
-    <span class="stage-pending">pending port</span>
-  </article>
-  <article class="stage-card">
-    <div><span class="stage-num">04</span></div>
-    <div>
-      <div class="stage-name">Aggregation</div>
-      <div class="stage-desc">Collapse to super-graph; iterate.</div>
-    </div>
-    <span class="stage-pending">pending port</span>
-  </article>
-  <article class="stage-card">
-    <div><span class="stage-num">05</span></div>
-    <div>
-      <div class="stage-name">Final</div>
-      <div class="stage-desc">Output partition + \(Q\) value + ground-truth comparison.</div>
-    </div>
-    <span class="stage-pending">pending port</span>
-  </article>
+  <p>Modularity's resolution limit shows up early on a graph this size. With \(2m = 104\), the threshold below which any community is at risk of being absorbed is roughly \(\sqrt{104} \approx 10\). Every planted community in the fixture is at or below that threshold. Whether Leiden-Mod recovers them depends on how each community's degree mass interacts with the merge-or-split tradeoff at every level. The Louvain page shows what happens when the same objective is optimised without Leiden's refinement step: every level keeps merging until the optimum is one community.</p>
 </section>
+
+<section class="stage">
+  <div class="stage-num">stage 1 &middot; singleton init</div>
+  <h2>Every node starts in its own community.</h2>
+  <p>Leiden begins from singletons (paper Fig. 3a). 32 nodes, 32 communities, one node each. With every community at size one, no edge has both endpoints sharing a label, so the first term of \(Q\) vanishes. The configuration-model penalty term remains:</p>
+  <p style="text-align:center">\(Q_0 = -\sum_c (k_c / 2m)^2\)</p>
+  <p>What this tells us: every node still pays the configuration-model penalty for the degree mass it brings into its own singleton community, even though no community has any internal edges yet. On the 32-node fixture this evaluates to a small negative number, around \(-0.027\). Two properties worth keeping in mind: a singleton partition is the worst possible \(Q\) for a connected graph (every other partition can only do better, since merging two adjacent nodes always brings a positive contribution), and \(Q_0\) shrinks toward zero as the graph gets denser, so the algorithm has more headroom on sparse networks than on dense ones.</p>
+  <div class="graph" id="g-singleton">
+    <div class="graph-chrome">
+      <span>singleton partition &middot; \(Q_0 \approx -0.027\)</span>
+      <span class="right">colour = community id (32 distinct hues)</span>
+    </div>
+    <div class="graph-canvas" id="g-singleton-cy"></div>
+  </div>
+  <p>From here every move either grows the intra-community edge total (which raises \(Q\)) or shifts a node into a community whose total degree is small enough that the penalty term softens. The walker below shows the very first pass.</p>
+</section>
+
+<section class="stage">
+  <div class="stage-num">stage 2 &middot; local moving (fast)</div>
+  <h2>One node at a time, with a queue + restabilisation.</h2>
+  <p>Leiden's local-move phase is the same shape as <a href="./louvain.html">Louvain</a>'s but scheduled differently: every node enters a queue in random order, gets popped and evaluated one at a time, moves to its best-\(\Delta Q\) candidate community when one beats the current placement, and triggers a re-push of any neighbour whose stable mark needs revisiting. Drain until empty. The pay-off versus Louvain's repeated full sweeps is that the cost grows with moves performed rather than nodes-times-passes; on this fixture the move-only phase finishes in one queue drain.</p>
+  <div class="graph" id="g-move">
+    <div class="graph-chrome">
+      <span><span class="level-pill" id="g-move-level">L0</span><span id="g-move-status">stage 0 · singleton init · 32 nodes alone</span></span>
+      <span class="right" id="g-move-stats">moves: 0 &middot; ΔQ cum: 0.0000</span>
+    </div>
+    <div class="graph-canvas" id="g-move-cy"></div>
+    <div class="widget-row">
+      <button class="btn" id="g-move-reset" type="button">reset</button>
+      <button class="btn" id="g-move-prev" type="button">back</button>
+      <button class="btn primary" id="g-move-next" type="button">next visit</button>
+      <button class="btn" id="g-move-end" type="button">finish pass</button>
+      <span class="step-label">visit <b id="g-move-cur">0</b> / <span id="g-move-total">0</span></span>
+    </div>
+  </div>
+  <p>The side panel below the graph lists every candidate community considered for the current node, each with its \(\Delta Q\). The chosen target is highlighted in mint; the node's current community is shown in grey and labelled "current". Modularity acceptance is strict-positive: a candidate with \(\Delta Q = 0\) does not move the node. There is no resolution slider on this page (modularity has no tunable knob), so the run is fixed at seed 42.</p>
+  <div id="g-move-panel"></div>
+  <div class="callout">
+    <div class="tag">why modularity behaves differently here</div>
+    <p>At the same fixture, <a href="./leiden-cpm.html">Leiden-CPM</a> at \(\gamma = 0.05\) settles on around 8 communities; Leiden-Mod tends to settle on a smaller number because modularity actively rewards merging anything below the resolution threshold. Where CPM treats each community on its own terms, modularity compares each community against a degree-weighted null and pulls together anything that beats it.</p>
+  </div>
+</section>
+
+<section class="stage">
+  <div class="stage-num">stage 3 &middot; refinement</div>
+  <h2>Re-partition each community in isolation, starting from singletons.</h2>
+  <p>Refinement is the phase that distinguishes Leiden from <a href="./louvain.html">Louvain</a> (paper §"Leiden Algorithm", Fig. 3c). It re-partitions each community independently. The members of each community are first reset to singletons inside the community, then walked through one merge sweep in random order. The constraint that does the heavy lifting: a node can only merge with sub-communities that share its <em>original</em> community label from the moving phase. No merges leak across the moving-phase boundaries.</p>
+  <p>Refinement accepts ties (\(\Delta Q \ge 0\)) where the moving phase requires strict positive (\(\Delta Q > 0\)). In plain terms: refinement is willing to fold two equivalent micro-options together where the moving phase would have left them apart. The output is the refined partition; in most cases a strict subdivision of the moving-phase partition (each community broken into one or more sub-communities), occasionally identical to the moving-phase output when refinement found nothing worth splitting.</p>
+  <div class="graph" id="g-refine">
+    <div class="graph-chrome">
+      <span><span class="level-pill" id="g-refine-level">L0</span><span id="g-refine-status">starts from post-move · 32 refined singletons</span></span>
+      <span class="right" id="g-refine-stats">merges: 0</span>
+    </div>
+    <div class="graph-canvas" id="g-refine-cy"></div>
+    <div class="widget-row">
+      <button class="btn" id="g-refine-reset" type="button">reset</button>
+      <button class="btn" id="g-refine-prev" type="button">back</button>
+      <button class="btn primary" id="g-refine-next" type="button">next visit</button>
+      <button class="btn" id="g-refine-end" type="button">finish pass</button>
+      <span class="step-label">visit <b id="g-refine-cur">0</b> / <span id="g-refine-total">0</span></span>
+    </div>
+  </div>
+  <p>On this 32-node fixture the refinement pass under modularity is mostly a no-op for the same reason it is under CPM: the local-move pass already produced internally-connected communities, so refinement has nothing to split. The gap between Louvain and Leiden under modularity shows up on larger sparse networks where the resolution limit is most aggressive.</p>
+</section>
+
+<section class="stage">
+  <div class="stage-num">stage 4 &middot; aggregation</div>
+  <h2>Collapse refined sub-communities, label them by the pre-refined partition.</h2>
+  <p>Aggregation builds a smaller graph for the next round (paper Fig. 3d–e). One super-node per refined sub-community; super-edges between two sub-communities sum into one weighted edge. <a href="./louvain.html">Louvain</a> aggregates the same way except for one detail. Louvain's super-node inherits the post-Phase-1 community id directly. Leiden's super-node inherits the pre-refinement community id from the moving phase, so the next round of moves continues working on the same higher-level grouping the previous round just settled.</p>
+  <div class="graph" id="g-agg">
+    <div class="graph-chrome">
+      <span>before &middot; refined fine partition (\(n = 32\))</span>
+      <span class="right" id="g-agg-cap">after &middot; super-graph (\(n = \cdot\))</span>
+    </div>
+    <div class="graph-canvas" id="g-agg-cy"></div>
+    <div class="widget-row">
+      <button class="btn primary" id="g-agg-play" type="button">collapse</button>
+      <button class="btn" id="g-agg-reset" type="button">reset</button>
+      <span class="step-label">fine edges fade as super-edges aggregate by community pair</span>
+    </div>
+  </div>
+  <p>The outer loop terminates when an aggregation step does not shrink the graph. On this fixture under modularity that happens at level 0 for the same reason CPM does: local-move plus refinement found a partition that is its own coarsening, so the kernel reports it and stops.</p>
+</section>
+
+<section class="stage">
+  <div class="stage-num">stage 5 &middot; final</div>
+  <h2>The Leiden-Mod output, side by side with planted ground-truth.</h2>
+  <p>Below: Leiden's modularity-optimised partition (left) next to the planted ground-truth (right). Per-community size, internal edges, boundary edges, and conductance follow.</p>
+  <div class="gt-compare">
+    <div class="panel-mini">
+      <div class="cap">Leiden-Mod output &middot; \(Q = \) <span id="g-final-Q">·</span></div>
+      <div class="graph-canvas" id="g-final-leiden" style="height: 280px"></div>
+    </div>
+    <div class="panel-mini">
+      <div class="cap">planted ground-truth &middot; 4 communities + 2 outliers</div>
+      <div class="graph-canvas" id="g-final-gt" style="height: 280px"></div>
+    </div>
+  </div>
+  <table class="cluster-stats" id="g-final-stats">
+    <thead><tr><th>community</th><th>size</th><th>edges in</th><th>edges out</th><th>conductance</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <div class="callout">
+    <div class="tag">on this fixture, by region</div>
+    <p>Modularity tends to merge wherever it can without paying too much penalty. A's \(K_5\) and most of its periphery cluster together (the K_5 itself contributes 10 intra-edges of pure reward; the periphery edges are individually weaker but cumulatively positive). B's two K_4s typically merge across the bridge into one block, because the merge gains one bridge edge and the size penalty for an 8-node community is below the threshold below which absorption is favoured. C's two 3-cycles still end up as two separate communities for the same reason CPM keeps them apart: there is no edge to merge across regardless of which objective you optimise. D's two 2-cliques may merge with their nearest A or B periphery rather than standing on their own.</p>
+  </div>
+  <div class="callout warn">
+    <div class="tag">caveat &middot; this kernel is a draft port</div>
+    <p>The kernel under this page follows the leidenalg-0.12 default flow with the modularity quality function: move + refine + aggregate, greedy refinement, no fixed-membership mask, no maximum-community-size constraint. Bit-level cross-check against canonical Python output is still pending; we target near-perfect agreement on the partition (Adjusted Rand Index above 0.95) over a ten-seed ensemble. Treat the partition shown here as illustrative of the algorithm's behaviour rather than as a guaranteed match for any specific canonical run.</p>
+  </div>
+</section>
+
+<div id="kin"></div>
 
 <footer class="ack">
   <p class="tools">drawn with <a href="https://d3js.org" target="_blank" rel="noopener">d3</a></p>
   <p class="credit">typed by vltanh, doodled with Claude</p>
 </footer>
 
-<script src="./js/fixture.js"></script>
+</main>
+
 <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 <script>
 window.MathJax = {
@@ -313,7 +189,12 @@ window.MathJax = {
 };
 </script>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
-<script src="./js/landing_hero.js"></script>
+<script src="./shared.js"></script>
+<script src="./js/fixture.js"></script>
+<script src="./js/louvain/louvain.js"></script>
+<script src="./js/leiden/leiden.js"></script>
+<script src="./js/comdet/page_helpers.js"></script>
+<script src="./js/leiden/page_mod.js"></script>
 
 </body>
 </html>

@@ -59,6 +59,7 @@ PAGES = [
             ("Aggregation", "Collapse to super-graph; iterate."),
             ("Final", "Output partition + \\(Q\\) value + ground-truth comparison."),
         ],
+        "skip_render": True,  # hand-crafted blog page; do not regenerate
     },
     {
         "file": "louvain.html",
