@@ -466,23 +466,24 @@
       for (let i = 0; i < order.length; i++) remap[order[i]] = i;
       for (let v = 0; v < n; v++) membership[v] = remap[membership[v]];
       const newN = order.length;
+      const directed = graph.isDirected();
       const newCsize = new Float64Array(newN);
       const newCnodes = new Int32Array(newN);
       const newIn = new Float64Array(newN);
       const newTo = new Float64Array(newN);
-      const newFrom = new Float64Array(newN);
+      const newFrom = directed ? new Float64Array(newN) : null;
       for (let i = 0; i < newN; i++) {
         const oldId = order[i];
         newCsize[i] = csize[oldId];
         newCnodes[i] = cnodes[oldId];
         newIn[i] = totalWeightInComm[oldId];
         newTo[i] = totalWeightToComm[oldId];
-        newFrom[i] = totalWeightFromComm[oldId];
+        if (directed) newFrom[i] = totalWeightFromComm[oldId];
       }
       csize = newCsize; cnodes = newCnodes;
       totalWeightInComm = newIn;
       totalWeightToComm = newTo;
-      totalWeightFromComm = graph.isDirected() ? newFrom : newTo;
+      totalWeightFromComm = directed ? newFrom : newTo;
       ncomm = newN;
       empties.clear();
       // totalWeightInAllComms + totalPossibleEdgesInAllComms unchanged
