@@ -219,6 +219,7 @@ body {
   max-width: var(--span-wide);
   margin: 0 auto 1.8rem;
 }
+
 </style>
 </head>
 <body>
@@ -229,26 +230,44 @@ body {
 </div>
 
 <header class="hdr">
-  <div class="kicker">algorithm &middot; connectivity modifier</div>
-  <h1>CM</h1>
-  <p class="sub">One algorithm in the gallery: connectivity modifier. Walked stage by stage on the shared 32-node fixture, side by side with the planted ground truth.</p>
+  <div class="kicker">community detection &middot; post-proc &middot; connectivity modifier</div>
+  <h1><em>CM</em></h1>
+  <p class="fullname">connectivity modifier &middot; Park 2024</p>
+  <p class="sub">The heaviest of the three connectivity post-procs. <a href="./wcc.html">WCC</a>'s cut + a re-run of the base clustering algorithm on each cut half before the recursion advances. Iterates to a fixed point where every output cluster is both well-connected and locally optimal under the base objective.</p>
 </header>
 
 <div class="uc-banner">
-  <strong>Walker pending.</strong> The full per-stage walker for CM is pending the Phase 4c kernel port. Today the page surfaces the input fixture and the planned stage list; interactive widgets land per-stage as the JS port reaches feature parity with canonical (see the active plan's Phase 4c verification matrix).
+  <strong>Walker pending.</strong> The per-stage walker for CM waits on the Phase 4c port (mincut + Leiden kernel both have to land first). Today the page surfaces the input fixture and the planned stage list. The technical companion at <a href="https://github.com/vlttnh/community-detection/blob/main/docs/algorithms/cm.md">docs/algorithms/cm.md</a> covers source pointers, fate vocabulary, and the binary's flag surface.
 </div>
 
+<section class="hook">
+  <p>CM does what <a href="./wcc.html">WCC</a> does (cut a cluster whose mincut falls below the threshold), then re-runs the base community-detection algorithm (Leiden CPM, Leiden Mod, Louvain, Infomap) on the induced subgraph of each cut half. The output of that re-run replaces the cut halves; every produced sub-cluster goes back through the threshold check. The loop repeats until no cluster fails.</p>
+  <p>This buys two things WCC does not. First, the post-cut halves are not stuck with the input partition's labels: if WCC cut a 200-node cluster into halves of 70 and 130, CM lets the base algorithm find smaller real communities inside each. Second, an output cluster is locally optimal under both the connectivity threshold <em>and</em> the base algorithm's quality function, not one or the other.</p>
+  <p>The threshold uses the same parser as WCC: \( f(n) = C \log_x(n) \) or \( f(n) = C\,n^x \). Park 2024 (<a href="https://doi.org/10.1371/journal.pcsy.0000009">PLOS Complex Systems 1(3):e0000009</a>) recommends \( f(n) = \log_{10}(n) \). Our pipeline ships <code>0.2n^0.5</code> instead, a sqrt criterion that diverges from the paper's default.</p>
+  <div class="defs">
+    <div><span class="term">cluster fate</span> Park 2024 §4.2 classifies every input cluster as one of four fates: <em>extant</em> (unchanged), <em>reduced</em> (smaller but still one cluster), <em>split</em> (two or more sub-clusters), <em>degraded</em> (every leaf descendant ended up below the size filter <code>B</code>, default 11). The binary writes a <code>history.log</code> tree of parent → children so the fate is reconstructable per input cluster.</div>
+    <div><span class="term">re-cluster step</span> CM does <em>not</em> re-run the base algorithm globally. It runs the base algorithm on the induced subgraph of one cut half, then again on the other half. Each call gets a fresh `seed = 0` (the base algo's RNG is re-seeded per call); only VieCut's mincut RNG carries state across rounds.</div>
+    <div><span class="term">pre-prune</span> Park 2024's Stage 3 specifies an iterative pre-prune that strips low-degree nodes (degree ≤ <code>f(n)</code> in the cluster's induced subgraph) before the cut. The binary exposes this via <code>--prune</code>; the <code>src/cm/pipeline.sh</code> wrapper does not pass the flag, so today's CM runs without pre-prune.</div>
+  </div>
+  <div class="callout">
+    <div class="tag">when CM moves the needle &middot; Park 2024 §4.4</div>
+    <p>Heaviest gain comes on Leiden-CPM at small resolution (\( r \in [0.0001, 0.001] \)) where the base algorithm over-merges; CM peels apart real sub-communities that CPM left bundled. Lightest gain (or even slight loss) on already-conservative algorithms like IKC at <code>k=10</code>, where most clusters come through unchanged. Leiden-Mod sits in between, with a meaningful fraction of its clusters split. The paper's empirical verdict: CM is most useful as a sharpener for over-merging base algorithms, less so as a corrector for over-splitting ones.</p>
+  </div>
+</section>
+
 <section class="algo-meta">
-  <p>WCC's recursive split, plus a re-run of the base algorithm (Leiden CPM or Mod) on each piece after the cut. Repeats to a fixed point: every output cluster ends up well-connected and locally-optimal under the base objective. Heaviest of the three post-procs; only wired with Leiden today.</p>
   <div class="algo-refs">
-    <span><span class="ref-label">paper</span><a href="https://doi.org/10.1007/s41109-024-00658-8" target="_blank" rel="noopener">Park et al. 2024</a></span>
+    <span><span class="ref-label">paper</span><a href="https://doi.org/10.1371/journal.pcsy.0000009" target="_blank" rel="noopener">Park 2024</a></span>
     <span><span class="ref-label">code</span><a href="https://github.com/MinhyukPark/constrained-clustering" target="_blank" rel="noopener">constrained-clustering CM</a></span>
+    <span><span class="ref-label">pipeline</span><a href="https://github.com/illinois-or-research-analytics/cm_pipeline" target="_blank" rel="noopener">cm_pipeline (orchestration)</a></span>
+    <span><span class="ref-label">mincut</span><a href="https://github.com/VieCut/VieCut" target="_blank" rel="noopener">VieCut</a></span>
+    <span><span class="ref-label">docs</span><a href="https://github.com/vlttnh/community-detection/blob/main/docs/algorithms/cm.md" target="_blank" rel="noopener">technical companion</a></span>
   </div>
 </section>
 
 <figure class="shared-graph">
   <div class="graph-caption">
-    <span class="st">stage 0</span> input fixture &middot; 32 nodes, 49 edges, 4 planted communities + 2 outliers
+    <span class="st">stage 0</span> input fixture &middot; 32 nodes, 52 edges, 4 planted communities + 2 outliers
   </div>
   <svg id="shared-graph-svg" aria-label="32-node specialized fixture"></svg>
 </figure>
