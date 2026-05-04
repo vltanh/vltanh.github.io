@@ -69,7 +69,7 @@
       deg[i] = lg.degree(i);
     }
     return { n: n, ids: nodeIds, idx: idx, adj: adj, deg: deg,
-             m: lg.totalWeight(), lg: lg };
+             m: lg.totalWeight() };
   }
 
   // Stationary p_α = d_α / (2m) for connected undirected unweighted.
@@ -247,32 +247,30 @@
     const mods = modulesOf(partition);
     mods.forEach(function (members, c) {
       if (members.length < 4) { out[c] = null; return; }
-      const subIds = members.map(function (i) { return g.ids[i]; });
-      const subEdges = [];
+      // CC over filtered g.adj using memberSet — no parent buildGraph
+      // needed. comps is array of g-index arrays.
       const memberSet = new Set(members);
-      for (let v = 0; v < g.n; v++) {
-        if (!memberSet.has(v)) continue;
-        const nb = g.adj[v];
-        for (let k = 0; k < nb.length; k++) {
-          if (memberSet.has(nb[k]) && v < nb[k]) {
-            subEdges.push([g.ids[v], g.ids[nb[k]]]);
-          }
-        }
-      }
-      const subG = buildGraph(subIds, subEdges);
-      // Stationary p_α = d_α/(2m) is the random-walk fixed point only on
-      // a connected subgraph; on a reducible chain there is no unique
-      // stationary. Run greedy+tune per connected component, then stitch
-      // the sub-partitions into one labelling.
-      const comps = subgraphComponents(subG);
-      const subPartition = new Array(subG.n);
+      const comps = componentsByMember(g, members, memberSet);
+      const subIds = members.map(function (i) { return g.ids[i]; });
+      const subIdxOfG = new Map();
+      members.forEach(function (gi, k) { subIdxOfG.set(gi, k); });
+      const subPartition = new Array(members.length);
       let nextSubId = 0;
       let stitchedL = 0;
-      comps.forEach(function (compIdx) {
-        const compIds = compIdx.map(function (i) { return subG.ids[i]; });
+      comps.forEach(function (compGIdx) {
+        const compIds = compGIdx.map(function (gi) { return g.ids[gi]; });
         const compIdSet = new Set(compIds);
-        const compEdges = subEdges.filter(function (e) {
-          return compIdSet.has(e[0]) && compIdSet.has(e[1]);
+        // Stationary p = d/(2m) is the random-walk fixed point only on
+        // a connected chain; per-component run keeps it valid.
+        const compEdges = [];
+        compGIdx.forEach(function (gi) {
+          const nb = g.adj[gi];
+          for (let k = 0; k < nb.length; k++) {
+            const u = nb[k];
+            if (memberSet.has(u) && gi < u && compIdSet.has(g.ids[u])) {
+              compEdges.push([g.ids[gi], g.ids[u]]);
+            }
+          }
         });
         const compG = buildGraph(compIds, compEdges);
         const compP = stationary(compG);
@@ -282,8 +280,8 @@
         const t = tune(compG, compP, j.partition, { recordTrace: false });
         const compRenum = renumber(t.partition);
         const startId = nextSubId;
-        compIdx.forEach(function (subIdx, k) {
-          subPartition[subIdx] = startId + compRenum[k];
+        compGIdx.forEach(function (gi, k) {
+          subPartition[subIdxOfG.get(gi)] = startId + compRenum[k];
         });
         let maxLocal = 0;
         compRenum.forEach(function (x) { if (x > maxLocal) maxLocal = x; });
@@ -297,10 +295,20 @@
         subL: stitchedL,
         components: comps.length,
       };
+      // Recursive descent only needs another buildGraph if it splits.
       const distinct = new Set(subPartition);
       if (distinct.size > 1 && depth + 1 < maxDepth) {
-        const subPdummy = stationary(subG);
-        out[c].sub = subLevelPartition(subG, subPdummy, subPartition, {
+        const subEdges = [];
+        members.forEach(function (gi, ki) {
+          const nb = g.adj[gi];
+          for (let k = 0; k < nb.length; k++) {
+            const u = nb[k];
+            if (memberSet.has(u) && gi < u) subEdges.push([g.ids[gi], g.ids[u]]);
+          }
+        });
+        const subG = buildGraph(subIds, subEdges);
+        const subP = stationary(subG);
+        out[c].sub = subLevelPartition(subG, subP, subPartition, {
           maxDepth: maxDepth, depth: depth + 1,
         });
       }
@@ -308,24 +316,26 @@
     return out;
   }
 
-  function subgraphComponents(subG) {
-    const seen = new Uint8Array(subG.n);
+  // BFS over members (g-indices) using g.adj filtered by memberSet.
+  function componentsByMember(g, members, memberSet) {
+    const seen = new Set();
     const comps = [];
-    for (let s = 0; s < subG.n; s++) {
-      if (seen[s]) continue;
+    members.forEach(function (s) {
+      if (seen.has(s)) return;
       const comp = [];
       const q = [s];
-      seen[s] = 1;
+      seen.add(s);
       while (q.length) {
         const v = q.shift();
         comp.push(v);
-        const nb = subG.adj[v];
+        const nb = g.adj[v];
         for (let k = 0; k < nb.length; k++) {
-          if (!seen[nb[k]]) { seen[nb[k]] = 1; q.push(nb[k]); }
+          const u = nb[k];
+          if (memberSet.has(u) && !seen.has(u)) { seen.add(u); q.push(u); }
         }
       }
       comps.push(comp);
-    }
+    });
     return comps;
   }
 

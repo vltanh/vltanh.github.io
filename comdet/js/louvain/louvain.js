@@ -196,17 +196,22 @@
     function rebuildAdmin() {
       ncomm = 0;
       for (let i = 0; i < n; i++) if (membership[i] + 1 > ncomm) ncomm = membership[i] + 1;
+      const directed = graph.isDirected();
       csize = new Float64Array(ncomm);
       cnodes = new Int32Array(ncomm);
       totalWeightInComm = new Float64Array(ncomm);
       totalWeightToComm = new Float64Array(ncomm);
-      totalWeightFromComm = new Float64Array(ncomm);
+      // For undirected graphs totalWeightFromComm[c] always equals
+      // totalWeightToComm[c] (every edge's weight is counted in both
+      // by symmetry). Alias the storage so writes to either side update
+      // both views; halves the per-move admin work without changing the
+      // numbers any reader sees.
+      totalWeightFromComm = directed ? new Float64Array(ncomm) : totalWeightToComm;
       for (let v = 0; v < n; v++) {
         csize[membership[v]] += graph.nodeSize(v);
         cnodes[membership[v]] += 1;
       }
       const m = graph.ecount();
-      const directed = graph.isDirected();
       for (let e = 0; e < m; e++) {
         const uv = graph.edge(e);
         const u = uv[0], v = uv[1];

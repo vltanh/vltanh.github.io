@@ -4,180 +4,153 @@
  * Modularity gate computes the paper formula but defaults to canonical
  * pass-through (run_ikc.py:280 short-circuits to POSITIVE_VALUE = 1);
  * `opts.canonicalGate = false` enforces mod(s) > 0 instead.
+ *
+ * Internals operate on compact 0..n-1 indices via Int32Array adjacency;
+ * external API takes / returns original node ids.
  */
 (function () {
   "use strict";
-  if (!window.COMDET || !window.COMDET.LOUVAIN) {
-    console.warn("[ikc] COMDET.LOUVAIN missing; load louvain.js first");
-    return;
-  }
+  if (!window.COMDET) return;
   const C = window.COMDET;
-  const LV = C.LOUVAIN;
 
-  // External node ids (potentially non-contiguous after IKC peels nodes
-  // out of the residual). Build LOUVAIN.Graph over compacted indices,
-  // then expose adjacency as a Map<originalId, Set<originalId>> shim
-  // since IKC's coreNumbers / connectedComponents / kValid all key off
-  // original ids.
-  function buildAdj(nodeIds, edges) {
+  // Compact a (nodeIds, edges) pair into Int32Array CSR-ish adjacency.
+  // Returns {n, ids, idx, adjN, adjStarts, m} where adjN is a flat
+  // Int32Array of neighbour-indices and adjStarts[i] is the offset of
+  // node i's neighbour list (length = adjStarts[i+1] - adjStarts[i]).
+  function compactSubgraph(nodeIds, edges) {
     const n = nodeIds.length;
     const idx = new Map();
     nodeIds.forEach(function (id, i) { idx.set(id, i); });
-    const compactEdges = [];
+    let m = 0;
+    const eu = [];
+    const ev = [];
     edges.forEach(function (e) {
       if (e[0] === e[1]) return;
-      const u = idx.get(e[0]), v = idx.get(e[1]);
+      const u = idx.get(e[0]); const v = idx.get(e[1]);
       if (u == null || v == null) return;
-      compactEdges.push([u, v]);
+      eu.push(u); ev.push(v); m += 1;
     });
-    const lg = LV.Graph(n, compactEdges, { correctSelfLoops: false });
-    const adj = new Map();
-    nodeIds.forEach(function (id, i) {
-      const nb = lg.neighbours(i);
-      const set = new Set();
-      for (let k = 0; k < nb.length; k++) set.add(nodeIds[nb[k]]);
-      adj.set(id, set);
-    });
-    return adj;
+    const deg = new Int32Array(n);
+    for (let i = 0; i < m; i++) { deg[eu[i]] += 1; deg[ev[i]] += 1; }
+    const adjStarts = new Int32Array(n + 1);
+    for (let i = 0; i < n; i++) adjStarts[i + 1] = adjStarts[i] + deg[i];
+    const adjN = new Int32Array(adjStarts[n]);
+    const cursor = new Int32Array(n);
+    for (let i = 0; i < m; i++) {
+      const u = eu[i], v = ev[i];
+      adjN[adjStarts[u] + cursor[u]++] = v;
+      adjN[adjStarts[v] + cursor[v]++] = u;
+    }
+    return { n: n, ids: nodeIds, idx: idx, adjN: adjN, adjStarts: adjStarts, m: m };
   }
 
-  function inducedEdges(nodeIds, edges) {
-    const set = new Set(nodeIds);
-    return edges.filter(function (e) { return set.has(e[0]) && set.has(e[1]); });
-  }
+  function nbStart(g, i) { return g.adjStarts[i]; }
+  function nbEnd(g, i)   { return g.adjStarts[i + 1]; }
 
-  // Batagelj-Zaversnik linear-time core decomposition. Bucket queue
-  // ordered by current degree; pop a node, assign its current degree
-  // as core number, decrement neighbour degrees and slide them down a
-  // bucket. O(V + E) total.
-  function coreNumbers(nodeIds, edges) {
-    const n = nodeIds.length;
-    const adj = buildAdj(nodeIds, edges);
-    const deg = new Map();
+  // Batagelj-Zaversnik linear-time core decomposition over compact
+  // indices. Bucket queue ordered by current degree; pop a node, assign
+  // its current degree as core number, slide neighbour positions when
+  // their degree decreases. O(V + E).
+  function coreNumbersCompact(g) {
+    const n = g.n;
+    if (n === 0) return { core: new Int32Array(0), max: 0 };
+    const deg = new Int32Array(n);
     let maxDeg = 0;
-    nodeIds.forEach(function (id) {
-      const d = adj.get(id).size;
-      deg.set(id, d);
-      if (d > maxDeg) maxDeg = d;
-    });
-    const bin = new Array(maxDeg + 1).fill(0);
-    nodeIds.forEach(function (id) { bin[deg.get(id)] += 1; });
+    for (let i = 0; i < n; i++) {
+      deg[i] = nbEnd(g, i) - nbStart(g, i);
+      if (deg[i] > maxDeg) maxDeg = deg[i];
+    }
+    const bin = new Int32Array(maxDeg + 1);
+    for (let i = 0; i < n; i++) bin[deg[i]] += 1;
     let start = 0;
     for (let d = 0; d <= maxDeg; d++) {
       const c = bin[d]; bin[d] = start; start += c;
     }
-    const order = new Array(n);
-    const pos = new Map();
-    nodeIds.forEach(function (id) {
-      const d = deg.get(id);
-      order[bin[d]] = id;
-      pos.set(id, bin[d]);
-      bin[d] += 1;
-    });
+    const order = new Int32Array(n);
+    const pos = new Int32Array(n);
+    for (let i = 0; i < n; i++) {
+      const d = deg[i];
+      order[bin[d]] = i; pos[i] = bin[d]; bin[d] += 1;
+    }
     for (let d = maxDeg; d > 0; d--) bin[d] = bin[d - 1];
     bin[0] = 0;
-    const core = new Map();
+    const core = new Int32Array(n);
     for (let i = 0; i < n; i++) {
       const v = order[i];
-      core.set(v, deg.get(v));
-      adj.get(v).forEach(function (u) {
-        if (deg.get(u) <= deg.get(v)) return;
-        const du = deg.get(u);
-        const pu = pos.get(u);
-        const pw = bin[du];
-        const w = order[pw];
+      core[v] = deg[v];
+      const lo = nbStart(g, v), hi = nbEnd(g, v);
+      for (let k = lo; k < hi; k++) {
+        const u = g.adjN[k];
+        if (deg[u] <= deg[v]) continue;
+        const du = deg[u], pu = pos[u], pw = bin[du], w = order[pw];
         if (u !== w) {
-          order[pu] = w; order[pw] = u;
-          pos.set(u, pw); pos.set(w, pu);
+          order[pu] = w; order[pw] = u; pos[u] = pw; pos[w] = pu;
         }
         bin[du] += 1;
-        deg.set(u, du - 1);
-      });
+        deg[u] = du - 1;
+      }
     }
     let mx = 0;
-    core.forEach(function (v) { if (v > mx) mx = v; });
+    for (let i = 0; i < n; i++) if (core[i] > mx) mx = core[i];
     return { core: core, max: mx };
   }
 
-  function connectedComponents(nodeIds, edges) {
-    const adj = buildAdj(nodeIds, edges);
-    const seen = new Set();
+  function connectedComponentsCompact(g, mask) {
+    const n = g.n;
+    const seen = new Uint8Array(n);
     const comps = [];
-    nodeIds.forEach(function (s) {
-      if (seen.has(s)) return;
+    for (let s = 0; s < n; s++) {
+      if (seen[s]) continue;
+      if (mask && !mask[s]) { seen[s] = 1; continue; }
       const comp = [];
-      const q = [s];
-      seen.add(s);
-      while (q.length) {
-        const v = q.shift();
-        comp.push(v);
-        adj.get(v).forEach(function (u) {
-          if (!seen.has(u)) { seen.add(u); q.push(u); }
-        });
+      let head = 0;
+      comp.push(s); seen[s] = 1;
+      while (head < comp.length) {
+        const v = comp[head++];
+        const lo = nbStart(g, v), hi = nbEnd(g, v);
+        for (let k = lo; k < hi; k++) {
+          const u = g.adjN[k];
+          if (seen[u]) continue;
+          if (mask && !mask[u]) continue;
+          seen[u] = 1; comp.push(u);
+        }
       }
       comps.push(comp);
-    });
+    }
     return comps;
   }
 
-  // Within the kcore subgraph (subEdges), every component node must
-  // have degree >= kFloor (run_ikc.py:264-275).
-  function kValid(component, subEdges, kFloor) {
-    const set = new Set(component);
-    const deg = new Map();
-    component.forEach(function (v) { deg.set(v, 0); });
-    subEdges.forEach(function (e) {
-      if (set.has(e[0]) && set.has(e[1])) {
-        deg.set(e[0], deg.get(e[0]) + 1);
-        deg.set(e[1], deg.get(e[1]) + 1);
+  // Within the kcore subgraph (compact), every component node must
+  // have degree >= kFloor counting only neighbours in the same kcore.
+  // Implemented via a Uint8 mask of kcore membership; per-node degree
+  // is the count of neighbours whose mask-bit is set.
+  function kValidCompact(g, component, kcoreMask, kFloor) {
+    for (let i = 0; i < component.length; i++) {
+      const v = component[i];
+      let d = 0;
+      const lo = nbStart(g, v), hi = nbEnd(g, v);
+      for (let k = lo; k < hi; k++) {
+        if (kcoreMask[g.adjN[k]]) d += 1;
       }
-    });
-    let pass = true;
-    deg.forEach(function (d) { if (d < kFloor) pass = false; });
-    return pass;
+      if (d < kFloor) return false;
+    }
+    return true;
   }
 
-  // Paper formula (Wedell 2022 §2.2.2):
-  //   mod(s) = l_s / L - (d_s / (2L))^2
-  // l_s = intra-edges, d_s = sum of intra-degrees, L = original graph
-  // edge count. Canonical run_ikc.py:280 returns 1 instead.
-  function clusterModularity(component, fullEdges) {
-    const L = fullEdges.length;
-    if (L === 0) return 0;
-    const set = new Set(component);
-    let lS = 0;
-    let dS = 0;
-    fullEdges.forEach(function (e) {
-      const a = set.has(e[0]);
-      const b = set.has(e[1]);
-      if (a && b) { lS += 1; dS += 2; }
-      else if (a || b) { dS += 1; }
-    });
-    return (lS / L) - Math.pow(dS / (2 * L), 2);
-  }
-
-  // Iteration-scoped batch modularity. One O(E_full) sweep over
-  // fullEdges bins each edge into the (compMembership[u], compMembership[v])
-  // cell; per-component (l_s, d_s) is then O(1). compMembership maps each
-  // component-member node to its component index; nodes outside any
-  // current component map to -1.
-  function batchModularities(components, fullEdges, fullL) {
+  // Iteration-scoped batch modularity. One O(E_full) sweep over fullEU/EV
+  // bins each edge by (memberOf[u], memberOf[v]). Per-component (l_s, d_s)
+  // is then O(1). memberOf is Int32Array(globalN) initialised to -1.
+  function batchModularitiesCompact(components, memberOf, fullEU, fullEV, fullL) {
     if (fullL === 0) return components.map(function () { return 0; });
-    const memberOf = new Map();
-    components.forEach(function (comp, ci) {
-      comp.forEach(function (id) { memberOf.set(id, ci); });
-    });
     const lS = new Float64Array(components.length);
     const dS = new Float64Array(components.length);
-    fullEdges.forEach(function (e) {
-      const ca = memberOf.has(e[0]) ? memberOf.get(e[0]) : -1;
-      const cb = memberOf.has(e[1]) ? memberOf.get(e[1]) : -1;
-      if (ca === cb && ca !== -1) { lS[ca] += 1; dS[ca] += 2; }
-      else {
-        if (ca !== -1) dS[ca] += 1;
-        if (cb !== -1) dS[cb] += 1;
-      }
-    });
+    for (let i = 0; i < fullEU.length; i++) {
+      const ca = memberOf[fullEU[i]];
+      const cb = memberOf[fullEV[i]];
+      if (ca !== -1) dS[ca] += 1;
+      if (cb !== -1) dS[cb] += 1;
+      if (ca !== -1 && ca === cb) lS[ca] += 1;
+    }
     const out = new Array(components.length);
     for (let i = 0; i < components.length; i++) {
       out[i] = (lS[i] / fullL) - Math.pow(dS[i] / (2 * fullL), 2);
@@ -185,63 +158,143 @@
     return out;
   }
 
-  // ── Outer loop ──────────────────────────────────────────────────
   function runIKC(nodeIds, fullEdges, opts) {
     opts = opts || {};
     const kFloor = opts.kFloor != null ? opts.kFloor : 4;
-    // canonicalGate = true → match run_ikc.py:280 (mod always passes);
-    // false → enforce paper's mod > 0 gate. Default mirrors shipped.
     const canonicalGate = opts.canonicalGate !== false;
 
-    const remaining = new Set(nodeIds);
-    const accepted = []; // {iteration, k, members, modularity}
+    // Top-level compaction (stable globalIdx for fullEdges).
+    const top = compactSubgraph(nodeIds, fullEdges);
+    const globalN = top.n;
+    const fullEU = new Int32Array(top.m);
+    const fullEV = new Int32Array(top.m);
+    let fillI = 0;
+    fullEdges.forEach(function (e) {
+      if (e[0] === e[1]) return;
+      const u = top.idx.get(e[0]); const v = top.idx.get(e[1]);
+      if (u == null || v == null) return;
+      fullEU[fillI] = u; fullEV[fillI] = v; fillI += 1;
+    });
+    const fullL = top.m;
+
+    const remaining = new Uint8Array(globalN); remaining.fill(1);
+    const accepted = []; // {iteration, k, members:originalIds, modularity}
     const iterations = [];
     let it = 0;
-    const dropped = []; // singleton / k-invalid nodes
-    while (remaining.size > 0) {
-      const remList = nodeIds.filter(function (id) { return remaining.has(id); });
-      const remEdges = inducedEdges(remList, fullEdges);
-      const cn = coreNumbers(remList, remEdges);
+    const dropped = []; // originalIds
+
+    while (true) {
+      let remCount = 0;
+      for (let i = 0; i < globalN; i++) if (remaining[i]) remCount += 1;
+      if (remCount === 0) break;
+
+      // Build residual edge list (compact-global ids) from fullE + mask.
+      const remEU = []; const remEV = [];
+      for (let i = 0; i < top.m; i++) {
+        if (remaining[fullEU[i]] && remaining[fullEV[i]]) {
+          remEU.push(fullEU[i]); remEV.push(fullEV[i]);
+        }
+      }
+      // Compact the residual into its own [0..remCount-1] index space.
+      const localOfGlobal = new Int32Array(globalN); localOfGlobal.fill(-1);
+      const globalOfLocal = new Int32Array(remCount);
+      let li = 0;
+      for (let gi = 0; gi < globalN; gi++) {
+        if (!remaining[gi]) continue;
+        localOfGlobal[gi] = li; globalOfLocal[li] = gi; li += 1;
+      }
+      const remDeg = new Int32Array(remCount);
+      for (let i = 0; i < remEU.length; i++) {
+        remDeg[localOfGlobal[remEU[i]]] += 1;
+        remDeg[localOfGlobal[remEV[i]]] += 1;
+      }
+      const remStarts = new Int32Array(remCount + 1);
+      for (let i = 0; i < remCount; i++) remStarts[i + 1] = remStarts[i] + remDeg[i];
+      const remAdjN = new Int32Array(remStarts[remCount]);
+      const cursor = new Int32Array(remCount);
+      for (let i = 0; i < remEU.length; i++) {
+        const lu = localOfGlobal[remEU[i]], lv = localOfGlobal[remEV[i]];
+        remAdjN[remStarts[lu] + cursor[lu]++] = lv;
+        remAdjN[remStarts[lv] + cursor[lv]++] = lu;
+      }
+      const remG = { n: remCount, ids: null, idx: null,
+                     adjN: remAdjN, adjStarts: remStarts, m: remEU.length };
+
+      const cn = coreNumbersCompact(remG);
       const maxK = cn.max;
 
+      const residualOrigIds = new Array(remCount);
+      for (let i = 0; i < remCount; i++) residualOrigIds[i] = nodeIds[globalOfLocal[i]];
       const itRec = {
         iteration: it,
-        residualNodes: remList.slice(),
-        residualEdges: remEdges.slice(),
-        coreNumbers: Array.from(cn.core.entries()),
+        residualNodes: residualOrigIds,
+        residualEdges: [], // populated below
+        coreNumbers: null,
         maxK: maxK,
         kcoreNodes: [],
         kcoreEdges: [],
-        components: [], // per-component {nodes, kValid, mod, accepted, fateReason}
-        accepted: [],   // accepted clusters this iteration
+        components: [],
+        accepted: [],
         bailed: false,
       };
+      // Original-id residualEdges + coreNumbers map for trace consumers.
+      const remOrigEdges = new Array(remEU.length);
+      for (let i = 0; i < remEU.length; i++) {
+        remOrigEdges[i] = [nodeIds[remEU[i]], nodeIds[remEV[i]]];
+      }
+      itRec.residualEdges = remOrigEdges;
+      const cnPairs = new Array(remCount);
+      for (let i = 0; i < remCount; i++) cnPairs[i] = [residualOrigIds[i], cn.core[i]];
+      itRec.coreNumbers = cnPairs;
 
       if (maxK < kFloor) {
-        // Bail: residual nodes become singletons / dropped.
         itRec.bailed = true;
-        remList.forEach(function (id) {
-          dropped.push(id);
-          remaining.delete(id);
-        });
+        for (let i = 0; i < remCount; i++) {
+          dropped.push(residualOrigIds[i]);
+          remaining[globalOfLocal[i]] = 0;
+        }
         iterations.push(itRec);
         break;
       }
 
-      // Extract (max_k)-core subgraph.
-      const kcoreNodes = remList.filter(function (id) { return cn.core.get(id) >= maxK; });
-      const kcoreEdges = inducedEdges(kcoreNodes, remEdges);
-      itRec.kcoreNodes = kcoreNodes;
-      itRec.kcoreEdges = kcoreEdges;
+      // (max_k)-core extraction.
+      const kcoreMask = new Uint8Array(remCount);
+      for (let i = 0; i < remCount; i++) if (cn.core[i] >= maxK) kcoreMask[i] = 1;
+      const kcoreNodesLocal = [];
+      const kcoreNodesOrig = [];
+      for (let i = 0; i < remCount; i++) {
+        if (kcoreMask[i]) {
+          kcoreNodesLocal.push(i);
+          kcoreNodesOrig.push(residualOrigIds[i]);
+        }
+      }
+      const kcoreEdgesOrig = [];
+      for (let i = 0; i < remEU.length; i++) {
+        const lu = localOfGlobal[remEU[i]], lv = localOfGlobal[remEV[i]];
+        if (kcoreMask[lu] && kcoreMask[lv]) {
+          kcoreEdgesOrig.push([nodeIds[remEU[i]], nodeIds[remEV[i]]]);
+        }
+      }
+      itRec.kcoreNodes = kcoreNodesOrig;
+      itRec.kcoreEdges = kcoreEdgesOrig;
 
-      const components = connectedComponents(kcoreNodes, kcoreEdges);
-      const mods = batchModularities(components, fullEdges, fullEdges.length);
-      components.forEach(function (comp, cIdx) {
-        const okK = kValid(comp, kcoreEdges, kFloor);
+      const compsLocal = connectedComponentsCompact(remG, kcoreMask);
+
+      // Build memberOf:Int32Array(globalN) for batch modularity. Each
+      // local-comp node maps to its component index; everything else -1.
+      const memberOf = new Int32Array(globalN); memberOf.fill(-1);
+      compsLocal.forEach(function (compLocal, ci) {
+        compLocal.forEach(function (li) { memberOf[globalOfLocal[li]] = ci; });
+      });
+      const mods = batchModularitiesCompact(compsLocal, memberOf, fullEU, fullEV, fullL);
+
+      compsLocal.forEach(function (compLocal, cIdx) {
+        const okK = kValidCompact(remG, compLocal, kcoreMask, kFloor);
         const mod = mods[cIdx];
         const okMod = canonicalGate ? true : (mod > 0);
+        const compOrig = compLocal.map(function (li) { return residualOrigIds[li]; });
         const cRec = {
-          nodes: comp.slice(),
+          nodes: compOrig,
           kValid: okK,
           modularity: mod,
           modularityPass: okMod,
@@ -250,30 +303,30 @@
         };
         if (cRec.accepted) {
           cRec.fateReason = "accepted";
-          accepted.push({ iteration: it, k: maxK, members: comp.slice(), modularity: mod });
+          accepted.push({ iteration: it, k: maxK, members: compOrig.slice(), modularity: mod });
           itRec.accepted.push(cRec);
-          comp.forEach(function (id) { remaining.delete(id); });
+          compLocal.forEach(function (li) { remaining[globalOfLocal[li]] = 0; });
         } else if (!okK) {
           cRec.fateReason = "failed k-valid";
-          comp.forEach(function (id) {
-            dropped.push(id);
-            remaining.delete(id);
+          compLocal.forEach(function (li) {
+            dropped.push(residualOrigIds[li]);
+            remaining[globalOfLocal[li]] = 0;
           });
         } else {
           cRec.fateReason = "failed modularity";
-          comp.forEach(function (id) {
-            dropped.push(id);
-            remaining.delete(id);
+          compLocal.forEach(function (li) {
+            dropped.push(residualOrigIds[li]);
+            remaining[globalOfLocal[li]] = 0;
           });
         }
         itRec.components.push(cRec);
       });
       iterations.push(itRec);
       it += 1;
-      if (it > 100) break; // safety
+      if (it > 100) break;
     }
 
-    // Build final membership: cluster_id 0..K-1 for accepted, -1 for dropped.
+    // Final membership map keyed by original id; -1 = dropped/singleton.
     const membership = new Map();
     accepted.forEach(function (cl, ci) {
       cl.members.forEach(function (id) { membership.set(id, ci); });
@@ -292,13 +345,48 @@
     };
   }
 
-  // ── Public API ──────────────────────────────────────────────────
+  // External-API coreNumbers: takes original ids, returns a Map<id, k>.
+  // Used by ikc/page.js to render the stage-1 viz independently of runIKC.
+  function coreNumbers(nodeIds, edges) {
+    const g = compactSubgraph(nodeIds, edges);
+    const cn = coreNumbersCompact(g);
+    const core = new Map();
+    for (let i = 0; i < g.n; i++) core.set(g.ids[i], cn.core[i]);
+    return { core: core, max: cn.max };
+  }
+
+  // External-API connectedComponents: takes original ids, returns array
+  // of arrays of original ids.
+  function connectedComponents(nodeIds, edges) {
+    const g = compactSubgraph(nodeIds, edges);
+    const compsLocal = connectedComponentsCompact(g, null);
+    return compsLocal.map(function (comp) {
+      return comp.map(function (li) { return g.ids[li]; });
+    });
+  }
+
+  function inducedEdges(nodeIds, edges) {
+    const set = new Set(nodeIds);
+    return edges.filter(function (e) { return set.has(e[0]) && set.has(e[1]); });
+  }
+
+  function clusterModularity(component, fullEdges) {
+    const L = fullEdges.length;
+    if (L === 0) return 0;
+    const set = new Set(component);
+    let lS = 0, dS = 0;
+    fullEdges.forEach(function (e) {
+      const a = set.has(e[0]); const b = set.has(e[1]);
+      if (a && b) { lS += 1; dS += 2; }
+      else if (a || b) { dS += 1; }
+    });
+    return (lS / L) - Math.pow(dS / (2 * L), 2);
+  }
+
   C.IKC = {
-    buildAdj: buildAdj,
     inducedEdges: inducedEdges,
     coreNumbers: coreNumbers,
     connectedComponents: connectedComponents,
-    kValid: kValid,
     clusterModularity: clusterModularity,
     runIKC: runIKC,
     runFixture: function (kFloor, canonicalGate) {
