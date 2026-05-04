@@ -301,10 +301,5 @@
     moveNodes: moveNodes,
     mergeNodesConstrained: mergeNodesConstrained,
     optimisePartition: optimisePartition,
-    runFixture: function (quality, seed) {
-      const F = window.COMDET.FIXTURE;
-      const G = LV.Graph(F.nodes.length, F.edges, { correctSelfLoops: false });
-      return optimisePartition(G, quality, seed >>> 0, { recordTrace: true });
-    },
   };
 })();

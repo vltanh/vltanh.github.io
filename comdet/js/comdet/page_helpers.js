@@ -357,8 +357,11 @@
       if (opts.capEl) opts.capEl.textContent = "after · super-graph (n = ·)";
       collapsed = false;
     }
-    if (opts.playBtn) opts.playBtn.addEventListener("click", play);
-    if (opts.resetBtn) opts.resetBtn.addEventListener("click", reset);
+    // Use onclick = ... so re-mounts replace the previous handler instead
+    // of stacking listeners. Re-mount happens on γ-slider rebuild in the
+    // CPM page; without this, every slider tick added another play handler.
+    if (opts.playBtn) opts.playBtn.onclick = play;
+    if (opts.resetBtn) opts.resetBtn.onclick = reset;
     return { viz: viz, play: play, reset: reset };
   }
 
@@ -428,6 +431,115 @@
       { correctSelfLoops: false });
   }
 
+  // ── Leiden / Louvain walker wrappers ─────────────────────────────
+  // Both algorithms walk a list of (node-visit) events that share the
+  // same shape: { v, fromComm, toComm, moved, delta, candidates }. The
+  // page glue differs only in (a) the metric symbol shown in the cum
+  // line ("Q" for Modularity, "H" for CPM), and (b) which kernel result
+  // the events come from. mountMoveWalker + mountRefineWalker collect
+  // the shared boilerplate.
+  function mountMoveWalker(opts) {
+    const F = C.FIXTURE;
+    const metric = opts.metric || "H";       // "H" (CPM) or "Q" (Modularity)
+    const events = opts.events;
+    const initialMembership = opts.initialMembership
+      || F.nodes.map(function (_, i) { return i; });
+    const postMembership = opts.postMembership;     // membership at end of phase
+    const statusEl = document.getElementById(opts.ctlPrefix + "-status");
+    const statsEl = document.getElementById(opts.ctlPrefix + "-stats");
+    const onExtra = opts.onExtraRender || function () {};
+
+    function snapshotAt(idx) {
+      if (idx === 0) return initialMembership;
+      return postMembership;
+    }
+    function eventStatus(ev) {
+      if (!ev) return "stage 0 · singleton init · all " + F.nodes.length + " nodes alone";
+      const tail = ev.moved
+        ? (' &middot; moved to comm ' + ev.toComm
+            + ' (Δ' + metric + ' = ' + ev.delta.toFixed(4) + ')')
+        : ' &middot; stayed (no Δ' + metric + ' > 0)';
+      return "node " + ev.v + " &middot; visit " + ((ev.idx != null ? ev.idx : 0) + 1) + tail;
+    }
+    function statsHTML(idx) {
+      let cum = 0, n = 0;
+      for (let k = 0; k < idx; k++) {
+        const e = events[k];
+        if (e.moved) { cum += e.delta; n += 1; }
+      }
+      return "moves: " + n + " &middot; Δ" + metric + " cum: " + cum.toFixed(4);
+    }
+    function candPanelHTML(idx, ev) {
+      if (!ev) return '<div class="step-desc">Stage 0: every node is its own community. No candidate evaluation yet.</div>';
+      const rows = ev.candidates.slice().sort(function (a, b) { return b.delta - a.delta; });
+      let html = '<div class="step-desc">candidates for node ' + ev.v
+        + ' &middot; current comm = ' + ev.fromComm + '</div>';
+      html += '<table class="cand-table"><thead><tr><th>cand comm</th><th>Δ ' + metric
+            + '</th><th>verdict</th></tr></thead><tbody>';
+      rows.forEach(function (r) {
+        const isPick = (r.comm === ev.toComm && ev.moved);
+        const isFrom = (r.comm === ev.fromComm);
+        const cls = isPick ? 'cand-pick' : (isFrom ? 'cand-from' : '');
+        const verdict = isPick ? 'pick' : (isFrom ? 'current' : '');
+        html += '<tr class="' + cls + '"><td>' + r.comm + '</td><td>'
+              + r.delta.toFixed(4) + '</td><td>' + verdict + '</td></tr>';
+      });
+      html += '</tbody></table>';
+      return html;
+    }
+    return mountStepWalker({
+      vizHostId: opts.vizHostId,
+      panelHostId: opts.panelHostId,
+      ctlPrefix: opts.ctlPrefix,
+      events: events,
+      snapshotAt: snapshotAt,
+      sidePanelHTML: candPanelHTML,
+      onRender: function (idx, ev) {
+        if (statusEl) statusEl.innerHTML = eventStatus(ev);
+        if (statsEl) statsEl.innerHTML = statsHTML(idx);
+        onExtra(idx, ev);
+      },
+    });
+  }
+
+  function mountRefineWalker(opts) {
+    const F = C.FIXTURE;
+    const events = opts.events;
+    const preMembership = opts.preMembership;       // membership at refine start
+    const postMembership = opts.postMembership;     // membership at refine end
+    const statusEl = document.getElementById(opts.ctlPrefix + "-status");
+    const statsEl = document.getElementById(opts.ctlPrefix + "-stats");
+
+    function snapshotAt(idx) {
+      if (idx === 0) return preMembership;
+      return postMembership;
+    }
+    function eventStatus(ev) {
+      if (!ev) return "starts from post-move partition · " + F.nodes.length + " refined singletons";
+      const tail = ev.moved
+        ? (' &middot; merged into refined comm ' + ev.toComm)
+        : ' &middot; stayed (no Δ ≥ 0)';
+      return "node " + ev.v + " &middot; visit " + ((ev.idx != null ? ev.idx : 0) + 1) + tail;
+    }
+    function statsHTML(idx) {
+      let merges = 0;
+      for (let k = 0; k < idx; k++) if (events[k].moved) merges += 1;
+      return "merges: " + merges;
+    }
+    return mountStepWalker({
+      vizHostId: opts.vizHostId,
+      panelHostId: opts.panelHostId || (opts.ctlPrefix + "-panel"),
+      ctlPrefix: opts.ctlPrefix,
+      events: events,
+      snapshotAt: snapshotAt,
+      sidePanelHTML: function () { return ""; },
+      onRender: function (idx, ev) {
+        if (statusEl) statusEl.innerHTML = eventStatus(ev);
+        if (statsEl) statsEl.innerHTML = statsHTML(idx);
+      },
+    });
+  }
+
   C.PAGE = {
     partitionColor: partitionColor,
     indexById: indexById,
@@ -435,6 +547,8 @@
     recolour: recolour,
     focusNode: focusNode,
     mountStepWalker: mountStepWalker,
+    mountMoveWalker: mountMoveWalker,
+    mountRefineWalker: mountRefineWalker,
     mountAggregation: mountAggregation,
     mountFinalCompare: mountFinalCompare,
     computeClusterStats: computeClusterStats,

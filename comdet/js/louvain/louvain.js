@@ -13,9 +13,8 @@
  *   - sweep(P, rng): one full pass over every node in shuffled order;
  *     each visit picks the candidate community with the largest strictly
  *     positive ΔQ (greedy, no acceptance of ties).
- *   - phase1(graph, q, rng): repeat sweep until nbMoves == 0.
- *   - run(graph, q, seed): phase1 → aggregate → phase1 → ... until the
- *     aggregation step doesn't shrink the graph.
+ *   - run(graph, q, seed): sweep until quiet, aggregate, repeat until
+ *     the aggregation step doesn't shrink the graph.
  *
  * Leiden (js/leiden/leiden.js) extends this substrate by:
  *   - Adding the CPM quality function (size-penalty objective).
@@ -430,7 +429,6 @@
       rebuildAdmin: rebuildAdmin,
       diffMove: function (v, target) { return qualityFn.diffMove(this, v, target); },
       quality: function () { return qualityFn.quality(this); },
-      qualityName: qualityFn.name,
       qualityFn: qualityFn,
       setMembership: function (m) {
         for (let i = 0; i < n; i++) membership[i] = m[i] | 0;
@@ -602,7 +600,6 @@
     Partition: Partition,
     Modularity: Modularity,
     sweep: sweep,
-    phase1: phase1,
     run: run,
   };
 })();
