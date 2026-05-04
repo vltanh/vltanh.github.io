@@ -4,13 +4,14 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Community Detection Algorithms</title>
-<link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔍</text></svg>">
-<meta name="description" content="A gallery of community-detection algorithms (Leiden, Infomap, IKC, SBM family, plus CC/WCC/CM post-procs), each walked stage by stage on the same small example input.">
+<link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🪡</text></svg>">
+<meta name="description" content="A gallery of community-detection algorithms (Leiden, Infomap, IKC, SBM family) and post-procs (CC, WCC, CM), each walked stage by stage on the same small input.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="./shared.css">
 <style>
+/* Typed-note body: sans-serif overrides the serif body in shared.css. */
 body {
   font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
   font-variation-settings: normal;
@@ -24,242 +25,933 @@ body {
   line-height: 1.55;
 }
 
-.uc-banner {
-  background: var(--paper-3, #f5e9c8);
-  border: 2px dashed var(--ink-2, #8a7a44);
-  padding: 0.8rem 1.2rem;
-  margin: 1.5rem 0;
-  font-family: 'Caveat Brush', cursive;
-  font-size: 1.2rem;
-  color: var(--ink-2, #8a7a44);
-  text-align: center;
+/* Icon nav (fixed-width hover, no layout shift) */
+.icon-links {
+  display: flex; flex-wrap: wrap; gap: 1.6rem;
+  justify-content: center; align-items: center;
+  margin: 1.3rem auto 2.6rem;
+}
+.icon-links a {
+  display: inline-flex; align-items: center; gap: .45rem;
+  color: var(--paper);
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .72rem; letter-spacing: .16em; text-transform: uppercase;
+  background: none; background-image: none;
+  padding: .3rem .2rem .45rem;
+  border-bottom: 1.5px solid transparent;
+  transition: color .18s ease, border-color .18s ease, transform .18s ease;
+  opacity: .8;
+}
+.icon-links a:hover {
+  color: var(--signal);
+  opacity: 1;
+  border-bottom-color: var(--signal);
+  transform: translateY(-1px);
+  background-image: none;
+}
+.icon-links a svg { width: 18px; height: 18px; flex-shrink: 0; transition: transform .18s ease; }
+.icon-links a:hover svg { transform: rotate(-8deg); }
+
+/* Hook prose */
+.hook {
+  font-family: 'IBM Plex Sans', sans-serif;
+  color: var(--paper-2);
+  font-size: 1.05rem; line-height: 1.72;
+  max-width: var(--span-prose);
+  margin: 0 auto 2.8rem;
+}
+.hook em {
+  color: var(--paper);
+  font-style: italic;
+  background: linear-gradient(180deg, transparent 58%, rgba(246,225,90,.5) 58%, rgba(246,225,90,.5) 92%, transparent 92%);
+  padding: 0 .15em;
+}
+.hook .defs {
+  margin-top: 1.4rem;
+  display: grid; gap: .5rem;
+  font-size: .95rem; line-height: 1.55;
+  padding: .9rem 1.1rem;
+  border-left: 2px solid var(--paper);
+  background: rgba(237, 228, 201, .55);
+  border-radius: 0 2px 2px 0;
+}
+.hook .defs .term {
+  font-family: 'Special Elite', 'Courier New', monospace;
+  color: var(--paper);
+  font-size: .78rem; letter-spacing: .1em; text-transform: uppercase;
+  margin-right: .35rem;
+}
+.hook .defs .term.out { color: var(--signal); }
+.hook .defs .term.cl { color: var(--cobalt); }
+.hook ol.post-process {
+  margin: 0; padding-left: 1.3rem;
+  font-size: .95rem; line-height: 1.55;
+}
+.hook ol.post-process li { margin-bottom: .35rem; }
+.hook ol.post-process li:last-child { margin-bottom: 0; }
+.hook ol.post-process strong {
+  color: var(--paper);
+  font-weight: 500;
+}
+.hook .defs + p,
+.hook p + ol.post-process,
+.hook ol.post-process + p {
+  margin-top: 1rem;
 }
 
-.gallery-grid {
+/* Shared-graph: 2-col layout (svg left, info right) on wide, stacked on narrow */
+.shared-graph {
+  max-width: var(--span-wide); margin: 0 auto 3.4rem;
+  background: var(--ink-2); border: 1.5px solid var(--paper);
+  border-radius: 2px; padding: 1.4rem 1.5rem;
+  box-shadow: 3px 3px 0 rgba(27,32,51,.15);
+  position: relative;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: minmax(0, 1.55fr) minmax(250px, 290px);
   gap: 1.5rem;
-  margin-top: 2rem;
+  align-items: stretch;
+}
+.shared-graph::before,
+.shared-graph::after {
+  content: ""; position: absolute;
+  top: -9px; width: 50px; height: 16px;
+  background: var(--tape-tan); opacity: .82;
+  border: 1px solid rgba(139,117,65,.4);
+  box-shadow: 0 1px 2px rgba(27,32,51,.15);
+  pointer-events: none;
+}
+.shared-graph::before { left: 14px; transform: rotate(-4deg); }
+.shared-graph::after  { right: 14px; transform: rotate(3deg); }
+.shared-graph svg {
+  display: block; width: 100%; height: auto;
+  cursor: grab; touch-action: none;
+  align-self: center;
+}
+.shared-graph svg:active { cursor: grabbing; }
+.info-col {
+  display: flex; flex-direction: column; gap: .95rem;
+  padding-left: 1rem;
+  border-left: 1px dashed rgba(139,117,65,.55);
+}
+@media (max-width: 680px) {
+  .shared-graph { grid-template-columns: 1fr; }
+  .info-col { border-left: none; border-top: 1px dashed rgba(139,117,65,.55); padding-left: 0; padding-top: 1rem; }
+}
+.info-block {
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .76rem; color: var(--paper-2);
+  line-height: 1.55;
+}
+.info-block .hd {
+  display: block; color: var(--paper);
+  font-size: .66rem; letter-spacing: .2em; text-transform: uppercase;
+  margin-bottom: .35rem; font-weight: 400;
+}
+.info-block .big {
+  font-size: .84rem; line-height: 1.5; color: var(--paper);
+  white-space: nowrap;
+}
+.info-block .big b { color: var(--cobalt); font-weight: 400; font-variant-numeric: tabular-nums; }
+.info-block ul { list-style: none; padding: 0; margin: 0; }
+.info-block li {
+  padding: .08rem 0;
+  display: flex; align-items: center; gap: .5rem;
+}
+.info-block li b { color: var(--cobalt); font-weight: 400; font-variant-numeric: tabular-nums; }
+.edge-swatch {
+  display: inline-flex; flex-direction: column; justify-content: center;
+  width: 1.1rem; flex-shrink: 0;
+  gap: 1.5px;
+}
+.edge-swatch .bar { display: block; height: 2.5px; border-radius: 1px; }
+.legend-row {
+  display: flex; flex-wrap: wrap; gap: .4rem .95rem;
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .74rem; color: var(--paper-2);
+}
+.legend-dot {
+  display: inline-block; width: .82rem; height: .82rem; border-radius: 50%;
+  vertical-align: middle; margin-right: .35rem;
+  border: 1px solid var(--paper);
+  box-shadow: 1px 1px 0 rgba(27,32,51,.25);
+}
+.info-hint {
+  font-family: 'Caveat Brush', cursive;
+  font-size: 1.15rem; color: var(--paper-3);
+  transform: rotate(-1.5deg);
+  margin-top: auto;
+  padding-top: .3rem;
+  line-height: 1.2;
 }
 
-.algo-card {
-  background: var(--paper-1, #fff);
-  border: 1px solid var(--ink-3, #ddd);
-  padding: 1.2rem;
-  border-radius: 6px;
-  transition: transform 0.15s, box-shadow 0.15s;
+/* HTML tooltip over the graph */
+.gtip {
+  position: absolute; pointer-events: none;
+  background: var(--paper); color: var(--ink);
+  border: 1.5px solid var(--paper);
+  border-radius: 2px;
+  padding: .45rem .6rem;
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .7rem;
+  opacity: 0;
+  box-shadow: 2px 2px 0 rgba(27,32,51,.25);
+  z-index: 4;
+  max-width: 220px; line-height: 1.45;
+  transition: opacity .12s ease;
+}
+.gtip.on { opacity: 1 }
+.gtip b { color: var(--hl-yellow); font-weight: 400; }
+.gtip .dim { color: rgba(243, 236, 215, .65); }
+.gtip .hd {
+  color: var(--hl-yellow); font-weight: 400;
+  letter-spacing: .14em; text-transform: uppercase;
+  margin-bottom: .25rem; font-size: .66rem;
+}
+
+/* Family sections */
+.family {
+  margin: 0 auto 3.4rem;
+  max-width: var(--span-wide);
   position: relative;
 }
-
-.algo-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+.family-title {
+  font-family: 'Caveat Brush', 'Caveat', cursive;
+  font-size: clamp(1.85rem, 3.2vw, 2.25rem);
+  font-weight: 400;
+  color: var(--paper);
+  margin: 0 0 .55rem;
+  display: inline-block;
+  transform: rotate(-1deg);
+  position: relative;
+  padding: 0 .1rem 0;
+  line-height: 1.08;
 }
-
-.algo-card h3 {
-  margin: 0 0 0.5rem;
-  font-family: 'Fraunces', serif;
-  font-size: 1.3rem;
-}
-
-.algo-card .canonical {
-  font-family: 'Special Elite', monospace;
-  font-size: 0.85rem;
-  color: var(--paper-2, #888);
-  margin-bottom: 0.5rem;
-}
-
-.algo-card .blurb {
-  font-size: 0.95rem;
-  line-height: 1.45;
-  color: var(--ink-1, #333);
-}
-
-.algo-card.uc::after {
-  content: "UC";
+.family-title::before {
+  content: "";
   position: absolute;
-  top: 0.5rem;
-  right: 0.7rem;
-  font-family: 'Caveat Brush', cursive;
-  background: var(--paper-3, #f5e9c8);
-  color: var(--ink-2, #8a7a44);
-  padding: 0.1rem 0.5rem;
-  border-radius: 3px;
-  font-size: 0.85rem;
+  left: -14px; right: -18px;
+  top: -6px; bottom: -8px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 220 50' preserveAspectRatio='none' overflow='visible'><defs><filter id='r' x='-15%25' y='-18%25' width='130%25' height='136%25'><feTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='3' seed='3' result='w'/><feDisplacementMap in='SourceGraphic' in2='w' scale='10' result='d'/><feTurbulence type='fractalNoise' baseFrequency='2.6' numOctaves='2' seed='7' result='p'/><feColorMatrix in='p' type='matrix' values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  1.8 0 0 0 -.15' result='pa'/><feComposite in='d' in2='pa' operator='in' result='c'/><feGaussianBlur in='c' stdDeviation='.35'/></filter></defs><g filter='url(%23r)' fill='none' stroke='%23c92a2a' stroke-linecap='round' stroke-linejoin='round'><path d='M 6 12 L 215 16 L 5 22 L 216 26 L 5 32 L 215 36 L 6 41' stroke-width='11' opacity='.22' stroke-dasharray='14 3 9 4 18 2 11 3'/><path d='M 10 15 L 213 18 L 9 25 L 214 29 L 9 35 L 213 38' stroke-width='7.5' opacity='.24'/></g></svg>");
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  background-position: center;
+  opacity: .52;
+  transform: rotate(-2.3deg);
+  z-index: -1;
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 5%, #000 95%, transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 5%, #000 95%, transparent 100%);
+}
+.family ~ .family .family-title::before {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 220 50' preserveAspectRatio='none' overflow='visible'><defs><filter id='r' x='-15%25' y='-18%25' width='130%25' height='136%25'><feTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='3' seed='7' result='w'/><feDisplacementMap in='SourceGraphic' in2='w' scale='10' result='d'/><feTurbulence type='fractalNoise' baseFrequency='2.6' numOctaves='2' seed='11' result='p'/><feColorMatrix in='p' type='matrix' values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  1.8 0 0 0 -.15' result='pa'/><feComposite in='d' in2='pa' operator='in' result='c'/><feGaussianBlur in='c' stdDeviation='.35'/></filter></defs><g filter='url(%23r)' fill='none' stroke='%23c92a2a' stroke-linecap='round' stroke-linejoin='round'><path d='M 6 12 L 215 16 L 5 22 L 216 26 L 5 32 L 215 36 L 6 41' stroke-width='11' opacity='.22' stroke-dasharray='14 3 9 4 18 2 11 3'/><path d='M 10 15 L 213 18 L 9 25 L 214 29 L 9 35 L 213 38' stroke-width='7.5' opacity='.24'/></g></svg>");
+  transform: rotate(-1.6deg);
+}
+.family ~ .family ~ .family .family-title::before {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 220 50' preserveAspectRatio='none' overflow='visible'><defs><filter id='r' x='-15%25' y='-18%25' width='130%25' height='136%25'><feTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='3' seed='11' result='w'/><feDisplacementMap in='SourceGraphic' in2='w' scale='10' result='d'/><feTurbulence type='fractalNoise' baseFrequency='2.6' numOctaves='2' seed='15' result='p'/><feColorMatrix in='p' type='matrix' values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  1.8 0 0 0 -.15' result='pa'/><feComposite in='d' in2='pa' operator='in' result='c'/><feGaussianBlur in='c' stdDeviation='.35'/></filter></defs><g filter='url(%23r)' fill='none' stroke='%23c92a2a' stroke-linecap='round' stroke-linejoin='round'><path d='M 6 12 L 215 16 L 5 22 L 216 26 L 5 32 L 215 36 L 6 41' stroke-width='11' opacity='.22' stroke-dasharray='14 3 9 4 18 2 11 3'/><path d='M 10 15 L 213 18 L 9 25 L 214 29 L 9 35 L 213 38' stroke-width='7.5' opacity='.24'/></g></svg>");
+  transform: rotate(-2.8deg);
+}
+.family ~ .family ~ .family ~ .family .family-title::before {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 220 50' preserveAspectRatio='none' overflow='visible'><defs><filter id='r' x='-15%25' y='-18%25' width='130%25' height='136%25'><feTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='3' seed='17' result='w'/><feDisplacementMap in='SourceGraphic' in2='w' scale='10' result='d'/><feTurbulence type='fractalNoise' baseFrequency='2.6' numOctaves='2' seed='19' result='p'/><feColorMatrix in='p' type='matrix' values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  1.8 0 0 0 -.15' result='pa'/><feComposite in='d' in2='pa' operator='in' result='c'/><feGaussianBlur in='c' stdDeviation='.35'/></filter></defs><g filter='url(%23r)' fill='none' stroke='%23c92a2a' stroke-linecap='round' stroke-linejoin='round'><path d='M 6 12 L 215 16 L 5 22 L 216 26 L 5 32 L 215 36 L 6 41' stroke-width='11' opacity='.22' stroke-dasharray='14 3 9 4 18 2 11 3'/><path d='M 10 15 L 213 18 L 9 25 L 214 29 L 9 35 L 213 38' stroke-width='7.5' opacity='.24'/></g></svg>");
+  transform: rotate(-1.1deg);
+}
+.family ~ .family ~ .family ~ .family ~ .family .family-title::before {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 220 50' preserveAspectRatio='none' overflow='visible'><defs><filter id='r' x='-15%25' y='-18%25' width='130%25' height='136%25'><feTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='3' seed='23' result='w'/><feDisplacementMap in='SourceGraphic' in2='w' scale='10' result='d'/><feTurbulence type='fractalNoise' baseFrequency='2.6' numOctaves='2' seed='29' result='p'/><feColorMatrix in='p' type='matrix' values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  1.8 0 0 0 -.15' result='pa'/><feComposite in='d' in2='pa' operator='in' result='c'/><feGaussianBlur in='c' stdDeviation='.35'/></filter></defs><g filter='url(%23r)' fill='none' stroke='%23c92a2a' stroke-linecap='round' stroke-linejoin='round'><path d='M 6 12 L 215 16 L 5 22 L 216 26 L 5 32 L 215 36 L 6 41' stroke-width='11' opacity='.22' stroke-dasharray='14 3 9 4 18 2 11 3'/><path d='M 10 15 L 213 18 L 9 25 L 214 29 L 9 35 L 213 38' stroke-width='7.5' opacity='.24'/></g></svg>");
+  transform: rotate(-2deg);
+}
+.family-lede {
+  font-family: 'IBM Plex Sans', sans-serif;
+  color: var(--paper-2);
+  font-size: .98rem; line-height: 1.6;
+  margin-bottom: 1.3rem;
+  max-width: var(--span-medium);
 }
 
-.algo-card a {
-  color: inherit;
-  text-decoration: none;
-  display: block;
+/* Equal-width cards */
+.gen-grid {
+  display: flex; flex-wrap: wrap; gap: 1.4rem 1.3rem;
+  align-items: stretch;
+}
+.gen-card {
+  flex: 0 0 auto;
+  width: calc((100% - 1.3rem) / 2);
+  min-width: 260px;
+  display: flex; flex-direction: column;
+  padding: 1.1rem 1.25rem 1.15rem;
+  background: var(--ink-2); border: 1.5px solid var(--paper);
+  border-radius: 2px; color: inherit;
+  background-image: none;
+  box-shadow: 2.5px 3px 0 rgba(27,32,51,.18);
+  transition: transform .22s ease, box-shadow .22s ease, background .22s ease;
+  position: relative;
+}
+.gen-card .card-click {
+  position: absolute; inset: 0;
+  z-index: 1;
+  background: none; background-image: none;
+  border: none;
+}
+.gen-card::before { z-index: 2; }
+.gen-card .refs { position: relative; z-index: 3; }
+
+@media (max-width: 600px) { .gen-card { width: 100%; } }
+
+.gen-card:nth-of-type(odd)  { transform: rotate(-.7deg); }
+.gen-card:nth-of-type(even) { transform: rotate(.6deg); }
+.gen-card::before {
+  content: ""; position: absolute;
+  top: -8px; left: 50%;
+  transform: translateX(-50%) rotate(-2deg);
+  width: 46px; height: 14px;
+  background: var(--tape-tan); opacity: .85;
+  border: 1px solid rgba(139,117,65,.4);
+  box-shadow: 0 1px 2px rgba(27,32,51,.15);
+}
+.gen-card:hover {
+  background: var(--hl-yellow);
+  transform: rotate(0) translateY(-2px);
+  box-shadow: 3.5px 4px 0 rgba(27,32,51,.28);
+  color: inherit; background-image: none;
+}
+.gen-card.under-construction::after {
+  content: "under construction";
+  position: absolute;
+  bottom: 8px;
+  right: 10px;
+  transform: rotate(-3deg);
+  font-family: 'Caveat Brush', 'Caveat', cursive;
+  font-size: .72rem;
+  line-height: 1;
+  color: var(--signal);
+  background: var(--hl-yellow);
+  padding: .12rem .4rem .15rem;
+  border: 1px solid var(--signal);
+  border-radius: 2px;
+  box-shadow: 1px 1px 0 rgba(27,32,51,.18);
+  letter-spacing: .02em;
+  pointer-events: none;
+  z-index: 6;
+  white-space: nowrap;
+}
+.gen-card .name-row {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: .6rem; margin-bottom: .5rem;
+}
+.gen-card .name-block { display: flex; flex-direction: column; gap: .1rem; }
+.gen-card .name {
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: 1.15rem; font-weight: 400;
+  color: var(--cobalt);
+  letter-spacing: .01em;
+  transition: color .18s ease;
+}
+.gen-card:hover .name { color: var(--paper); }
+.gen-card .fullname {
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-style: italic;
+  font-size: .74rem; font-weight: 400;
+  color: var(--paper-3);
+  line-height: 1.3;
+}
+.gen-card:hover .fullname { color: var(--paper-2); }
+.gen-card .refs {
+  display: inline-flex; align-items: baseline; gap: .4rem;
+  flex-shrink: 0;
+}
+.gen-card .refs .sep { color: var(--paper-4); font-size: .7rem; }
+.gen-card .ref {
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .62rem; letter-spacing: .14em;
+  color: var(--paper-3);
+  text-transform: uppercase;
+  background: none; background-image: none;
+  padding-bottom: 1px;
+  border-bottom: 1px dashed var(--paper-3);
+  transition: color .18s ease, border-color .18s ease;
+}
+.gen-card .ref:hover {
+  color: var(--signal);
+  border-bottom: 1.5px solid var(--signal);
+}
+.gen-card .ref.unpub {
+  color: var(--paper-4);
+  border-bottom: 1px dashed var(--paper-4);
+  cursor: default;
+}
+.gen-card .ref.unpub:hover {
+  color: var(--paper-4);
+  border-bottom: 1px dashed var(--paper-4);
+}
+.gen-card .blurb {
+  font-family: 'IBM Plex Sans', sans-serif;
+  color: var(--paper-2); font-size: .93rem; line-height: 1.55;
+  flex: 1;
 }
 
-.section-header {
-  font-family: 'Fraunces', serif;
-  font-size: 1.6rem;
-  margin: 2.5rem 0 0.5rem;
-  border-bottom: 2px solid var(--ink-3, #ddd);
-  padding-bottom: 0.3rem;
-}
 </style>
 </head>
 <body>
-<div class="page">
+<main class="page">
 
 <header class="hdr">
-  <h1>Community-Detection Algorithms</h1>
-  <p class="sub">A gallery of CD algorithms walked stage by stage on a shared
-  32-node fixture. Companion to the
-  <a href="../netgen/">netgen gallery</a> of synthetic-network generators.</p>
+  <div class="kicker">project · community-detection</div>
+  <h1>Community-Detection <em>Algorithms</em></h1>
+  <p class="sub">A gallery of community-detection algorithms and post-processors walked stage by stage on the same small input. Each takes an unlabelled network and emits a partition of its nodes; what counts as a community differs from one method to the next.</p>
 </header>
 
-<div class="uc-banner">
-  Under construction. Pages ship with placeholder walkers; faithful JS kernel
-  ports of leidenalg, infomap, graph-tool SBM, constrained-clustering, and
-  VieCut land per Phase 4c of the active plan.
-</div>
+<nav class="icon-links" aria-label="project links">
+  <a href="https://github.com/MinhyukPark/community-detection" target="_blank" rel="noopener" aria-label="algorithm notes">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4.5v15A1.5 1.5 0 0 0 5.5 21H20V5H5.5A1.5 1.5 0 0 1 4 4.5Z"/><path d="M4 4.5A1.5 1.5 0 0 1 5.5 3H20v2"/><path d="M8 8h8M8 11.5h8M8 15h6"/></svg>
+    notes
+  </a>
+  <a href="../netgen/" target="_blank" rel="noopener" aria-label="sister gallery">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/><circle cx="12" cy="12" r="2"/><path d="M8 6h8M6 8v8M18 8v8M8 18h8M7.4 7.4l3.2 3.2M16.6 7.4l-3.2 3.2M7.4 16.6l3.2-3.2M16.6 16.6l-3.2-3.2"/></svg>
+    netgen
+  </a>
+  <a href="https://github.com/MinhyukPark/community-detection" target="_blank" rel="noopener" aria-label="github repository">
+    <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+    source
+  </a>
+</nav>
 
-<h2 class="section-header">Base algorithms</h2>
-<div class="gallery-grid">
-
-  <div class="algo-card uc">
-    <a href="leiden-cpm.html">
-    <h3>Leiden (CPM)</h3>
-    <div class="canonical">leidenalg + libleidenalg</div>
-    <p class="blurb">Move-refine-aggregate optimizer minimizing the constant
-    Potts model objective. Resolution slider exposes the multi-scale partition.</p>
-    </a>
+<section class="hook">
+  <p>Given a network \(G\) (undirected, unweighted, simple) with no labels on its nodes, we want a partition \(\hat{\mathcal{C}}\) that groups the nodes into communities. <em>Community</em> means different things to different algorithms: a tightly-knit modularity peak, a short codelength under a random-walk encoding, a high-\(k\) core, or a posterior block under a generative model. Each algorithm here picks one definition and optimises it.</p>
+  <p>Different algorithms agree on the obvious cases and disagree on the boundaries. The same input network produces a different number of clusters, different boundaries, and a different singleton set under each method. The gallery exists to make that disagreement visible: every page walks one algorithm from input to output on the same 32-node fixture, keeps one interactive widget per stage, and shows the partition next to the planted ground truth.</p>
+  <p>Two labels recur across the pages: a node either lands in a non-trivial cluster the algorithm found, or stands alone, and algorithms treat the two cases differently.</p>
+  <div class="defs">
+    <div><span class="term cl">cluster</span>: group of size &ge; 2 in the algorithm's output partition.</div>
+    <div><span class="term out">outlier</span>: node dropped from the partition, either unassigned by the algorithm or surviving alone in a singleton that gets pruned pre-write.</div>
   </div>
+  <p>Every algorithm runs a single base stage that emits its <em>com.csv</em>. Optional <strong>post-processors</strong> run downstream of the base, each consuming the previous partition and tightening it under a constraint:</p>
+  <ol class="post-process">
+    <li><strong>CC</strong> splits any internally-disconnected cluster into its connected components.</li>
+    <li><strong>WCC</strong> mincuts each cluster and splits when the cut falls below a connectedness threshold (\(\log n\) by default; \(\sqrt{n}\) on the sqrt criterion).</li>
+    <li><strong>CM</strong> mincuts, splits, then re-runs the base algorithm on each piece, repeating to a fixed point.</li>
+  </ol>
+  <p>Each algorithm only accepts the post-procs that make sense for it: SBM gets CC + WCC, Leiden gets CM, IKC gets none, Infomap gets CC.</p>
+</section>
 
-  <div class="algo-card uc">
-    <a href="leiden-mod.html">
-    <h3>Leiden (Modularity)</h3>
-    <div class="canonical">leidenalg + libleidenalg</div>
-    <p class="blurb">Same algorithm, modularity objective. Walker shows the
-    refinement phase that distinguishes Leiden from Louvain.</p>
-    </a>
+<figure class="shared-graph">
+  <svg id="shared-graph-svg" aria-label="32-node specialized fixture for community-detection"></svg>
+  <div class="info-col">
+    <div class="info-block">
+      <span class="hd">the example</span>
+      <div class="big"><b>32</b> nodes &middot; <b>49</b> edges &middot; <b>4</b> clusters</div>
+    </div>
+    <div class="info-block">
+      <span class="hd">node breakdown</span>
+      <ul>
+        <li><b>30</b> clustered</li>
+        <li><b>2</b> outliers</li>
+      </ul>
+    </div>
+    <div class="info-block">
+      <span class="hd">edge breakdown</span>
+      <ul>
+        <li>
+          <span class="edge-swatch">
+            <span class="bar" style="background:#3559a0"></span>
+            <span class="bar" style="background:#b4741d"></span>
+            <span class="bar" style="background:#4e7a3a"></span>
+          </span>
+          <span><b>42</b> intra-cluster</span>
+        </li>
+        <li>
+          <span class="edge-swatch"><span class="bar" style="background:#3a3f4a"></span></span>
+          <span><b>6</b> inter-cluster</span>
+        </li>
+        <li>
+          <span class="edge-swatch"><span class="bar" style="background:#7e468f"></span></span>
+          <span><b>1</b> clustered-outlier</span>
+        </li>
+      </ul>
+    </div>
+    <div class="info-block">
+      <span class="hd">cluster breakdown</span>
+      <div class="legend-row">
+        <span><span class="legend-dot" style="background:#7b9bd6"></span>A core (12)</span>
+        <span><span class="legend-dot" style="background:#e0a649"></span>B bridge (8)</span>
+        <span><span class="legend-dot" style="background:#8fbb70"></span>C disconn (6)</span>
+        <span><span class="legend-dot" style="background:#b07ac9"></span>D modular (4)</span>
+        <span><span class="legend-dot" style="background:#e07c6a"></span>outliers (2)</span>
+      </div>
+    </div>
+    <span class="info-hint">drag any node</span>
   </div>
+  <div class="gtip" id="gtip"></div>
+</figure>
 
-  <div class="algo-card uc">
-    <a href="infomap.html">
-    <h3>Infomap</h3>
-    <div class="canonical">infomap</div>
-    <p class="blurb">Map-equation flow. Pre-MCMC PageRank flow, then greedy
-    joining + tuning + sublevel optimization until L(M) stops shrinking.</p>
-    </a>
+<section class="family">
+  <h2 class="family-title">Optimisation-based</h2>
+  <p class="family-lede">Pick a quality function on partitions and walk a local search over partitions until no move improves it. Modularity and CPM are the two objectives in shipping use; Leiden is the optimiser of choice for both since it fixes Louvain's badly-connected-community failure mode via a refinement phase.</p>
+  <div class="gen-grid">
+    <article class="gen-card under-construction">
+      <a class="card-click" href="./leiden-cpm.html" aria-label="Leiden CPM"></a>
+      <div class="name-row">
+        <div class="name-block">
+          <span class="name">Leiden-CPM</span>
+          <span class="fullname">Leiden with constant Potts model</span>
+        </div>
+        <span class="refs">
+          <a class="ref" href="https://doi.org/10.1038/s41598-019-41695-z" target="_blank" rel="noopener">paper</a>
+          <span class="sep">&middot;</span>
+          <a class="ref" href="https://github.com/vtraag/leidenalg" target="_blank" rel="noopener">code</a>
+        </span>
+      </div>
+      <div class="blurb">Local-move, refinement, aggregation, repeat. CPM trades the resolution-limit problem of modularity for a tunable resolution \(\gamma\): high \(\gamma\) splits, low \(\gamma\) merges. Leiden's refinement phase guarantees every output community is internally well-connected.</div>
+    </article>
+    <article class="gen-card under-construction">
+      <a class="card-click" href="./leiden-mod.html" aria-label="Leiden Modularity"></a>
+      <div class="name-row">
+        <div class="name-block">
+          <span class="name">Leiden-Mod</span>
+          <span class="fullname">Leiden with modularity</span>
+        </div>
+        <span class="refs">
+          <a class="ref" href="https://doi.org/10.1038/s41598-019-41695-z" target="_blank" rel="noopener">paper</a>
+          <span class="sep">&middot;</span>
+          <a class="ref" href="https://github.com/vtraag/leidenalg" target="_blank" rel="noopener">code</a>
+        </span>
+      </div>
+      <div class="blurb">Same optimiser, modularity objective. Inherits modularity's resolution limit: communities below a size threshold get absorbed into larger ones whether the network wants them to or not. Workable on small graphs; degrades on large sparse ones.</div>
+    </article>
   </div>
+</section>
 
-  <div class="algo-card uc">
-    <a href="ikc.html">
-    <h3>IKC</h3>
-    <div class="canonical">networkit core decomposition</div>
-    <p class="blurb">Iterative k-core peeling. Walker exposes the layered
-    cores + the modularity-gating that drops sub-modular peelings.</p>
-    </a>
+<section class="family">
+  <h2 class="family-title">Information-theoretic</h2>
+  <p class="family-lede">Encode a random walk on \(G\) using a two-level prefix code: one set of code words per module plus one set per node within a module. The optimum partition is the one whose codelength \(L(M)\) is shortest. Communities are flow traps.</p>
+  <div class="gen-grid">
+    <article class="gen-card under-construction">
+      <a class="card-click" href="./infomap.html" aria-label="Infomap"></a>
+      <div class="name-row">
+        <div class="name-block">
+          <span class="name">Infomap</span>
+          <span class="fullname">map equation on PageRank flow</span>
+        </div>
+        <span class="refs">
+          <a class="ref" href="https://doi.org/10.1073/pnas.0706851105" target="_blank" rel="noopener">paper</a>
+          <span class="sep">&middot;</span>
+          <a class="ref" href="https://github.com/mapequation/infomap" target="_blank" rel="noopener">code</a>
+        </span>
+      </div>
+      <div class="blurb">Smart-teleportation PageRank gives the per-node flow; the map equation \(L(M)\) measures the codelength a random walker spends inside vs. between modules. Greedy joining shrinks \(L(M)\); fine + coarse tuning escapes local minima; recursion builds the hierarchy.</div>
+    </article>
   </div>
+</section>
 
-  <div class="algo-card uc">
-    <a href="sbm-flat-dc.html">
-    <h3>SBM flat (deg-corr)</h3>
-    <div class="canonical">graph-tool</div>
-    <p class="blurb">Multilevel MCMC sweep over flat block partitions, with
-    degree correction. Walker steps through merge_sweep + mh_sweep.</p>
-    </a>
+<section class="family">
+  <h2 class="family-title">K-core peeling</h2>
+  <p class="family-lede">Repeatedly extract the \(k\)-core (the maximal subgraph where every node has degree \(\ge k\)) and call each connected piece a community. Drop everything that fails a minimum-density check.</p>
+  <div class="gen-grid">
+    <article class="gen-card under-construction">
+      <a class="card-click" href="./ikc.html" aria-label="IKC"></a>
+      <div class="name-row">
+        <div class="name-block">
+          <span class="name">IKC</span>
+          <span class="fullname">iterative k-core decomposition</span>
+        </div>
+        <span class="refs">
+          <span class="ref unpub" title="based on networkit core decomposition">unpublished</span>
+          <span class="sep">&middot;</span>
+          <a class="ref" href="https://networkit.github.io" target="_blank" rel="noopener">code</a>
+        </span>
+      </div>
+      <div class="blurb">Take the \(k\)-core for the largest \(k\) that still contains \(\ge\) one node, peel off the connected components, gate each on a modularity threshold. Drops nodes that never qualify. Tightest of the bunch on coverage, loosest on recall.</div>
+    </article>
   </div>
+</section>
 
-  <div class="algo-card uc">
-    <a href="sbm-flat-ndc.html">
-    <h3>SBM flat (no deg-corr)</h3>
-    <div class="canonical">graph-tool</div>
-    <p class="blurb">Same multilevel MCMC, no degree correction. Comparison
-    page surfaces where ndc and dc disagree on hub assignment.</p>
-    </a>
+<section class="family">
+  <h2 class="family-title">Generative (Bayesian SBM)</h2>
+  <p class="family-lede">Posit a generative model where edges between blocks follow a Poisson rate, then find the partition that maximises the posterior. Variants change the prior (planted vs. uniform) and whether the model corrects for the degree sequence. Nested variants compose flat SBMs across hierarchy levels.</p>
+  <div class="gen-grid">
+    <article class="gen-card under-construction">
+      <a class="card-click" href="./sbm-flat-dc.html" aria-label="SBM flat dc"></a>
+      <div class="name-row">
+        <div class="name-block">
+          <span class="name">SBM-flat-dc</span>
+          <span class="fullname">degree-corrected stochastic block model</span>
+        </div>
+        <span class="refs">
+          <a class="ref" href="https://doi.org/10.1103/PhysRevE.83.016107" target="_blank" rel="noopener">paper</a>
+          <span class="sep">&middot;</span>
+          <a class="ref" href="https://git.skewed.de/count0/graph-tool" target="_blank" rel="noopener">code</a>
+        </span>
+      </div>
+      <div class="blurb">Flat SBM with degree correction. Multilevel MCMC alternates merge sweeps that shrink the partition and Metropolis-Hastings sweeps that move single nodes. The deg-corr prior absorbs degree heterogeneity into the model so heavy-tailed nodes don't get their own block.</div>
+    </article>
+    <article class="gen-card under-construction">
+      <a class="card-click" href="./sbm-flat-ndc.html" aria-label="SBM flat ndc"></a>
+      <div class="name-row">
+        <div class="name-block">
+          <span class="name">SBM-flat-ndc</span>
+          <span class="fullname">non-degree-corrected SBM</span>
+        </div>
+        <span class="refs">
+          <a class="ref" href="https://doi.org/10.1103/PhysRevE.83.016107" target="_blank" rel="noopener">paper</a>
+          <span class="sep">&middot;</span>
+          <a class="ref" href="https://git.skewed.de/count0/graph-tool" target="_blank" rel="noopener">code</a>
+        </span>
+      </div>
+      <div class="blurb">Same multilevel MCMC, no degree correction. Hubs end up flagged as their own block. Useful when degree variance carries community signal that deg-corr would otherwise factor out.</div>
+    </article>
+    <article class="gen-card under-construction">
+      <a class="card-click" href="./sbm-flat-pp.html" aria-label="SBM flat pp"></a>
+      <div class="name-row">
+        <div class="name-block">
+          <span class="name">SBM-flat-pp</span>
+          <span class="fullname">planted-partition SBM</span>
+        </div>
+        <span class="refs">
+          <a class="ref" href="https://arxiv.org/abs/1705.10225" target="_blank" rel="noopener">paper</a>
+          <span class="sep">&middot;</span>
+          <a class="ref" href="https://git.skewed.de/count0/graph-tool" target="_blank" rel="noopener">code</a>
+        </span>
+      </div>
+      <div class="blurb">Specialised SBM with one rate inside blocks and one rate between them. Strong assortativity prior; favours partitions where every block looks the same shape. Trips on networks where some blocks are sparse and others dense.</div>
+    </article>
+    <article class="gen-card under-construction">
+      <a class="card-click" href="./sbm-nested-dc.html" aria-label="SBM nested dc"></a>
+      <div class="name-row">
+        <div class="name-block">
+          <span class="name">SBM-nested-dc</span>
+          <span class="fullname">hierarchical degree-corrected SBM</span>
+        </div>
+        <span class="refs">
+          <a class="ref" href="https://doi.org/10.1103/PhysRevX.4.011047" target="_blank" rel="noopener">paper</a>
+          <span class="sep">&middot;</span>
+          <a class="ref" href="https://git.skewed.de/count0/graph-tool" target="_blank" rel="noopener">code</a>
+        </span>
+      </div>
+      <div class="blurb">Stack of flat deg-corrected SBMs, level \(l\) treating level \(l\!-\!1\)'s block-graph as input. Defeats the resolution limit by encoding small-cluster structure at the lowest level + coarse cluster structure at higher ones. Ground-truth comparison uses level 0.</div>
+    </article>
+    <article class="gen-card under-construction">
+      <a class="card-click" href="./sbm-nested-ndc.html" aria-label="SBM nested ndc"></a>
+      <div class="name-row">
+        <div class="name-block">
+          <span class="name">SBM-nested-ndc</span>
+          <span class="fullname">hierarchical non-degree-corrected SBM</span>
+        </div>
+        <span class="refs">
+          <a class="ref" href="https://doi.org/10.1103/PhysRevX.4.011047" target="_blank" rel="noopener">paper</a>
+          <span class="sep">&middot;</span>
+          <a class="ref" href="https://git.skewed.de/count0/graph-tool" target="_blank" rel="noopener">code</a>
+        </span>
+      </div>
+      <div class="blurb">Hierarchical SBM without degree correction. Pairs the resolution-limit fix with the degree-blind prior. Hubs may form their own first-level blocks before getting absorbed up the hierarchy.</div>
+    </article>
+    <article class="gen-card under-construction">
+      <a class="card-click" href="./sbm-flat-best.html" aria-label="SBM flat best"></a>
+      <div class="name-row">
+        <div class="name-block">
+          <span class="name">SBM-flat-best</span>
+          <span class="fullname">flat SBM, lowest entropy</span>
+        </div>
+        <span class="refs">
+          <span class="ref unpub" title="meta-model selector">meta</span>
+          <span class="sep">&middot;</span>
+          <a class="ref" href="https://git.skewed.de/count0/graph-tool" target="_blank" rel="noopener">code</a>
+        </span>
+      </div>
+      <div class="blurb">Runs flat-dc, flat-ndc, and flat-pp; picks the one whose model entropy is lowest; symlinks downstream. The default flat-SBM picker when there's no prior reason to prefer one variant.</div>
+    </article>
+    <article class="gen-card under-construction">
+      <a class="card-click" href="./sbm-nested-best.html" aria-label="SBM nested best"></a>
+      <div class="name-row">
+        <div class="name-block">
+          <span class="name">SBM-nested-best</span>
+          <span class="fullname">nested SBM, lowest entropy</span>
+        </div>
+        <span class="refs">
+          <span class="ref unpub" title="meta-model selector">meta</span>
+          <span class="sep">&middot;</span>
+          <a class="ref" href="https://git.skewed.de/count0/graph-tool" target="_blank" rel="noopener">code</a>
+        </span>
+      </div>
+      <div class="blurb">Same selector for the nested family: nested-dc vs. nested-ndc, lowest entropy wins. Hierarchy preserved through the symlink.</div>
+    </article>
   </div>
+</section>
 
-  <div class="algo-card uc">
-    <a href="sbm-flat-pp.html">
-    <h3>SBM flat (planted partition)</h3>
-    <div class="canonical">graph-tool</div>
-    <p class="blurb">Planted-partition prior favoring equal-size blocks.</p>
-    </a>
+<section class="family">
+  <h2 class="family-title">Post-processors</h2>
+  <p class="family-lede">Three constraints applied downstream of any base partition. Each tightens what the base produced, never adds nodes back. CM is the only one that re-runs the base optimiser; CC and WCC are pure split operations.</p>
+  <div class="gen-grid">
+    <article class="gen-card under-construction">
+      <a class="card-click" href="./cc.html" aria-label="CC"></a>
+      <div class="name-row">
+        <div class="name-block">
+          <span class="name">CC</span>
+          <span class="fullname">connected-component split</span>
+        </div>
+        <span class="refs">
+          <a class="ref" href="https://igraph.org" target="_blank" rel="noopener">code</a>
+        </span>
+      </div>
+      <div class="blurb">Walk every cluster's induced subgraph, split it into weakly-connected components, write each as its own cluster. Catches algorithms that assigned a label without checking connectivity (SBM is the usual culprit). Pure BFS, no model parameters.</div>
+    </article>
+    <article class="gen-card under-construction">
+      <a class="card-click" href="./wcc.html" aria-label="WCC"></a>
+      <div class="name-row">
+        <div class="name-block">
+          <span class="name">WCC</span>
+          <span class="fullname">well-connected components</span>
+        </div>
+        <span class="refs">
+          <a class="ref" href="https://doi.org/10.1007/s41109-024-00658-8" target="_blank" rel="noopener">paper</a>
+          <span class="sep">&middot;</span>
+          <a class="ref" href="https://github.com/MinhyukPark/constrained-clustering" target="_blank" rel="noopener">code</a>
+        </span>
+      </div>
+      <div class="blurb">Stronger than CC: a cluster passes only if its mincut exceeds a connectedness threshold (\(\log_{10} n\) on the log criterion, \(0.2\sqrt{n}\) on sqrt). Anything weaker gets recursively mincut and split. VieCut's cactus algorithm runs the cuts.</div>
+    </article>
+    <article class="gen-card under-construction">
+      <a class="card-click" href="./cm.html" aria-label="CM"></a>
+      <div class="name-row">
+        <div class="name-block">
+          <span class="name">CM</span>
+          <span class="fullname">connectivity modifier</span>
+        </div>
+        <span class="refs">
+          <a class="ref" href="https://doi.org/10.1007/s41109-024-00658-8" target="_blank" rel="noopener">paper</a>
+          <span class="sep">&middot;</span>
+          <a class="ref" href="https://github.com/MinhyukPark/constrained-clustering" target="_blank" rel="noopener">code</a>
+        </span>
+      </div>
+      <div class="blurb">WCC's recursive split, plus a re-run of the base algorithm (Leiden CPM or Mod) on each piece after the cut. Repeats to a fixed point: every output cluster is well-connected and locally-optimal under the base objective. Heaviest of the three.</div>
+    </article>
   </div>
+</section>
 
-  <div class="algo-card uc">
-    <a href="sbm-nested-dc.html">
-    <h3>SBM nested (deg-corr)</h3>
-    <div class="canonical">graph-tool</div>
-    <p class="blurb">Hierarchical SBM as a Python composition over per-level
-    flat BlockState instances.</p>
-    </a>
-  </div>
-
-  <div class="algo-card uc">
-    <a href="sbm-nested-ndc.html">
-    <h3>SBM nested (no deg-corr)</h3>
-    <div class="canonical">graph-tool</div>
-    <p class="blurb">Hierarchical, no degree correction.</p>
-    </a>
-  </div>
-
-  <div class="algo-card uc">
-    <a href="sbm-flat-best.html">
-    <h3>SBM flat (best)</h3>
-    <div class="canonical">graph-tool meta</div>
-    <p class="blurb">Picks the lowest-entropy variant from {flat-dc, flat-ndc,
-    flat-pp}.</p>
-    </a>
-  </div>
-
-  <div class="algo-card uc">
-    <a href="sbm-nested-best.html">
-    <h3>SBM nested (best)</h3>
-    <div class="canonical">graph-tool meta</div>
-    <p class="blurb">Picks the lowest-entropy variant from {nested-dc,
-    nested-ndc}.</p>
-    </a>
-  </div>
-
-</div>
-
-<h2 class="section-header">Post-processors</h2>
-<div class="gallery-grid">
-
-  <div class="algo-card uc">
-    <a href="cc.html">
-    <h3>CC (connected components)</h3>
-    <div class="canonical">igraph weakly_connected_components</div>
-    <p class="blurb">Splits any cluster that is internally disconnected. The
-    32-node fixture's cluster C (two 3-cycles, no inter-edge) exposes this
-    cleanly.</p>
-    </a>
-  </div>
-
-  <div class="algo-card uc">
-    <a href="wcc.html">
-    <h3>WCC (well-connected components)</h3>
-    <div class="canonical">VieCut + constrained-clustering</div>
-    <p class="blurb">Cluster &gt; mincut &gt; if cut &lt; threshold(criterion),
-    split &gt; recurse. Cluster B (two K_4's joined by 1 edge) splits at
-    log threshold.</p>
-    </a>
-  </div>
-
-  <div class="algo-card uc">
-    <a href="cm.html">
-    <h3>CM (Connectivity Modifier)</h3>
-    <div class="canonical">constrained-clustering CM + libleidenalg</div>
-    <p class="blurb">Mincut, then re-run Leiden on each piece, repeat to
-    fixed point. Shipped only with Leiden-CPM and Leiden-Mod base algos.</p>
-    </a>
-  </div>
-
-</div>
-
-<footer style="margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--ink-3, #ddd); text-align: center; color: var(--paper-2, #888); font-size: 0.85rem;">
-  Fixture: 32 nodes, 4 planted communities, 2 outliers, 49 edges. Source-of-truth
-  at <code>js/fixture.js</code>.
+<footer class="ack">
+  <p class="tools">drawn with <a href="https://d3js.org" target="_blank" rel="noopener">d3</a></p>
+  <p class="credit">typed by vltanh, doodled with Claude</p>
 </footer>
 
-</div>
+<script src="./js/fixture.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script>
+window.MathJax = {
+  tex: {
+    inlineMath: [['\\(', '\\)'], ['$', '$'], ['$$', '$$']],
+    displayMath: [['\\[', '\\]']]
+  },
+  chtml: { scale: 1.0 }
+};
+</script>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script>
+(function () {
+  const FIX = COMDET.FIXTURE;
+
+  // 4 communities + outlier palette aligned with shared.css cluster vars.
+  // Outlier red kept saturated for the landing hero; per-page convention may
+  // shift it to neutral plum once interaction work lands.
+  const COL = {
+    0: "#7b9bd6",   // A core
+    1: "#e0a649",   // B bridge
+    2: "#8fbb70",   // C disconn
+    3: "#b07ac9",   // D modular
+    OUT: "#e07c6a",
+    edge_intra: {
+      0: "#3559a0",
+      1: "#b4741d",
+      2: "#4e7a3a",
+      3: "#7e468f",
+    },
+    edge_inter: "#3a3f4a",
+    edge_to_outlier: "#7e468f",
+  };
+
+  const CLUSTER_OF = {};
+  FIX.nodes.forEach((id, i) => {
+    const c = FIX.gt[i];
+    CLUSTER_OF[id] = c >= 0 ? c : "OUT";
+  });
+
+  // ── Per-node degree / edge-type stats ──────────────────
+  const intraDeg = {};
+  const interDeg = {};
+  const totalDeg = {};
+  FIX.nodes.forEach(n => {
+    intraDeg[n] = 0;
+    interDeg[n] = 0;
+    totalDeg[n] = 0;
+  });
+  FIX.edges.forEach(([u, v]) => {
+    totalDeg[u]++;
+    totalDeg[v]++;
+    const cu = CLUSTER_OF[u], cv = CLUSTER_OF[v];
+    const same = cu === cv && cu !== "OUT";
+    if (same) {
+      intraDeg[u]++;
+      intraDeg[v]++;
+    } else {
+      interDeg[u]++;
+      interDeg[v]++;
+    }
+  });
+
+  function edgeType(u, v) {
+    const cu = CLUSTER_OF[u], cv = CLUSTER_OF[v];
+    if (cu === "OUT" && cv === "OUT") return "outlier-outlier";
+    if (cu === "OUT" || cv === "OUT") return "clustered-outlier";
+    if (cu === cv) return "intra-cluster (" + clusterLabel(cu) + ")";
+    return "inter-cluster (" + clusterLabel(cu) + ", " + clusterLabel(cv) + ")";
+  }
+  function edgeColor(u, v) {
+    const cu = CLUSTER_OF[u], cv = CLUSTER_OF[v];
+    if (cu === "OUT" || cv === "OUT") return COL.edge_to_outlier;
+    if (cu === cv) return COL.edge_intra[cu];
+    return COL.edge_inter;
+  }
+  function clusterLabel(c) {
+    if (c === "OUT") return "(outlier)";
+    return ["A", "B", "C", "D"][c];
+  }
+
+  // ── Force-directed, anchored to fixture positions ──────
+  const POS_BY_ID = {};
+  FIX.positions.forEach(p => { POS_BY_ID[p.id] = { x: p.x, y: p.y }; });
+  const xs = FIX.positions.map(p => p.x);
+  const ys = FIX.positions.map(p => p.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const pad = 30;
+  const vbW = (maxX - minX) + pad * 2;
+  const vbH = (maxY - minY) + pad * 2;
+  const offX = pad - minX;
+  const offY = pad - minY;
+
+  const svg = d3.select("#shared-graph-svg")
+    .attr("viewBox", `0 0 ${vbW} ${vbH}`)
+    .attr("preserveAspectRatio", "xMidYMid meet");
+  const gLinks = svg.append("g").attr("class", "links");
+  const gNodes = svg.append("g").attr("class", "nodes");
+  const gLabels = svg.append("g").attr("class", "labels");
+
+  const simNodes = FIX.nodes.map(id => {
+    const p = POS_BY_ID[id];
+    return {
+      id,
+      x: p.x + offX,
+      y: p.y + offY,
+      homeX: p.x + offX,
+      homeY: p.y + offY,
+      cluster: CLUSTER_OF[id],
+    };
+  });
+  const idx = {};
+  simNodes.forEach(n => { idx[n.id] = n; });
+  const simLinks = FIX.edges.map(([u, v]) => ({
+    source: idx[u],
+    target: idx[v],
+    type: edgeType(u, v),
+    color: edgeColor(u, v),
+    u, v,
+  }));
+
+  const link = gLinks.selectAll("line").data(simLinks).join("line")
+    .attr("stroke", d => d.color)
+    .attr("stroke-width", 1.5)
+    .attr("stroke-linecap", "round")
+    .attr("opacity", 0.82)
+    .style("cursor", "pointer");
+
+  const node = gNodes.selectAll("circle").data(simNodes).join("circle")
+    .attr("r", 11)
+    .attr("fill", d => COL[d.cluster] || COL.OUT)
+    .attr("stroke", "#1b2033")
+    .attr("stroke-width", 1.5)
+    .style("cursor", "grab");
+
+  const label = gLabels.selectAll("text").data(simNodes).join("text")
+    .attr("text-anchor", "middle")
+    .attr("dominant-baseline", "central")
+    .attr("font-family", "Special Elite, Courier New, monospace")
+    .attr("font-size", 9)
+    .attr("font-weight", 400)
+    .attr("fill", "#1b2033")
+    .attr("pointer-events", "none")
+    .text(d => d.id);
+
+  const sim = d3.forceSimulation(simNodes)
+    .force("link", d3.forceLink(simLinks).distance(45).strength(0.18))
+    .force("charge", d3.forceManyBody().strength(-55))
+    .force("collide", d3.forceCollide(14))
+    .force("x", d3.forceX(d => d.homeX).strength(0.20))
+    .force("y", d3.forceY(d => d.homeY).strength(0.20))
+    .alpha(0.45).alphaDecay(0.035);
+
+  sim.on("tick", () => {
+    link
+      .attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+      .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+    node.attr("cx", d => d.x).attr("cy", d => d.y);
+    label.attr("x", d => d.x).attr("y", d => d.y);
+  });
+
+  const drag = d3.drag()
+    .on("start", function (e, d) {
+      if (!e.active) sim.alphaTarget(0.35).restart();
+      d.fx = d.x; d.fy = d.y;
+      d3.select(this).style("cursor", "grabbing");
+    })
+    .on("drag", function (e, d) { d.fx = e.x; d.fy = e.y; })
+    .on("end", function (e, d) {
+      if (!e.active) sim.alphaTarget(0);
+      d.fx = null; d.fy = null;
+      d3.select(this).style("cursor", "grab");
+    });
+  node.call(drag);
+
+  // ── Tooltip ──────────────────────────────────────────
+  const tip = document.getElementById("gtip");
+  const figure = document.querySelector(".shared-graph");
+  function showTip(html, clientX, clientY) {
+    tip.innerHTML = html;
+    tip.classList.add("on");
+    const rect = figure.getBoundingClientRect();
+    let x = clientX - rect.left + 14;
+    let y = clientY - rect.top + 14;
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    if (x + tw > rect.width - 8) x = clientX - rect.left - tw - 12;
+    if (y + th > rect.height - 8) y = clientY - rect.top - th - 8;
+    tip.style.left = x + "px";
+    tip.style.top = y + "px";
+  }
+  function hideTip() { tip.classList.remove("on"); }
+
+  node.on("mouseenter", function (e, d) {
+    const d_total = totalDeg[d.id];
+    const d_int = intraDeg[d.id];
+    const d_ext = interDeg[d.id];
+    const mu = d_total > 0 ? (d_ext / d_total) : 0;
+    const type = d.cluster === "OUT" ? "outlier" : "clustered";
+    const cl = d.cluster === "OUT" ? "(none)" : clusterLabel(d.cluster);
+    showTip(
+      '<div class="hd">node ' + d.id + ' &middot; ' + type + '</div>' +
+      '<div>cluster <b>' + cl + '</b></div>' +
+      '<div>degree <b>' + d_total + '</b> <span class="dim">(intra ' + d_int + ', inter ' + d_ext + ')</span></div>' +
+      '<div>μ<sub>i</sub> <b>' + (d_total === 0 ? "—" : mu.toFixed(2)) + '</b></div>',
+      e.clientX, e.clientY
+    );
+  })
+  .on("mousemove", function (e) { showTip(tip.innerHTML, e.clientX, e.clientY); })
+  .on("mouseleave", hideTip);
+
+  link.on("mouseenter", function (e, d) {
+    showTip(
+      '<div class="hd">edge</div>' +
+      '<div><b>' + d.u + '</b>, <b>' + d.v + '</b></div>' +
+      '<div class="dim">' + d.type + '</div>',
+      e.clientX, e.clientY
+    );
+  })
+  .on("mousemove", function (e) { showTip(tip.innerHTML, e.clientX, e.clientY); })
+  .on("mouseleave", hideTip);
+})();
+</script>
+
 </body>
 </html>
