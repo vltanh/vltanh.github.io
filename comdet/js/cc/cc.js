@@ -94,8 +94,13 @@
     }
     // BFS components in node-id order: root selection iterates F.nodes in
     // order; each returned component is the BFS tree from its root.
+    // Within each component sort by node-id ascending to mirror the
+    // canonical's per-node iteration in constrained.h:402-411 (the loop
+    // walks node_id = 0..vcount-1 and pushes into component_id_to_member
+    // _vector_map[cid], so per-component contents are node-id-sorted).
     const orderedNodes = F.nodes.slice();
-    const allComps = bfsComponents(orderedNodes, intraEdges);
+    const allComps = bfsComponents(orderedNodes, intraEdges)
+      .map(function (c) { return c.slice().sort(function (a, b) { return a - b; }); });
     tlog("STAGE_REMOVE intra_edges=" + intraEdges.length + " (of " + F.edges.length + ")");
     tlog("STAGE_COMPONENTS count=" + allComps.length);
     allComps.forEach(function (c, i) {
