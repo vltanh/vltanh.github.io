@@ -871,7 +871,10 @@
         ...opts, boundaryLog: log, isFirstLoop: isFirstLoopThis,
       });
       const newL = collapsedP.codelength();
-      if (eff === 0 || newL >= lastL - minImpr) break;
+      // canonical break is purely codelength-based (mirrors
+      // restoreConsolidatedOptimizationPointIfNoImprovement). Drop the
+      // eff === 0 early break for parity with findTopModulesRepeatedly.
+      if (newL >= lastL - minImpr) break;
       const next = new Int32Array(g.n);
       for (let v = 0; v < g.n; v++) {
         next[v] = collapsedP.moduleOf[aggregateMembership[v]];
@@ -1000,11 +1003,15 @@
 
   function coarseTuneFaithful(g, leafToTop, rng, opts) {
     opts = opts || {};
+    const log = opts.boundaryLog || null;
     const ncomm = maxOf(leafToTop) + 1;
     const groups = new Array(ncomm);
     for (let i = 0; i < ncomm; i++) groups[i] = [];
     for (let v = 0; v < g.n; v++) groups[leafToTop[v]].push(v);
 
+    // Phase 1: per top-module sub-Infomap. Mirrors canonical's
+    // InfomapBase::coarseTune lines 1442-1466 (subInfomap.setTwoLevel(true).
+    // setTuneIterationLimit(1)).
     const subOf = new Int32Array(g.n);
     let offset = 0;
     for (let c = 0; c < ncomm; c++) {
@@ -1023,16 +1030,13 @@
         }
       }
       const subIds = Array.from({ length: members.length }, (_, i) => i);
-      // canonical's coarseTune sub-Infomap: setTwoLevel(true) +
-      // setTuneIterationLimit(1). This makes the partition() outer loop
-      // run at most 1 fineTune/coarseTune iteration in the sub-call
-      // (gating tuneIterationLimit !== 1 inside tryMoveEach also flips).
       const subRes = runInfomapFaithful(subIds, subEdges, {
         seed: opts.seed != null ? opts.seed : 1,
         rng: rng,
         twoLevel: true,
         tuneIterationLimit: 1,
         aggregationLimit: 30,
+        boundaryLog: log,
       });
       let maxSub = 0;
       for (let i = 0; i < members.length; i++) {
@@ -1042,7 +1046,61 @@
       }
       offset += maxSub + 1;
     }
-    return findTopModulesRepeatedlyFromPartition(g, subOf, rng, opts);
+
+    // Phase 2: project leaves to sub-modules (canonical lines 1472-1480
+    // moveActiveNodesToPredefinedModules(subModules)). Deterministic; no
+    // RNG.
+    const PsubLeaf = makePartition(g);
+    applyMembership(PsubLeaf, g, subOf);
+
+    // Phase 3: collapse leaves -> sub-modules super-net (canonical's
+    // consolidateModules(true)). Build a super-graph where each sub-
+    // module is a node. Then move sub-modules to former top-modules
+    // (canonical lines 1490-1500: moveActiveNodesToPredefinedModules(
+    // modules)). Deterministic; no RNG.
+    const subRenum = renumberByEncounter(subOf, g.n);
+    const numSub = maxOf(subRenum) + 1;
+    const subToTop = new Int32Array(numSub);
+    {
+      // Each sub-module's parent top-module = the leafToTop of any leaf
+      // in that sub-module. Take the first leaf encountered per sub.
+      const seen = new Int8Array(numSub);
+      for (let v = 0; v < g.n; v++) {
+        const s = subRenum[v];
+        if (!seen[s]) { subToTop[s] = leafToTop[v]; seen[s] = 1; }
+      }
+    }
+
+    const collapsedG = collapseGraph(g, subRenum, numSub, null);
+    const collapsedP = makePartition(collapsedG);
+    // Move sub-modules to their former top-modules. After this,
+    // collapsedP.moduleOf == subToTop.
+    applyMembership(collapsedP, collapsedG, subToTop);
+
+    // Phase 4: optimizeActiveNetwork at the sub-module level (canonical
+    // line 1504). RNG-consuming. isCoarseTune=true -> loopLimit=20.
+    if (log) log("coarseTune.subModuleOpt", { n: collapsedG.n });
+    optimizeActiveNetwork(collapsedP, collapsedG, rng, {
+      loopLimit: 20,
+      tuneIterationLimit: opts.tuneIterationLimit | 0,
+      isFirstLoop: false,
+      boundaryLog: log,
+    });
+
+    // Phase 5: project optimized sub-module-of-sub-modules back to
+    // leaves to produce the new leaf->top membership.
+    const newLeafToTop = new Int32Array(g.n);
+    for (let v = 0; v < g.n; v++) {
+      newLeafToTop[v] = collapsedP.moduleOf[subRenum[v]];
+    }
+    const newRenum = renumberByEncounter(newLeafToTop, g.n);
+
+    // Phase 6: continue with findTopModulesRepeatedlyFromPartition on
+    // the new leaf-level membership (canonical's findTopModulesRepeatedly
+    // call after coarseTune in partition()).
+    return findTopModulesRepeatedlyFromPartition(g, newRenum, rng, {
+      ...opts, isFirstLoopOuter: false,
+    });
   }
 
   // Faithful mirror of InfomapBase::partition (two-level path).
