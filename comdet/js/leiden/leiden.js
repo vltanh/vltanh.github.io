@@ -83,7 +83,14 @@
     const n = P.n();
     const order = new Array(n);
     for (let v = 0; v < n; v++) order[v] = v;
-    LV.shuffle(order, rng);
+    // Replay-mode: inject the canonical Optimiser's shuffled queue.
+    // Used by tools/viz_check/leiden to byte-equal libleidenalg.
+    if (opts.visitOrder) {
+      const vo = opts.visitOrder;
+      for (let v = 0; v < n && v < vo.length; v++) order[v] = vo[v];
+    } else {
+      LV.shuffle(order, rng);
+    }
     const queue = order.slice();
     const isStable = new Uint8Array(n);
     let totalImprov = 0;
