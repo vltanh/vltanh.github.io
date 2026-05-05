@@ -39,28 +39,34 @@
     return p * Math.log2(p);
   }
 
-  // ── libstdc++-style std::uniform_int_distribution<unsigned int> ────
-  // For std::mt19937 (urngmin=0, urngmax=2^32-1) the 32-bit-output
-  // path runs:
-  //   urngrange = 2^32 - 1
-  //   urange    = max - min
-  //   uerange   = urange + 1
-  //   scaling   = urngrange / uerange   (integer)
-  //   past      = uerange * scaling
-  //   loop: ret = mt19937(); reject if ret >= past
-  //   return min + ret / scaling
-  // The JS MT19937 raw() returns a uint32 already, matching std::mt19937.
+  // ── libstdc++ std::uniform_int_distribution<unsigned int>(lo, hi) ──
+  // For std::mt19937 (__urngrange == UINT32_MAX), libstdc++ routes through
+  // _S_nd<uint64>(g, range): Lemire's debiased multiplication
+  // (uniform_int_dist.h:244-270). Always consumes >= 1 raw mt() call,
+  // including when lo == hi (range == 1).
+  //   range    = hi - lo + 1
+  //   product  = uint64(g()) * uint64(range)
+  //   low      = uint32(product)
+  //   if low < range:
+  //     threshold = 2^32 % range          // == (-range) % range under uint32
+  //     while low < threshold: redraw
+  //   ret      = uint32(product >> 32)
+  //   return lo + ret
+  // Verified bit-equal vs libstdc++ at L1 (tools/viz_check/infomap/L1_uniform_int)
+  // across 9 seeds × 100k draws.
   function uniformInt(rng, lo, hi) {
-    if (hi <= lo) return lo;
-    const urngrange = 0xFFFFFFFF;            // 2^32 - 1
-    const urange = (hi - lo) >>> 0;
-    const uerange = urange + 1;              // safe: urange < 2^32 in our usage
-    // Use floor division for integers; JS double can hold (2^32-1) exactly.
-    const scaling = Math.floor(urngrange / uerange);
-    const past = uerange * scaling;
-    let ret;
-    do { ret = rng.raw() >>> 0; } while (ret >= past);
-    return lo + Math.floor(ret / scaling);
+    const range = ((hi - lo) >>> 0) + 1;
+    const r64 = BigInt(range);
+    const t = (1n << 32n) % r64;
+    let product = BigInt(rng.raw() >>> 0) * r64;
+    let low = product & 0xFFFFFFFFn;
+    if (low < r64) {
+      while (low < t) {
+        product = BigInt(rng.raw() >>> 0) * r64;
+        low = product & 0xFFFFFFFFn;
+      }
+    }
+    return lo + Number(product >> 32n);
   }
 
   // Mirror Random::getRandomizedIndexVector (Random.h):
