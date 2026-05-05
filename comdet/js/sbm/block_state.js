@@ -136,15 +136,17 @@
       return logChooseRep(NB, E);
     }
     function partitionDl() {
+      const ne = sortedNonEmpty();
       let S = lgamma(N + 1);
-      for (let i = 0; i < Bne; i++) S -= lgamma(nr[neList[i]] + 1);
+      for (let i = 0; i < ne.length; i++) S -= lgamma(nr[ne[i]] + 1);
       S += lbinom(N - 1, Bne - 1) + Math.log(N);
       return S;
     }
     function degreeDlUniform() {
+      const ne = sortedNonEmpty();
       let S = 0;
-      for (let i = 0; i < Bne; i++) {
-        const r = neList[i];
+      for (let i = 0; i < ne.length; i++) {
+        const r = ne[i];
         S += logChooseRep(nr[r], Math.round(er[r]));
       }
       return S;
@@ -153,9 +155,10 @@
     // C(M_out, E_out)^-1 (uniform over simple graphs with the two
     // exact edge counts). Same units as DC/NDC exact entropy.
     function ppLikelihood() {
+      const ne = sortedNonEmpty();
       let Ein2 = 0, Min = 0, nTot = 0;
-      for (let i = 0; i < Bne; i++) {
-        const r = neList[i];
+      for (let i = 0; i < ne.length; i++) {
+        const r = ne[i];
         Ein2 += ers[r * B + r];
         Min += (nr[r] * (nr[r] - 1)) / 2;
         nTot += nr[r];
@@ -170,9 +173,10 @@
       return S;
     }
     function ppEdgesDl() {
+      const ne = sortedNonEmpty();
       let Min = 0;
-      for (let i = 0; i < Bne; i++) {
-        const r = neList[i];
+      for (let i = 0; i < ne.length; i++) {
+        const r = ne[i];
         Min += (nr[r] * (nr[r] - 1)) / 2;
       }
       return Math.log(Math.min(E, Min) + 1);
@@ -265,11 +269,14 @@
       // eterm(r,s) (counted once, off-diagonal).
       if (r !== s) S -= lgamma(ers[r * B + s] + 1);
       // eterm(r,t) + eterm(s,t) for every other non-empty t. Iterate
-      // over the live prefix of neList instead of all B labels - on
-      // dnc B=N=906 but Bne stays around 30, so this collapses the
-      // inner loop's lgamma count from ~B per virtualMove to ~Bne.
-      for (let i = 0; i < Bne; i++) {
-        const t = neList[i];
+      // the sorted neList prefix - on dnc B=N=906 but Bne~30, so the
+      // inner loop drops from ~B per virtualMove to ~Bne. Sorting
+      // (vs raw admin-order) keeps the summation order identical to
+      // the pre-cache version that walked t=0..B-1, so dS values
+      // stay byte-equal across the refactor.
+      const ne = sortedNonEmpty();
+      for (let i = 0; i < ne.length; i++) {
+        const t = ne[i];
         if (t === r || t === s) continue;
         S -= lgamma(ers[r * B + t] + 1);
         S -= lgamma(ers[s * B + t] + 1);
