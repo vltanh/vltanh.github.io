@@ -463,6 +463,11 @@
       if (P.moduleMembers[oldM] === 1) {
         P.emptyModules.push(oldM);
       }
+      if (opts.onMoveDeltas) {
+        opts.onMoveDeltas(v, oldM, bestModule,
+                          oldEntry.deltaEnter, oldEntry.deltaExit,
+                          bestEntry.deltaEnter, bestEntry.deltaExit);
+      }
       P.moveNode(v, bestModule,
                  oldEntry.deltaEnter, oldEntry.deltaExit,
                  bestEntry.deltaEnter, bestEntry.deltaExit);
@@ -489,6 +494,7 @@
       }
       // Move single connected node to same module.
       if (numLinkedInOld === 1 && P.moduleMembers[oldM] === 1) {
+        if (opts.onPairPull) opts.onPairPull(v, nodeInOldModule, oldM, bestModule);
         const w = nodeInOldModule;
         // Build deltaFlow for w restricted to oldM and bestModule.
         let oDE = 0, oDX = 0, nDE = 0, nDX = 0;
