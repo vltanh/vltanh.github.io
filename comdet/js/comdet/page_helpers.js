@@ -314,9 +314,19 @@
       nextBtn: document.getElementById(ctlPrefix + "-next"),
       resetBtn: document.getElementById(ctlPrefix + "-reset"),
       endBtn: document.getElementById(ctlPrefix + "-end"),
+      // Optional random-row buttons; omit in markup to keep the
+      // walker deterministic (existing pages without rerolls keep
+      // their behaviour because document.getElementById returns null
+      // and stepController treats null as "no button").
+      randStepBtn: document.getElementById(ctlPrefix + "-rand-step"),
+      randAllBtn:  document.getElementById(ctlPrefix + "-rand-all"),
       labelCur: document.getElementById(ctlPrefix + "-cur"),
       labelTotal: document.getElementById(ctlPrefix + "-total"),
       onRender: render,
+      onRandStep: typeof opts.onRandStep === "function" ? opts.onRandStep : null,
+      onRandAll:  typeof opts.onRandAll  === "function" ? opts.onRandAll  : null,
+      randStepDisabledAt: opts.randStepDisabledAt,
+      randAtStart: !!opts.randAtStart,
       keyboard: false,
     });
 

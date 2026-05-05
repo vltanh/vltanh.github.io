@@ -2,10 +2,22 @@
  * Phase 1 (modularity sweep — full passes until quiet) and Phase 2
  * (aggregation), iterated until the graph stops shrinking.
  *
- * Reuses COMDET.PAGE primitives. Stage 2 walks every per-node visit
- * within Phase 1's first pass at level 0 (the longest sweep). Stage 3
- * shows the level-0 collapse. Stage 4 lets the user step through
- * higher-level passes. Stage 5 is the side-by-side final.
+ * Reroll convention follows netgen's matcher / SBM / nPSO walkers
+ * (feedback_matcher_reroll_ux.md + feedback_randall_in_stage.md):
+ *   - random step  : bump per-step seed; re-run kernel; clamp cursor
+ *                    to MIN(idx-1, newTotal-1) so the user keeps the
+ *                    same approximate position. Strict in-stage
+ *                    [idx-1..end] preservation isn't possible because
+ *                    Louvain.run threads a single RNG instance through
+ *                    every level; new shuffle = new trajectory from
+ *                    visit 0. Documented relaxation.
+ *   - random all   : bump global seed; re-run kernel; cursor lands on
+ *                    visit 0 (start of run) so the user can step
+ *                    through the new trajectory.
+ *
+ * Stages 3, 4, 5 are deterministic functions of `result`; they tear
+ * down + remount on every reroll so the user sees consistent state
+ * across the page.
  */
 (function () {
   "use strict";
@@ -19,30 +31,37 @@
     document.getElementById("links").innerHTML = C.linksRow({ gen: "louvain" });
   }
 
-  const seed = 42;
-  function runKernel() {
-    const G = LV.Graph(F.nodes.length, F.edges, { correctSelfLoops: false });
-    return LV.run(G, LV.Modularity(), seed, { recordTrace: true });
-  }
-  let result = runKernel();
+  let seed = 42;
+  let result = null;
+  // Mutable arrays captured by the stage-2 walker's closure. Reroll
+  // mutates these in place + calls ctl.reconfigureKeep so the closure
+  // picks up the new content without re-mounting.
+  const phase1Events = [];
+  const snapshots = [];
+  let walker = null;        // { viz, controller, render }
 
-  // ── Stage 0 + 1 ─────────────────────────────────────────────────
+  function runKernel(s) {
+    const G = LV.Graph(F.nodes.length, F.edges, { correctSelfLoops: false });
+    return LV.run(G, LV.Modularity(), s, { recordTrace: true });
+  }
+
+  // ── Stage 0 + 1 (static, never reroll-driven) ──────────────────
   P.renderFixture("g-input-cy", { useGT: true, pinned: true });
   const singleton = F.nodes.map(function (_, i) { return i; });
   P.renderFixture("g-singleton-cy", { membership: singleton, pinned: true });
 
-  // ── Stage 2: Phase 1 walker (level 0, all sweeps stitched) ──────
-  // Build flat event list: every visit across every sweep at level 0.
-  function buildPhase1Events() {
-    const lv0 = result.levels[0];
-    const events = [];
+  // ── Per-result derivation: rebuild phase1 events + snapshots ────
+  function rebuildPhase1Trace(res) {
+    phase1Events.length = 0;
+    snapshots.length = 0;
+    const lv0 = res.levels[0];
     let cumMoves = 0, cumDeltaQ = 0;
     lv0.sweeps.forEach(function (sw, swIdx) {
       sw.traces.forEach(function (t, vi) {
-        events.push({
+        phase1Events.push({
           sweepIdx: swIdx,
           visitInSweep: vi,
-          totalSoFar: events.length + 1,
+          totalSoFar: phase1Events.length + 1,
           isLastInSweep: vi === sw.traces.length - 1,
           nbMovesAfterSweep: cumMoves + sw.nbMoves,
           deltaQAfterSweep: cumDeltaQ + sw.totalImprov,
@@ -53,33 +72,27 @@
       cumMoves += sw.nbMoves;
       cumDeltaQ += sw.totalImprov;
     });
-    return events;
-  }
-  const phase1Events = buildPhase1Events();
-
-  // Compute per-event membership snapshot by replaying the sweeps.
-  function computeSnapshots() {
+    // Snapshots: replay phase-1 sweeps to capture per-visit membership.
     const Gloc = LV.Graph(F.nodes.length, F.edges, { correctSelfLoops: false });
     const Pl = LV.Partition(Gloc, null, LV.Modularity());
-    const snaps = [];
-    const lv0 = result.levels[0];
     lv0.sweeps.forEach(function (sw) {
       sw.traces.forEach(function (t) {
         if (t.moved) Pl.moveNode(t.v, t.toComm);
-        snaps.push(Array.from(Pl.membership()));
+        snapshots.push(Array.from(Pl.membership()));
       });
     });
-    return snaps;
   }
-  const snapshots = computeSnapshots();
+
   function moveSnapshot(idx) {
     if (idx === 0) return singleton;
     return snapshots[idx - 1];
   }
 
+  // ── Stage 2 status / stats / sweep label renderers ──────────────
   const moveStatusEl = document.getElementById("g-move-status");
-  const moveStatsEl = document.getElementById("g-move-stats");
-  const moveSweepEl = document.getElementById("g-move-sweep");
+  const moveStatsEl  = document.getElementById("g-move-stats");
+  const moveSweepEl  = document.getElementById("g-move-sweep");
+  const moveSeedEl   = document.getElementById("g-move-seed");
 
   function moveStatusHTML(idx, ev) {
     if (!ev) return "stage 0 · singleton init · 32 nodes alone";
@@ -89,7 +102,7 @@
     return "node " + ev.v + " &middot; sweep " + (ev.sweepIdx + 1)
          + " · visit " + (ev.visitInSweep + 1) + verb;
   }
-  function moveStatsHTML(idx, ev) {
+  function moveStatsHTML(idx) {
     let mv = 0, dq = 0;
     for (let k = 0; k < idx; k++) {
       const e = phase1Events[k];
@@ -115,40 +128,27 @@
     html += '</tbody></table>';
     return html;
   }
-  P.mountStepWalker({
-    vizHostId: "g-move-cy",
-    panelHostId: "g-move-panel",
-    ctlPrefix: "g-move",
-    events: phase1Events,
-    snapshotAt: moveSnapshot,
-    sidePanelHTML: moveCandPanel,
-    onRender: function (idx, ev) {
-      if (moveStatusEl) moveStatusEl.innerHTML = moveStatusHTML(idx, ev);
-      if (moveStatsEl) moveStatsEl.innerHTML = moveStatsHTML(idx, ev);
-      if (moveSweepEl) {
-        const sweepNum = ev ? (ev.sweepIdx + 1) : 0;
-        const totalSweeps = result.levels[0].sweeps.length;
-        moveSweepEl.textContent = "sweep " + sweepNum + " / " + totalSweeps;
-      }
-    },
-  });
 
-  // ── Stage 3: Aggregation (level-0 collapse) ─────────────────────
-  P.mountAggregation({
-    vizHostId: "g-agg-cy",
-    fineMembership: Array.from(result.levels[0].finePost),
-    capEl: document.getElementById("g-agg-cap"),
-    playBtn: document.getElementById("g-agg-play"),
-    resetBtn: document.getElementById("g-agg-reset"),
-  });
+  // ── Stage 3, 4, 5 mounters (idempotent: tear down host DOM first) ─
+  function mountStage3(res) {
+    const host = document.getElementById("g-agg-cy");
+    if (host) host.innerHTML = "";
+    const cap = document.getElementById("g-agg-cap");
+    if (cap) cap.textContent = "after · super-graph (n = ·)";
+    P.mountAggregation({
+      vizHostId: "g-agg-cy",
+      fineMembership: Array.from(res.levels[0].finePost),
+      capEl: cap,
+      playBtn: document.getElementById("g-agg-play"),
+      resetBtn: document.getElementById("g-agg-reset"),
+    });
+  }
 
-  // ── Stage 4: Higher-level passes summary ────────────────────────
-  // Show a per-level table: vc-before, ncomm-found, vc-after, sweeps,
-  // total moves at that level, ΔQ across the level.
-  const levelTableEl = document.getElementById("g-levels-tbody");
-  if (levelTableEl) {
-    levelTableEl.innerHTML = "";
-    result.levels.forEach(function (lv, i) {
+  function mountStage4(res) {
+    const tbody = document.getElementById("g-levels-tbody");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+    res.levels.forEach(function (lv, i) {
       let totMoves = 0, totDQ = 0;
       lv.sweeps.forEach(function (sw) { totMoves += sw.nbMoves; totDQ += sw.totalImprov; });
       const tr = document.createElement("tr");
@@ -160,24 +160,13 @@
         '<td>' + lv.sweeps.length + '</td>' +
         '<td>' + totMoves + '</td>' +
         '<td>' + totDQ.toFixed(4) + '</td>';
-      levelTableEl.appendChild(tr);
+      tbody.appendChild(tr);
     });
   }
 
-  // ── Stage 5: Final compare ──────────────────────────────────────
-  P.mountFinalCompare({
-    leidenHostId: "g-final-louvain",
-    gtHostId: "g-final-gt",
-    statsTbody: document.querySelector("#g-final-stats tbody"),
-    membership: result.partition.membership(),
-    hValue: result.quality,
-    hValueEl: document.getElementById("g-final-Q"),
-  });
-
-  // Detect internally disconnected communities (the Leiden Fig 2 case).
   function disconnectedComms(membership) {
     const idxById = P.indexById(F);
-    const adj = new Map(); // node id -> [neighbour ids]
+    const adj = new Map();
     F.nodes.forEach(function (id) { adj.set(id, []); });
     F.edges.forEach(function (e) {
       adj.get(e[0]).push(e[1]); adj.get(e[1]).push(e[0]);
@@ -187,7 +176,6 @@
     F.nodes.forEach(function (start) {
       if (seen.has(start)) return;
       const comm = membership[idxById[start]];
-      // BFS within this comm.
       const q = [start]; seen.add(start);
       const found = [start];
       while (q.length) {
@@ -198,28 +186,93 @@
           seen.add(w); q.push(w); found.push(w);
         });
       }
-      // Total nodes in this comm.
       const allInComm = F.nodes.filter(function (id) {
         return membership[idxById[id]] === comm;
       });
-      // If found < allInComm, we know this comm is disconnected. Mark
-      // it once (the BFS will run separately on the other component
-      // and we'd add it again, so use a Set).
       if (found.length < allInComm.length) badComms.add(comm);
     });
     return Array.from(badComms);
   }
-  const badEl = document.getElementById("g-final-disconn");
-  if (badEl) {
-    const bad = disconnectedComms(result.partition.membership());
-    if (bad.length === 0) {
-      badEl.innerHTML = '<em>None.</em> On this small fixture, Louvain happens to land on a connected partition.';
-    } else {
-      badEl.innerHTML = 'communities <strong>' + bad.join(', ') + '</strong> are internally disconnected. '
-        + 'These are the cases the paper Traag et al. 2019 measured at up to 16% on real benchmark networks; '
-        + 'Leiden\'s refinement phase splits them automatically. See <a href="./leiden-cpm.html">Leiden-CPM</a>.';
+
+  function mountStage5(res) {
+    document.getElementById("g-final-louvain").innerHTML = "";
+    document.getElementById("g-final-gt").innerHTML = "";
+    P.mountFinalCompare({
+      leidenHostId: "g-final-louvain",
+      gtHostId: "g-final-gt",
+      statsTbody: document.querySelector("#g-final-stats tbody"),
+      membership: res.partition.membership(),
+      hValue: res.quality,
+      hValueEl: document.getElementById("g-final-Q"),
+    });
+    const badEl = document.getElementById("g-final-disconn");
+    if (badEl) {
+      const bad = disconnectedComms(res.partition.membership());
+      if (bad.length === 0) {
+        badEl.innerHTML = '<em>None.</em> On this small fixture, Louvain happens to land on a connected partition.';
+      } else {
+        badEl.innerHTML = 'communities <strong>' + bad.join(', ') + '</strong> are internally disconnected. '
+          + 'These are the cases the paper Traag et al. 2019 measured at up to 16% on real benchmark networks; '
+          + "Leiden's refinement phase splits them automatically. See <a href=\"./leiden-cpm.html\">Leiden-CPM</a>.";
+      }
     }
   }
 
-  if (typeof MathJax !== "undefined" && MathJax.typesetPromise) MathJax.typesetPromise();
+  // ── Apply a fresh kernel result across every stage ──────────────
+  function applyResult(res, opts) {
+    opts = opts || {};
+    result = res;
+    rebuildPhase1Trace(res);
+    if (moveSeedEl) moveSeedEl.textContent = String(seed);
+
+    if (!walker) {
+      walker = P.mountStepWalker({
+        vizHostId: "g-move-cy",
+        panelHostId: "g-move-panel",
+        ctlPrefix: "g-move",
+        events: phase1Events,
+        snapshotAt: moveSnapshot,
+        sidePanelHTML: moveCandPanel,
+        onRender: function (idx, ev) {
+          if (moveStatusEl) moveStatusEl.innerHTML = moveStatusHTML(idx, ev);
+          if (moveStatsEl)  moveStatsEl.innerHTML  = moveStatsHTML(idx);
+          if (moveSweepEl) {
+            const sweepNum = ev ? (ev.sweepIdx + 1) : 0;
+            const totalSweeps = result.levels[0].sweeps.length;
+            moveSweepEl.textContent = "sweep " + sweepNum + " / " + totalSweeps;
+          }
+        },
+        onRandStep: function (idx) {
+          // Bump per-step seed; re-run; clamp cursor to MIN(idx-1, newTotal-1).
+          // Strict [idx-1..end] preservation isn't possible because Louvain.run
+          // threads a single RNG instance; new seed = new shuffle from visit 0.
+          seed = (seed + 1009) | 0;
+          applyResult(runKernel(seed), { keepIdx: Math.max(0, idx - 1) });
+          return true;  // snap-render; applyResult already called controller.set
+        },
+        onRandAll: function () {
+          seed = (seed + 1) | 0;
+          applyResult(runKernel(seed), { keepIdx: 0 });
+        },
+        randStepDisabledAt: function (idx) { return idx <= 0; },
+      });
+    } else {
+      // In-place re-bind: phase1Events + snapshots already mutated;
+      // controller picks them up via closure on next render.
+      const newTotal = phase1Events.length + 1;
+      const targetIdx = (typeof opts.keepIdx === "number")
+        ? Math.max(0, Math.min(newTotal - 1, opts.keepIdx))
+        : 0;
+      walker.controller.reconfigureKeep(newTotal, targetIdx);
+    }
+
+    mountStage3(res);
+    mountStage4(res);
+    mountStage5(res);
+
+    if (typeof MathJax !== "undefined" && MathJax.typesetPromise) MathJax.typesetPromise();
+  }
+
+  // ── Initial run ─────────────────────────────────────────────────
+  applyResult(runKernel(seed));
 })();
