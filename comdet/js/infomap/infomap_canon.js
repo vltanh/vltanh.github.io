@@ -171,8 +171,14 @@
   }
 
   // ── Module flow data + MapEquation accumulators ───────────────────
-  // Mirrors InfomapOptimizer + MapEquation state.
-  function makePartition(g) {
+  // Mirrors InfomapOptimizer + MapEquation state. opts.nodeFlowLogNodeFlow
+  // overrides the per-active-node sum used in the codelength formula;
+  // canonical's MapEquation::nodeFlow_log_nodeFlow is the LEAF-level
+  // sum_v plogp(p_v), held constant across all aggregation levels in
+  // findTopModulesRepeatedly's super-net iterations. Pass the leaf
+  // constant when seeding a super-level partition.
+  function makePartition(g, opts) {
+    opts = opts || {};
     const n = g.n;
     const moduleOf = new Int32Array(n);
     const moduleMembers = new Int32Array(n);
@@ -193,9 +199,15 @@
     }
 
     // MapEquation accumulators (calculateCodelengthTerms over modules):
-    let nodeFlow_log_nodeFlow = 0;
-    for (let v = 0; v < n; v++) nodeFlow_log_nodeFlow += plogp(g.nodeFlow[v]);
-    let exitNetworkFlow = 0; // root-level exit flow; 0 for two-level full network
+    let nodeFlow_log_nodeFlow;
+    if (opts.nodeFlowLogNodeFlow != null) {
+      nodeFlow_log_nodeFlow = +opts.nodeFlowLogNodeFlow;
+    } else {
+      nodeFlow_log_nodeFlow = 0;
+      for (let v = 0; v < n; v++) nodeFlow_log_nodeFlow += plogp(g.nodeFlow[v]);
+    }
+    let exitNetworkFlow = opts.exitNetworkFlow != null
+      ? +opts.exitNetworkFlow : 0;
     let exitNetworkFlow_log_exitNetworkFlow = plogp(exitNetworkFlow);
 
     let enterFlow = exitNetworkFlow;
@@ -314,13 +326,24 @@
   }
 
   // ── tryMoveEachNodeIntoBestModule (Louvain-style sweep) ───────────
+  // Random-oracle hooks: opts.visitOrder injects canonical's
+  // post-randomization visit sequence; opts.linkOrders injects the
+  // per-non-skipped-visit module-link permutation. opts.onVisit is
+  // called once per iteration of the outer for-loop with
+  // (v, moved, newM, L_after) — used by kernel_check.mjs to diff
+  // JS's deterministic decision against canonical's.
   function tryMoveEach(P, g, rng, opts) {
     opts = opts || {};
     const isFirstLoop = !!opts.isFirstLoop;
     const tuneIterationLimit = opts.tuneIterationLimit | 0;
     const minImpr = 1e-10; // minimumSingleNodeCodelengthImprovement
     const dirty = opts.dirty;
-    const order = getRandomizedIndexVector(rng, g.n);
+    const order = opts.visitOrder
+      ? opts.visitOrder
+      : getRandomizedIndexVector(rng, g.n);
+    const linkOrdersOracle = opts.linkOrders || null;
+    let linkOrdersIdx = 0;
+    const onVisit = opts.onVisit || null;
     let nMoved = 0;
 
     // Reused across nodes: per-iter `clear()` is much cheaper than
@@ -330,9 +353,13 @@
 
     for (let i = 0; i < g.n; i++) {
       const v = order[i];
-      if (!dirty[v]) continue;
+      if (!dirty[v]) {
+        if (onVisit) onVisit(v, false, P.moduleOf[v], P.codelength());
+        continue;
+      }
       if (P.moduleMembers[P.moduleOf[v]] > 1
           && isFirstLoop && tuneIterationLimit !== 1) {
+        if (onVisit) onVisit(v, false, P.moduleOf[v], P.codelength());
         continue;
       }
       // Build deltaFlow: module -> {deltaExit, deltaEnter}.
@@ -379,9 +406,17 @@
           insertOrder.push(ne);
         }
       }
-      // Randomize link order via canonical's getRandomizedIndexVector.
+      // Randomize link order via canonical's getRandomizedIndexVector
+      // unless the caller injected canonical's order via the oracle.
       const numLinks = insertOrder.length;
-      const linkOrder = getRandomizedIndexVector(rng, numLinks);
+      const linkOrder = linkOrdersOracle
+        ? linkOrdersOracle[linkOrdersIdx++]
+        : getRandomizedIndexVector(rng, numLinks);
+      if (linkOrdersOracle && linkOrder && linkOrder.length !== numLinks) {
+        throw new Error(
+          `link-order oracle size mismatch at v=${v}: js insertOrder=${numLinks} oracle=${linkOrder.length}`
+        );
+      }
 
       let bestModule = oldM;
       let bestDelta = 0;
@@ -417,6 +452,7 @@
       }
       if (bestModule === oldM) {
         dirty[v] = 0;
+        if (onVisit) onVisit(v, false, oldM, P.codelength());
         continue;
       }
       // Apply move + maintain emptyModules.
@@ -473,6 +509,7 @@
           for (const e of g.inEdges[w]) dirty[e.u] = 1;
         }
       }
+      if (onVisit) onVisit(v, true, bestModule, P.codelength());
     }
     return nMoved;
   }
@@ -591,11 +628,18 @@
   // previous level's Partition. If absent, recompute from the leaf
   // graph + membership.
   function collapseGraph(g, membership, ncomm, prevP) {
+    // Canonical's InfomapOptimizer::consolidateModules aggregates
+    // inter-module edges under the sorted pair (min, max) when
+    // isUndirectedClustering() is true. Without the sort, leaf edges
+    // with mirrored (cu, cv) vs (cv, cu) on different leaves get split
+    // into two super-edges instead of summed; the resulting super-net
+    // diverges from canonical's.
     const linkMap = new Map();
     for (const lk of g.links) {
-      const cu = membership[lk.u];
-      const cv = membership[lk.v];
+      let cu = membership[lk.u];
+      let cv = membership[lk.v];
       if (cu === cv) continue;
+      if (cu > cv) { const t = cu; cu = cv; cv = t; }
       const key = cu + "|" + cv;
       const w = lk.weight;
       const f = lk.flow;
@@ -871,6 +915,8 @@
     getRandomizedIndexVector: getRandomizedIndexVector,
     buildGraph: buildGraph,
     makePartition: makePartition,
+    applyMembership: applyMembership,
+    tryMoveEach: tryMoveEach,
     optimizeActiveNetwork: optimizeActiveNetwork,
     findTopModulesRepeatedly: findTopModulesRepeatedly,
     collapseGraph: collapseGraph,
