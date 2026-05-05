@@ -69,11 +69,7 @@
           G.setPartitionIndex(v, H.getCurrentPosition(v));
         }
       }
-      H.original_nodes = H.vertices.length;
-      for (let n = 0; n < H.vertices.length; n++) {
-        H.current_position[n] = n;
-        H.contained_in_this[n] = [n];
-      }
+      H.resetContainedvertices();
     }
     return H;
   }
@@ -88,7 +84,8 @@
       contracted.new_node();
       for (let node = 0; node < reverse_mapping[p].length; node++) {
         const n = reverse_mapping[p][node];
-        for (let e = 0; e < G.vertices[n].length; e++) {
+        const ne = G.get_first_invalid_edge(n);
+        for (let e = 0; e < ne; e++) {
           if (G.getEdgeWeight(n, e) === 0) continue;
           const tgt = G.getEdgeTarget(n, e);
           const wgt = G.getEdgeWeight(n, e);

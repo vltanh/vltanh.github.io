@@ -57,13 +57,11 @@
     }
     if (G.number_of_nodes() === 1 || G.number_of_edges() === 0) return G;
 
-    let s = 0, e = 0, tgt = 0;
-    [s, e, tgt] = this._maximumWeightedFlowEdge(G);
-
+    const [s, e, tgt] = this._maximumWeightedFlowEdge(G);
     const pr = new NS.PushRelabel();
     this.problem_id++;
-    const [max_flow, _ss] = pr.solve_max_flow_min_cut(G, [s, tgt], 0, false, 0,
-                                                     this.problem_id);
+    const [max_flow] = pr.solve_max_flow_min_cut(G, [s, tgt], 0, false, 0,
+                                                 this.problem_id);
     if (max_flow > this.mincut) {
       G.contractEdge(s, e);
       return this._recursiveCactus(G, depth + 1);

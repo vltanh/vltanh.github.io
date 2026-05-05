@@ -11,8 +11,8 @@
  *   COMDET.WCC.run(membership, { mincutFn: COMDET.MINCUT.viecut, ... })
  *
  * Self-loops in the input edge list are filtered (matching SW's
- * convention). Multi-edges accumulate weight via mergeEdgeSparse on the
- * underlying mutable_graph.
+ * convention). Multi-edges accumulate weight in a (u,v) -> count map
+ * before being emitted as a single weighted mutable_graph edge.
  */
 (function () {
   "use strict";

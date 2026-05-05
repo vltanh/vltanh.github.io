@@ -47,15 +47,8 @@
 
   function retrieveMinimumCut(graphs) {
     const G = graphs[0];
-    let inside = 0, outside = 0;
     for (let n = 0; n < G.number_of_nodes(); n++) {
-      if (G.getNodeInCut(n)) {
-        inside++;
-        G.setPartitionIndex(n, 0);
-      } else {
-        outside++;
-        G.setPartitionIndex(n, 1);
-      }
+      G.setPartitionIndex(n, G.getNodeInCut(n) ? 0 : 1);
     }
   }
 

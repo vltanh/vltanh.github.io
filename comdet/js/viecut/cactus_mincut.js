@@ -8,9 +8,11 @@
  *   cutValue, inPartition, outPartition, cactus  // mutable_graph
  * }
  *
- * G is a COMDET.VIECUT.MutableGraph. opts.known_mincut may pre-supply a
- * cut value to skip the heuristic; opts.find_most_balanced (default
- * true) controls whether the bipartition is selected via balanced DFS.
+ * G is a COMDET.VIECUT.MutableGraph. opts.seed sets the std::mt19937
+ * seed for capforest start_vertex + max-flow problem ids + balanced
+ * DFS start; opts.known_mincut pre-supplies a cut value to skip the
+ * VIECUT bound. The bipartition is always selected via balanced DFS
+ * over the cactus.
  */
 (function () {
   "use strict";

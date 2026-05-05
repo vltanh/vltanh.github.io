@@ -22,9 +22,6 @@
 
   function PushRelabel() { this.m_current_iteration = 0; }
 
-  PushRelabel.prototype._setEdgeFlow = function (n, e, f) {
-    this.m_G.setEdgeFlow(n, e, f, this.m_problemid);
-  };
   PushRelabel.prototype._addEdgeFlow = function (n, e, f) {
     this.m_G.addEdgeFlow(n, e, f, this.m_problemid);
   };

@@ -1,6 +1,6 @@
 /* COMDET.VIECUT entry shim.
  *
- * Exposes the wired Phase A + Phase B-1 surface:
+ * Exposes the full cactus-mincut surface:
  *
  *   COMDET.VIECUT.MT19937
  *   COMDET.VIECUT.uniformInt(rng, lo, hi)

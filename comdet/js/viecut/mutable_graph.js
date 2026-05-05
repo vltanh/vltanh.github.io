@@ -170,11 +170,6 @@
   MutableGraph.prototype.setCurrentPosition = function (n, p) {
     this.current_position[n] = p;
   };
-  MutableGraph.prototype.setEdgeFlow = function (n, e, f, pid) {
-    const re = this.vertices[n][e];
-    re.flow = f;
-    re.pid = pid;
-  };
   MutableGraph.prototype.addEdgeFlow = function (n, e, addF, pid) {
     const re = this.vertices[n][e];
     if (re.pid === pid) re.flow += addF;

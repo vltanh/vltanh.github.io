@@ -107,8 +107,6 @@
       const reIns = G.new_empty_node();
       if (n0 === n1) {
         G.new_edge_order(n0, reIns, this.mincut);
-        G.setContainedVertices(reIns, cont);
-        for (const v of cont) G.setCurrentPosition(v, reIns);
       } else {
         let e = UNDEFINED_EDGE;
         const ne = G.get_first_invalid_edge(n0);
@@ -134,7 +132,7 @@
       const vtx = G.new_empty_node();
       G.new_edge_order(curr, vtx, this.mincut);
       G.setContainedVertices(vtx, cont);
-      for (const v of G.containedVertices(vtx)) G.setCurrentPosition(v, vtx);
+      for (const v of cont) G.setCurrentPosition(v, vtx);
     }
   };
 
