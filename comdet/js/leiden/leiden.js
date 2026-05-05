@@ -26,6 +26,19 @@
   }
   const LV = window.COMDET.LOUVAIN;
 
+  // Leiden-local Fisher-Yates shuffle that uses rng.intLemire (igraph's
+  // Lemire-debiased bounded-int) so the JS production walker's RNG draw
+  // sequence bit-equals libleidenalg under matching seed. LV.shuffle
+  // uses rng.int (textbook rejection) which does NOT match igraph's
+  // get_random_int; Louvain externals's tracer relies on the textbook
+  // path so that side stays unchanged.
+  function leidenShuffle(arr, rng) {
+    for (let idx = arr.length - 1; idx >= 1; idx--) {
+      const j = rng.intLemire(0, idx);
+      const t = arr[idx]; arr[idx] = arr[j]; arr[j] = t;
+    }
+  }
+
   // ── CPM quality (CPMVertexPartition.cpp:41-122) ─────────────────
   function CPM(resolution) {
     return {
@@ -89,14 +102,19 @@
       const vo = opts.visitOrder;
       for (let v = 0; v < n && v < vo.length; v++) order[v] = vo[v];
     } else {
-      LV.shuffle(order, rng);
+      leidenShuffle(order, rng);
     }
     const queue = order.slice();
     const isStable = new Uint8Array(n);
     let totalImprov = 0;
     let nbMoves = 0;
     const traces = [];
+    let _moveCap = 0;
     while (queue.length > 0) {
+      if (++_moveCap > n * 1000) {
+        console.warn("[leiden] moveNodes visit-cap exceeded n*1000=" + (n*1000) + " visits; bailing");
+        break;
+      }
       const v = queue.shift();
       const vComm = P.memberOf(v);
       const cands = P.getNeighComms(v);
@@ -139,11 +157,10 @@
         }
       }
       if (recordTrace) {
-        traces.push({
-          v: v, fromComm: vComm, toComm: maxComm,
-          moved: moved, delta: moved ? maxImprov : 0,
-          candidates: deltas,
-        });
+        const rec = { v: v, fromComm: vComm, toComm: maxComm,
+                      moved: moved, delta: moved ? maxImprov : 0 };
+        if (opts.recordCandidates) rec.candidates = deltas;
+        traces.push(rec);
       }
     }
     return { totalImprov: totalImprov, nbMoves: nbMoves, traces: traces };
@@ -159,7 +176,7 @@
     const n = P.n();
     const order = new Array(n);
     for (let v = 0; v < n; v++) order[v] = v;
-    LV.shuffle(order, rng);
+    leidenShuffle(order, rng);
     let totalImprov = 0;
     let nbMoves = 0;
     const traces = [];
@@ -193,11 +210,10 @@
         nbMoves += 1;
       }
       if (recordTrace) {
-        traces.push({
-          v: v, fromComm: vComm, toComm: maxComm,
-          moved: moved, delta: moved ? maxImprov : 0,
-          candidates: deltas,
-        });
+        const rec = { v: v, fromComm: vComm, toComm: maxComm,
+                      moved: moved, delta: moved ? maxImprov : 0 };
+        if (opts.recordCandidates) rec.candidates = deltas;
+        traces.push(rec);
       }
     }
     return { totalImprov: totalImprov, nbMoves: nbMoves, traces: traces };
@@ -224,11 +240,21 @@
     let fineMembership = new Int32Array(graph.vcount());
     for (let i = 0; i < graph.vcount(); i++) fineMembership[i] = collapsedP.memberOf(i);
 
+    let _safety = 0;
     while (aggregateFurther) {
+      if (++_safety > 100) {
+        console.warn("[leiden] aggregate loop exceeded 100 levels; bailing out");
+        break;
+      }
       const prevVcount = collapsedGraph.vcount();
       const moveOut = moveNodes(collapsedP, rng, {
         recordTrace: recordTrace, considerEmpty: true,
       });
+      // Mirror libleidenalg Optimiser.cpp:792: renumber after move_nodes
+      // so collapsedP.ncomm() reflects the post-move community count
+      // (otherwise stale empty-comm allocations leave ncomm pinned at
+      // singleton-count, breaking the aggregate_further check below).
+      collapsedP.renumber();
       const memColl = collapsedP.membership();
       for (let v = 0; v < graph.vcount(); v++) {
         fineMembership[v] = memColl[aggregateNodePerFine[v]];

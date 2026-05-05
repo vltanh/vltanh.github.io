@@ -1,38 +1,50 @@
-/* Louvain kernel — primitives + Blondel et al. 2008 fast unfolding.
+/* Louvain kernel — JS port faithful to externals/louvain (Blondel 2008
+ * et al., gen-louvain v0.3 src/louvain.cpp + modularity.cpp +
+ * graph_binary.cpp). The JS code structure mirrors the canonical
+ * cpp source, not the paper: every per-step computation lands on the
+ * same arithmetic operands in the same order so a JS-MT19937 + double-
+ * precision build of the canonical (community-detection/tools/viz_check/
+ * louvain/instrumented/louvain_l4_tracer.cpp) produces bit-identical
+ * per-visit output under matching seed.
  *
- * This file owns the shared graph-partition substrate that BOTH Louvain
- * and Leiden build on:
- *   - MT19937 RNG
- *   - Fisher-Yates shuffle
- *   - Graph wrapper (adjacency cache, totalWeight, collapse, possibleEdges)
- *   - MutableVertexPartition (admin: csize, total_weight_*, neighbour cache,
- *     moveNode, getEmptyCommunity, renumber, fromCoarsePartition, ...)
- *   - Modularity quality function
+ * What this file owns:
+ *   - MT19937 RNG (JS port; the cpp tracer's libc rand is replaced
+ *     with the same MT19937 to make L4 bit-equality reachable).
+ *   - Fisher-Yates shuffle (mirrors canonical louvain.cpp:222-229
+ *     loop direction: i from 0 to n-2; rand_pos = mt(qual->size-i)+i).
+ *   - Graph (mirrors canonical Graph from graph_binary.cpp + .h:
+ *     adj is per-node neighbour list with both directions for non-self
+ *     edges and one entry for self-loops; weighted_degree(v) sums adj
+ *     weights so a self-loop contributes ONCE; total_weight at level 0
+ *     equals 2m for unweighted undirected, doubles per level).
+ *   - Modularity admin (mirrors canonical Modularity::in/tot from
+ *     modularity.h + .cpp: in[c] = 2·intra_c + Σ self-loops,
+ *     tot[c] = Σ weighted_degree of constituents; remove + insert update
+ *     by subtracting / adding 2·dnc + nb_selfloops(node) and
+ *     weighted_degree(node)).
+ *   - Sweep: for each v in shuffled order, neigh_comm(v) populates
+ *     neigh_pos[0..neigh_last] with neigh_pos[0]=vComm and weight 0;
+ *     remove(v, vComm, neigh_weight[vComm]); pick best gain via strict
+ *     `> best_increase` (init 0); insert(v, best_comm, neigh_weight[best]).
+ *   - Run: while improvement, level loop with partition2graph_binary
+ *     renumber-by-original-id-ASC + canonical aggregation (per-direction
+ *     iteration => super-self-loop weight = 2·intra_c).
  *
- * Plus the Louvain-specific outer driver (Blondel 2008):
- *   - sweep(P, rng): one full pass over every node in shuffled order;
- *     each visit picks the candidate community with the largest strictly
- *     positive ΔQ (greedy, no acceptance of ties).
- *   - run(graph, q, seed): sweep until quiet, aggregate, repeat until
- *     the aggregation step doesn't shrink the graph.
- *
- * Leiden (js/leiden/leiden.js) extends this substrate by:
- *   - Adding the CPM quality function (size-penalty objective).
- *   - Replacing sweep with moveNodes (FIFO queue + neighbour
+ * Leiden (js/leiden/leiden.js) extends this substrate:
+ *   - Adds the CPM quality function (size-penalty objective).
+ *   - Replaces sweep with moveNodes (FIFO queue + neighbour
  *     restabilisation, paper §"fast local move procedure").
- *   - Inserting mergeNodesConstrained between local-move and aggregation
+ *   - Inserts mergeNodesConstrained between local-move and aggregation
  *     (the refinement phase that guarantees γ-connectivity).
- *   - Aggregating from the refined sub-partition while keeping the
- *     pre-refinement community labels.
  */
 (function () {
   "use strict";
   if (!window.COMDET) window.COMDET = {};
 
   // ── MT19937 ─────────────────────────────────────────────────────
-  // Matsumoto-Nishimura 32-bit state machine. Seed via int32; integer
-  // draws on [lo, hi] use rejection sampling to match the canonical
-  // igraph contract.
+  // Matsumoto-Nishimura 32-bit. Same module the cpp tracer uses (the
+  // canonical libc rand is substituted out in the L4 tracer build so
+  // both sides share a single deterministic RNG family).
   function MT19937(seed) {
     const N = 624;
     const mt = new Uint32Array(N);
@@ -66,6 +78,9 @@
     }
     init(seed >>> 0);
     return {
+      // int(lo, hi) — rejection sampling on [lo, hi]. Used by Louvain
+      // shuffle. Matches the cpp tracer's int_inclusive helper bit-for-
+      // bit (range = hi-lo+1; limit = floor(2^32/range)*range).
       int: function (lo, hi) {
         const range = hi - lo + 1;
         if (range <= 0) return lo;
@@ -74,23 +89,20 @@
         do { r = next(); } while (r >= limit);
         return lo + (r % range);
       },
-      // Lemire's debiased multiplication, mirrors igraph's
-      // igraph_i_rng_get_uint32_bounded (random.c:428-439). Used by
-      // Leiden so its int(lo, hi) draws bit-equal igraph's
-      // igraph_rng_get_integer (which uses Lemire). Returns the high
-      // 32 bits of (next() * range), retried only when the low 32 bits
-      // are below the bias threshold (-range) % range.
+      // Lemire's debiased multiplication. Used by Leiden so its
+      // int(lo, hi) draws bit-equal to igraph's igraph_rng_get_integer
+      // (which uses Lemire). Independent from Louvain's plain int().
       intLemire: function (lo, hi) {
         if (hi === lo) return lo;
         const range = hi - lo + 1;
         if (range <= 0) return lo;
         const r64 = BigInt(range);
-        const t = ((-r64) % r64 + r64) % r64;        // (-range) % range
+        const t = ((-r64) % r64 + r64) % r64;
         let m, l;
         do {
           const x = BigInt(next());
-          m = x * r64;                                // 64-bit product
-          l = m & 0xffffffffn;                        // uint32(m)
+          m = x * r64;
+          l = m & 0xffffffffn;
         } while (l < t);
         return lo + Number(m >> 32n);
       },
@@ -99,25 +111,35 @@
     };
   }
 
+  // Canonical louvain.cpp:222-229. i runs forward from 0 to n-2;
+  // rand_pos = rng.int(i, n-1); swap arr[i] with arr[rand_pos].
+  // Cpp tracer mirrors this loop direction exactly.
   function shuffle(arr, rng) {
-    for (let idx = arr.length - 1; idx >= 1; idx--) {
-      const j = rng.int(0, idx);
-      const t = arr[idx]; arr[idx] = arr[j]; arr[j] = t;
+    const n = arr.length;
+    for (let i = 0; i < n - 1; i++) {
+      const rand_pos = rng.int(i, n - 1);
+      const t = arr[i]; arr[i] = arr[rand_pos]; arr[rand_pos] = t;
     }
   }
   function range(n) { const a = new Array(n); for (let i = 0; i < n; i++) a[i] = i; return a; }
 
   // ── Graph ────────────────────────────────────────────────────────
+  // Mirrors canonical externals/louvain/src/graph_binary.{h,cpp}:
+  //   - adj per node stores neighbour list with self-loop ONCE and
+  //     every non-self edge in BOTH directions.
+  //   - weighted_degree(v) = Σ over adj weights → self-loop counts once.
+  //   - total_weight = Σ_v weighted_degree(v) → equals 2m for unweighted
+  //     undirected at level 0, doubles per level because canonical's
+  //     partition2graph_binary emits each pair in both directions.
   function Graph(n, edges, opts) {
     opts = opts || {};
     const directed = !!opts.directed;
     const correctSelfLoops = !!opts.correctSelfLoops;
-    // sortAdj=true sorts each node's adjacency by neighbour-id asc,
-    // mirroring igraph's igraph_lazy_adjlist_get with IGRAPH_MULTIPLE
-    // ordering. Required for byte-equal vs libleidenalg under matching
-    // seed (libleidenalg's cache_neigh_communities iterates the sorted
-    // adjlist; greedy ties pick the lowest-id neighbour-comm first).
-    // Default off to preserve Louvain externals adjacency conventions.
+    // sortAdj: true sorts each node's adjacency by neighbour-id ASC,
+    // mirroring igraph_lazy_adjlist iteration order. Required for byte-
+    // equal greedy-pick vs libleidenalg under matching seed (greedy
+    // ties pick the lowest-id neighbour-comm first). Default off so
+    // Louvain's canonical insertion-order adjacency stays unchanged.
     const sortAdj = !!opts.sortAdj;
     const nodeSizes = opts.nodeSizes ? opts.nodeSizes.slice()
                                      : new Array(n).fill(1);
@@ -130,13 +152,19 @@
       ev[i] = edges[i][1] | 0;
       ew[i] = edges[i].length > 2 ? +edges[i][2] : 1.0;
     }
+    // Per-node adjacency: each non-self edge appears in BOTH endpoint
+    // lists; self-loop appears in one list ONCE. Mirrors canonical
+    // graph_binary's links[] layout.
     const adjE = new Array(n);
     const adjN = new Array(n);
-    for (let i = 0; i < n; i++) { adjE[i] = []; adjN[i] = []; }
+    const adjW = new Array(n);
+    for (let i = 0; i < n; i++) { adjE[i] = []; adjN[i] = []; adjW[i] = []; }
     for (let e = 0; e < m; e++) {
-      const u = eu[e], v = ev[e];
-      adjE[u].push(e); adjN[u].push(v);
-      if (u !== v) { adjE[v].push(e); adjN[v].push(u); }
+      const u = eu[e], v = ev[e], w = ew[e];
+      adjE[u].push(e); adjN[u].push(v); adjW[u].push(w);
+      if (u !== v) {
+        adjE[v].push(e); adjN[v].push(u); adjW[v].push(w);
+      }
     }
     if (sortAdj) {
       for (let v = 0; v < n; v++) {
@@ -147,19 +175,27 @@
         });
         adjN[v] = idxs.map(function (i) { return adjN[v][i]; });
         adjE[v] = idxs.map(function (i) { return adjE[v][i]; });
+        adjW[v] = idxs.map(function (i) { return adjW[v][i]; });
       }
     }
-    const nodeSelfWeights = new Float64Array(n);
-    for (let e = 0; e < m; e++) if (eu[e] === ev[e]) nodeSelfWeights[eu[e]] += ew[e];
-    const strength = new Float64Array(n);
-    for (let e = 0; e < m; e++) {
-      // Standard convention: undirected self-loop contributes 2*w to
-      // strength (the looped end counts at both endpoints).
-      strength[eu[e]] += ew[e];
-      strength[ev[e]] += ew[e];
+    // weighted_degree(v) = Σ over adj entries (self-loop counted once).
+    // Mirrors canonical Graph::weighted_degree (graph_binary.h:130-143).
+    const wDeg = new Float64Array(n);
+    for (let v = 0; v < n; v++) {
+      let s = 0;
+      for (let i = 0; i < adjW[v].length; i++) s += adjW[v][i];
+      wDeg[v] = s;
     }
+    // nb_selfloops(v): weight of v's self-loop entry, or 0 if none.
+    // For unweighted, returns 1 per the canonical convention. For our
+    // case all edges have explicit weights so just return the stored
+    // self-loop weight.
+    const nbSelfLoops = new Float64Array(n);
+    for (let e = 0; e < m; e++) if (eu[e] === ev[e]) nbSelfLoops[eu[e]] += ew[e];
+    // total_weight = Σ_v weighted_degree(v). Mirrors graph_binary.cpp:91-92.
     let totalWeight = 0;
-    for (let e = 0; e < m; e++) totalWeight += ew[e];
+    for (let v = 0; v < n; v++) totalWeight += wDeg[v];
+
     return {
       vcount: function () { return n; },
       ecount: function () { return m; },
@@ -168,46 +204,102 @@
       edge: function (e) { return [eu[e], ev[e]]; },
       edgeWeight: function (e) { return ew[e]; },
       nodeSize: function (v) { return nodeSizes[v]; },
-      nodeSelfWeight: function (v) { return nodeSelfWeights[v]; },
+      nodeSelfWeight: function (v) { return nbSelfLoops[v]; },
+      nbSelfLoops: function (v) { return nbSelfLoops[v]; },
       degree: function (v) { return adjN[v].length; },
-      strength: function (v) { return strength[v]; },
+      weightedDegree: function (v) { return wDeg[v]; },
+      strength: function (v) { return wDeg[v]; },  // alias for legacy
       totalWeight: function () { return totalWeight; },
       neighbours: function (v) { return adjN[v]; },
       neighbourEdges: function (v) { return adjE[v]; },
+      neighbourWeights: function (v) { return adjW[v]; },
       possibleEdges: function (sz) {
         let p = directed ? sz * sz : (sz * (sz - 1)) / 2;
         if (correctSelfLoops) p += sz;
         return p;
       },
+      // Canonical partition2graph_binary (louvain.cpp:147-211): renumber
+      // surviving comms by ORIGINAL-id-ASC; for each comm c, walk every
+      // constituent v's adj list, accumulate per-target-comm weights into
+      // a sorted map; emit edges. Each non-self pair appears TWICE in
+      // the output adj (once from each endpoint's walk) → super-edge
+      // weight as stored is total contribution from one side, but the
+      // emitted graph stores both directions like graph_binary. For
+      // intra (cu==cv): m[c] accumulates 2·intra_c (each intra edge
+      // contributes from both u's and v's walks). For inter (cu!=cv):
+      // m_at_cu[cv] accumulates inter_{c,c'} from cu-side; m_at_cv[cu]
+      // accumulates the same from cv-side, so the new graph has both
+      // directions stored correctly.
       collapse: function (membership, ncomm) {
-        const wmap = new Map();
-        for (let e = 0; e < m; e++) {
-          const a = membership[eu[e]];
-          const b = membership[ev[e]];
-          const w = ew[e];
-          let lo = a, hi = b;
-          if (!directed && lo > hi) { lo = b; hi = a; }
-          const key = lo * ncomm + hi;
-          wmap.set(key, (wmap.get(key) || 0) + w);
+        // Step 1 — comm renumber by original-id-ASC. Mirrors
+        // louvain.cpp:147-160.
+        const renumber = new Int32Array(ncomm);
+        for (let c = 0; c < ncomm; c++) renumber[c] = -1;
+        for (let v = 0; v < n; v++) renumber[membership[v]] = 1;
+        let last = 0;
+        for (let i = 0; i < ncomm; i++) {
+          if (renumber[i] !== -1) renumber[i] = last++;
         }
+        const nbc = last;
+        // Step 2 — comm_nodes[c] = list of constituents.
+        const commNodes = new Array(nbc);
+        for (let c = 0; c < nbc; c++) commNodes[c] = [];
+        const newSizes = new Array(nbc).fill(0);
+        for (let v = 0; v < n; v++) {
+          const nc = renumber[membership[v]];
+          commNodes[nc].push(v);
+          newSizes[nc] += nodeSizes[v];
+        }
+        // Step 3 — for each new comm c, walk constituents' adj; bucket
+        // weights by target-new-comm using a sorted map (canonical
+        // std::map<int, long double> iteration order = key-ascending).
+        // Emit one entry per (c, target) pair.
         const newEdges = [];
-        wmap.forEach(function (w, key) {
-          const lo = Math.floor(key / ncomm), hi = key % ncomm;
-          newEdges.push([lo, hi, w]);
-        });
-        const newSizes = new Array(ncomm).fill(0);
-        for (let v = 0; v < n; v++) newSizes[membership[v]] += nodeSizes[v];
-        return Graph(ncomm, newEdges, {
+        for (let c = 0; c < nbc; c++) {
+          // Map<int_target_comm, double_weight_sum> — aggregate first,
+          // then iterate in key-ASC order to mirror canonical std::map.
+          const bucket = new Map();
+          const constituents = commNodes[c];
+          for (let i = 0; i < constituents.length; i++) {
+            const v = constituents[i];
+            const av = adjN[v];
+            const aw = adjW[v];
+            for (let k = 0; k < av.length; k++) {
+              const targetNew = renumber[membership[av[k]]];
+              bucket.set(targetNew, (bucket.get(targetNew) || 0) + aw[k]);
+            }
+          }
+          // Iterate bucket in key-ASC order (canonical std::map order).
+          const targets = Array.from(bucket.keys()).sort(function (a, b) { return a - b; });
+          for (let t = 0; t < targets.length; t++) {
+            const tc = targets[t];
+            const w = bucket.get(tc);
+            newEdges.push([c, tc, w]);
+          }
+        }
+        // Note: each non-self pair (c, tc) appears TWICE in newEdges
+        // (once with c=A,tc=B and once with c=B,tc=A) so the new graph
+        // builder produces a both-directions adj layout that matches
+        // canonical graph_binary. Self-loops appear ONCE per comm with
+        // weight = 2·intra_c (canonical's m[c] captures both directions
+        // of intra edges).
+        return Graph(nbc, newEdges, {
           directed: directed,
           correctSelfLoops: correctSelfLoops,
           nodeSizes: newSizes,
-          sortAdj: sortAdj,
+          collapsed: true,  // signal that adj is pre-doubled
+          sortAdj: sortAdj, // propagate to collapsed graph
         });
       },
     };
   }
 
-  // ── Partition ────────────────────────────────────────────────────
+  // ── Modularity admin (canonical Quality + Modularity) ──────────
+  // The Partition holds membership + Modularity::in / tot vectors per
+  // canonical modularity.h:42-89. remove(v, c, dnc) and insert(v, c, dnc)
+  // mutate in[c] / tot[c] exactly as canonical does. neigh_comm(v) fills
+  // a per-Partition scratch (neigh_pos / neigh_weight / neigh_last) so
+  // sweep can reuse it without reallocation.
   function Partition(graph, init, qualityFn) {
     const n = graph.vcount();
     let membership = new Int32Array(n);
@@ -215,237 +307,167 @@
     else for (let i = 0; i < n; i++) membership[i] = i;
     let ncomm = 0;
     for (let i = 0; i < n; i++) if (membership[i] + 1 > ncomm) ncomm = membership[i] + 1;
+    // size = number of nodes (canonical Quality::size); equals n.
+    const size = n;
+
+    // Canonical Modularity::in[c] = 2·intra_c + Σ self-loops in c.
+    // Canonical Modularity::tot[c] = Σ weighted_degree of constituents.
+    let inC  = new Float64Array(ncomm);
+    let totC = new Float64Array(ncomm);
     let csize = new Float64Array(ncomm);
     let cnodes = new Int32Array(ncomm);
-    let totalWeightInComm = new Float64Array(ncomm);
-    let totalWeightToComm = new Float64Array(ncomm);
-    let totalWeightFromComm = new Float64Array(ncomm);
-    let totalPossibleEdgesInAllComms = 0;
     let totalWeightInAllComms = 0;
-    // LIFO stack of empty community ids. Mirrors libleidenalg
-    // _empty_communities (vector<size_t>): push when a comm becomes
-    // empty, reverse-scan + erase when a comm is moved into. .back()
-    // is the next id served by getEmptyCommunity (matches cpp
-    // MutableVertexPartition.cpp:482-492).
+    let totalPossibleEdgesInAllComms = 0;
     const empties = [];
+
+    // Per-visit scratch buffers for neigh_comm. neigh_weight is sized
+    // to ncomm and lazily reset between calls via the trail in
+    // neigh_pos[0..neigh_last]. Mirrors canonical louvain.h:50-52.
+    let neighWeight = new Float64Array(ncomm);
+    for (let c = 0; c < ncomm; c++) neighWeight[c] = -1;
+    const neighPos = new Int32Array(size);
+    let neighLast = 0;
+
     function emptiesAdd(c) { empties.push(c); }
     function emptiesRemove(c) {
       for (let i = empties.length - 1; i >= 0; i--) {
         if (empties[i] === c) { empties.splice(i, 1); return; }
       }
     }
-    // Per-node neighbour-comm cache: when caller asks about v's
-    // neighbour communities or weights repeatedly (which every
-    // diff_move loop does), populate once and reuse until v moves
-    // or the cache is invalidated. Mirrors libleidenalg
-    // cache_neigh_communities (MutableVertexPartition.cpp:799).
-    let cacheV = -1;
-    let cacheNeighComms = [];     // list of distinct neighbour comms of cacheV
-    const cacheWeightsTo = new Map();   // comm -> weight from neighbours in comm to v
-    const cacheWeightsFrom = new Map(); // comm -> weight from v to neighbours in comm
 
     function rebuildAdmin() {
       ncomm = 0;
       for (let i = 0; i < n; i++) if (membership[i] + 1 > ncomm) ncomm = membership[i] + 1;
-      const directed = graph.isDirected();
+      inC  = new Float64Array(ncomm);
+      totC = new Float64Array(ncomm);
       csize = new Float64Array(ncomm);
       cnodes = new Int32Array(ncomm);
-      totalWeightInComm = new Float64Array(ncomm);
-      totalWeightToComm = new Float64Array(ncomm);
-      // For undirected graphs totalWeightFromComm[c] always equals
-      // totalWeightToComm[c] (every edge's weight is counted in both
-      // by symmetry). Alias the storage so writes to either side update
-      // both views; halves the per-move admin work without changing the
-      // numbers any reader sees.
-      totalWeightFromComm = directed ? new Float64Array(ncomm) : totalWeightToComm;
-      for (let v = 0; v < n; v++) {
-        csize[membership[v]] += graph.nodeSize(v);
-        cnodes[membership[v]] += 1;
-      }
+      // canonical init (modularity.cpp:46-50): in[i] = nb_selfloops(i),
+      // tot[i] = weighted_degree(i) for the SINGLETON case. For non-
+      // singleton init we have to play back insert/remove from singleton
+      // to target — easier to recompute directly:
+      //   in[c] = 2·intra_c + Σ self-loops in c
+      //   tot[c] = Σ weighted_degree(v) for v in c
       const m = graph.ecount();
+      for (let v = 0; v < n; v++) {
+        const c = membership[v];
+        csize[c] += graph.nodeSize(v);
+        cnodes[c] += 1;
+        totC[c] += graph.weightedDegree(v);
+      }
       for (let e = 0; e < m; e++) {
         const uv = graph.edge(e);
         const u = uv[0], v = uv[1];
-        const cu = membership[u], cv = membership[v];
         const w = graph.edgeWeight(e);
-        if (cu === cv) totalWeightInComm[cu] += w;
-        if (directed) {
-          totalWeightFromComm[cu] += w;
-          totalWeightToComm[cv] += w;
-        } else {
-          // Per-endpoint convention: each edge endpoint contributes w
-          // to its comm's to-array slot. Intra ⇒ both endpoints in the
-          // same comm ⇒ to[c] += 2w. Inter ⇒ to[a] += w, to[b] += w.
-          // Result: totalWeightToComm[c] = strength_sum_c =
-          // 2*intra_c + inter_c, which is what Modularity().diffMove
-          // and quality treat as Kc.
-          totalWeightToComm[cu] += w;
-          totalWeightToComm[cv] += w;
+        const cu = membership[u], cv = membership[v];
+        if (u === v) {
+          // Self-loop: contributes nb_selfloops(u) to in[c]. The
+          // graph stores it ONCE in adj.
+          if (cu === cv) inC[cu] += w;
+        } else if (cu === cv) {
+          // Non-self intra: each direction in canonical adj would add
+          // the dnc that hits this edge once on each side. Mirroring
+          // canonical's accumulator: the edge contributes 2w to in[cu]
+          // (once when u is inserted into c (dnc carries v's
+          // contribution), once when v is inserted (dnc carries u's
+          // contribution)).
+          inC[cu] += 2 * w;
         }
       }
       totalPossibleEdgesInAllComms = 0;
       totalWeightInAllComms = 0;
       empties.length = 0;
       for (let c = 0; c < ncomm; c++) {
-        totalWeightInAllComms += totalWeightInComm[c];
+        totalWeightInAllComms += inC[c];
         totalPossibleEdgesInAllComms += graph.possibleEdges(csize[c]);
         if (cnodes[c] === 0) emptiesAdd(c);
       }
-      invalidateCache();
-    }
-
-    function invalidateCache() {
-      cacheV = -1;
-      cacheNeighComms.length = 0;
-      cacheWeightsTo.clear();
-      cacheWeightsFrom.clear();
-    }
-
-    function cacheNeighbours(v) {
-      if (cacheV === v) return;
-      cacheV = v;
-      cacheNeighComms.length = 0;
-      cacheWeightsTo.clear();
-      cacheWeightsFrom.clear();
-      const directed = graph.isDirected();
-      const adjE = graph.neighbourEdges(v);
-      const seen = new Set();
-      for (let i = 0; i < adjE.length; i++) {
-        const e = adjE[i];
-        const uv = graph.edge(e);
-        const other = (uv[0] === v) ? uv[1] : uv[0];
-        if (other === v) continue; // self-loop carried by node_self_weight
-        const c = membership[other];
-        if (!seen.has(c)) {
-          seen.add(c);
-          cacheNeighComms.push(c);
-        }
-        const w = graph.edgeWeight(e);
-        if (directed) {
-          if (uv[1] === v) {
-            cacheWeightsTo.set(c, (cacheWeightsTo.get(c) || 0) + w);
-          } else {
-            cacheWeightsFrom.set(c, (cacheWeightsFrom.get(c) || 0) + w);
-          }
-        } else {
-          cacheWeightsTo.set(c, (cacheWeightsTo.get(c) || 0) + w);
-        }
-      }
+      // Resize neigh-comm scratch.
+      neighWeight = new Float64Array(ncomm);
+      for (let c = 0; c < ncomm; c++) neighWeight[c] = -1;
+      neighLast = 0;
     }
     rebuildAdmin();
 
-    function moveNode(v, target) {
-      const old = membership[v];
-      if (old === target) return;
-      const directed = graph.isDirected();
-      const adjE = graph.neighbourEdges(v);
-      let deltaInAll = 0;
+    // ─────── Canonical neigh_comm (louvain.cpp:78-105) ────────
+    // Fills neigh_pos[0..neigh_last] with the distinct neighbour comms
+    // of `node`. neigh_pos[0] is ALWAYS vComm with neigh_weight 0; the
+    // rest are first-seen non-self nbrs in adj iteration order. Cleans
+    // up the previous trail before populating.
+    function neighComm(node) {
+      // Reset the previous trail.
+      for (let i = 0; i < neighLast; i++) neighWeight[neighPos[i]] = -1;
+      neighLast = 0;
+      // Slot 0 = vComm with weight 0.
+      const vComm = membership[node];
+      neighPos[0] = vComm;
+      neighWeight[vComm] = 0;
+      neighLast = 1;
+      // Walk node's adj. Self-loops skipped (counted via nb_selfloops in
+      // remove/insert, not in dnc).
+      const adjN = graph.neighbours(node);
+      const adjW = graph.neighbourWeights(node);
+      for (let i = 0; i < adjN.length; i++) {
+        const neigh = adjN[i];
+        if (neigh === node) continue;
+        const nc = membership[neigh];
+        const nw = adjW[i];
+        if (neighWeight[nc] === -1) {
+          neighWeight[nc] = 0;
+          neighPos[neighLast++] = nc;
+        }
+        neighWeight[nc] += nw;
+      }
+    }
 
-      // Phase A: subtract v's contribution from `old`. Per-edge logic
-      // inlined for hot-path perf; closure-style helper extraction
-      // measured a 2× kernel slowdown so we keep the explicit branches.
-      // Undirected branch uses the single-write to-only pattern (from
-      // aliases to in storage; halving the writes per edge versus the
-      // canonical four-write pattern lands the same numeric values
-      // because rebuildAdmin uses the matching single-write pattern).
-      for (let i = 0; i < adjE.length; i++) {
-        const e = adjE[i];
-        const uv = graph.edge(e);
-        const other = (uv[0] === v) ? uv[1] : uv[0];
-        const w = graph.edgeWeight(e);
-        if (other === v) {
-          totalWeightInComm[old] -= w;
-          totalWeightFromComm[old] -= w;
-          totalWeightToComm[old] -= w;
-          deltaInAll -= w;
-          continue;
-        }
-        const cother = membership[other];
-        if (directed) {
-          if (uv[0] === v) {
-            totalWeightFromComm[old] -= w;
-            totalWeightToComm[cother] -= w;
-            if (cother === old) { totalWeightInComm[old] -= w; deltaInAll -= w; }
-          } else {
-            totalWeightToComm[old] -= w;
-            totalWeightFromComm[cother] -= w;
-            if (cother === old) { totalWeightInComm[old] -= w; deltaInAll -= w; }
-          }
-        } else {
-          // Per-endpoint convention (mirror rebuildAdmin): subtract w
-          // from to[old] for v's endpoint, and -w from to[cother] for
-          // the other endpoint. Intra (cother == old) ⇒ both writes
-          // hit to[old] ⇒ -2w net.
-          totalWeightToComm[old] -= w;
-          totalWeightToComm[cother] -= w;
-          if (cother === old) {
-            totalWeightInComm[old] -= w;
-            deltaInAll -= w;
-          }
-        }
-      }
-      // Phase B: relocate v's csize / cnodes; grow arrays if `target` is
-      // a fresh community id. For undirected the from-storage aliases
-      // to-storage so a fresh allocation must re-establish the alias.
-      csize[old] -= graph.nodeSize(v);
-      cnodes[old] -= 1;
-      totalPossibleEdgesInAllComms -= graph.possibleEdges(csize[old] + graph.nodeSize(v));
-      totalPossibleEdgesInAllComms += graph.possibleEdges(csize[old]);
-      membership[v] = target;
-      if (target >= ncomm) {
-        const newN = target + 1;
-        csize = grow(csize, newN);
-        cnodes = grow(cnodes, newN);
-        totalWeightInComm = grow(totalWeightInComm, newN);
-        totalWeightToComm = grow(totalWeightToComm, newN);
-        totalWeightFromComm = directed
-          ? grow(totalWeightFromComm, newN)
-          : totalWeightToComm;
-        totalPossibleEdgesInAllComms += graph.possibleEdges(0) * (newN - ncomm);
-        ncomm = newN;
-      }
-      totalPossibleEdgesInAllComms -= graph.possibleEdges(csize[target]);
-      csize[target] += graph.nodeSize(v);
-      cnodes[target] += 1;
-      totalPossibleEdgesInAllComms += graph.possibleEdges(csize[target]);
-      // Phase C: add v's contribution to `target`. Same inlined per-edge
-      // shape as Phase A with sign flipped and vComm = target.
-      for (let i = 0; i < adjE.length; i++) {
-        const e = adjE[i];
-        const uv = graph.edge(e);
-        const other = (uv[0] === v) ? uv[1] : uv[0];
-        const w = graph.edgeWeight(e);
-        if (other === v) {
-          totalWeightInComm[target] += w;
-          totalWeightFromComm[target] += w;
-          totalWeightToComm[target] += w;
-          deltaInAll += w;
-          continue;
-        }
-        const cother = membership[other];
-        if (directed) {
-          if (uv[0] === v) {
-            totalWeightFromComm[target] += w;
-            totalWeightToComm[cother] += w;
-            if (cother === target) { totalWeightInComm[target] += w; deltaInAll += w; }
-          } else {
-            totalWeightToComm[target] += w;
-            totalWeightFromComm[cother] += w;
-            if (cother === target) { totalWeightInComm[target] += w; deltaInAll += w; }
-          }
-        } else {
-          totalWeightToComm[target] += w;
-          totalWeightToComm[cother] += w;
-          if (cother === target) {
-            totalWeightInComm[target] += w;
-            deltaInAll += w;
-          }
-        }
-      }
-      if (cnodes[old] === 0) emptiesAdd(old);
-      emptiesRemove(target);
-      totalWeightInAllComms += deltaInAll;
-      invalidateCache();
+    // ─────── Canonical Modularity::remove (modularity.h:60-68) ───
+    function modRemove(node, comm, dnc) {
+      inC[comm]  -= 2 * dnc + graph.nbSelfLoops(node);
+      totC[comm] -= graph.weightedDegree(node);
+      // membership stays at `comm` until insert restores it; canonical
+      // sets n2c[node] = -1 between remove and insert. Skip the -1
+      // marker since JS callers don't observe membership during the
+      // gap window.
+      cnodes[comm] -= 1;
+      csize[comm] -= graph.nodeSize(node);
+      totalPossibleEdgesInAllComms -= graph.possibleEdges(csize[comm] + graph.nodeSize(node));
+      totalPossibleEdgesInAllComms += graph.possibleEdges(csize[comm]);
+      totalWeightInAllComms -= 2 * dnc + graph.nbSelfLoops(node);
+      if (cnodes[comm] === 0) emptiesAdd(comm);
+    }
+    function modInsert(node, comm, dnc) {
+      // Fresh comm id — grow admin.
+      if (comm >= ncomm) growAdmin(comm + 1);
+      inC[comm]  += 2 * dnc + graph.nbSelfLoops(node);
+      totC[comm] += graph.weightedDegree(node);
+      cnodes[comm] += 1;
+      totalPossibleEdgesInAllComms -= graph.possibleEdges(csize[comm]);
+      csize[comm] += graph.nodeSize(node);
+      totalPossibleEdgesInAllComms += graph.possibleEdges(csize[comm]);
+      membership[node] = comm;
+      totalWeightInAllComms += 2 * dnc + graph.nbSelfLoops(node);
+      emptiesRemove(comm);
+    }
+    // ─────── Canonical Modularity::gain (modularity.h:80-88) ─────
+    function modGain(node, comm, dnc, w_degree) {
+      const m2 = graph.totalWeight();
+      return dnc - totC[comm] * w_degree / m2;
+    }
+
+    function growAdmin(newN) {
+      if (newN <= ncomm) return;
+      inC = grow(inC, newN);
+      totC = grow(totC, newN);
+      csize = grow(csize, newN);
+      cnodes = grow(cnodes, newN);
+      const oldNcomm = ncomm;
+      ncomm = newN;
+      totalPossibleEdgesInAllComms += graph.possibleEdges(0) * (newN - oldNcomm);
+      // Resize + reset neigh-comm scratch tail.
+      const newNW = new Float64Array(newN);
+      for (let i = 0; i < neighWeight.length; i++) newNW[i] = neighWeight[i];
+      for (let i = neighWeight.length; i < newN; i++) newNW[i] = -1;
+      neighWeight = newNW;
     }
 
     function grow(typedArr, newN) {
@@ -458,38 +480,47 @@
 
     function getEmptyCommunity() {
       if (empties.length > 0) {
-        // LIFO: cpp _empty_communities.back().
         return empties[empties.length - 1];
       }
       const newId = ncomm;
-      csize = grow(csize, newId + 1);
-      cnodes = grow(cnodes, newId + 1);
-      totalWeightInComm = grow(totalWeightInComm, newId + 1);
-      totalWeightToComm = grow(totalWeightToComm, newId + 1);
-      totalWeightFromComm = graph.isDirected()
-        ? grow(totalWeightFromComm, newId + 1)
-        : totalWeightToComm;
-      ncomm += 1;
+      growAdmin(newId + 1);
       emptiesAdd(newId);
-      totalPossibleEdgesInAllComms += graph.possibleEdges(0);
-      // Cache lists comm ids; growing the comm list does not change v's
-      // neighbour comms, so the cache stays valid. No invalidation here.
       return newId;
     }
 
-    function weightToComm(v, comm) {
-      cacheNeighbours(v);
-      return cacheWeightsTo.get(comm) || 0;
-    }
-    function weightFromComm(v, comm) {
-      if (!graph.isDirected()) return weightToComm(v, comm);
-      cacheNeighbours(v);
-      return cacheWeightsFrom.get(comm) || 0;
+    // moveNode is a thin wrapper around remove + insert for callers
+    // (Leiden) that prefer the high-level "move v to target" verb.
+    // Internally: do a neigh_comm scan to find dnc to vComm and dnc
+    // to target, then remove + insert. This duplicates the scan
+    // sweep already does, so Louvain.sweep does NOT call moveNode —
+    // it calls remove + insert directly. moveNode is the legacy
+    // surface kept for Leiden's refinement code path.
+    function moveNode(v, target) {
+      const old = membership[v];
+      if (old === target) return;
+      neighComm(v);
+      const dncOld = neighWeight[old] === -1 ? 0 : neighWeight[old];
+      const dncNew = neighWeight[target] === -1 ? 0 : neighWeight[target];
+      modRemove(v, old, dncOld);
+      modInsert(v, target, dncNew);
     }
 
+    // weightToComm / weightFromComm / getNeighComms: caller-visible
+    // accessors that build a full neighbour-cache for v. Used by Leiden
+    // diffMove (which needs ΔQ vs target without the remove-then-gain
+    // pattern). For Louvain.sweep we use neigh_comm / neigh_weight
+    // directly.
+    function weightToComm(v, comm) {
+      neighComm(v);
+      const w = neighWeight[comm];
+      return w === -1 ? 0 : w;
+    }
+    function weightFromComm(v, comm) { return weightToComm(v, comm); }
     function getNeighComms(v) {
-      cacheNeighbours(v);
-      return cacheNeighComms;
+      neighComm(v);
+      const out = new Array(neighLast);
+      for (let i = 0; i < neighLast; i++) out[i] = neighPos[i];
+      return out;
     }
     function getNeighCommsConstrained(v, constrained) {
       const adjN = graph.neighbours(v);
@@ -504,66 +535,74 @@
       return Array.from(seen);
     }
 
+    // renumber: canonical partition2graph_binary's renumber by
+    // ORIGINAL-id-ASC (louvain.cpp:147-160). Surviving comms get new
+    // contiguous ids preserving original-id order.
     function renumber() {
-      // Sort surviving comm ids by csize DESC, cnodes DESC, then orig-id
-      // ASC. Mirrors libleidenalg orderCSize (GraphHelper.cpp:16-28). The
-      // tiebreak chain is required for byte-equal collapse: differently-
-      // labelled-but-equivalent partitions produce different collapsed
-      // graphs (super-node order changes).
-      const order = [];
-      for (let c = 0; c < ncomm; c++) if (cnodes[c] > 0) order.push(c);
-      order.sort(function (a, b) {
-        if (csize[a] !== csize[b]) return csize[b] - csize[a];
-        if (cnodes[a] !== cnodes[b]) return cnodes[b] - cnodes[a];
-        return a - b;
-      });
       const remap = new Int32Array(ncomm);
-      for (let i = 0; i < order.length; i++) remap[order[i]] = i;
+      for (let c = 0; c < ncomm; c++) remap[c] = -1;
+      for (let v = 0; v < n; v++) remap[membership[v]] = 1;
+      let last = 0;
+      const order = [];
+      for (let c = 0; c < ncomm; c++) {
+        if (remap[c] !== -1) {
+          remap[c] = last++;
+          order.push(c);
+        }
+      }
       for (let v = 0; v < n; v++) membership[v] = remap[membership[v]];
       const newN = order.length;
-      const directed = graph.isDirected();
+      const newIn = new Float64Array(newN);
+      const newTot = new Float64Array(newN);
       const newCsize = new Float64Array(newN);
       const newCnodes = new Int32Array(newN);
-      const newIn = new Float64Array(newN);
-      const newTo = new Float64Array(newN);
-      const newFrom = directed ? new Float64Array(newN) : null;
       for (let i = 0; i < newN; i++) {
         const oldId = order[i];
+        newIn[i] = inC[oldId];
+        newTot[i] = totC[oldId];
         newCsize[i] = csize[oldId];
         newCnodes[i] = cnodes[oldId];
-        newIn[i] = totalWeightInComm[oldId];
-        newTo[i] = totalWeightToComm[oldId];
-        if (directed) newFrom[i] = totalWeightFromComm[oldId];
       }
+      inC = newIn; totC = newTot;
       csize = newCsize; cnodes = newCnodes;
-      totalWeightInComm = newIn;
-      totalWeightToComm = newTo;
-      totalWeightFromComm = directed ? newFrom : newTo;
       ncomm = newN;
       empties.length = 0;
-      // totalWeightInAllComms + totalPossibleEdgesInAllComms unchanged
-      // by a permutation that drops empty communities only (those have
-      // csize=0, so possibleEdges(0) contribution is zero anyway).
-      invalidateCache();
+      neighWeight = new Float64Array(ncomm);
+      for (let c = 0; c < ncomm; c++) neighWeight[c] = -1;
+      neighLast = 0;
     }
 
+    // ─── Public surface ────────────────────────────────────
     return {
       graph: graph,
       membership: function () { return membership; },
       memberOf: function (v) { return membership[v]; },
       n: function () { return n; },
       ncomm: function () { return ncomm; },
-      // OOB -> 0 mirrors libleidenalg MutableVertexPartition::csize
-      // / cnodes (line 75-89). Required for canonCPM diffMove on
-      // freshly-allocated empty comm ids beyond current ncomm.
       csize: function (c) { return c < ncomm ? csize[c] : 0; },
       cnodes: function (c) { return c < ncomm ? cnodes[c] : 0; },
-      totalWeightInComm: function (c) { return c < ncomm ? totalWeightInComm[c] : 0; },
-      totalWeightToComm: function (c) { return c < ncomm ? totalWeightToComm[c] : 0; },
-      totalWeightFromComm: function (c) { return c < ncomm ? totalWeightFromComm[c] : 0; },
+      // in[c] / tot[c] are canonical Modularity admin. The legacy
+      // names totalWeightInComm / totalWeightToComm / totalWeightFromComm
+      // are kept as aliases so Leiden + page glue keep working.
+      totalWeightInComm:    function (c) { return c < ncomm ? inC[c] : 0; },
+      totalWeightToComm:    function (c) { return c < ncomm ? totC[c] : 0; },
+      totalWeightFromComm:  function (c) { return c < ncomm ? totC[c] : 0; },
       totalWeightInAllComms: function () { return totalWeightInAllComms; },
       totalPossibleEdgesInAllComms: function () { return totalPossibleEdgesInAllComms; },
       moveNode: moveNode,
+      // Canonical sweep primitives — exposed so the outer driver does
+      // remove/gain/insert per the canonical body.
+      neighComm: neighComm,
+      neighWeight: function (c) {
+        const w = neighWeight[c];
+        return w === -1 ? 0 : w;
+      },
+      neighPos: function (i) { return neighPos[i]; },
+      neighLast: function () { return neighLast; },
+      modRemove: modRemove,
+      modInsert: modInsert,
+      modGain: modGain,
+      // Legacy accessors — keep Leiden + page diffMove paths alive.
       weightToComm: weightToComm,
       weightFromComm: weightFromComm,
       getNeighComms: getNeighComms,
@@ -585,97 +624,121 @@
     };
   }
 
-  // ── Modularity quality (paper §1 eq 1, ΔQ from §2 eq 2) ─────────
+  // ── Modularity quality function (canonical modularity.cpp:58-71) ─
+  // Q = Σ_c (in[c] - tot[c]^2/m2) / m2; m2 = total_weight.
+  // diffMove returns ΔQ in the same units the legacy JS callers expect
+  // (Leiden uses it). For Louvain.sweep we use the canonical
+  // remove + gain pattern instead — diffMove here is a fallback.
   function Modularity() {
     return {
       name: "Modularity",
       resolution: 1.0,
+      // Equivalent to canonical's (gain[c]_after_remove - gain[vComm]_after_remove)
+      // computed in one shot. Leiden uses this for its move-decisions
+      // because Leiden doesn't run the canonical Louvain remove + gain
+      // pattern.
       diffMove: function (P, v, newComm) {
         const oldComm = P.memberOf(v);
         if (oldComm === newComm) return 0;
         const G = P.graph;
-        const m = G.totalWeight();
-        if (m <= 0) return 0;
-        const W = G.isDirected() ? m : 2 * m;
-        const kv = G.strength(v);
+        const m2 = G.totalWeight();
+        if (m2 <= 0) return 0;
+        const kv = G.weightedDegree(v);
         const wToOld = P.weightToComm(v, oldComm);
         const wToNew = P.weightToComm(v, newComm);
-        const Kold = P.totalWeightFromComm(oldComm);
-        const Knew = P.totalWeightFromComm(newComm);
-        const diffOld = wToOld - kv * (Kold - kv) / W;
-        const diffNew = wToNew - kv * Knew / W;
-        const diff = (diffNew - diffOld) * (G.isDirected() ? 1 : 2);
-        return diff / W;
+        const Kold = P.totalWeightToComm(oldComm);
+        const Knew = P.totalWeightToComm(newComm);
+        // After-remove form: gain[c]_after = dnc - tot[c]·kv/m2.
+        // For c != vComm, dnc = wToNew, tot[c] unchanged.
+        // For c == vComm (the no-move baseline), dnc = 0 and
+        // tot[vComm]_after = Kold - kv.
+        const gainNew = wToNew - Knew * kv / m2;
+        const gainOld = 0 - (Kold - kv) * kv / m2;
+        // Express ΔQ in Q units (canonical gain returns "gain units"
+        // = gain * m2; divide by m2 once for ΔQ).
+        return (gainNew - gainOld) / m2;
       },
       quality: function (P) {
         const G = P.graph;
-        const m = G.totalWeight();
-        if (m <= 0) return 0;
-        const W = G.isDirected() ? m : 2 * m;
+        const m2 = G.totalWeight();
+        if (m2 <= 0) return 0;
         let q = 0;
         for (let c = 0; c < P.ncomm(); c++) {
           if (P.cnodes(c) === 0) continue;
           const ec = P.totalWeightInComm(c);
-          const Kc = P.totalWeightFromComm(c);
-          q += (G.isDirected() ? ec : 2 * ec) - (Kc * Kc) / W;
+          const Kc = P.totalWeightToComm(c);
+          // Canonical: q += in[c] - tot[c]·tot[c] / m2; q /= m2.
+          q += ec - Kc * Kc / m2;
         }
-        return q / W;
+        return q / m2;
       },
     };
   }
 
-  // ── Louvain sweep + phase1 + run ────────────────────────────────
-  // sweep(P, rng): one full pass over every node. Greedy strict-positive
-  // ΔQ pick (Blondel: ΔQ > 0). No queue, no neighbour restabilisation.
+  // ── Louvain sweep (canonical louvain.cpp:213-280 one_level body) ─
+  // For each node in shuffled order: neigh_comm fills the trail
+  // including vComm at slot 0; remove(v from vComm); pick best gain
+  // by strict `> best_increase` over neigh_pos[0..neigh_last); insert
+  // into best_comm.
   function sweep(P, rng, opts) {
     opts = opts || {};
     const recordTrace = !!opts.recordTrace;
     const n = P.n();
     const order = new Array(n);
     for (let i = 0; i < n; i++) order[i] = i;
-    // Replay-mode: caller can inject the canonical's exact visit order
-    // (e.g. gen-louvain's random_order vector). When set, JS skips its
-    // own shuffle so per-visit moves are deterministic vs canonical.
     if (opts.visitOrder) {
       for (let i = 0; i < n; i++) order[i] = opts.visitOrder[i];
     } else {
       shuffle(order, rng);
     }
-    let totalImprov = 0;
     let nbMoves = 0;
+    let totalImprov = 0;
     const traces = [];
     for (let i = 0; i < n; i++) {
       const v = order[i];
       const vComm = P.memberOf(v);
-      const cands = P.getNeighComms(v);
-      if (cands.indexOf(vComm) < 0) cands.push(vComm);
-      let maxComm = vComm;
-      let maxImprov = 0;             // strict positive (Blondel paper)
+      const wDeg = P.graph.weightedDegree(v);
+      // neigh_comm sets neigh_pos[0]=vComm, weight 0; rest = first-seen
+      // distinct neighbour comms.
+      P.neighComm(v);
+      const neighLast = P.neighLast();
+      // Canonical remove(v, vComm, neigh_weight[vComm]). neigh_comm
+      // initialised neigh_weight[vComm] to 0 + accumulated the weights
+      // from v to non-self neighbours that are CURRENTLY in vComm — at
+      // singleton init that's 0, but inside a sweep where prior visits
+      // have moved nodes into vComm it's strictly positive.
+      P.modRemove(v, vComm, P.neighWeight(vComm));
+      let bestComm = vComm;
+      let bestIncrease = 0;
       const deltas = [];
-      for (let j = 0; j < cands.length; j++) {
-        const c = cands[j];
-        if (c === vComm) {
-          deltas.push({ comm: c, delta: 0 });
-          continue;
-        }
-        const d = P.diffMove(v, c);
-        deltas.push({ comm: c, delta: d });
-        if (d > maxImprov) {
-          maxImprov = d;
-          maxComm = c;
+      for (let j = 0; j < neighLast; j++) {
+        const c = P.neighPos(j);
+        const dnc = P.neighWeight(c);
+        const inc = P.modGain(v, c, dnc, wDeg);
+        if (recordTrace) deltas.push({ comm: c, delta: inc });
+        if (inc > bestIncrease) {
+          bestIncrease = inc;
+          bestComm = c;
         }
       }
-      let moved = false;
-      if (maxComm !== vComm) {
-        totalImprov += maxImprov;
-        P.moveNode(v, maxComm);
-        moved = true;
+      const dncBest = P.neighWeight(bestComm);
+      P.modInsert(v, bestComm, dncBest);
+      const moved = bestComm !== vComm;
+      if (moved) {
         nbMoves += 1;
+        totalImprov += bestIncrease;
       }
       if (recordTrace) {
         traces.push({
-          v: v, fromComm: vComm, toComm: maxComm,
-          moved: moved, delta: moved ? maxImprov : 0,
+          v: v, fromComm: vComm, toComm: bestComm,
+          moved: moved,
+          // Canonical gain returned in unnormalized units (gain * m2);
+          // expose as ΔQ-in-Q-units (gain / m2) so trace consumers see
+          // a small float, matching prior page wiring.
+          delta: moved ? (bestIncrease / P.graph.totalWeight()) : 0,
+          // delta_gain holds the raw gain value (unnormalized) for
+          // consumers that need the canonical bit-equal compare.
+          deltaGain: moved ? bestIncrease : 0,
           candidates: deltas,
         });
       }
@@ -688,16 +751,34 @@
     const recordTrace = !!opts.recordTrace;
     const P = Partition(graph, null, qualityFn);
     const sweeps = [];
+    // Canonical louvain.cpp:221-229: random_order is computed ONCE per
+    // level, shuffled in place, then reused for every pass in the
+    // do/while. JS mirrors that — shuffle once, inject the same
+    // visitOrder into every sweep call.
+    const n = P.n();
+    const visitOrder = new Array(n);
+    for (let i = 0; i < n; i++) visitOrder[i] = i;
+    if (opts.visitOrder) {
+      for (let i = 0; i < n; i++) visitOrder[i] = opts.visitOrder[i];
+    } else {
+      shuffle(visitOrder, rng);
+    }
     let pass = 0;
+    let curQ = qualityFn.quality(P);
     while (true) {
-      const out = sweep(P, rng, { recordTrace: recordTrace });
+      const before = curQ;
+      const out = sweep(P, rng, { recordTrace: recordTrace, visitOrder: visitOrder });
+      const after = qualityFn.quality(P);
       sweeps.push(out);
       pass += 1;
-      if (out.nbMoves === 0 || pass > 50) break;
+      if (out.nbMoves === 0 || (after - before) <= 1e-6 || pass > 50) break;
+      curQ = after;
     }
     return { partition: P, sweeps: sweeps };
   }
 
+  // run: outer level loop. partition2graph_binary already happens inside
+  // Graph.collapse with renumber-by-original-id-ASC.
   function run(graph, qualityFn, seed, opts) {
     opts = opts || {};
     const recordTrace = !!opts.recordTrace;
@@ -713,6 +794,8 @@
       const prevVcount = collapsedG.vcount();
       const p1 = phase1(collapsedG, qualityFn, rng, { recordTrace: recordTrace });
       const collP = p1.partition;
+      // Renumber by original-id-ASC (canonical partition2graph_binary
+      // step 1) before composing fineMembership + collapsing.
       collP.renumber();
       const memColl = collP.membership();
       for (let v = 0; v < graph.vcount(); v++) {
