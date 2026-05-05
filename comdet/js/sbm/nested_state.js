@@ -12,6 +12,10 @@
  * :140). The viz_check tracer pairs this JS leg with a C++ tracer
  * that runs the identical formula under std::mt19937, so cpp + JS
  * replay byte-equal across all levels.
+ *
+ * SBM.buildLevelGraph is exported as a tracer hook so the JS replay
+ * leg can drive the same per-sweep e_rs propagation cpp does. It
+ * is not part of the public NestedBlockState surface.
  */
 (function () {
   "use strict";
@@ -31,6 +35,9 @@
     const N = parentGraph.vcount();
     const mem = parentState.blockMembership();
     const ers = new Map();
+    // Pair encoding: assumes block ids < 2^20 = ~1M. Comdet pages run
+    // on ~1k vertex fixtures; bumping to a longer key (or a string)
+    // is the lift if larger graphs ever land here.
     const KEY_MUL = 1 << 20;
     function key(r, s) { return r < s ? r * KEY_MUL + s : s * KEY_MUL + r; }
     for (let v = 0; v < N; v++) {
@@ -52,9 +59,10 @@
       }
     }
     const nonEmpty = parentState.nonEmptyBlocks();
+    const Bne = nonEmpty.length;
     const remap = new Int32Array(N + 1);
     for (let i = 0; i < remap.length; i++) remap[i] = -1;
-    for (let i = 0; i < nonEmpty.length; i++) remap[nonEmpty[i]] = i;
+    for (let i = 0; i < Bne; i++) remap[nonEmpty[i]] = i;
     const edges = [];
     for (const [k, w] of ers) {
       const r = Math.floor(k / KEY_MUL), s = k % KEY_MUL;
@@ -62,11 +70,12 @@
       if (rr < 0 || ss < 0) continue;
       edges.push([rr, ss, w]);
     }
-    const Bne = nonEmpty.length;
     const newGraph = LV.Graph(Bne, edges, { correctSelfLoops: false });
     const init = new Int32Array(Bne);
+    // OOB parent ids (mid-mcmc "open new block" candidates) coerce to 0;
+    // cpp's flat_traced.cpp:buildLevelGraph defaults the same way.
     for (let i = 0; i < Bne; i++) init[i] = (b_next[nonEmpty[i]] | 0);
-    return { graph: newGraph, init: init, remap: remap, nonEmpty: nonEmpty };
+    return { graph: newGraph, init: init };
   }
 
   function NestedBlockState(graph, opts) {

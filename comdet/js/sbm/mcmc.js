@@ -78,7 +78,7 @@
       }
       if (recordTrace) {
         const entry = {
-          v: v, fromR: fromR, toS: toS, pickIdx: pickIdx,
+          v: v, fromR: fromR, toS: toS,
           cands: cands.slice(), dS: dS, accept: accept, accepted: committed,
         };
         if (recordCandidates) entry.candidates = candDeltas;

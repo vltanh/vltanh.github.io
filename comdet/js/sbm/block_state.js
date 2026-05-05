@@ -104,10 +104,19 @@
     // simple graph, ignoring the partition-independent constants.
     // e_rr stored doubled (= 2·E_internal); e_rr!! = 2^{e_rr/2}·(e_rr/2)!.
     const LOG2 = Math.log(2);
+    // Sorted neList prefix - reused by every nonempty-block iteration
+    // below so the entropy/DL terms scan O(Bne) instead of O(B=N).
+    function sortedNonEmpty() {
+      const a = neList.slice(0, Bne);
+      Array.prototype.sort.call(a, (x, y) => x - y);
+      return a;
+    }
+
     function exactEntropy() {
+      const ne = sortedNonEmpty();
       let S = 0;
-      for (let r = 0; r < B; r++) {
-        if (nr[r] === 0) continue;
+      for (let i = 0; i < ne.length; i++) {
+        const r = ne[i];
         // vterm: DC = lgamma(e_r+1) (from -log(1/e_r!) in denominator);
         //        NDC = e_r·log(n_r) (from -log(1/n_r^{e_r})).
         S += degCorr ? lgamma(er[r] + 1) : er[r] * safelog(nr[r]);
@@ -115,7 +124,10 @@
         const e_rr_half = ers[r * B + r] / 2;
         S -= e_rr_half * LOG2 + lgamma(e_rr_half + 1);
         // eterm r!=s undirected: -log(e_rs!).
-        for (let s = r + 1; s < B; s++) S -= lgamma(ers[r * B + s] + 1);
+        for (let j = i + 1; j < ne.length; j++) {
+          const s = ne[j];
+          S -= lgamma(ers[r * B + s] + 1);
+        }
       }
       return S;
     }
@@ -125,14 +137,14 @@
     }
     function partitionDl() {
       let S = lgamma(N + 1);
-      for (let r = 0; r < B; r++) if (nr[r] > 0) S -= lgamma(nr[r] + 1);
+      for (let i = 0; i < Bne; i++) S -= lgamma(nr[neList[i]] + 1);
       S += lbinom(N - 1, Bne - 1) + Math.log(N);
       return S;
     }
     function degreeDlUniform() {
       let S = 0;
-      for (let r = 0; r < B; r++) {
-        if (nr[r] === 0) continue;
+      for (let i = 0; i < Bne; i++) {
+        const r = neList[i];
         S += logChooseRep(nr[r], Math.round(er[r]));
       }
       return S;
@@ -142,8 +154,8 @@
     // exact edge counts). Same units as DC/NDC exact entropy.
     function ppLikelihood() {
       let Ein2 = 0, Min = 0, nTot = 0;
-      for (let r = 0; r < B; r++) {
-        if (nr[r] === 0) continue;
+      for (let i = 0; i < Bne; i++) {
+        const r = neList[i];
         Ein2 += ers[r * B + r];
         Min += (nr[r] * (nr[r] - 1)) / 2;
         nTot += nr[r];
@@ -159,7 +171,10 @@
     }
     function ppEdgesDl() {
       let Min = 0;
-      for (let r = 0; r < B; r++) if (nr[r] > 0) Min += (nr[r] * (nr[r] - 1)) / 2;
+      for (let i = 0; i < Bne; i++) {
+        const r = neList[i];
+        Min += (nr[r] * (nr[r] - 1)) / 2;
+      }
       return Math.log(Math.min(E, Min) + 1);
     }
 
