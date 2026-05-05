@@ -34,9 +34,18 @@
   const C = window.COMDET;
   const LV = C.LOUVAIN;
 
+  // plogp's log2 must match the cpp tracer's bit-equal log2 on the kernel
+  // hot path. glibc std::log2 + V8 Math.log2 drift by 1 ulp on roughly 1 in
+  // 1e5 inputs (verified at tools/viz_check/infomap/L2_log2/). Route through
+  // jsLog2(x) = x===1 ? 0 : Math.log(x) * Math.LOG2E so cpp's matching path
+  // (fdlibm __ieee754_log * Math.LOG2E + log2(1)=0 special) hits the same bits.
+  function jsLog2(x) {
+    if (x === 1.0) return 0.0;
+    return Math.log(x) * Math.LOG2E;
+  }
   function plogp(p) {
     if (p <= 0) return 0;
-    return p * Math.log2(p);
+    return p * jsLog2(p);
   }
 
   // ── libstdc++ std::uniform_int_distribution<unsigned int>(lo, hi) ──
