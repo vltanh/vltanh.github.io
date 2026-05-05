@@ -575,7 +575,14 @@
     const n = P.n();
     const order = new Array(n);
     for (let i = 0; i < n; i++) order[i] = i;
-    shuffle(order, rng);
+    // Replay-mode: caller can inject the canonical's exact visit order
+    // (e.g. gen-louvain's random_order vector). When set, JS skips its
+    // own shuffle so per-visit moves are deterministic vs canonical.
+    if (opts.visitOrder) {
+      for (let i = 0; i < n; i++) order[i] = opts.visitOrder[i];
+    } else {
+      shuffle(order, rng);
+    }
     let totalImprov = 0;
     let nbMoves = 0;
     const traces = [];
