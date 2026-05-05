@@ -226,11 +226,14 @@
     //               exitNetworkFlow_log_exitNetworkFlow) +
     //              (-exit_log_exit + flow_log_flow - nodeFlow_log_nodeFlow)
     function codelength() {
-      const indexCodelength = enterFlow_log_enterFlow - enter_log_enter
-                            - exitNetworkFlow_log_exitNetworkFlow;
-      const moduleCodelength = -exit_log_exit + flow_log_flow
-                             - nodeFlow_log_nodeFlow;
-      return indexCodelength + moduleCodelength;
+      return indexCodelength() + moduleCodelength();
+    }
+    function indexCodelength() {
+      return enterFlow_log_enterFlow - enter_log_enter
+             - exitNetworkFlow_log_exitNetworkFlow;
+    }
+    function moduleCodelength() {
+      return -exit_log_exit + flow_log_flow - nodeFlow_log_nodeFlow;
     }
 
     // Closed-form ΔL on moving v into newM (per
@@ -322,6 +325,9 @@
       diffMove: diffMove,
       moveNode: moveNode,
       codelength: codelength,
+      indexCodelength: indexCodelength,
+      moduleCodelength: moduleCodelength,
+      enterFlow: function () { return enterFlow; },
     };
   }
 
@@ -354,12 +360,12 @@
     for (let i = 0; i < g.n; i++) {
       const v = order[i];
       if (!dirty[v]) {
-        if (onVisit) onVisit(v, false, P.moduleOf[v], P.codelength());
+        if (onVisit) onVisit(v, false, P.moduleOf[v], P.codelength(), P.indexCodelength(), P.moduleCodelength(), P.enterFlow());
         continue;
       }
       if (P.moduleMembers[P.moduleOf[v]] > 1
           && isFirstLoop && tuneIterationLimit !== 1) {
-        if (onVisit) onVisit(v, false, P.moduleOf[v], P.codelength());
+        if (onVisit) onVisit(v, false, P.moduleOf[v], P.codelength(), P.indexCodelength(), P.moduleCodelength(), P.enterFlow());
         continue;
       }
       // Build deltaFlow: module -> {deltaExit, deltaEnter}.
@@ -452,7 +458,7 @@
       }
       if (bestModule === oldM) {
         dirty[v] = 0;
-        if (onVisit) onVisit(v, false, oldM, P.codelength());
+        if (onVisit) onVisit(v, false, oldM, P.codelength(), P.indexCodelength(), P.moduleCodelength(), P.enterFlow());
         continue;
       }
       // Apply move + maintain emptyModules.
@@ -515,7 +521,7 @@
           for (const e of g.inEdges[w]) dirty[e.u] = 1;
         }
       }
-      if (onVisit) onVisit(v, true, bestModule, P.codelength());
+      if (onVisit) onVisit(v, true, bestModule, P.codelength(), P.indexCodelength(), P.moduleCodelength(), P.enterFlow());
     }
     return nMoved;
   }
