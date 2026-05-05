@@ -119,7 +119,11 @@
     const F = opts.fixture || C.FIXTURE;
     const criterion = opts.criterion || "1log_10(n)";
     const parsed = parseCriterion(criterion);
-    const mincutFn = opts.mincutFn || (C.MINCUT && C.MINCUT.stoerWagner);
+    // Default backend prefers VieCut cactus mincut when available
+    // (matches canonical constrained_clustering binary). Falls back to
+    // Stoer-Wagner standin when only mincut.js is loaded.
+    const mincutFn = opts.mincutFn
+      || (C.MINCUT && (C.MINCUT.viecut || C.MINCUT.stoerWagner));
     if (!mincutFn) throw new Error("WCC: no mincut backend (load mincut.js first)");
     const trace = opts.trace ? [] : null;
     function tlog(line) { if (trace) trace.push(line); }

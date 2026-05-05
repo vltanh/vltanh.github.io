@@ -107,7 +107,11 @@
     const algorithm = opts.algorithm || "leiden-cpm";
     const resolution = opts.resolution != null ? opts.resolution : 0.0001;
     const seed = opts.seed != null ? (opts.seed >>> 0) : 0;
-    const mincutFn = opts.mincutFn || C.MINCUT.stoerWagner;
+    // Default backend prefers VieCut cactus mincut when available
+    // (matches canonical constrained_clustering binary). Falls back to
+    // Stoer-Wagner standin when only mincut.js is loaded.
+    const mincutFn = opts.mincutFn
+      || (C.MINCUT && (C.MINCUT.viecut || C.MINCUT.stoerWagner));
     const baseAlgoFn = opts.baseAlgoFn || null; // optional injection
     // Replay-mode oracle: keyed by sorted-cluster-ids string, returns
     // { cutValue, inPartition, outPartition }. Used by tools/viz_check/cm
