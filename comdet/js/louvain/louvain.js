@@ -74,6 +74,26 @@
         do { r = next(); } while (r >= limit);
         return lo + (r % range);
       },
+      // Lemire's debiased multiplication, mirrors igraph's
+      // igraph_i_rng_get_uint32_bounded (random.c:428-439). Used by
+      // Leiden so its int(lo, hi) draws bit-equal igraph's
+      // igraph_rng_get_integer (which uses Lemire). Returns the high
+      // 32 bits of (next() * range), retried only when the low 32 bits
+      // are below the bias threshold (-range) % range.
+      intLemire: function (lo, hi) {
+        if (hi === lo) return lo;
+        const range = hi - lo + 1;
+        if (range <= 0) return lo;
+        const r64 = BigInt(range);
+        const t = ((-r64) % r64 + r64) % r64;        // (-range) % range
+        let m, l;
+        do {
+          const x = BigInt(next());
+          m = x * r64;                                // 64-bit product
+          l = m & 0xffffffffn;                        // uint32(m)
+        } while (l < t);
+        return lo + Number(m >> 32n);
+      },
       seed: function (s) { init(s >>> 0); },
       raw: next,
     };
@@ -92,6 +112,13 @@
     opts = opts || {};
     const directed = !!opts.directed;
     const correctSelfLoops = !!opts.correctSelfLoops;
+    // sortAdj=true sorts each node's adjacency by neighbour-id asc,
+    // mirroring igraph's igraph_lazy_adjlist_get with IGRAPH_MULTIPLE
+    // ordering. Required for byte-equal vs libleidenalg under matching
+    // seed (libleidenalg's cache_neigh_communities iterates the sorted
+    // adjlist; greedy ties pick the lowest-id neighbour-comm first).
+    // Default off to preserve Louvain externals adjacency conventions.
+    const sortAdj = !!opts.sortAdj;
     const nodeSizes = opts.nodeSizes ? opts.nodeSizes.slice()
                                      : new Array(n).fill(1);
     const m = edges.length;
@@ -110,6 +137,17 @@
       const u = eu[e], v = ev[e];
       adjE[u].push(e); adjN[u].push(v);
       if (u !== v) { adjE[v].push(e); adjN[v].push(u); }
+    }
+    if (sortAdj) {
+      for (let v = 0; v < n; v++) {
+        const idxs = adjN[v].map(function (_, i) { return i; });
+        idxs.sort(function (a, b) {
+          if (adjN[v][a] !== adjN[v][b]) return adjN[v][a] - adjN[v][b];
+          return adjE[v][a] - adjE[v][b];
+        });
+        adjN[v] = idxs.map(function (i) { return adjN[v][i]; });
+        adjE[v] = idxs.map(function (i) { return adjE[v][i]; });
+      }
     }
     const nodeSelfWeights = new Float64Array(n);
     for (let e = 0; e < m; e++) if (eu[e] === ev[e]) nodeSelfWeights[eu[e]] += ew[e];
@@ -163,6 +201,7 @@
           directed: directed,
           correctSelfLoops: correctSelfLoops,
           nodeSizes: newSizes,
+          sortAdj: sortAdj,
         });
       },
     };
@@ -183,7 +222,18 @@
     let totalWeightFromComm = new Float64Array(ncomm);
     let totalPossibleEdgesInAllComms = 0;
     let totalWeightInAllComms = 0;
-    const empties = new Set();
+    // LIFO stack of empty community ids. Mirrors libleidenalg
+    // _empty_communities (vector<size_t>): push when a comm becomes
+    // empty, reverse-scan + erase when a comm is moved into. .back()
+    // is the next id served by getEmptyCommunity (matches cpp
+    // MutableVertexPartition.cpp:482-492).
+    const empties = [];
+    function emptiesAdd(c) { empties.push(c); }
+    function emptiesRemove(c) {
+      for (let i = empties.length - 1; i >= 0; i--) {
+        if (empties[i] === c) { empties.splice(i, 1); return; }
+      }
+    }
     // Per-node neighbour-comm cache: when caller asks about v's
     // neighbour communities or weights repeatedly (which every
     // diff_move loop does), populate once and reuse until v moves
@@ -235,11 +285,11 @@
       }
       totalPossibleEdgesInAllComms = 0;
       totalWeightInAllComms = 0;
-      empties.clear();
+      empties.length = 0;
       for (let c = 0; c < ncomm; c++) {
         totalWeightInAllComms += totalWeightInComm[c];
         totalPossibleEdgesInAllComms += graph.possibleEdges(csize[c]);
-        if (cnodes[c] === 0) empties.add(c);
+        if (cnodes[c] === 0) emptiesAdd(c);
       }
       invalidateCache();
     }
@@ -392,8 +442,8 @@
           }
         }
       }
-      if (cnodes[old] === 0) empties.add(old);
-      empties.delete(target);
+      if (cnodes[old] === 0) emptiesAdd(old);
+      emptiesRemove(target);
       totalWeightInAllComms += deltaInAll;
       invalidateCache();
     }
@@ -407,10 +457,9 @@
     }
 
     function getEmptyCommunity() {
-      if (empties.size > 0) {
-        // Pick any empty id (insertion order via Set iterator).
-        const it = empties.values();
-        return it.next().value;
+      if (empties.length > 0) {
+        // LIFO: cpp _empty_communities.back().
+        return empties[empties.length - 1];
       }
       const newId = ncomm;
       csize = grow(csize, newId + 1);
@@ -421,7 +470,7 @@
         ? grow(totalWeightFromComm, newId + 1)
         : totalWeightToComm;
       ncomm += 1;
-      empties.add(newId);
+      emptiesAdd(newId);
       totalPossibleEdgesInAllComms += graph.possibleEdges(0);
       // Cache lists comm ids; growing the comm list does not change v's
       // neighbour comms, so the cache stays valid. No invalidation here.
@@ -456,12 +505,18 @@
     }
 
     function renumber() {
-      // Sort surviving comm ids by descending csize, then permute the
-      // admin tables in place. Avoids the full per-edge re-accumulation
-      // that rebuildAdmin would do.
+      // Sort surviving comm ids by csize DESC, cnodes DESC, then orig-id
+      // ASC. Mirrors libleidenalg orderCSize (GraphHelper.cpp:16-28). The
+      // tiebreak chain is required for byte-equal collapse: differently-
+      // labelled-but-equivalent partitions produce different collapsed
+      // graphs (super-node order changes).
       const order = [];
       for (let c = 0; c < ncomm; c++) if (cnodes[c] > 0) order.push(c);
-      order.sort(function (a, b) { return csize[b] - csize[a]; });
+      order.sort(function (a, b) {
+        if (csize[a] !== csize[b]) return csize[b] - csize[a];
+        if (cnodes[a] !== cnodes[b]) return cnodes[b] - cnodes[a];
+        return a - b;
+      });
       const remap = new Int32Array(ncomm);
       for (let i = 0; i < order.length; i++) remap[order[i]] = i;
       for (let v = 0; v < n; v++) membership[v] = remap[membership[v]];
@@ -485,7 +540,7 @@
       totalWeightToComm = newTo;
       totalWeightFromComm = directed ? newFrom : newTo;
       ncomm = newN;
-      empties.clear();
+      empties.length = 0;
       // totalWeightInAllComms + totalPossibleEdgesInAllComms unchanged
       // by a permutation that drops empty communities only (those have
       // csize=0, so possibleEdges(0) contribution is zero anyway).
