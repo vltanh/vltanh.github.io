@@ -12,16 +12,12 @@
  *   COMDET.VIECUT.strong_components(G, fpid?)
  *   COMDET.VIECUT.runBalancedCutDFS(cactus, mincut, start_vertex)
  *   COMDET.VIECUT.findBipartitionFromCactus(cactus, n_orig, dfsOut)
+ *   COMDET.VIECUT.cactus_mincut(G, opts)  // full pipeline
  *
- * Cactus-building (full cactus_mincut pipeline) is NOT YET implemented.
- * Production WCC + CM JS pages still need cutOracle injection until the
- * Phase B-2 stack lands (push_relabel + noi + viecut_heuristic +
- * padberg_rinaldi + heavy_edges + graph_modification + all_cut_local_red
- * + recursive_cactus + cactus_mincut driver). See
- * `viecut_phase_b_kickstart.md` in repo memory.
- *
- * Public helper for the Phase A use case (sweep start_vertex against
- * a canonical bipartition, useful for kernel_check.mjs-style replay):
+ * `bipartitionFromCactusWithSweep` is the helper used by tracers when
+ * canonical's start_vertex is unknowable (RNG state divergence between
+ * canonical's pre-DFS calls and the JS port). It sweeps start_vertex
+ * 0..n-1 and returns the first match (exact or bit-flipped).
  */
 (function () {
   "use strict";

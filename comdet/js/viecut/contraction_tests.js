@@ -19,9 +19,6 @@
   const C = window.COMDET;
   const NS = (C.VIECUT = C.VIECUT || {});
 
-  const UNDEFINED_NODE = 0xffffffff;
-  const UNDEFINED_EDGE = 0xffffffff;
-
   function prTests12(G, limit, find_all_cuts) {
     if (find_all_cuts === undefined) find_all_cuts = false;
     const n = G.number_of_nodes();

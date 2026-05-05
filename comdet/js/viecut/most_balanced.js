@@ -22,6 +22,7 @@
     const inCut = new Int8Array(n_orig);
     const checked = new Uint8Array(cactus.n());
     const q = [n1];
+    let qhead = 0;
     checked[n1] = 1;
     if (n1 !== n2) {
       q.push(n2);
@@ -30,10 +31,11 @@
     checked[rev_n1] = 1;
     checked[rev_n2] = 1;
 
-    while (q.length > 0) {
-      const top = q.shift();
+    while (qhead < q.length) {
+      const top = q[qhead++];
       for (const v of cactus.containedVertices(top)) inCut[v] = 1;
-      for (const e of cactus.edges_of(top)) {
+      const ne = cactus.get_first_invalid_edge(top);
+      for (let e = 0; e < ne; e++) {
         const t = cactus.getEdgeTarget(top, e);
         if (!checked[t]) {
           q.push(t);

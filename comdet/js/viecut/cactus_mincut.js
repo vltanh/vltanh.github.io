@@ -22,7 +22,7 @@
 
   function findAllMincuts(graphs, known_mincut) {
     if (!graphs.length || !graphs[graphs.length - 1]) {
-      return { mincut: -1, out_graph: null, mb_edges: [] };
+      return { mincut: -1, out_graph: null };
     }
     let mincut = graphs[graphs.length - 1].getMinDegree();
     if (known_mincut === undefined || known_mincut === UNDEFINED_NODE) {
@@ -88,7 +88,7 @@
     NS.minimum_cut_helpers.setVertexLocations(
       out_graph, graphs, ge_ids, guaranteed_edges, mincut);
 
-    return { mincut, out_graph, mb_edges: [] };
+    return { mincut, out_graph };
   }
 
   // High-level wrapper matching the cutOracle contract used by WCC + CM.
@@ -103,34 +103,17 @@
                inPartition: graphs[0].containedVertices(0).slice(),
                outPartition: [] };
     }
-    // Run balanced DFS on the cactus + transplant bipartition to original ids.
     const cactus = result.out_graph;
     const sv = NS.random_functions.nextInt(0, cactus.n() - 1);
     const dfs = NS.runBalancedCutDFS(cactus, result.mincut, sv);
-    // Use most_balanced BFS to flag inCut bits.
     const n_orig = cactus.getOriginalNodes();
-    const inCut = NS.findBipartitionFromCactus(cactusReadView(cactus), n_orig, dfs);
+    const inCut = NS.findBipartitionFromCactus(cactus, n_orig, dfs);
     const inP = [], outP = [];
     for (let i = 0; i < n_orig; i++) (inCut[i] ? inP : outP).push(i);
     return { cutValue: result.mincut, inPartition: inP, outPartition: outP,
              cactus: result.out_graph };
   }
 
-  // Adapt MutableGraph to CactusGraph's read interface for most_balanced BFS.
-  function cactusReadView(G) {
-    return {
-      n: () => G.n(),
-      getOriginalNodes: () => G.getOriginalNodes(),
-      containedVertices: (n) => G.containedVertices(n),
-      edges_of: (n) => G.edges_of(n),
-      getEdgeTarget: (n, e) => G.getEdgeTarget(n, e),
-      getEdgeWeight: (n, e) => G.getEdgeWeight(n, e),
-      get_first_invalid_edge: (n) => G.get_first_invalid_edge(n),
-      getReverseEdge: (n, e) => G.getReverseEdge(n, e),
-    };
-  }
-
   NS.cactus_mincut = cactus_mincut;
   NS.findAllMincuts = findAllMincuts;
-  NS._cactusReadView = cactusReadView;
 })();

@@ -14,12 +14,16 @@
     for (let i = 0; i < n; i++) this.parent[i] = i;
   }
   UnionFind.prototype.Find = function (x) {
-    if (this.parent[x] !== x) {
-      const r = this.Find(this.parent[x]);
-      this.parent[x] = r;
-      return r;
+    let r = x;
+    while (this.parent[r] !== r) r = this.parent[r];
+    // path compression
+    let cur = x;
+    while (this.parent[cur] !== r) {
+      const nxt = this.parent[cur];
+      this.parent[cur] = r;
+      cur = nxt;
     }
-    return x;
+    return r;
   };
   UnionFind.prototype.Union = function (lhs, rhs) {
     const sl = this.Find(lhs);

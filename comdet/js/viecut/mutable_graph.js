@@ -280,8 +280,6 @@
     }
   };
 
-  // edges_of returns an explicit edge-id range; a fresh array per call so
-  // mid-iteration deletes don't break callers.
   MutableGraph.prototype.edges_of = function (node) {
     const len = this.vertices[node].length;
     const out = new Array(len);

@@ -49,7 +49,10 @@
       this.m_bfstouched[i] = false;
     }
     for (let i = 0; i < this.m_count.length; i++) this.m_count[i] = 0;
-    this.m_Q = []; // (node, key) heap; we just sort on pop. Small graphs only.
+    // m_Q is a max-priority queue keyed by distance label. Upstream uses
+    // maxNodeHeap; NodeBucketPQ matches at our size budget (distance is
+    // bounded by 2*n) and is already loaded.
+    this.m_Q = new NS.NodeBucketPQ(n, 2 * n + 1);
     this.m_count[0] = G.number_of_nodes() - 1;
     this.m_count[G.number_of_nodes()] = 1;
 
@@ -75,6 +78,7 @@
       }
     }
     const Q = [];
+    let qhead = 0;
     for (const sink of sources) {
       if (sink === flow_source) {
         this.m_distance[sink] = G.n();
@@ -87,8 +91,8 @@
       this.m_distance[sink] = 0;
     }
     this.m_bfstouched[flow_source] = true;
-    while (Q.length > 0) {
-      const node = Q.shift();
+    while (qhead < Q.length) {
+      const node = Q[qhead++];
       const ne = G.get_first_invalid_edge(node);
       for (let e = 0; e < ne; e++) {
         const target = G.getEdgeTarget(node, e);
@@ -126,19 +130,12 @@
     if (this.m_active[target]) return;
     if (this.m_excess[target] > 0) {
       this.m_active[target] = true;
-      this.m_Q.push({ node: target, key: this.m_distance[target] });
+      this.m_Q.insert(target, this.m_distance[target]);
     }
   };
 
   PushRelabel.prototype._popMax = function () {
-    let bestIdx = 0;
-    for (let i = 1; i < this.m_Q.length; i++) {
-      if (this.m_Q[i].key > this.m_Q[bestIdx].key) bestIdx = i;
-    }
-    const v = this.m_Q[bestIdx].node;
-    this.m_Q[bestIdx] = this.m_Q[this.m_Q.length - 1];
-    this.m_Q.pop();
-    return v;
+    return this.m_Q.deleteMax();
   };
 
   PushRelabel.prototype._discharge = function (node) {
@@ -193,13 +190,14 @@
     for (let nx = 0; nx < G.number_of_nodes(); nx++) this.m_bfstouched[nx] = false;
 
     const Q = [];
+    let qhead = 0;
     for (const tgt of sources) {
       if (tgt === src) continue;
       Q.push(tgt);
       this.m_bfstouched[tgt] = true;
     }
-    while (Q.length > 0) {
-      const node = Q.shift();
+    while (qhead < Q.length) {
+      const node = Q[qhead++];
       const ne = G.get_first_invalid_edge(node);
       for (let e = 0; e < ne; e++) {
         const rev_e = G.getReverseEdge(node, e);
@@ -213,10 +211,11 @@
       }
     }
     const Qsrc = [src];
+    let qsrc_head = 0;
     source_set.push(src);
     this.m_bfstouched[src] = true;
-    while (Qsrc.length > 0) {
-      const node = Qsrc.shift();
+    while (qsrc_head < Qsrc.length) {
+      const node = Qsrc[qsrc_head++];
       const ne = G.get_first_invalid_edge(node);
       for (let e = 0; e < ne; e++) {
         const n2 = G.getEdgeTarget(node, e);
@@ -247,7 +246,7 @@
     this._global_relabeling(sources, curr_source, true);
     const work_todo = WORK_NODE_TO_EDGES * G.number_of_nodes() + G.number_of_edges();
 
-    while (this.m_Q.length > 0) {
+    while (!this.m_Q.empty()) {
       const v = this._popMax();
       this.m_active[v] = false;
       this._discharge(v);

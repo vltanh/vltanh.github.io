@@ -62,14 +62,16 @@
           best_in_cycle = true;
           const fn = cycle_vertices[((front - 1) % length + length) % length];
           const ftgt = cycle_vertices[((front) % length + length) % length];
-          for (const e of G.edges_of(fn)) {
+          const fne = G.get_first_invalid_edge(fn);
+          for (let e = 0; e < fne; e++) {
             if (G.getEdgeTarget(fn, e) === ftgt) {
               best_n = fn; best_e = e; break;
             }
           }
           const bn = cycle_vertices[((back - 1) % length + length) % length];
           const btgt = cycle_vertices[((back) % length + length) % length];
-          for (const e of G.edges_of(bn)) {
+          const bne = G.get_first_invalid_edge(bn);
+          for (let e = 0; e < bne; e++) {
             if (G.getEdgeTarget(bn, e) === btgt) {
               best_n2 = bn; best_e2 = e; break;
             }

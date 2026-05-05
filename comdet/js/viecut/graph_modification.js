@@ -79,11 +79,12 @@
           neighbors.set(neighbors_cycle[i][0], i);
         }
         const q = [neighbors_cycle[0][0]];
+        let qhead = 0;
         const seen = new Uint8Array(cactus.number_of_nodes());
         seen[vertex] = 1;
         let matched = false;
-        while (q.length > 0 && !matched) {
-          const n = q.shift();
+        while (qhead < q.length && !matched) {
+          const n = q[qhead++];
           const ne2 = cactus.get_first_invalid_edge(n);
           for (let e = 0; e < ne2; e++) {
             const tgt = cactus.getEdgeTarget(n, e);

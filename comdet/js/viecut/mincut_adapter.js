@@ -43,12 +43,11 @@
       if (a === undefined || b === undefined) continue;
       if (a === b) continue;
       const lo = Math.min(a, b), hi = Math.max(a, b);
-      const key = lo * 1e9 + hi;
+      const key = lo + "," + hi;
       wgtMap.set(key, (wgtMap.get(key) || 0) + 1);
     }
     for (const [key, w] of wgtMap) {
-      const lo = Math.floor(key / 1e9);
-      const hi = key - lo * 1e9;
+      const [lo, hi] = key.split(",").map(Number);
       G.new_edge(lo, hi, w);
     }
     G.finish_construction();
