@@ -4,9 +4,9 @@
  *
  * Capforest contraction repeatedly applies modified_capforest +
  * fromUnionFind until n <= 2 or mincut == 0. PQ choice mirrors VieCut's
- * default: bucket queue (we use NodeBucketPQ; canonical may pick
- * fifo_node_bucket_pq for default. Both correct, may differ on tie
- * order; flagged as a possible byte-equal divergence.)
+ * "default" config: fifo_node_bucket_pq (FIFO bucket pop), matching
+ * canonical noi_minimum_cut.h:95-100 selectPq() for n*mincut not
+ * exceeding the heap-switch threshold.
  */
 (function () {
   "use strict";
@@ -18,7 +18,7 @@
     const n = G.number_of_nodes();
     const uf = new NS.UnionFind(n);
     const span = Math.max(1, mincut + 1);
-    const pq = new NS.NodeBucketPQ(n, span);
+    const pq = new NS.FifoNodeBucketPQ(n, span);
     const visited = new Uint8Array(n);
     const seen = new Uint8Array(n);
     const r_v = new Array(n).fill(0);

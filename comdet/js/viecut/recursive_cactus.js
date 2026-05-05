@@ -18,8 +18,15 @@
   const UNDEFINED_EDGE = 0xffffffff;
 
   function RecursiveCactus(mincut) {
+    // [UPSTREAM recursive_cactus.h:52] Default ctor leaves problem_id
+    // unset; flowMincut() initialises it from random_functions::next().
+    // The mincut-arg ctor (line 53) DOES draw an RNG value, but
+    // cactus_mincut.h:76 uses the default ctor + setMincut(), so the
+    // JS port follows that path. Calling next() here would advance the
+    // RNG one extra step relative to canonical and break byte-equal
+    // start_vertex selection in balanced_cut_dfs.
     this.mincut = mincut;
-    this.problem_id = NS.random_functions.next();
+    this.problem_id = 0;
   }
 
   RecursiveCactus.prototype.setMincut = function (m) { this.mincut = m; };
