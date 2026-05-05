@@ -102,11 +102,9 @@
     const idx = new Map();
     nodeIds.forEach(function (id, i) { idx.set(id, i); });
 
-    // Compact + drop self-loops + dedupe per (src, tgt).
-    // Canonical pypi accumulates link weight on duplicate (u, v) via
-    // StateNetwork::addLink. For unweighted input each edge has w=1.
-    const linkMap = new Map(); // "src|tgt" -> weight
-    const outEdgeBySrc = new Map(); // src -> [{tgt, w}]
+    // Aggregate edge weights by (src, tgt). Canonical's StateNetwork::
+    // addLink accumulates duplicate (u, v) link weights.
+    const linkMap = new Map();
     edges.forEach(function (e) {
       const u = idx.get(e[0]); const v = idx.get(e[1]);
       if (u == null || v == null || u === v) return;
@@ -119,46 +117,29 @@
       }
     });
 
-    // Iterate linkMap in (src, tgt) ASC order so the optimizer's
+    // Iterate edges in (src, tgt) ASC order so the optimizer's
     // deltaFlow VectorMap insertion order is deterministic; canonical
     // uses std::map keyed by id, sorted ASC.
-    const links = [];
     const ents = Array.from(linkMap.entries()).map(function (kv) {
       const [s, t] = kv[0].split("|");
       return [+s, +t, kv[1]];
     });
     ents.sort(function (a, b) { return a[0] - b[0] || a[1] - b[1]; });
-    let sumLinkWeight = 0;
     let sumWeightedDegree = 0;
-    const nodeOutDegree = new Int32Array(n);
-    const sumLinkOutWeight = new Float64Array(n);
-
-    // First pass: per FlowCalculator::FlowCalculator constructor.
-    for (const [u, v, w] of ents) {
-      nodeOutDegree[u] += 1;
-      sumLinkOutWeight[u] += w;
-      sumLinkWeight += w;
-      sumWeightedDegree += 2 * w; // undirected: count both endpoints
-      // For undirected target also gets out-deg contribution
-      nodeOutDegree[v] += 1;
-      sumLinkOutWeight[v] += w;
-    }
+    for (const [, , w] of ents) sumWeightedDegree += 2 * w;
 
     // FlowCalculator::calcUndirectedFlow:
     //   link.flow = 2 * w / sumWeightedDegree (for non-self-loops)
-    // node.flow = sum over both endpoints of w / sumWeightedDegree
+    //   node.flow = deg(v) / sumWeightedDegree
     const nodeFlow = new Float64Array(n);
+    const links = [];
     for (const [u, v, w] of ents) {
       nodeFlow[u] += w / sumWeightedDegree;
       nodeFlow[v] += w / sumWeightedDegree;
-      links.push({
-        u: u, v: v,
-        weight: w,
-        flow: 2.0 * w / sumWeightedDegree,
-      });
+      links.push({ u: u, v: v, weight: w,
+                   flow: 2.0 * w / sumWeightedDegree });
     }
 
-    // Outgoing + incoming edge lists per node.
     const outEdges = new Array(n);
     const inEdges  = new Array(n);
     for (let i = 0; i < n; i++) { outEdges[i] = []; inEdges[i] = []; }
@@ -167,9 +148,9 @@
       inEdges[lk.v].push(lk);
     }
 
-    // Mirror InfomapBase::initEnterExitFlow for undirected: node.exit
-    // = node.enter = sum of halfFlow over incident edges = nodeFlow
-    // for the leaf network with no self-loops.
+    // InfomapBase::initEnterExitFlow for undirected: node.enter =
+    // node.exit = sum of halfFlow over incident edges = nodeFlow on
+    // the leaf graph with no self-loops.
     const nodeEnter = new Float64Array(n);
     const nodeExit  = new Float64Array(n);
     for (let v = 0; v < n; v++) {
@@ -179,16 +160,12 @@
 
     return {
       n: n,
-      ids: nodeIds,
-      idx: idx,
       links: links,
       outEdges: outEdges,
       inEdges: inEdges,
       nodeFlow: nodeFlow,
       nodeEnter: nodeEnter,
       nodeExit: nodeExit,
-      nodeDeg: nodeOutDegree,
-      sumLinkWeight: sumLinkWeight,
       sumWeightedDegree: sumWeightedDegree,
     };
   }
@@ -348,6 +325,11 @@
     const order = getRandomizedIndexVector(rng, g.n);
     let nMoved = 0;
 
+    // Reused across nodes: per-iter `clear()` is much cheaper than
+    // allocating a fresh Map + Array per visit.
+    const insertOrder = [];
+    const dfMap = new Map();
+
     for (let i = 0; i < g.n; i++) {
       const v = order[i];
       if (!dirty[v]) continue;
@@ -355,36 +337,49 @@
           && isFirstLoop && tuneIterationLimit !== 1) {
         continue;
       }
-      // Build deltaFlow: module -> {deltaExit, deltaEnter}
+      // Build deltaFlow: module -> {deltaExit, deltaEnter}.
       // Insertion order matters (canonical's VectorMap iterates in
       // insertion order before randomized link enumeration).
-      const insertOrder = [];
-      const dfMap = new Map();
-      function dfAdd(mod, dexit, denter) {
-        if (dfMap.has(mod)) {
-          const r = dfMap.get(mod);
-          r.deltaExit += dexit;
-          r.deltaEnter += denter;
+      insertOrder.length = 0;
+      dfMap.clear();
+      for (const e of g.outEdges[v]) {
+        const mod = P.moduleOf[e.v];
+        const r = dfMap.get(mod);
+        if (r === undefined) {
+          const ne = { module: mod, deltaExit: e.flow, deltaEnter: 0 };
+          dfMap.set(mod, ne);
+          insertOrder.push(ne);
         } else {
-          const r = { module: mod, deltaExit: dexit, deltaEnter: denter };
-          dfMap.set(mod, r);
-          insertOrder.push(r);
+          r.deltaExit += e.flow;
         }
       }
-      for (const e of g.outEdges[v]) {
-        dfAdd(P.moduleOf[e.v], e.flow, 0);
-      }
       for (const e of g.inEdges[v]) {
-        dfAdd(P.moduleOf[e.u], 0, e.flow);
+        const mod = P.moduleOf[e.u];
+        const r = dfMap.get(mod);
+        if (r === undefined) {
+          const ne = { module: mod, deltaExit: 0, deltaEnter: e.flow };
+          dfMap.set(mod, ne);
+          insertOrder.push(ne);
+        } else {
+          r.deltaEnter += e.flow;
+        }
       }
-      // For not moving (canonical: deltaFlow.add(current.index, {0,0}))
+      // For not moving (canonical: deltaFlow.add(current.index, {0,0})).
       const oldM = P.moduleOf[v];
-      dfAdd(oldM, 0, 0);
-      const oldEntry = dfMap.get(oldM);
+      let oldEntry = dfMap.get(oldM);
+      if (oldEntry === undefined) {
+        oldEntry = { module: oldM, deltaExit: 0, deltaEnter: 0 };
+        dfMap.set(oldM, oldEntry);
+        insertOrder.push(oldEntry);
+      }
       // Option to move to empty module if not alone.
       if (P.moduleMembers[oldM] > 1 && P.emptyModules.length > 0) {
         const em = P.emptyModules[P.emptyModules.length - 1];
-        dfAdd(em, 0, 0);
+        if (!dfMap.has(em)) {
+          const ne = { module: em, deltaExit: 0, deltaEnter: 0 };
+          dfMap.set(em, ne);
+          insertOrder.push(ne);
+        }
       }
       // Randomize link order via canonical's getRandomizedIndexVector.
       const numLinks = insertOrder.length;
@@ -507,6 +502,36 @@
       oldL = newL;
     }
     return numEffective;
+  }
+
+  // Apply a target leaf->module mapping to a singleton-init Partition,
+  // computing per-leaf deltaEnter/deltaExit and committing each move
+  // via P.moveNode. After all moves, P.emptyModules is rebuilt from
+  // moduleMembers (canonical maintains it incrementally with
+  // pop_back/push_back, but the post-hoc rebuild is O(n) total + lets
+  // applyMembership share one path instead of three near-duplicates).
+  function applyMembership(P, g, target) {
+    for (let v = 0; v < g.n; v++) {
+      const t = target[v];
+      const oldM = P.moduleOf[v];
+      if (t === oldM) continue;
+      let oDE = 0, oDX = 0, nDE = 0, nDX = 0;
+      for (const e of g.outEdges[v]) {
+        const cu = P.moduleOf[e.v];
+        if (cu === oldM) oDX += e.flow;
+        else if (cu === t) nDX += e.flow;
+      }
+      for (const e of g.inEdges[v]) {
+        const cu = P.moduleOf[e.u];
+        if (cu === oldM) oDE += e.flow;
+        else if (cu === t) nDE += e.flow;
+      }
+      P.moveNode(v, t, oDE, oDX, nDE, nDX);
+    }
+    P.emptyModules.length = 0;
+    for (let c = 0; c < g.n; c++) {
+      if (P.moduleMembers[c] === 0) P.emptyModules.push(c);
+    }
   }
 
   // ── Multi-level findTopModulesRepeatedly + collapse ────────────────
@@ -639,16 +664,12 @@
     }
     return {
       n: ncomm,
-      ids: nodeFlow.map((_, i) => i),
-      idx: null,
       links: links,
       outEdges: outEdges,
       inEdges: inEdges,
       nodeFlow: nodeFlow,
       nodeEnter: nodeEnter,
       nodeExit: nodeExit,
-      nodeDeg: nodeFlow.map(_ => 0),
-      sumLinkWeight: 0,
       sumWeightedDegree: g.sumWeightedDegree,
     };
   }
@@ -685,31 +706,7 @@
     let aggregateMembership = seedRenum;
     let lastL = (function () {
       const P = makePartition(g);
-      // Apply seedRenum directly.
-      for (let v = 0; v < g.n; v++) {
-        const target = seedRenum[v];
-        if (target === P.moduleOf[v]) continue;
-        let oDE = 0, oDX = 0, nDE = 0, nDX = 0;
-        const oldM = P.moduleOf[v];
-        for (const e of g.outEdges[v]) {
-          const cu = P.moduleOf[e.v];
-          if (cu === oldM) oDX += e.flow;
-          else if (cu === target) nDX += e.flow;
-        }
-        for (const e of g.inEdges[v]) {
-          const cu = P.moduleOf[e.u];
-          if (cu === oldM) oDE += e.flow;
-          else if (cu === target) nDE += e.flow;
-        }
-        if (P.moduleMembers[target] === 0) {
-          const idx = P.emptyModules.indexOf(target);
-          if (idx >= 0) P.emptyModules.splice(idx, 1);
-        }
-        if (P.moduleMembers[oldM] === 1) {
-          P.emptyModules.push(oldM);
-        }
-        P.moveNode(v, target, oDE, oDX, nDE, nDX);
-      }
+      applyMembership(P, g, seedRenum);
       return P.codelength();
     })();
     const aggLimit = opts.aggregationLimit != null
@@ -740,40 +737,8 @@
   // Returns the new membership + L.
   function fineTune(g, leafToTop, rng, opts) {
     opts = opts || {};
-    // initPartition on leaves = singleton; then moveActiveNodes to
-    // existing top-module indices. We can shortcut by starting fresh
-    // makePartition (singleton) and moving each leaf into its
-    // top-module. Need to skip identity moves.
     const P = makePartition(g);
-    // Apply leafToTop directly via moveNode + computed deltas.
-    for (let v = 0; v < g.n; v++) {
-      const target = leafToTop[v];
-      if (target === P.moduleOf[v]) continue;
-      let oDE = 0, oDX = 0, nDE = 0, nDX = 0;
-      const oldM = P.moduleOf[v];
-      for (const e of g.outEdges[v]) {
-        const cu = P.moduleOf[e.v];
-        if (cu === oldM) oDX += e.flow;
-        else if (cu === target) nDX += e.flow;
-      }
-      for (const e of g.inEdges[v]) {
-        const cu = P.moduleOf[e.u];
-        if (cu === oldM) oDE += e.flow;
-        else if (cu === target) nDE += e.flow;
-      }
-      // Maintain emptyModules: target may be empty, and oldM becomes
-      // empty after (since singleton init -> 1 member each).
-      if (P.moduleMembers[target] === 0) {
-        // Pop target from emptyModules if present.
-        const idx = P.emptyModules.indexOf(target);
-        if (idx >= 0) P.emptyModules.splice(idx, 1);
-      }
-      if (P.moduleMembers[oldM] === 1) {
-        P.emptyModules.push(oldM);
-      }
-      P.moveNode(v, target, oDE, oDX, nDE, nDX);
-    }
-    // Re-optimize.
+    applyMembership(P, g, leafToTop);
     optimizeActiveNetwork(P, g, rng, opts);
     const newMembership = renumberByEncounter(P.moduleOf, g.n);
     return { membership: newMembership, L: P.codelength(), partition: P };
@@ -894,23 +859,7 @@
       doFineTune = !doFineTune;
     }
     const partitionFinal = makePartition(g);
-    // Apply leafToTop directly.
-    for (let v = 0; v < g.n; v++) {
-      const target = leafToTop[v];
-      if (target !== partitionFinal.moduleOf[v]) {
-        // Compute deltas for incremental move.
-        let oDE = 0, oDX = 0, nDE = 0, nDX = 0;
-        for (const e of g.outEdges[v]) {
-          if (partitionFinal.moduleOf[e.v] === partitionFinal.moduleOf[v]) oDX += e.flow;
-          else if (partitionFinal.moduleOf[e.v] === target) nDX += e.flow;
-        }
-        for (const e of g.inEdges[v]) {
-          if (partitionFinal.moduleOf[e.u] === partitionFinal.moduleOf[v]) oDE += e.flow;
-          else if (partitionFinal.moduleOf[e.u] === target) nDE += e.flow;
-        }
-        partitionFinal.moveNode(v, target, oDE, oDX, nDE, nDX);
-      }
-    }
+    applyMembership(partitionFinal, g, leafToTop);
     const L = partitionFinal.codelength();
     const membership = new Map();
     nodeIds.forEach(function (id, i) { membership.set(id, leafToTop[i]); });
