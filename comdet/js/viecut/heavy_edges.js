@@ -83,9 +83,11 @@
         const contained = G.containedVertices(n).slice();
         G.setContainedVertices(n, []);
         for (const c of contained) G.setCurrentPosition(c, UNDEFINED_NODE);
+        // [UPSTREAM heavy_edges.h:99 "we use basic for loop so G->n() can
+        // update"] no re-examine. After swap-and-pop the data that was at
+        // last moves to index n; upstream skips it.
         G.contractEdgeSparseTarget(n0, G.getReverseEdge(n, rev));
         cycleEdges.push([[p0, p1], contained]);
-        n--;  // re-examine because indices may shift
       } else if (G.get_first_invalid_edge(n) === 2
                  && G.getEdgeWeight(n, 0) !== G.getEdgeWeight(n, 1)) {
         const h1 = G.getEdgeWeight(n, 0) < G.getEdgeWeight(n, 1);
@@ -93,7 +95,6 @@
         const ngbr = G.getEdgeTarget(n, heavier);
         const rev = G.getReverseEdge(n, heavier);
         G.contractEdgeSparseTarget(ngbr, rev);
-        n--;
       }
     }
     return cycleEdges;
