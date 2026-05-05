@@ -22,8 +22,8 @@
  *
  * The legacy paper-faithful 2008 port (greedy pair-join + greedy tune
  * + heat-bath SA refinement) lives in infomap.js and is preserved as
- * the COMDET.INFOMAP_LEGACY surface for the page walker. This file
- * mounts COMDET.INFOMAP_CANON.
+ * the COMDET.INFOMAP surface for the page walker. This file mounts
+ * COMDET.INFOMAP_CANON.
  */
 (function () {
   "use strict";
@@ -176,7 +176,7 @@
     const n = g.n;
     const moduleOf = new Int32Array(n);
     const moduleMembers = new Int32Array(n);
-    const moduleFlow      = new Float64Array(n); // flow + selfFlow for that module's leaf
+    const moduleFlow      = new Float64Array(n);
     const moduleEnterFlow = new Float64Array(n);
     const moduleExitFlow  = new Float64Array(n);
     const emptyModules = []; // stack of empty module ids for reuse
@@ -301,7 +301,6 @@
     }
 
     return {
-      n: function () { return n; },
       moduleOf: moduleOf,
       moduleMembers: moduleMembers,
       moduleFlow: moduleFlow,
@@ -311,7 +310,6 @@
       diffMove: diffMove,
       moveNode: moveNode,
       codelength: codelength,
-      getEnterFlow: function () { return enterFlow; },
     };
   }
 
@@ -772,23 +770,20 @@
         continue;
       }
       // Build sub-graph: relabel members to 0..k-1, collect edges.
-      const memberIds = members; // external ids = original compact indices
       const remap = new Map();
       members.forEach(function (v, i) { remap.set(v, i); });
       const subEdges = [];
-      const memberSet = new Set(members);
       for (const lk of g.links) {
-        if (memberSet.has(lk.u) && memberSet.has(lk.v)) {
+        if (remap.has(lk.u) && remap.has(lk.v)) {
           subEdges.push([remap.get(lk.u), remap.get(lk.v)]);
         }
       }
-      const subRes = runInfomapCanonical(
-        members.map(function (_, i) { return i; }),
-        subEdges,
-        { seed: opts.seed != null ? opts.seed : 1,
-          aggregationLimit: 30,
-          tuneIterationLimitOuter: 0 }
-      );
+      const subIds = Array.from({ length: members.length }, (_, i) => i);
+      const subRes = runInfomapCanonical(subIds, subEdges, {
+        seed: opts.seed != null ? opts.seed : 1,
+        aggregationLimit: 30,
+        tuneIterationLimitOuter: 0,
+      });
       // Project sub-Infomap's membership back onto leaves with offset.
       let maxSub = 0;
       for (let i = 0; i < members.length; i++) {
@@ -814,8 +809,6 @@
     const rng = LV.MT19937(seed >>> 0);
     const aggregationLimit = opts.aggregationLimit != null
       ? opts.aggregationLimit : 30;
-    const tuneIterationLimit = opts.tuneIterationLimit != null
-      ? opts.tuneIterationLimit : 0;
     // findTopModulesRepeatedly does one full multi-level Louvain pass.
     let r = findTopModulesRepeatedly(g, rng, {
       aggregationLimit: aggregationLimit,
