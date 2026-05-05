@@ -579,7 +579,7 @@
     const isFirstLoopFlag = opts.isFirstLoop !== undefined ? !!opts.isFirstLoop : true;
     while (coreLoopCount < loopLimit) {
       coreLoopCount += 1;
-      if (log) log("tryMoveEach.begin", { fl: isFirstLoopFlag, n: g.n });
+      if (log) log("tryMoveEach.begin", { fl: isFirstLoopFlag, n: g.n }, rng);
       const nMoved = tryMoveEach(P, g, rng, {
         isFirstLoop: isFirstLoopFlag,
         tuneIterationLimit: opts.tuneIterationLimit | 0,
@@ -1030,12 +1030,21 @@
         }
       }
       const subIds = Array.from({ length: members.length }, (_, i) => i);
+      // canonical's getSubInfomap creates a fresh InfomapBase whose
+      // InfomapConfig ctor re-seeds m_rand from the same
+      // seedToRandomNumberGenerator (Config.seedToRandomNumberGenerator,
+      // = the original CLI --seed). Each sub-Infomap thus starts with
+      // the same RNG state as the top-level run. Pass a FRESH MT19937
+      // here, NOT the parent rng.
       const subRes = runInfomapFaithful(subIds, subEdges, {
         seed: opts.seed != null ? opts.seed : 1,
-        rng: rng,
+        rng: rng,                       // share parent rng
         twoLevel: true,
         tuneIterationLimit: 1,
         aggregationLimit: 30,
+        isMain: false,                  // sub-Infomap analog of cpp's
+                                        // setIsMain(false); affects
+                                        // isFirstLoop() inside.
         boundaryLog: log,
       });
       let maxSub = 0;
@@ -1122,12 +1131,19 @@
     // Compute one-level codelength up front (for the bail-out check).
     const oneLevelL = oneLevelCodelength(g);
 
-    // First findTopModulesRepeatedly at aggregation_level = 0,
-    // tuneIterationIndex = 0 -> isFirstLoop = true on every call within.
+    // First findTopModulesRepeatedly. canonical's isFirstLoop() ==
+    // (m_tuneIterationIndex == 0 && isFullNetwork()) where
+    // isFullNetwork() == m_isMain && m_aggregationLevel == 0. For the
+    // top-level Infomap m_isMain == true; for sub-Infomap inside
+    // coarseTune m_isMain == false. opts.isMain (default true) toggles
+    // this so sub-Infomap's tryMoveEach sees isFirstLoop == false even
+    // at aggregation_level == 0.
+    const isMain = opts.isMain !== undefined ? !!opts.isMain : true;
     if (log) log("partition.firstFindTop", { n: g.n });
     let r = findTopModulesRepeatedly(g, rng, {
       aggregationLimit: aggregationLimit, loopLimit: 10,
-      isFirstLoopOuter: true,
+      isFirstLoopOuter: isMain,
+      tuneIterationLimit: tuneIterationLimit,
       boundaryLog: log,
     });
     let leafToTop = r.membership;

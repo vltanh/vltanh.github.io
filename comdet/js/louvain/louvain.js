@@ -78,6 +78,20 @@
     }
     init(seed >>> 0);
     return {
+      // peek(k): return next k raw uint32 outputs without consuming.
+      // Snapshots mt + mti, draws k, restores. Used by L4 RNG-state
+      // diff diagnostics to compare RNG state at boundary points
+      // against the cpp tracer's std::mt19937 peek (uses the same
+      // copy-and-draw idiom).
+      peek: function (k) {
+        const mtSave = new Uint32Array(mt);
+        const mtiSave = mti;
+        const out = new Array(k);
+        for (let i = 0; i < k; i++) out[i] = next() >>> 0;
+        for (let i = 0; i < N; i++) mt[i] = mtSave[i];
+        mti = mtiSave;
+        return out;
+      },
       // int(lo, hi) — rejection sampling on [lo, hi]. Used by Louvain
       // shuffle. Matches the cpp tracer's int_inclusive helper bit-for-
       // bit (range = hi-lo+1; limit = floor(2^32/range)*range).
@@ -663,11 +677,13 @@
         const m2 = G.totalWeight();
         if (m2 <= 0) return 0;
         let q = 0;
+        // Filter on tot > 0 (canonical modularity.cpp:64); cnodes == 0
+        // would diverge when a comm is emptied through a remove/insert
+        // chain that leaves tot at a tiny positive FP residual.
         for (let c = 0; c < P.ncomm(); c++) {
-          if (P.cnodes(c) === 0) continue;
-          const ec = P.totalWeightInComm(c);
           const Kc = P.totalWeightToComm(c);
-          // Canonical: q += in[c] - tot[c]·tot[c] / m2; q /= m2.
+          if (Kc <= 0) continue;
+          const ec = P.totalWeightInComm(c);
           q += ec - Kc * Kc / m2;
         }
         return q / m2;
