@@ -115,17 +115,58 @@
   // ---- random_functions facade matching VieCut's static API ------------
   let m_seed = 0;
   let m_mt = new MT19937(0);
+  // Oracle queue: when set, next/nextInt/etc. consume from this queue
+  // (each entry is { kind: "next"|"nextInt"|"nextBool"|"nextDouble", val })
+  // instead of advancing the MT19937. Used by the random/deterministic
+  // separation test: feed canonical C++'s RNG outputs into JS, verify
+  // JS deterministic computation matches canonical's downstream output.
+  let m_oracle = null;
 
   function setSeed(seed) {
     m_seed = seed;
     m_mt = new MT19937(seed);
   }
+  function setOracle(queue) { m_oracle = queue; }
+  function clearOracle() { m_oracle = null; }
 
   function getSeed() { return m_seed; }
-  function next() { return m_mt.next(); }
-  function nextInt(lb, rb) { return uniformInt(m_mt, lb, rb); }
-  function nextBool() { return uniformInt(m_mt, 0, 1) === 1; }
+  function next() {
+    if (m_oracle !== null) {
+      const e = m_oracle.shift();
+      if (!e || e.kind !== "next")
+        throw new Error(`oracle exhausted/wrong kind for next(): ${JSON.stringify(e)}`);
+      return e.val >>> 0;
+    }
+    return m_mt.next();
+  }
+  function nextInt(lb, rb) {
+    if (m_oracle !== null) {
+      const e = m_oracle.shift();
+      if (!e || e.kind !== "nextInt")
+        throw new Error(`oracle exhausted/wrong kind for nextInt(): ${JSON.stringify(e)}`);
+      if (e.lb !== lb || e.rb !== rb) {
+        throw new Error(`oracle nextInt range mismatch: oracle=(${e.lb},${e.rb}) caller=(${lb},${rb})`);
+      }
+      return e.val;
+    }
+    return uniformInt(m_mt, lb, rb);
+  }
+  function nextBool() {
+    if (m_oracle !== null) {
+      const e = m_oracle.shift();
+      if (!e || e.kind !== "nextBool")
+        throw new Error(`oracle wrong kind for nextBool(): ${JSON.stringify(e)}`);
+      return e.val;
+    }
+    return uniformInt(m_mt, 0, 1) === 1;
+  }
   function nextDouble(lb, rb) {
+    if (m_oracle !== null) {
+      const e = m_oracle.shift();
+      if (!e || e.kind !== "nextDouble")
+        throw new Error(`oracle wrong kind for nextDouble(): ${JSON.stringify(e)}`);
+      return e.val;
+    }
     // libstdc++ uniform_real picks 53-bit fraction via two uint32 draws;
     // not used by cactus path. Provide a simple version for completeness.
     const a = m_mt.next() >>> 5;        // 27 bits
@@ -137,7 +178,8 @@
   NS.MT19937 = MT19937;
   NS.uniformInt = uniformInt;
   NS.random_functions = {
-    setSeed, getSeed, next, nextInt, nextBool, nextDouble,
+    setSeed, getSeed, setOracle, clearOracle,
+    next, nextInt, nextBool, nextDouble,
     getMT: () => m_mt,
   };
 })();
