@@ -173,6 +173,13 @@
       nodeExit[v]  = nodeFlow[v];
     }
 
+    // Pre-compute leaf-level nodeFlow_log_nodeFlow constant. cpp's
+    // MapEquation::initNetwork sets this once over the leaf graph and
+    // holds constant across every super-net level inside
+    // findTopModulesRepeatedly. Stored on graph so all makePartition
+    // calls (incl. those on collapsedG) read the same value.
+    let leafNFLNF = 0;
+    for (let v = 0; v < n; v++) leafNFLNF += plogp(nodeFlow[v]);
     return {
       n: n,
       links: links,
@@ -182,6 +189,67 @@
       nodeEnter: nodeEnter,
       nodeExit: nodeExit,
       sumWeightedDegree: sumWeightedDegree,
+      exitNetworkFlow: 0,
+      leafNodeFlowLogNodeFlow: leafNFLNF,
+    };
+  }
+
+  // Build a sub-graph that inherits parent leaf flows + edge flows
+  // verbatim. Per cpp's generateSubNetwork (InfomapBase.cpp:874): clones
+  // parent leaf FlowData (flow, enterFlow, exitFlow) verbatim; does NOT
+  // re-run initEnterExitFlow on the sub-network. So sub-leaf.enterFlow
+  // = parent_leaf.enterFlow = parent.nodeFlow (for undirected with no
+  // self-loops where nodeEnter/nodeExit/nodeFlow all equal parent's
+  // 0.5 * Σ_incident link.flow). Crucially this means sub-leaf.enterFlow
+  // includes parent's cross-module-edge contributions, NOT just
+  // sub-incident edges. Recomputing from sub-edges only gives a smaller
+  // value (half it for leaves with all parent edges within the module,
+  // less for leaves with cross-module edges) and trips per-visit ΔL
+  // tie-breaks differently from cpp.
+  // exitNetworkFlow is the parent module's exitFlow — propagates into
+  // sub-Infomap MapEquation as the constant exitNetworkFlow term.
+  function buildSubGraph(parentG, members, exitNetworkFlow) {
+    const n = members.length;
+    const inv = new Map();
+    members.forEach(function (v, i) { inv.set(v, i); });
+    const nodeFlow = new Float64Array(n);
+    const nodeEnter = new Float64Array(n);
+    const nodeExit = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      nodeFlow[i]  = parentG.nodeFlow[members[i]];
+      nodeEnter[i] = parentG.nodeEnter[members[i]];
+      nodeExit[i]  = parentG.nodeExit[members[i]];
+    }
+    const linkObjs = [];
+    for (const lk of parentG.links) {
+      if (!inv.has(lk.u) || !inv.has(lk.v)) continue;
+      linkObjs.push({ u: inv.get(lk.u), v: inv.get(lk.v),
+                      weight: lk.weight, flow: lk.flow });
+    }
+    linkObjs.sort(function (a, b) { return a.u - b.u || a.v - b.v; });
+    const outEdges = new Array(n);
+    const inEdges = new Array(n);
+    for (let i = 0; i < n; i++) { outEdges[i] = []; inEdges[i] = []; }
+    for (const lk of linkObjs) {
+      outEdges[lk.u].push(lk);
+      inEdges[lk.v].push(lk);
+    }
+    // Sub-Infomap leafNodeFlowLogNodeFlow = sum over sub-leaves of
+    // plogp(parent's nodeFlow). cpp's MapEquation::initNetwork(parent)
+    // does the same.
+    let leafNFLNF = 0;
+    for (let v = 0; v < n; v++) leafNFLNF += plogp(nodeFlow[v]);
+    return {
+      n: n,
+      links: linkObjs,
+      outEdges: outEdges,
+      inEdges: inEdges,
+      nodeFlow: nodeFlow,
+      nodeEnter: nodeEnter,
+      nodeExit: nodeExit,
+      sumWeightedDegree: parentG.sumWeightedDegree,
+      exitNetworkFlow: exitNetworkFlow || 0,
+      leafNodeFlowLogNodeFlow: leafNFLNF,
     };
   }
 
@@ -222,7 +290,8 @@
       for (let v = 0; v < n; v++) nodeFlow_log_nodeFlow += plogp(g.nodeFlow[v]);
     }
     let exitNetworkFlow = opts.exitNetworkFlow != null
-      ? +opts.exitNetworkFlow : 0;
+      ? +opts.exitNetworkFlow
+      : (g.exitNetworkFlow != null ? +g.exitNetworkFlow : 0);
     let exitNetworkFlow_log_exitNetworkFlow = plogp(exitNetworkFlow);
 
     let enterFlow = exitNetworkFlow;
@@ -672,11 +741,18 @@
       ncomm: maxOf(aggregateMembership) + 1,
     });
     const aggLimit = opts.aggregationLimit != null ? opts.aggregationLimit : 30;
+    // D3: at each level transition, supply the previous level's per-cluster
+    // enterFlow / exitFlow read off the running tracker. Cpp's consolidate
+    // Modules: `new InfoNode(m_moduleFlowData[moduleIndex])` — inherits the
+    // tracker. Cross-edge fallback drifts by O(FP) accumulated through
+    // moves and trips strongest-connected tie-breaks differently from cpp.
+    let prevP = currentP;
+    let prevMembership = null; // leaf -> prevP's vertex id (null at lvl=1: prevP indexed on leaves)
     for (let lvl = 1; lvl < aggLimit; lvl++) {
       const ncomm = maxOf(aggregateMembership) + 1;
       if (ncomm <= 1) break;
       const collapsedG = collapseGraph(g, aggregateMembership, ncomm,
-                                       null);
+                                       prevP, prevMembership);
       const collapsedP = makePartition(collapsedG);
       // aggregation_level > 0 -> loopLimit=20. isFirstLoop = false here
       // (canonical's isFullNetwork() returns false once aggLevel > 0).
@@ -699,6 +775,13 @@
       // membership and stop. Mirrors canonical's
       // restoreConsolidatedOptimizationPointIfNoImprovement.
       if (newL >= lastL - minImpr) break;
+      // Capture pre-update aggregateMembership: at lvl+1, prevP is this
+      // iteration's collapsedP (super-net vertex scope); each leaf's
+      // super-net vertex id at this level = the membership going INTO
+      // this level's collapse, i.e. aggregateMembership BEFORE the
+      // post-optimize update.
+      prevMembership = new Int32Array(aggregateMembership);
+      prevP = collapsedP;
       const next = new Int32Array(g.n);
       for (let v = 0; v < g.n; v++) {
         next[v] = collapsedP.moduleOf[aggregateMembership[v]];
@@ -724,7 +807,7 @@
   // Pass `prevP` to inherit per-module accumulated flows from the
   // previous level's Partition. If absent, recompute from the leaf
   // graph + membership.
-  function collapseGraph(g, membership, ncomm, prevP) {
+  function collapseGraph(g, membership, ncomm, prevP, prevMembership) {
     // Canonical's InfomapOptimizer::consolidateModules aggregates
     // inter-module edges under the sorted pair (min, max) when
     // isUndirectedClustering() is true. Without the sort, leaf edges
@@ -759,13 +842,17 @@
       // that don't match the renumbered membership (renumberByEncounter
       // remaps to 0..K-1). Walk leaves, find their previous-level
       // module, and copy its accumulator under the renumbered id.
-      // Since each leaf in the same renumbered module shared the same
-      // previous-level module, copying once per renumbered id suffices.
+      //   prevMembership == null  -> prevP is leaf-indexed (lvl 1 case;
+      //     prevP.moduleOf[v] gives the leaf's prev-level module).
+      //   prevMembership != null  -> prevP is super-net-indexed (lvl 2+);
+      //     prevMembership[v] gives the super-net vertex id at prevP's
+      //     scope, then prevP.moduleOf[sv] gives the prev-level module.
       const seen = new Int8Array(ncomm);
       for (let v = 0; v < g.n; v++) {
         const c = membership[v];
         if (seen[c]) continue;
-        const oldC = prevP.moduleOf[v];
+        const sv = prevMembership != null ? prevMembership[v] : v;
+        const oldC = prevP.moduleOf[sv];
         nodeEnter[c] = prevP.moduleEnterFlow[oldC];
         nodeExit[c]  = prevP.moduleExitFlow[oldC];
         seen[c] = 1;
@@ -810,6 +897,11 @@
       nodeEnter: nodeEnter,
       nodeExit: nodeExit,
       sumWeightedDegree: g.sumWeightedDegree,
+      exitNetworkFlow: g.exitNetworkFlow != null ? g.exitNetworkFlow : 0,
+      // Inherit leaf-constant from parent graph: cpp's super-net keeps
+      // nodeFlow_log_nodeFlow at leaf-level value through every level.
+      leafNodeFlowLogNodeFlow: g.leafNodeFlowLogNodeFlow != null
+        ? g.leafNodeFlowLogNodeFlow : 0,
     };
   }
 
@@ -857,11 +949,19 @@
     // isFullNetwork()). Caller passes opts.isFirstLoopOuter for the
     // very first level.
     const flOuter = opts.isFirstLoopOuter !== undefined ? !!opts.isFirstLoopOuter : false;
+    // D3: at each collapse, supply previous-level partition's per-cluster
+    // running tracker. lvl == 0 here entered from a seed membership (no
+    // prior optimize) — build a leaf-level partition to get a tracker
+    // matching the seed; from lvl 1 onwards, prevP is the previous
+    // level's collapsedP.
+    let prevP = null;
+    let prevMembership = null;
     for (let lvl = 0; lvl < aggLimit; lvl++) {
       const ncomm = maxOf(aggregateMembership) + 1;
       if (ncomm <= 1) break;
       if (log) log("findTopFromPartition.lvl", { lvl, n: ncomm });
-      const collapsedG = collapseGraph(g, aggregateMembership, ncomm, null);
+      const collapsedG = collapseGraph(g, aggregateMembership, ncomm,
+                                       prevP, prevMembership);
       const collapsedP = makePartition(collapsedG);
       // First lvl here = aggregationLevel 0 from this call's perspective;
       // subsequent lvls > 0. isFirstLoop tracks (tuneIterationIndex==0 &&
@@ -875,6 +975,10 @@
       // restoreConsolidatedOptimizationPointIfNoImprovement). Drop the
       // eff === 0 early break for parity with findTopModulesRepeatedly.
       if (newL >= lastL - minImpr) break;
+      // See note in findTopModulesRepeatedly: prevMembership for lvl+1 =
+      // pre-update aggregateMembership at this iteration.
+      prevMembership = new Int32Array(aggregateMembership);
+      prevP = collapsedP;
       const next = new Int32Array(g.n);
       for (let v = 0; v < g.n; v++) {
         next[v] = collapsedP.moduleOf[aggregateMembership[v]];
@@ -1009,6 +1113,19 @@
     for (let i = 0; i < ncomm; i++) groups[i] = [];
     for (let v = 0; v < g.n; v++) groups[leafToTop[v]].push(v);
 
+    // Per-top-module exitFlow (parent's exitNetworkFlow for sub-Infomap).
+    // Undirected: half-flow contribution from each edge crossing the
+    // module boundary. Mirrors aggregateFlowValuesFromLeafToRoot.
+    const parentModuleExit = new Float64Array(ncomm);
+    for (const lk of g.links) {
+      const cu = leafToTop[lk.u];
+      const cv = leafToTop[lk.v];
+      if (cu === cv) continue;
+      const half = lk.flow * 0.5;
+      parentModuleExit[cu] += half;
+      parentModuleExit[cv] += half;
+    }
+
     // Phase 1: per top-module sub-Infomap. Mirrors canonical's
     // InfomapBase::coarseTune lines 1442-1466 (subInfomap.setTwoLevel(true).
     // setTuneIterationLimit(1)).
@@ -1021,24 +1138,26 @@
         offset += 1;
         continue;
       }
-      const remap = new Map();
-      members.forEach(function (v, i) { remap.set(v, i); });
-      const subEdges = [];
-      for (const lk of g.links) {
-        if (remap.has(lk.u) && remap.has(lk.v)) {
-          subEdges.push([remap.get(lk.u), remap.get(lk.v)]);
-        }
-      }
+      // D2: build sub-graph that inherits parent leaf nodeFlow + edge
+      // flows verbatim (cpp's generateSubNetwork clones leaf FlowData;
+      // re-runs initEnterExitFlow on the sub-network). Without this the
+      // sub-Infomap re-normalises flows so they sum to 1 within the sub
+      // and ΔL magnitudes / decisions diverge from cpp.
+      const exitNetworkFlow = parentModuleExit != null
+        ? parentModuleExit[c] : 0;
+      const subG = buildSubGraph(g, members, exitNetworkFlow);
       const subIds = Array.from({ length: members.length }, (_, i) => i);
       // canonical's getSubInfomap creates a fresh InfomapBase whose
       // InfomapConfig ctor re-seeds m_rand from the same
       // seedToRandomNumberGenerator (Config.seedToRandomNumberGenerator,
       // = the original CLI --seed). Each sub-Infomap thus starts with
       // the same RNG state as the top-level run. Pass a FRESH MT19937
-      // here, NOT the parent rng.
-      const subRes = runInfomapFaithful(subIds, subEdges, {
-        seed: opts.seed != null ? opts.seed : 1,
-        rng: rng,                       // share parent rng
+      // here, NOT the parent rng. (D1 fix.)
+      const subSeed = opts.seed != null ? opts.seed : 1;
+      const subRes = runInfomapFaithful(subIds, [], {
+        seed: subSeed,
+        rng: LV.MT19937(subSeed >>> 0), // fresh per sub-Infomap (cpp parity)
+        presetGraph: subG,              // D2: inherit parent flows
         twoLevel: true,
         tuneIterationLimit: 1,
         aggregationLimit: 30,
@@ -1115,7 +1234,10 @@
   // Faithful mirror of InfomapBase::partition (two-level path).
   function runInfomapFaithful(nodeIds, edges, opts) {
     opts = opts || {};
-    const g = buildGraph(nodeIds, edges);
+    // D2: caller can supply a preset graph (used by coarseTuneFaithful
+    // to feed a sub-graph that inherits parent leaf flows).
+    const g = opts.presetGraph != null ? opts.presetGraph
+                                       : buildGraph(nodeIds, edges);
     const seed = opts.seed != null ? opts.seed : 1;
     // Allow caller to inject an existing rng (for sub-Infomap recursion
     // inside coarseTune). canonical re-uses m_rand at every level —
