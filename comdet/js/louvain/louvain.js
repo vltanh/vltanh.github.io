@@ -725,6 +725,12 @@
       // have moved nodes into vComm it's strictly positive.
       P.modRemove(v, vComm, P.neighWeight(vComm));
       let bestComm = vComm;
+      // Mirror canonical louvain.cpp:253-263: best_nblinks starts at 0
+      // and only updates alongside best_comm when a candidate beats
+      // best_increase. When no candidate yields strict-positive gain the
+      // pair (best_comm = vComm, best_nblinks = 0) is what gets passed
+      // into insert.
+      let bestNblinks = 0;
       let bestIncrease = 0;
       const deltas = [];
       for (let j = 0; j < neighLast; j++) {
@@ -735,10 +741,10 @@
         if (inc > bestIncrease) {
           bestIncrease = inc;
           bestComm = c;
+          bestNblinks = dnc;
         }
       }
-      const dncBest = P.neighWeight(bestComm);
-      P.modInsert(v, bestComm, dncBest);
+      P.modInsert(v, bestComm, bestNblinks);
       const moved = bestComm !== vComm;
       if (moved) {
         nbMoves += 1;
