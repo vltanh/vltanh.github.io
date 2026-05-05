@@ -170,7 +170,7 @@
   <p>What this tells us: every node still pays the configuration-model penalty for the degree mass it brings in, even though no community has internal edges yet. On the 32-node fixture, \(2m = 104\), and the sum of squared per-node degrees works out to a small negative number, \(Q_0 \approx -0.027\). Two properties worth keeping in mind: a singleton partition is the worst possible \(Q\) for a connected graph (every other partition can only do better, since merging two nodes that share an edge always brings a positive contribution), and the magnitude of \(Q_0\) shrinks as the graph gets denser, so the algorithm has more headroom on sparse networks than on dense ones.</p>
   <div class="graph" id="g-singleton">
     <div class="graph-chrome">
-      <span>singleton partition &middot; \(Q_0 \approx -0.027\)</span>
+      <span>singleton partition &middot; \(Q_0 = \) <output id="g-q0">·</output></span>
       <span class="right">colour = community id (32 distinct hues)</span>
     </div>
     <div class="graph-canvas" id="g-singleton-cy"></div>
@@ -206,7 +206,7 @@
   <div id="g-move-panel"></div>
   <div class="callout">
     <div class="tag">tie-breaking + ordering</div>
-    <p>Blondel et al. flag in §2 of the paper that the output depends on the order in which nodes are visited. The dependence is weak on the final modularity but visible on the running time. The kernel here shuffles using a deterministic seeded random-number generator; rerun at a different seed and you get a different partition with similar quality. Ordering effects are one of the softest spots in Louvain's reproducibility story. Leiden inherits the same shuffle but partly cancels it out via its queue, since the queue order is also reshaped by which moves actually happen.</p>
+    <p>Blondel et al. flag in §2 of the paper that the output depends on the order in which nodes are visited. The dependence is weak on the final modularity but visible on the running time. The kernel here shuffles using a deterministic seeded MT19937 random-number generator; rerun at a different seed and you get a different partition with similar quality. The candidate iteration inside one visit follows the canonical convention exactly: <code>neigh_pos[0]</code> is the visited node's current community with weight zero, then the rest are first-seen distinct neighbour communities in adjacency-edge order; the comparison is strict (<code>></code>) over the running maximum gain initialised at zero, so among equally-best moves the one encountered earliest in adjacency order wins. The "random step" / "random all" buttons above re-spin the seed and re-run the whole multi-level pipeline; the URL accepts <code>?seed=N</code> for reproducible deep links.</p>
   </div>
 </section>
 
@@ -227,6 +227,7 @@
     </div>
   </div>
   <p>The bookkeeping is simpler than Leiden's. Louvain collapses directly on the post-Phase-1 partition, so a super-node carries the same community label as the community it came from. Leiden collapses on a refined sub-partition instead, but each super-node carries the pre-refinement community label so that the next round of moves continues working at the higher level. That label step is what carries Leiden's connectivity guarantee through every level boundary.</p>
+  <p>The convention worth keeping in mind: at level 0 the input has no self-loops, but the moment Phase 2 fires every intra-community edge folds into a self-loop on the new super-node. Canonical gen-louvain iterates each constituent's neighbours in both directions when building the super-graph, so an intra edge of weight <em>w</em> contributes 2<em>w</em> to the super-self-loop. Weighted degree on the super-graph then sums each super-node's adjacency once (self-loop counted once), which works out to the same total degree mass the level-0 community originally carried. Modularity is preserved across the transition by construction.</p>
 </section>
 
 <section class="stage">
@@ -235,7 +236,7 @@
   <p>The table below shows one row per level. Each row corresponds to one pass through Phase 1 followed by one Phase 2 collapse. The columns track the super-graph node count entering the level, the number of communities Phase 1 found inside it, the super-graph node count after the collapse, the number of sweeps Phase 1 needed to quiet down, the total node-moves accumulated at the level, and the quality gain.</p>
   <table class="level-stats">
     <thead>
-      <tr><th>level</th><th>vc-before</th><th>ncomm</th><th>vc-after</th><th>sweeps</th><th>moves</th><th>Δ Q</th></tr>
+      <tr><th>level</th><th>vc-before</th><th>ncomm</th><th>vc-after</th><th>sweeps</th><th>moves</th><th>Δ Q</th><th>Q after</th></tr>
     </thead>
     <tbody id="g-levels-tbody"></tbody>
   </table>
@@ -268,6 +269,11 @@
     <div class="tag">how this compares to Leiden</div>
     <p>The kernel under this page shares its graph, partition, and modularity primitives with the Leiden pages. The difference between the two algorithms is everything the outer driver does on top of those primitives. Leiden replaces Phase 1's full-sweep loop with a queue that touches each node only when its neighbourhood actually changed, and inserts a refinement step between Phase 1 and Phase 2 that re-partitions every community in isolation before the collapse. The <a href="./leiden-cpm.html">Leiden-CPM</a> and <a href="./leiden-mod.html">Leiden-Mod</a> pages walk the differences move by move, on the same fixture. Implementation pointers (file paths, line numbers, source-of-truth references) live in the <a href="../../docs/algorithms/louvain.md">technical reference</a>.</p>
   </div>
+  <div class="callout">
+    <div class="tag">what the page actually runs</div>
+    <p>The JavaScript kernel under this page is a code-faithful port of <code>externals/louvain</code> (Blondel et al. 2008, gen-louvain v0.3 — <code>graph_binary.cpp</code>, <code>modularity.cpp</code>, <code>louvain.cpp</code>). Every per-step computation lands on the same arithmetic operands in the same order as the canonical source. A separate C++ build of the same algorithm body (<code>community-detection/tools/viz_check/louvain/instrumented/louvain_l4_tracer.cpp</code>) runs alongside the JS port; under matching seed the two produce bit-identical per-visit records across most of the test matrix. Two substitutions are baked in for the L4 leg: <code>long double</code> is reduced to <code>double</code> and <code>libc rand()</code> is replaced with the same MT19937 the JS port uses, so a Float64 + JS-MT19937 production walker can reach exact byte-for-byte equality. The original gen-louvain pipeline (long double + libc rand) remains the algorithm reference; this page is faithful to that body, not to a JS-author shorthand.</p>
+  </div>
+</section>
 </section>
 
 <div id="kin"></div>

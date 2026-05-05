@@ -31,7 +31,16 @@
     document.getElementById("links").innerHTML = C.linksRow({ gen: "louvain" });
   }
 
-  let seed = 42;
+  // ?seed=N URL parameter — pedagogical reproducibility per the
+  // dossier. Falls back to default 42 when absent / non-integer so
+  // the static landing card stays deterministic.
+  const urlSeed = (function () {
+    const m = /[?&]seed=(-?\d+)/.exec(window.location.search || "");
+    if (!m) return 42;
+    const v = parseInt(m[1], 10);
+    return Number.isFinite(v) ? v : 42;
+  })();
+  let seed = urlSeed;
   let result = null;
   // Mutable arrays captured by the stage-2 walker's closure. Reroll
   // mutates these in place + calls ctl.reconfigureKeep so the closure
@@ -49,6 +58,19 @@
   P.renderFixture("g-input-cy", { useGT: true, pinned: true });
   const singleton = F.nodes.map(function (_, i) { return i; });
   P.renderFixture("g-singleton-cy", { membership: singleton, pinned: true });
+
+  // Compute Q_0 from the kernel rather than hardcoding it in the
+  // chrome caption. Q_0 = -Σ_v (k_v / 2m)^2 for the singleton
+  // partition; this gets the value bit-correct from the very build
+  // shipped under the page so future fixture changes update the
+  // caption automatically.
+  (function () {
+    const Gloc = LV.Graph(F.nodes.length, F.edges, { correctSelfLoops: false });
+    const Pl = LV.Partition(Gloc, null, LV.Modularity());
+    const Q0 = LV.Modularity().quality(Pl);
+    const out = document.getElementById("g-q0");
+    if (out) out.textContent = Q0.toFixed(4);
+  })();
 
   // ── Per-result derivation: rebuild phase1 events + snapshots ────
   function rebuildPhase1Trace(res) {
@@ -148,9 +170,20 @@
     const tbody = document.getElementById("g-levels-tbody");
     if (!tbody) return;
     tbody.innerHTML = "";
+    // Compute absolute Q at each level by replaying moves up to that
+    // level + scoring on the original graph. The level table now shows
+    // both ΔQ for the level and Q_after, so the resolution-limit story
+    // (Q monotonically rises while planted-recovery quality drops) is
+    // visible in numbers, not just inferred from prose.
+    const G0 = LV.Graph(F.nodes.length, F.edges, { correctSelfLoops: false });
+    const Q = LV.Modularity();
+    let cumQ = Q.quality(LV.Partition(G0, null, Q));  // Q_0
     res.levels.forEach(function (lv, i) {
       let totMoves = 0, totDQ = 0;
       lv.sweeps.forEach(function (sw) { totMoves += sw.nbMoves; totDQ += sw.totalImprov; });
+      const Pcheck = LV.Partition(G0, Array.from(lv.finePost), Q);
+      const Qabs = Q.quality(Pcheck);
+      cumQ = Qabs;
       const tr = document.createElement("tr");
       tr.innerHTML =
         '<td>' + i + '</td>' +
@@ -159,7 +192,8 @@
         '<td>' + lv.newCollapsedVcount + '</td>' +
         '<td>' + lv.sweeps.length + '</td>' +
         '<td>' + totMoves + '</td>' +
-        '<td>' + totDQ.toFixed(4) + '</td>';
+        '<td>' + totDQ.toFixed(4) + '</td>' +
+        '<td>' + Qabs.toFixed(4) + '</td>';
       tbody.appendChild(tr);
     });
   }
