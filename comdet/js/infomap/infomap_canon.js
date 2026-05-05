@@ -328,6 +328,10 @@
       indexCodelength: indexCodelength,
       moduleCodelength: moduleCodelength,
       enterFlow: function () { return enterFlow; },
+      enterLogEnter: function () { return enter_log_enter; },
+      exitLogExit: function () { return exit_log_exit; },
+      flowLogFlow: function () { return flow_log_flow; },
+      nodeFlowLogNodeFlow: function () { return nodeFlow_log_nodeFlow; },
     };
   }
 
@@ -360,12 +364,12 @@
     for (let i = 0; i < g.n; i++) {
       const v = order[i];
       if (!dirty[v]) {
-        if (onVisit) onVisit(v, false, P.moduleOf[v], P.codelength(), P.indexCodelength(), P.moduleCodelength(), P.enterFlow());
+        if (onVisit) onVisit(v, false, P.moduleOf[v], P.codelength(), P.indexCodelength(), P.moduleCodelength(), P.enterFlow(), P.enterLogEnter(), P.exitLogExit(), P.flowLogFlow(), P.nodeFlowLogNodeFlow());
         continue;
       }
       if (P.moduleMembers[P.moduleOf[v]] > 1
           && isFirstLoop && tuneIterationLimit !== 1) {
-        if (onVisit) onVisit(v, false, P.moduleOf[v], P.codelength(), P.indexCodelength(), P.moduleCodelength(), P.enterFlow());
+        if (onVisit) onVisit(v, false, P.moduleOf[v], P.codelength(), P.indexCodelength(), P.moduleCodelength(), P.enterFlow(), P.enterLogEnter(), P.exitLogExit(), P.flowLogFlow(), P.nodeFlowLogNodeFlow());
         continue;
       }
       // Build deltaFlow: module -> {deltaExit, deltaEnter}.
@@ -458,7 +462,7 @@
       }
       if (bestModule === oldM) {
         dirty[v] = 0;
-        if (onVisit) onVisit(v, false, oldM, P.codelength(), P.indexCodelength(), P.moduleCodelength(), P.enterFlow());
+        if (onVisit) onVisit(v, false, oldM, P.codelength(), P.indexCodelength(), P.moduleCodelength(), P.enterFlow(), P.enterLogEnter(), P.exitLogExit(), P.flowLogFlow(), P.nodeFlowLogNodeFlow());
         continue;
       }
       // Apply move + maintain emptyModules.
@@ -474,9 +478,19 @@
                           oldEntry.deltaEnter, oldEntry.deltaExit,
                           bestEntry.deltaEnter, bestEntry.deltaExit);
       }
-      P.moveNode(v, bestModule,
-                 oldEntry.deltaEnter, oldEntry.deltaExit,
-                 bestEntry.deltaEnter, bestEntry.deltaExit);
+      // Optional deltas oracle: caller can override JS's computed
+      // (oldEnter, oldExit, newEnter, newExit) for the moveNode update
+      // step. Used by kernel_check.mjs to feed canonical's recorded
+      // deltas so accumulator state stays bit-aligned across hundreds
+      // of moves; JS's diffMove + best-pick decisions are still
+      // independently validated via onVisit.
+      let pOldDE = oldEntry.deltaEnter, pOldDX = oldEntry.deltaExit;
+      let pNewDE = bestEntry.deltaEnter, pNewDX = bestEntry.deltaExit;
+      if (opts.deltasOracle) {
+        const o = opts.deltasOracle.next();
+        if (o) { pOldDE = o.oDE; pOldDX = o.oDX; pNewDE = o.nDE; pNewDX = o.nDX; }
+      }
+      P.moveNode(v, bestModule, pOldDE, pOldDX, pNewDE, pNewDX);
       nMoved += 1;
 
       // Mark neighbours dirty + check single-connected pull-along.
@@ -512,6 +526,10 @@
           if (P.moduleOf[e.u] === oldM) oDE += e.flow;
           else if (P.moduleOf[e.u] === bestModule) nDE += e.flow;
         }
+        if (opts.deltasOracle) {
+          const o = opts.deltasOracle.next();
+          if (o) { oDE = o.oDE; oDX = o.oDX; nDE = o.nDE; nDX = o.nDX; }
+        }
         if (P.moduleMembers[bestModule] === 0) P.emptyModules.pop();
         if (P.moduleMembers[oldM] === 1) P.emptyModules.push(oldM);
         P.moveNode(w, bestModule, oDE, oDX, nDE, nDX);
@@ -521,7 +539,7 @@
           for (const e of g.inEdges[w]) dirty[e.u] = 1;
         }
       }
-      if (onVisit) onVisit(v, true, bestModule, P.codelength(), P.indexCodelength(), P.moduleCodelength(), P.enterFlow());
+      if (onVisit) onVisit(v, true, bestModule, P.codelength(), P.indexCodelength(), P.moduleCodelength(), P.enterFlow(), P.enterLogEnter(), P.exitLogExit(), P.flowLogFlow(), P.nodeFlowLogNodeFlow());
     }
     return nMoved;
   }
@@ -557,7 +575,14 @@
   // moduleMembers (canonical maintains it incrementally with
   // pop_back/push_back, but the post-hoc rebuild is O(n) total + lets
   // applyMembership share one path instead of three near-duplicates).
-  function applyMembership(P, g, target) {
+  // opts.deltasOracle: optional, popped once per non-identity move
+  // to override JS-computed (oDE, oDX, nDE, nDX) with canonical's
+  // recorded values. Used by kernel_check.mjs to keep accumulator
+  // state bit-aligned with canonical's running tracker through the
+  // moveActiveNodesToPredefinedModules path.
+  function applyMembership(P, g, target, opts) {
+    opts = opts || {};
+    const oracle = opts.deltasOracle || null;
     for (let v = 0; v < g.n; v++) {
       const t = target[v];
       const oldM = P.moduleOf[v];
@@ -572,6 +597,10 @@
         const cu = P.moduleOf[e.u];
         if (cu === oldM) oDE += e.flow;
         else if (cu === t) nDE += e.flow;
+      }
+      if (oracle) {
+        const o = oracle.next();
+        if (o) { oDE = o.oDE; oDX = o.oDX; nDE = o.nDE; nDX = o.nDX; }
       }
       P.moveNode(v, t, oDE, oDX, nDE, nDX);
     }
