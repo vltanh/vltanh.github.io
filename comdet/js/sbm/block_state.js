@@ -249,10 +249,13 @@
       }
       // eterm(r,s) (counted once, off-diagonal).
       if (r !== s) S -= lgamma(ers[r * B + s] + 1);
-      // eterm(r,t) + eterm(s,t) for every other non-empty t.
-      for (let t = 0; t < B; t++) {
+      // eterm(r,t) + eterm(s,t) for every other non-empty t. Iterate
+      // over the live prefix of neList instead of all B labels - on
+      // dnc B=N=906 but Bne stays around 30, so this collapses the
+      // inner loop's lgamma count from ~B per virtualMove to ~Bne.
+      for (let i = 0; i < Bne; i++) {
+        const t = neList[i];
         if (t === r || t === s) continue;
-        if (nr[t] === 0) continue;
         S -= lgamma(ers[r * B + t] + 1);
         S -= lgamma(ers[s * B + t] + 1);
       }

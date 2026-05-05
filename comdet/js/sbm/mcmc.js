@@ -23,9 +23,7 @@
     const N = state.N;
     let order;
     if (visitOrderInj) {
-      // Caller-supplied visit order (used by the viz_check tracer to
-      // replay a canonical leg's per-sweep order without consuming
-      // RNG draws). Default behaviour is unchanged when null.
+      // Replaces the shuffled-identity order; bypasses rng draws.
       order = Array.from(visitOrderInj);
     } else {
       order = new Array(N);
@@ -42,9 +40,7 @@
       const cands = candidatePool(state, v);
       let pickIdx, toS, oracleVerdict = null;
       if (proposalOracle) {
-        // Oracle bypasses both the candidate-pick draw and the MH
-        // accept draw. Returns {to_block, accept}; pickIdx is
-        // recovered from the cand pool for trace consistency.
+        // Oracle bypasses pick + accept draws.
         oracleVerdict = proposalOracle(v, i, cands);
         toS = oracleVerdict.to_block;
         pickIdx = cands.indexOf(toS);
@@ -93,9 +89,7 @@
   }
 
   function candidatePool(state, v) {
-    // nonEmptyBlocks returns an Int32Array view of the live prefix
-    // of the cached neList. Coerce to a plain Array so push() works
-    // when an extra "open new block" candidate is appended.
+    // Array.from() - nonEmptyBlocks returns Int32Array (no push()).
     const nonEmpty = state.nonEmptyBlocks();
     const cands = Array.from(nonEmpty);
     if (state.blockSize(state.blockOf(v)) > 1) {
