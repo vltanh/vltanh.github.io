@@ -498,11 +498,14 @@
       memberOf: function (v) { return membership[v]; },
       n: function () { return n; },
       ncomm: function () { return ncomm; },
-      csize: function (c) { return csize[c]; },
-      cnodes: function (c) { return cnodes[c]; },
-      totalWeightInComm: function (c) { return totalWeightInComm[c]; },
-      totalWeightToComm: function (c) { return totalWeightToComm[c]; },
-      totalWeightFromComm: function (c) { return totalWeightFromComm[c]; },
+      // OOB -> 0 mirrors libleidenalg MutableVertexPartition::csize
+      // / cnodes (line 75-89). Required for canonCPM diffMove on
+      // freshly-allocated empty comm ids beyond current ncomm.
+      csize: function (c) { return c < ncomm ? csize[c] : 0; },
+      cnodes: function (c) { return c < ncomm ? cnodes[c] : 0; },
+      totalWeightInComm: function (c) { return c < ncomm ? totalWeightInComm[c] : 0; },
+      totalWeightToComm: function (c) { return c < ncomm ? totalWeightToComm[c] : 0; },
+      totalWeightFromComm: function (c) { return c < ncomm ? totalWeightFromComm[c] : 0; },
       totalWeightInAllComms: function () { return totalWeightInAllComms; },
       totalPossibleEdgesInAllComms: function () { return totalPossibleEdgesInAllComms; },
       moveNode: moveNode,
