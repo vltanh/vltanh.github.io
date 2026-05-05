@@ -1,0 +1,136 @@
+/* cactus_mincut: top-level driver. findAllMincuts orchestrates VIECUT
+ * heuristic + capforest contractions + Padberg-Rinaldi tests + flowMincut
+ * + most_balanced_minimum_cut.
+ *
+ * [UPSTREAM VieCut/lib/algorithms/global_mincut/cactus/cactus_mincut.h]
+ *
+ * Public API: COMDET.VIECUT.cactus_mincut(G, opts) -> {
+ *   cutValue, inPartition, outPartition, cactus  // mutable_graph
+ * }
+ *
+ * G is a COMDET.VIECUT.MutableGraph. opts.known_mincut may pre-supply a
+ * cut value to skip the heuristic; opts.find_most_balanced (default
+ * true) controls whether the bipartition is selected via balanced DFS.
+ */
+(function () {
+  "use strict";
+  if (!window.COMDET) return;
+  const C = window.COMDET;
+  const NS = (C.VIECUT = C.VIECUT || {});
+
+  const UNDEFINED_NODE = 0xffffffff;
+
+  function findAllMincuts(graphs, known_mincut) {
+    if (!graphs.length || !graphs[graphs.length - 1]) {
+      return { mincut: -1, out_graph: null, mb_edges: [] };
+    }
+    let mincut = graphs[graphs.length - 1].getMinDegree();
+    if (known_mincut === undefined || known_mincut === UNDEFINED_NODE) {
+      mincut = NS.viecut_heuristic.perform_minimum_cut(
+        graphs[graphs.length - 1], true);
+    } else {
+      mincut = known_mincut;
+    }
+    NS.minimum_cut_helpers.setInitialCutValues(graphs);
+
+    const guaranteed_edges = [];
+    const ge_ids = [];
+    let previous_size = UNDEFINED_NODE;
+    while (graphs[graphs.length - 1].number_of_nodes() * 1.01 < previous_size) {
+      previous_size = graphs[graphs.length - 1].number_of_nodes();
+      const current_graph = graphs[graphs.length - 1];
+      const current_mincut = mincut;
+      ge_ids.push(graphs.length - 1);
+      guaranteed_edges.push([]);
+
+      const uf = NS.noi_minimum_cut.modified_capforest(current_graph, mincut + 1);
+      for (let n = 0; n < current_graph.number_of_nodes(); n++) {
+        const e0 = 0;
+        if (current_graph.get_first_invalid_edge(n) - e0 === 1) {
+          if (current_graph.getEdgeWeight(n, e0) === mincut && uf.n() > 1) {
+            const t = current_graph.getEdgeTarget(n, e0);
+            uf.Union(n, t);
+            guaranteed_edges[guaranteed_edges.length - 1].push([n, t]);
+          }
+        }
+      }
+      if (uf.n() < current_graph.number_of_nodes()) {
+        const newg = NS.contraction.fromUnionFind(current_graph, uf, true);
+        graphs.push(newg);
+        mincut = NS.minimum_cut_helpers.updateCut(graphs, mincut);
+      }
+      const uf12 = NS.tests.prTests12(graphs[graphs.length - 1], mincut + 1, true);
+      if (uf12.n() < graphs[graphs.length - 1].number_of_nodes()) {
+        const g12 = NS.contraction.fromUnionFind(graphs[graphs.length - 1], uf12, true);
+        graphs.push(g12);
+        mincut = NS.minimum_cut_helpers.updateCut(graphs, mincut);
+      }
+      const uf34 = NS.tests.prTests34(graphs[graphs.length - 1], mincut + 1, true);
+      if (uf34.n() < graphs[graphs.length - 1].number_of_nodes()) {
+        const g34 = NS.contraction.fromUnionFind(graphs[graphs.length - 1], uf34, true);
+        graphs.push(g34);
+        mincut = NS.minimum_cut_helpers.updateCut(graphs, mincut);
+      }
+      if (current_mincut > mincut) {
+        guaranteed_edges.length = 0;
+        ge_ids.length = 0;
+      }
+    }
+
+    if (graphs[graphs.length - 1].number_of_nodes() > 1) {
+      mincut = Math.min(
+        mincut,
+        NS.noi_minimum_cut.perform_minimum_cut(graphs[graphs.length - 1], true));
+    }
+
+    const rc = new NS.RecursiveCactus(mincut);
+    const out_graph = rc.flowMincut(graphs);
+    NS.minimum_cut_helpers.setVertexLocations(
+      out_graph, graphs, ge_ids, guaranteed_edges, mincut);
+
+    return { mincut, out_graph, mb_edges: [] };
+  }
+
+  // High-level wrapper matching the cutOracle contract used by WCC + CM.
+  // Returns { cutValue, inPartition, outPartition }.
+  function cactus_mincut(G, opts) {
+    if (!opts) opts = {};
+    NS.random_functions.setSeed(opts.seed === undefined ? 0 : opts.seed);
+    const graphs = [G];
+    const result = findAllMincuts(graphs, opts.known_mincut);
+    if (result.mincut <= 0 || !result.out_graph) {
+      return { cutValue: result.mincut,
+               inPartition: graphs[0].containedVertices(0).slice(),
+               outPartition: [] };
+    }
+    // Run balanced DFS on the cactus + transplant bipartition to original ids.
+    const cactus = result.out_graph;
+    const sv = NS.random_functions.nextInt(0, cactus.n() - 1);
+    const dfs = NS.runBalancedCutDFS(cactus, result.mincut, sv);
+    // Use most_balanced BFS to flag inCut bits.
+    const n_orig = cactus.getOriginalNodes();
+    const inCut = NS.findBipartitionFromCactus(cactusReadView(cactus), n_orig, dfs);
+    const inP = [], outP = [];
+    for (let i = 0; i < n_orig; i++) (inCut[i] ? inP : outP).push(i);
+    return { cutValue: result.mincut, inPartition: inP, outPartition: outP,
+             cactus: result.out_graph };
+  }
+
+  // Adapt MutableGraph to CactusGraph's read interface for most_balanced BFS.
+  function cactusReadView(G) {
+    return {
+      n: () => G.n(),
+      getOriginalNodes: () => G.getOriginalNodes(),
+      containedVertices: (n) => G.containedVertices(n),
+      edges_of: (n) => G.edges_of(n),
+      getEdgeTarget: (n, e) => G.getEdgeTarget(n, e),
+      getEdgeWeight: (n, e) => G.getEdgeWeight(n, e),
+      get_first_invalid_edge: (n) => G.get_first_invalid_edge(n),
+      getReverseEdge: (n, e) => G.getReverseEdge(n, e),
+    };
+  }
+
+  NS.cactus_mincut = cactus_mincut;
+  NS.findAllMincuts = findAllMincuts;
+  NS._cactusReadView = cactusReadView;
+})();

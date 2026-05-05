@@ -191,6 +191,95 @@
     return re.flow;
   };
 
+  MutableGraph.prototype.isEmpty = function (n) {
+    return this.contained_in_this[n].length === 0;
+  };
+
+  // [UPSTREAM 368-409] deleteVertex with swap-and-pop reindexing.
+  MutableGraph.prototype.deleteVertex = function (node) {
+    this.last_node--;
+    const back = this.number_of_nodes() - 1;
+    if (node < back) {
+      for (const v of this.contained_in_this[back]) {
+        this.current_position[v] = node;
+      }
+      for (const v of this.contained_in_this[node]) {
+        this.current_position[v] = back;
+      }
+      this.contained_in_this[node] = this.contained_in_this[back];
+    }
+    for (let e = 0; e < this.vertices[node].length; e++) {
+      const re = this.vertices[node][e];
+      this.weighted_degree[re.target] -= re.weight;
+      this._internalDeleteEdge(re.target, re.rev);
+      this.num_edges -= 2;
+    }
+    if (node < back) {
+      for (let e = 0; e < this.vertices[back].length; e++) {
+        const re = this.vertices[back][e];
+        this.vertices[re.target][re.rev].target = node;
+      }
+      this.vertices[node] = this.vertices[back];
+      this.weighted_degree[node] = this.weighted_degree[back];
+      this.partition_index[node] = this.partition_index[back];
+      this.node_in_cut[node] = this.node_in_cut[back];
+    }
+    this.vertices.pop();
+    this.weighted_degree.pop();
+    this.partition_index.pop();
+    this.node_in_cut.pop();
+    this.contained_in_this.pop();
+  };
+
+  // [UPSTREAM 516-564] contractEdgeSparseTarget
+  MutableGraph.prototype.contractEdgeSparseTarget = function (node, edge) {
+    const e = this.vertices[node][edge];
+    const target = e.target;
+    if (node === target + 1) return this.contractEdge(node, edge);
+    this.last_node--;
+    const ne_target = this.vertices[target].length;
+    for (let ed = 0; ed < ne_target; ed++) {
+      if (ed !== e.rev) {
+        this.mergeEdgeSparse(node, target, ed);
+      }
+    }
+    for (const n of this.contained_in_this[target]) {
+      this.contained_in_this[node].push(n);
+      this.current_position[n] = node;
+    }
+    this.contained_in_this[target] = [];
+    const lastIdx = this.vertices.length - 1;
+    for (const n of this.contained_in_this[lastIdx]) {
+      this.contained_in_this[target].push(n);
+      this.current_position[n] = target;
+    }
+    this._internalDeleteEdge(node, edge);
+    this.num_edges -= 2;
+    this.weighted_degree[node] -= e.weight;
+    this.vertices[target] = this.vertices[lastIdx];
+    this.weighted_degree[target] = this.weighted_degree[lastIdx];
+    this.partition_index[target] = this.partition_index[lastIdx];
+    this.node_in_cut[target] = this.node_in_cut[lastIdx];
+    this.vertices.pop();
+    this.weighted_degree.pop();
+    this.partition_index.pop();
+    this.node_in_cut.pop();
+    this.contained_in_this.pop();
+    for (let ed = 0; ed < this.vertices[target].length; ed++) {
+      const re = this.vertices[target][ed];
+      this.vertices[re.target][re.rev].target = target;
+    }
+    return target;
+  };
+
+  MutableGraph.prototype.resetContainedvertices = function () {
+    this.original_nodes = this.vertices.length;
+    for (let n = 0; n < this.vertices.length; n++) {
+      this.current_position[n] = n;
+      this.contained_in_this[n] = [n];
+    }
+  };
+
   // edges_of returns an explicit edge-id range; a fresh array per call so
   // mid-iteration deletes don't break callers.
   MutableGraph.prototype.edges_of = function (node) {

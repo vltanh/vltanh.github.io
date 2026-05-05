@@ -58,6 +58,6 @@
   NS.PHASE = {
     A_TRACER_READY: true,
     B1_DATASTRUCTURES_READY: true,
-    B2_CACTUS_BUILDING_READY: false,
+    B2_CACTUS_BUILDING_READY: true,
   };
 })();
