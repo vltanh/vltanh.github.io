@@ -445,6 +445,9 @@
   // JS's deterministic decision against canonical's.
   function tryMoveEach(P, g, rng, opts) {
     opts = opts || {};
+    if (typeof globalThis.__INFOMAP_CALL_BEGIN === 'function') {
+      globalThis.__INFOMAP_CALL_BEGIN(g.n);
+    }
     const isFirstLoop = !!opts.isFirstLoop;
     const tuneIterationLimit = opts.tuneIterationLimit | 0;
     const minImpr = 1e-16; // minimumSingleNodeCodelengthImprovement (cpp io/Config.h)
@@ -454,7 +457,7 @@
       : getRandomizedIndexVector(rng, g.n);
     const linkOrdersOracle = opts.linkOrders || null;
     let linkOrdersIdx = 0;
-    const onVisit = opts.onVisit || null;
+    const onVisit = opts.onVisit || (typeof globalThis.__INFOMAP_ONVISIT === 'function' ? globalThis.__INFOMAP_ONVISIT : null);
     let nMoved = 0;
 
     // Reused across nodes: per-iter `clear()` is much cheaper than
@@ -670,6 +673,7 @@
         isFirstLoop: isFirstLoopFlag,
         tuneIterationLimit: opts.tuneIterationLimit | 0,
         dirty: dirty,
+        onVisit: opts.onVisit,
       });
       const newL = P.codelength();
       if (log) log("tryMoveEach.end", { nMoved, newL });
