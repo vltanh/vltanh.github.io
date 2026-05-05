@@ -18,10 +18,20 @@
     const beta = opts.beta == null ? 1.0 : +opts.beta;
     const recordTrace = !!opts.recordTrace;
     const recordCandidates = !!opts.recordCandidates;
+    const proposalOracle = opts.proposalOracle || null;
+    const visitOrderInj = opts.visitOrder || null;
     const N = state.N;
-    const order = new Array(N);
-    for (let v = 0; v < N; v++) order[v] = v;
-    LV.shuffle(order, rng);
+    let order;
+    if (visitOrderInj) {
+      // Caller-supplied visit order (used by the viz_check tracer to
+      // replay a canonical leg's per-sweep order without consuming
+      // RNG draws). Default behaviour is unchanged when null.
+      order = Array.from(visitOrderInj);
+    } else {
+      order = new Array(N);
+      for (let v = 0; v < N; v++) order[v] = v;
+      LV.shuffle(order, rng);
+    }
 
     const traces = recordTrace ? [] : null;
     let accepted = 0;
@@ -30,8 +40,18 @@
       const v = order[i];
       const fromR = state.blockOf(v);
       const cands = candidatePool(state, v);
-      const pickIdx = rng.int(0, cands.length - 1);
-      const toS = cands[pickIdx];
+      let pickIdx, toS, oracleVerdict = null;
+      if (proposalOracle) {
+        // Oracle bypasses both the candidate-pick draw and the MH
+        // accept draw. Returns {to_block, accept}; pickIdx is
+        // recovered from the cand pool for trace consistency.
+        oracleVerdict = proposalOracle(v, i, cands);
+        toS = oracleVerdict.to_block;
+        pickIdx = cands.indexOf(toS);
+      } else {
+        pickIdx = rng.int(0, cands.length - 1);
+        toS = cands[pickIdx];
+      }
 
       let candDeltas = null;
       let dS;
@@ -49,14 +69,22 @@
         dS = (toS === fromR) ? 0 : state.virtualMove(v, toS);
       }
 
-      const accept = dS <= 0 || (rng.raw() / 0x100000000) < Math.exp(-beta * dS);
+      let accept;
+      if (proposalOracle) {
+        accept = !!oracleVerdict.accept;
+      } else {
+        accept = dS <= 0 || (rng.raw() / 0x100000000) < Math.exp(-beta * dS);
+      }
       const committed = accept && toS !== fromR;
       if (committed) {
         state.moveVertex(v, toS);
         accepted += 1;
       }
       if (recordTrace) {
-        const entry = { v: v, fromR: fromR, toS: toS, dS: dS, accepted: committed };
+        const entry = {
+          v: v, fromR: fromR, toS: toS, pickIdx: pickIdx,
+          cands: cands.slice(), dS: dS, accept: accept, accepted: committed,
+        };
         if (recordCandidates) entry.candidates = candDeltas;
         traces.push(entry);
       }
@@ -65,11 +93,14 @@
   }
 
   function candidatePool(state, v) {
+    // nonEmptyBlocks returns an Int32Array view of the live prefix
+    // of the cached neList. Coerce to a plain Array so push() works
+    // when an extra "open new block" candidate is appended.
     const nonEmpty = state.nonEmptyBlocks();
-    const cands = nonEmpty.slice();
+    const cands = Array.from(nonEmpty);
     if (state.blockSize(state.blockOf(v)) > 1) {
       let maxId = -1;
-      for (let i = 0; i < nonEmpty.length; i++) if (nonEmpty[i] > maxId) maxId = nonEmpty[i];
+      for (let i = 0; i < cands.length; i++) if (cands[i] > maxId) maxId = cands[i];
       cands.push(maxId + 1);
     }
     return cands;
