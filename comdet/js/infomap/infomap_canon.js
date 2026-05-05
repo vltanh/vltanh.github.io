@@ -384,6 +384,15 @@
       const deltaEEOld = oldDeltaEnter + oldDeltaExit;
       const deltaEENew = newDeltaEnter + newDeltaExit;
 
+      // [DEBUG] capture pre values for move-probe.
+      const _probe = (typeof globalThis.__INFOMAP_MOVE_PROBE === 'function');
+      const _oMep = _probe ? moduleEnterFlow[oldM] : 0;
+      const _oMxp = _probe ? moduleExitFlow[oldM]  : 0;
+      const _oMfp = _probe ? moduleFlow[oldM]      : 0;
+      const _nMep = _probe ? moduleEnterFlow[newM] : 0;
+      const _nMxp = _probe ? moduleExitFlow[newM]  : 0;
+      const _nMfp = _probe ? moduleFlow[newM]      : 0;
+
       enterFlow -= moduleEnterFlow[oldM] + moduleEnterFlow[newM];
       enter_log_enter -= plogp(moduleEnterFlow[oldM]) + plogp(moduleEnterFlow[newM]);
       exit_log_exit -= plogp(moduleExitFlow[oldM]) + plogp(moduleExitFlow[newM]);
@@ -410,6 +419,16 @@
       flow_log_flow += plogp(moduleExitFlow[oldM] + moduleFlow[oldM])
                      + plogp(moduleExitFlow[newM] + moduleFlow[newM]);
       enterFlow_log_enterFlow = plogp(enterFlow);
+
+      if (_probe) {
+        globalThis.__INFOMAP_MOVE_PROBE(oldM,
+          _oMep, _oMxp, _oMfp, _nMep, _nMxp, _nMfp,
+          moduleEnterFlow[oldM], moduleExitFlow[oldM], moduleFlow[oldM],
+          moduleEnterFlow[newM], moduleExitFlow[newM], moduleFlow[newM],
+          deltaEEOld, deltaEENew,
+          oldDeltaEnter, oldDeltaExit, newDeltaEnter, newDeltaExit,
+          g.nodeEnter[v], g.nodeExit[v], g.nodeFlow[v]);
+      }
 
       moduleMembers[oldM] -= 1;
       moduleMembers[newM] += 1;
@@ -767,22 +786,27 @@
     // Modules: `new InfoNode(m_moduleFlowData[moduleIndex])` — inherits the
     // tracker. Cross-edge fallback drifts by O(FP) accumulated through
     // moves and trips strongest-connected tie-breaks differently from cpp.
+    // srcG = graph to aggregate FROM at next level. Starts at leaf graph;
+    // becomes prev-level collapsedG at lvl 2+. Mirrors cpp's
+    // consolidateModules iterating the ACTIVE network (= prev-level
+    // super-vertices), NOT the leaf graph. JS used to iterate g.links
+    // (always leaves) at every level, which produces sums in different
+    // order than cpp once lvl >= 2 — drift compounds per level.
+    let srcG = g;
     let prevP = currentP;
-    let prevMembership = null; // leaf -> prevP's vertex id (null at lvl=1: prevP indexed on leaves)
     for (let lvl = 1; lvl < aggLimit; lvl++) {
       const ncomm = maxOf(aggregateMembership) + 1;
       if (ncomm <= 1) break;
-      const collapsedG = collapseGraph(g, aggregateMembership, ncomm,
-                                       prevP, prevMembership);
+      // srcToTgt: srcG vertex ID -> tgt-level cluster ID. At lvl 1
+      // srcG = leaves and srcToTgt = aggregateMembership. At lvl 2+ srcG
+      // = prev collapsedG and srcToTgt = renumberByEncounter applied to
+      // prevP.moduleOf.
+      const srcToTgt = (lvl === 1)
+        ? aggregateMembership
+        : renumberByEncounter(prevP.moduleOf, srcG.n);
+      const collapsedG = collapseGraph(srcG, srcToTgt, ncomm, prevP);
       const collapsedP = makePartition(collapsedG);
-      // aggregation_level > 0 -> loopLimit=20. isFirstLoop = false here
-      // (canonical's isFullNetwork() returns false once aggLevel > 0).
       if (log) log("findTopModulesRepeatedly.lvl", { lvl, n: collapsedG.n });
-      // canonical's findTopModulesRepeatedly always runs the level's
-      // optimize + checks restoreConsolidatedOptimizationPointIfNoImprovement
-      // AFTER the sweep. Removing the `eff === 0` early break — the
-      // sweep itself consumes RNG even when it makes no moves, and
-      // canonical's break is purely codelength-based.
       const eff = optimizeActiveNetwork(collapsedP, collapsedG, rng, {
         loopLimit: 20,
         tuneIterationLimit: opts.tuneIterationLimit | 0,
@@ -790,30 +814,26 @@
         boundaryLog: log,
       });
       const newL = collapsedP.codelength();
-      // Restore-on-no-improvement: if the super-network sweep didn't
-      // strictly reduce the leaf-flat codelength (= the super-network's
-      // current codelength once optimized), we keep the previous level's
-      // membership and stop. Mirrors canonical's
-      // restoreConsolidatedOptimizationPointIfNoImprovement.
       if (newL >= lastL - minImpr) break;
-      // Capture pre-update aggregateMembership: at lvl+1, prevP is this
-      // iteration's collapsedP (super-net vertex scope); each leaf's
-      // super-net vertex id at this level = the membership going INTO
-      // this level's collapse, i.e. aggregateMembership BEFORE the
-      // post-optimize update.
-      prevMembership = new Int32Array(aggregateMembership);
-      prevP = collapsedP;
-      const next = new Int32Array(g.n);
+      // Compose leaf->aggregate chain. aggregateMembership[v] is leaf v's
+      // current-level cluster (in [0, ncomm)); collapsedP.moduleOf maps
+      // current-level cluster -> next-level module. srcToTgt is NOT in
+      // this chain — it was the input map (srcG-vertex -> current cluster)
+      // used by collapseGraph to AGGREGATE edges; the leaf->cluster chain
+      // is independent.
+      const nextLeaf = new Int32Array(g.n);
       for (let v = 0; v < g.n; v++) {
-        next[v] = collapsedP.moduleOf[aggregateMembership[v]];
+        nextLeaf[v] = collapsedP.moduleOf[aggregateMembership[v]];
       }
-      aggregateMembership = renumberByEncounter(next, g.n);
+      aggregateMembership = renumberByEncounter(nextLeaf, g.n);
       levels.push({
         membership: new Int32Array(aggregateMembership),
         L: newL,
         ncomm: maxOf(aggregateMembership) + 1,
       });
       lastL = newL;
+      srcG = collapsedG;
+      prevP = collapsedP;
     }
     return { membership: aggregateMembership, levels: levels, L: lastL };
   }
@@ -835,12 +855,47 @@
     // with mirrored (cu, cv) vs (cv, cu) on different leaves get split
     // into two super-edges instead of summed; the resulting super-net
     // diverges from canonical's.
+    //
+    // Edge insertion order into outEdges/inEdges must match cpp's
+    // moduleLinks std::map iteration: (m1_orig, m2_orig) ASC where
+    // m_orig is the ORIGINAL module ID at the previous level (NOT the
+    // renumber-by-encounter ID JS uses internally). Without this sort,
+    // tryMoveEach's deltaFlow accumulation hits same edges in different
+    // order between cpp + JS, producing 1-ulp drift in deltaEnter /
+    // deltaExit (sums of edge.flow over modules in different orders).
+    //
+    // origOf[c] for renumbered c gives the original module ID. Built
+    // from prevP/prevMembership the same way nodeFlow et al. above.
+    const origOf = new Int32Array(ncomm);
+    {
+      const seen = new Int8Array(ncomm);
+      for (let v = 0; v < g.n; v++) {
+        const c = membership[v];
+        if (seen[c]) continue;
+        if (prevP != null) {
+          const sv = prevMembership != null ? prevMembership[v] : v;
+          origOf[c] = prevP.moduleOf[sv];
+        } else {
+          origOf[c] = c;
+        }
+        seen[c] = 1;
+      }
+    }
+    // Aggregate edges keyed by (orig_min, orig_max) pair — exactly cpp's
+    // moduleLinks std::map<NodePair, double> keyed by ORIGINAL module IDs.
+    // The swap below uses ORIGINAL IDs for the min/max comparison: cpp's
+    // `if (m1 > m2) std::swap(m1, m2)` operates on m_orig values, NOT on
+    // any renumbered position. JS renumbered IDs may not preserve the
+    // orig-ID order, so swapping by renumbered would put the source
+    // edge on the wrong side (outEdges vs inEdges) of v's adjacency.
     const linkMap = new Map();
     for (const lk of g.links) {
       let cu = membership[lk.u];
       let cv = membership[lk.v];
       if (cu === cv) continue;
-      if (cu > cv) { const t = cu; cu = cv; cv = t; }
+      // Swap so cu's ORIGINAL id < cv's. Mirrors cpp's moduleLinks insert
+      // with (m1, m2) sorted by orig.
+      if (origOf[cu] > origOf[cv]) { const t = cu; cu = cv; cv = t; }
       const key = cu + "|" + cv;
       const w = lk.weight;
       const f = lk.flow;
@@ -915,9 +970,18 @@
     const inEdges  = new Array(ncomm);
     for (let i = 0; i < ncomm; i++) { outEdges[i] = []; inEdges[i] = []; }
     const links = Array.from(linkMap.values());
-    // Sort by (u, v) ASC so insertion-order is deterministic when the
-    // optimizer's deltaFlow VectorMap accumulates contributions.
-    links.sort(function (a, b) { return a.u - b.u || a.v - b.v; });
+    // Sort by (origOf[u], origOf[v]) ASC to match cpp's moduleLinks
+    // std::map iteration order at consolidate-time. Each new outEdge /
+    // inEdge is appended in this order; tryMoveEach's deltaFlow
+    // accumulation iterates outEdges/inEdges in this order, so cpp + JS
+    // accumulate edge.flow contributions to deltaExit / deltaEnter in
+    // the SAME order — preventing 1-ulp drift in deltaEnter / deltaExit
+    // sums when a module aggregates flow from multiple super-edges.
+    links.sort(function (a, b) {
+      const ao = origOf[a.u], bo = origOf[b.u];
+      if (ao !== bo) return ao - bo;
+      return origOf[a.v] - origOf[b.v];
+    });
     for (const lk of links) {
       outEdges[lk.u].push(lk);
       inEdges[lk.v].push(lk);
