@@ -560,6 +560,9 @@
   }
 
   // optimizeActiveNetwork: loop tryMoveEach until no improvement.
+  // opts.boundaryLog: optional fn(label, info) called at each
+  // tryMoveEach call boundary. Used by L4_rng_consume_diff to localize
+  // RNG-consumption divergence vs cpp tracer.
   function optimizeActiveNetwork(P, g, rng, opts) {
     opts = opts || {};
     const loopLimit = opts.loopLimit != null ? opts.loopLimit : 10;
@@ -569,14 +572,21 @@
     let coreLoopCount = 0;
     let numEffective = 0;
     let oldL = P.codelength();
+    const log = opts.boundaryLog || null;
+    // canonical's isFirstLoop is `m_tuneIterationIndex == 0 &&
+    // isFullNetwork()` (= aggregationLevel == 0 + isMain), NOT
+    // coreLoopCount-dependent. caller pins this via opts.isFirstLoop.
+    const isFirstLoopFlag = opts.isFirstLoop !== undefined ? !!opts.isFirstLoop : true;
     while (coreLoopCount < loopLimit) {
       coreLoopCount += 1;
+      if (log) log("tryMoveEach.begin", { fl: isFirstLoopFlag, n: g.n });
       const nMoved = tryMoveEach(P, g, rng, {
-        isFirstLoop: coreLoopCount === 1,
+        isFirstLoop: isFirstLoopFlag,
         tuneIterationLimit: opts.tuneIterationLimit | 0,
         dirty: dirty,
       });
       const newL = P.codelength();
+      if (log) log("tryMoveEach.end", { nMoved, newL });
       if (nMoved === 0 || newL >= oldL - minImpr) break;
       numEffective += 1;
       oldL = newL;
@@ -640,11 +650,19 @@
     const levels = [];
     const baseLoopLimit = opts.loopLimit != null ? opts.loopLimit : 10;
     const isCoarseTune = !!opts.isCoarseTune;
+    const log = opts.boundaryLog || null;
     let currentP = makePartition(g);
     // aggregation_level == 0 path: use base loopLimit unless coarseTune.
+    // isFirstLoop = (tuneIterationIndex == 0 && isFullNetwork). caller
+    // forwards opts.isFirstLoopOuter; default true for the very first
+    // findTopModulesRepeatedly invocation (tuneIterationIndex == 0).
+    if (log) log("findTopModulesRepeatedly.level0", { n: g.n });
+    const flOuter = opts.isFirstLoopOuter !== undefined ? !!opts.isFirstLoopOuter : true;
     optimizeActiveNetwork(currentP, g, rng, {
       loopLimit: isCoarseTune ? 20 : baseLoopLimit,
       tuneIterationLimit: opts.tuneIterationLimit | 0,
+      isFirstLoop: flOuter,
+      boundaryLog: log,
     });
     let lastL = currentP.codelength();
     let aggregateMembership = renumberByEncounter(currentP.moduleOf, g.n);
@@ -660,10 +678,19 @@
       const collapsedG = collapseGraph(g, aggregateMembership, ncomm,
                                        null);
       const collapsedP = makePartition(collapsedG);
-      // aggregation_level > 0 -> loopLimit=20.
+      // aggregation_level > 0 -> loopLimit=20. isFirstLoop = false here
+      // (canonical's isFullNetwork() returns false once aggLevel > 0).
+      if (log) log("findTopModulesRepeatedly.lvl", { lvl, n: collapsedG.n });
+      // canonical's findTopModulesRepeatedly always runs the level's
+      // optimize + checks restoreConsolidatedOptimizationPointIfNoImprovement
+      // AFTER the sweep. Removing the `eff === 0` early break — the
+      // sweep itself consumes RNG even when it makes no moves, and
+      // canonical's break is purely codelength-based.
       const eff = optimizeActiveNetwork(collapsedP, collapsedG, rng, {
         loopLimit: 20,
         tuneIterationLimit: opts.tuneIterationLimit | 0,
+        isFirstLoop: false,
+        boundaryLog: log,
       });
       const newL = collapsedP.codelength();
       // Restore-on-no-improvement: if the super-network sweep didn't
@@ -671,7 +698,7 @@
       // current codelength once optimized), we keep the previous level's
       // membership and stop. Mirrors canonical's
       // restoreConsolidatedOptimizationPointIfNoImprovement.
-      if (eff === 0 || newL >= lastL - minImpr) break;
+      if (newL >= lastL - minImpr) break;
       const next = new Int32Array(g.n);
       for (let v = 0; v < g.n; v++) {
         next[v] = collapsedP.moduleOf[aggregateMembership[v]];
@@ -814,6 +841,7 @@
   function findTopModulesRepeatedlyFromPartition(g, seedMembership, rng, opts) {
     opts = opts || {};
     const minImpr = 1e-10;
+    const log = opts.boundaryLog || null;
     const seedRenum = renumberByEncounter(seedMembership, g.n);
     let aggregateMembership = seedRenum;
     let lastL = (function () {
@@ -823,12 +851,25 @@
     })();
     const aggLimit = opts.aggregationLimit != null
       ? opts.aggregationLimit : 30;
+    // First level here mirrors canonical's setActiveNetworkFromChildrenOfRoot
+    // path (haveModules() == true) — aggregationLevel becomes 0 then > 0
+    // as we collapse. isFirstLoop = (tuneIterationIndex == 0 &&
+    // isFullNetwork()). Caller passes opts.isFirstLoopOuter for the
+    // very first level.
+    const flOuter = opts.isFirstLoopOuter !== undefined ? !!opts.isFirstLoopOuter : false;
     for (let lvl = 0; lvl < aggLimit; lvl++) {
       const ncomm = maxOf(aggregateMembership) + 1;
       if (ncomm <= 1) break;
+      if (log) log("findTopFromPartition.lvl", { lvl, n: ncomm });
       const collapsedG = collapseGraph(g, aggregateMembership, ncomm, null);
       const collapsedP = makePartition(collapsedG);
-      const eff = optimizeActiveNetwork(collapsedP, collapsedG, rng, opts);
+      // First lvl here = aggregationLevel 0 from this call's perspective;
+      // subsequent lvls > 0. isFirstLoop tracks (tuneIterationIndex==0 &&
+      // aggregationLevel==0).
+      const isFirstLoopThis = flOuter && lvl === 0;
+      const eff = optimizeActiveNetwork(collapsedP, collapsedG, rng, {
+        ...opts, boundaryLog: log, isFirstLoop: isFirstLoopThis,
+      });
       const newL = collapsedP.codelength();
       if (eff === 0 || newL >= lastL - minImpr) break;
       const next = new Int32Array(g.n);
@@ -938,6 +979,8 @@
 
   function fineTuneFaithful(g, leafToTop, rng, opts) {
     opts = opts || {};
+    const log = opts.boundaryLog || null;
+    if (log) log("fineTune.begin", { n: g.n });
     const P = makePartition(g);
     applyMembership(P, g, leafToTop);
     const beforeL = P.codelength();
@@ -1016,13 +1059,18 @@
     const tuneIterationLimit = opts.tuneIterationLimit | 0;
     const minImpr = 1e-10;
     const minRelTuneImpr = 1e-5;
+    const log = opts.boundaryLog || null;
 
     // Compute one-level codelength up front (for the bail-out check).
     const oneLevelL = oneLevelCodelength(g);
 
-    // First findTopModulesRepeatedly at aggregation_level = 0.
+    // First findTopModulesRepeatedly at aggregation_level = 0,
+    // tuneIterationIndex = 0 -> isFirstLoop = true on every call within.
+    if (log) log("partition.firstFindTop", { n: g.n });
     let r = findTopModulesRepeatedly(g, rng, {
       aggregationLimit: aggregationLimit, loopLimit: 10,
+      isFirstLoopOuter: true,
+      boundaryLog: log,
     });
     let leafToTop = r.membership;
     let lastL = r.L;
@@ -1040,23 +1088,33 @@
       // after that many iterations.
       if (tuneIterationLimit !== 0 && tuneIdx === tuneIterationLimit) break;
       let res;
+      // tuneIdx > 0 -> isFirstLoopOuter=false for all calls inside.
       if (doFineTune) {
+        if (log) log("partition.fineTune.iter", { tuneIdx });
         const ft = fineTuneFaithful(g, leafToTop, rng, {
           aggregationLimit: aggregationLimit, loopLimit: 10,
           tuneIterationLimit: tuneIterationLimit,
+          isFirstLoop: false,
+          boundaryLog: log,
         });
         if (ft.numEffectiveLoops > 0) {
+          if (log) log("partition.findTopAfterFine", { tuneIdx });
           res = findTopModulesRepeatedlyFromPartition(g, ft.membership, rng, {
             aggregationLimit: aggregationLimit, loopLimit: 10,
+            isFirstLoopOuter: false,
+            boundaryLog: log,
           });
         } else {
           res = { membership: leafToTop, L: lastL };
         }
       } else {
         coarseTuned = true;
+        if (log) log("partition.coarseTune.iter", { tuneIdx });
         res = coarseTuneFaithful(g, leafToTop, rng, {
           aggregationLimit: aggregationLimit, loopLimit: 10,
           seed: seed,
+          isFirstLoopOuter: false,
+          boundaryLog: log,
         });
       }
       const newL = res.L;
