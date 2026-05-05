@@ -281,10 +281,21 @@
       moduleExitFlow[v]  = g.nodeExit[v];
     }
 
-    // MapEquation accumulators (calculateCodelengthTerms over modules):
+    // MapEquation accumulators (calculateCodelengthTerms over modules).
+    // cpp's MapEquation::initNetwork pins nodeFlow_log_nodeFlow to the
+    // sum of plogp(leaf.flow) over leaves at Infomap-session entry, then
+    // holds it constant across every super-net level inside
+    // findTopModulesRepeatedly. JS mirrors this via g.leafNodeFlowLogNodeFlow
+    // (set by buildGraph + buildSubGraph + propagated by collapseGraph).
+    // Without this pin, makePartition recomputes from g.nodeFlow at every
+    // super-net level — at supernet g.nodeFlow holds super-vertex flows,
+    // not leaves, so the constant becomes wrong + breaks the multi-level
+    // restoreConsolidatedOptimizationPointIfNoImprovement check.
     let nodeFlow_log_nodeFlow;
     if (opts.nodeFlowLogNodeFlow != null) {
       nodeFlow_log_nodeFlow = +opts.nodeFlowLogNodeFlow;
+    } else if (g.leafNodeFlowLogNodeFlow != null) {
+      nodeFlow_log_nodeFlow = +g.leafNodeFlowLogNodeFlow;
     } else {
       nodeFlow_log_nodeFlow = 0;
       for (let v = 0; v < n; v++) nodeFlow_log_nodeFlow += plogp(g.nodeFlow[v]);
@@ -294,7 +305,12 @@
       : (g.exitNetworkFlow != null ? +g.exitNetworkFlow : 0);
     let exitNetworkFlow_log_exitNetworkFlow = plogp(exitNetworkFlow);
 
-    let enterFlow = exitNetworkFlow;
+    // cpp MapEquation::calculateCodelengthTerms (MapEquation.h:313-333):
+    // enterFlow = 0; loop sums node.data.enterFlow over active network;
+    // THEN enterFlow += exitNetworkFlow at the end. Mirror that order
+    // exactly: for sub-Infomap (exitNetworkFlow != 0) the final addition
+    // ordering changes the bit-result by up to 1 ulp.
+    let enterFlow = 0;
     let enter_log_enter = 0;
     let exit_log_exit = 0;
     let flow_log_flow = 0;
@@ -304,6 +320,7 @@
       exit_log_exit += plogp(moduleExitFlow[c]);
       enterFlow += moduleEnterFlow[c];
     }
+    enterFlow += exitNetworkFlow;
     let enterFlow_log_enterFlow = plogp(enterFlow);
 
     // Codelength = (enterFlow_log_enterFlow - enter_log_enter -
@@ -430,7 +447,7 @@
     opts = opts || {};
     const isFirstLoop = !!opts.isFirstLoop;
     const tuneIterationLimit = opts.tuneIterationLimit | 0;
-    const minImpr = 1e-10; // minimumSingleNodeCodelengthImprovement
+    const minImpr = 1e-16; // minimumSingleNodeCodelengthImprovement (cpp io/Config.h)
     const dirty = opts.dirty;
     const order = opts.visitOrder
       ? opts.visitOrder
@@ -715,7 +732,7 @@
   // bumps loopLimit on iteration 1+.
   function findTopModulesRepeatedly(g, rng, opts) {
     opts = opts || {};
-    const minImpr = 1e-10;
+    const minImpr = 1e-16; // minimumSingleNodeCodelengthImprovement (restoreConsolidatedOptimizationPointIfNoImprovement)
     const levels = [];
     const baseLoopLimit = opts.loopLimit != null ? opts.loopLimit : 10;
     const isCoarseTune = !!opts.isCoarseTune;
@@ -830,13 +847,18 @@
         linkMap.set(key, { u: cu, v: cv, weight: w, flow: f });
       }
     }
-    // Sum leaf flows per module. For prev-level enter/exit, prefer
-    // previous Partition's accumulators which already track what
-    // moveNode + initEnterExitFlow produced.
+    // cpp's InfomapOptimizer::consolidateModules creates
+    //   `new InfoNode(m_moduleFlowData[moduleIndex])`
+    // which COPIES the entire FlowData struct (flow + enterFlow +
+    // exitFlow + teleport... fields) from the running tracker. Mirror
+    // this exactly: super-vertex's flow / enter / exit ALL come from
+    // prevP's running tracker, not from a fresh leaf-sum. Otherwise
+    // FP sum-order between the running tracker (move-order) and the
+    // direct leaf sum (v-id order) drifts by up to ~1 ulp per accumulated
+    // term, which compounds at every aggregation level.
     const nodeFlow  = new Float64Array(ncomm);
     const nodeEnter = new Float64Array(ncomm);
     const nodeExit  = new Float64Array(ncomm);
-    for (let v = 0; v < g.n; v++) nodeFlow[membership[v]] += g.nodeFlow[v];
     if (prevP != null) {
       // Module accumulators from previous level may use module ids
       // that don't match the renumbered membership (renumberByEncounter
@@ -853,11 +875,19 @@
         if (seen[c]) continue;
         const sv = prevMembership != null ? prevMembership[v] : v;
         const oldC = prevP.moduleOf[sv];
+        nodeFlow[c]  = prevP.moduleFlow[oldC];
         nodeEnter[c] = prevP.moduleEnterFlow[oldC];
         nodeExit[c]  = prevP.moduleExitFlow[oldC];
         seen[c] = 1;
       }
     } else {
+      // No prevP available: fall back to direct leaf sum (only used
+      // when collapseGraph is called outside the standard
+      // findTopModulesRepeatedly path, e.g. from coarseTuneFaithful's
+      // sub-module super-net). cpp's InfomapBase::aggregateFlowValues
+      // FromLeafToRoot does this too when the running tracker isn't
+      // available.
+      for (let v = 0; v < g.n; v++) nodeFlow[membership[v]] += g.nodeFlow[v];
       // First-level fallback: enterFlow = exitFlow = sum of inter-module
       // half-link-flows on each module's leaves. Mirrors canonical
       // InfomapBase::aggregateFlowValuesFromLeafToRoot for the
@@ -932,7 +962,7 @@
   // multi-level Louvain.
   function findTopModulesRepeatedlyFromPartition(g, seedMembership, rng, opts) {
     opts = opts || {};
-    const minImpr = 1e-10;
+    const minImpr = 1e-16; // minimumSingleNodeCodelengthImprovement (restoreConsolidatedOptimizationPointIfNoImprovement)
     const log = opts.boundaryLog || null;
     const seedRenum = renumberByEncounter(seedMembership, g.n);
     let aggregateMembership = seedRenum;
@@ -950,12 +980,16 @@
     // very first level.
     const flOuter = opts.isFirstLoopOuter !== undefined ? !!opts.isFirstLoopOuter : false;
     // D3: at each collapse, supply previous-level partition's per-cluster
-    // running tracker. lvl == 0 here entered from a seed membership (no
-    // prior optimize) — build a leaf-level partition to get a tracker
-    // matching the seed; from lvl 1 onwards, prevP is the previous
-    // level's collapsedP.
-    let prevP = null;
-    let prevMembership = null;
+    // running tracker. opts.seedPrevP / opts.seedPrevMembership let the
+    // caller (e.g. coarseTuneFaithful Phase 6) seed lvl 0's prevP with
+    // a post-coarseTune super-net partition, mirroring cpp's behaviour
+    // where the running tracker carries through consolidateModules(true)
+    // into the next findTopModulesRepeatedly. Without this seed, lvl 0
+    // falls back to direct-sum + half-flow (loses up to ~3 ulp per
+    // module enter/exit term).
+    let prevP = opts.seedPrevP != null ? opts.seedPrevP : null;
+    let prevMembership = opts.seedPrevMembership != null
+      ? opts.seedPrevMembership : null;
     for (let lvl = 0; lvl < aggLimit; lvl++) {
       const ncomm = maxOf(aggregateMembership) + 1;
       if (ncomm <= 1) break;
@@ -1226,8 +1260,19 @@
     // Phase 6: continue with findTopModulesRepeatedlyFromPartition on
     // the new leaf-level membership (canonical's findTopModulesRepeatedly
     // call after coarseTune in partition()).
+    //
+    // Pass post-Phase-5 collapsedP as the seed prevP. cpp's
+    // consolidateModules(true) at end of coarseTune leaves m_moduleFlowData
+    // populated with the running tracker for each top-module. The next
+    // findTopModulesRepeatedly's setActiveNetworkFromChildrenOfRoot +
+    // initPartition reads m_moduleFlowData verbatim. JS must mirror by
+    // inheriting collapsedP's moduleFlow / moduleEnter / moduleExit at
+    // lvl 0 of the post-coarseTune collapse, NOT recomputing via the
+    // fallback direct-sum + half-flow path.
     return findTopModulesRepeatedlyFromPartition(g, newRenum, rng, {
       ...opts, isFirstLoopOuter: false,
+      seedPrevP: collapsedP,
+      seedPrevMembership: subRenum,
     });
   }
 
