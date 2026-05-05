@@ -1372,7 +1372,13 @@
       }
     }
 
-    const collapsedG = collapseGraph(g, subRenum, numSub, null);
+    // Pass PsubLeaf as prevP — its running tracker has the leaf-level
+    // module accumulators after applyMembership(subOf). cpp's Phase 3
+    // consolidateModules(true) creates sub-module super-vertices with
+    // .data = m_moduleFlowData[m_orig] (running tracker after Phase 2's
+    // moveActiveNodesToPredefinedModules). Without this, fallback path
+    // recomputes from cross-edge half-flows + drifts O(1 ulp) from cpp.
+    const collapsedG = collapseGraph(g, subRenum, numSub, PsubLeaf);
     const collapsedP = makePartition(collapsedG);
     // Move sub-modules to their former top-modules. After this,
     // collapsedP.moduleOf == subToTop.
@@ -1380,8 +1386,16 @@
 
     // Phase 4: optimizeActiveNetwork at the sub-module level (canonical
     // line 1504). RNG-consuming. isCoarseTune=true -> loopLimit=20.
+    // Capture numEff: cpp's partition() outer loop only calls
+    // findTopModulesRepeatedly after coarseTune when coarseTune returned
+    // numEffectiveLoops > 0 (InfomapBase.cpp:1080). When numEff == 0
+    // cpp coarseTune returns 0 and partition()'s isImprovement gate
+    // kicks in directly without an extra findTop. JS must gate Phase 6
+    // identically — without this gate, Phase 6 runs an extra full
+    // multi-level Louvain pass that cpp never executes, drifting
+    // partition + L from cpp on long trajectories.
     if (log) log("coarseTune.subModuleOpt", { n: collapsedG.n });
-    optimizeActiveNetwork(collapsedP, collapsedG, rng, {
+    const phase4NumEff = optimizeActiveNetwork(collapsedP, collapsedG, rng, {
       loopLimit: 20,
       tuneIterationLimit: opts.tuneIterationLimit | 0,
       isFirstLoop: false,
@@ -1408,11 +1422,24 @@
     // inheriting collapsedP's moduleFlow / moduleEnter / moduleExit at
     // lvl 0 of the post-coarseTune collapse, NOT recomputing via the
     // fallback direct-sum + half-flow path.
-    return findTopModulesRepeatedlyFromPartition(g, newRenum, rng, {
+    if (phase4NumEff === 0) {
+      // Mirror cpp: skip post-coarseTune findTop; return current
+      // post-Phase-5 mapping + current L. Compute L via fresh Partition
+      // since we don't have the running tracker for the projected leaf
+      // membership directly.
+      const finalP = makePartition(g);
+      applyMembership(finalP, g, newRenum);
+      return { membership: newRenum, L: finalP.codelength(),
+               partition: finalP, topModuleOrigOf: null,
+               numEffectiveLoops: 0 };
+    }
+    const res = findTopModulesRepeatedlyFromPartition(g, newRenum, rng, {
       ...opts, isFirstLoopOuter: false,
       seedPrevP: collapsedP,
       seedPrevMembership: subRenum,
     });
+    res.numEffectiveLoops = phase4NumEff;
+    return res;
   }
 
   // Faithful mirror of InfomapBase::partition (two-level path).
@@ -1528,11 +1555,25 @@
       doFineTune = !doFineTune;
     }
 
-    // One-module bail-out.
+    // One-module bail-out. Mirrors cpp InfomapBase::partition lines
+    // 1109-1124. Cpp also requires haveNonTrivialModules (= at least
+    // one top-module with > 1 leaf). Without that gate, JS would bail
+    // on a partition where every leaf is in its own singleton module
+    // even though cpp wouldn't, drifting K_top vs cpp on tiny networks.
     const partitionFinal = makePartition(g);
     applyMembership(partitionFinal, g, leafToTop);
     const finalL = partitionFinal.codelength();
-    if (!opts.preferModularSolution && finalL > oneLevelL) {
+    let haveNonTrivialModules = false;
+    {
+      const sizes = new Int32Array(maxOf(leafToTop) + 1);
+      for (let v = 0; v < g.n; v++) sizes[leafToTop[v]]++;
+      for (let c = 0; c < sizes.length; c++) {
+        if (sizes[c] > 1) { haveNonTrivialModules = true; break; }
+      }
+      if (maxOf(leafToTop) + 1 <= 1) haveNonTrivialModules = false;
+    }
+    if (!opts.preferModularSolution && haveNonTrivialModules
+        && finalL > oneLevelL) {
       const target = new Int32Array(g.n);
       for (let v = 0; v < g.n; v++) target[v] = 0;
       const membership = new Map();
