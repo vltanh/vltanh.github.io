@@ -630,12 +630,22 @@
   // into super-nodes (each super-node = one module) and re-optimize on
   // the super-network. Repeat until <= 1 module or no further progress.
   // Returns the final leaf->top mapping + composed-via-renumber chain.
+  // canonical Infomap sets loopLimit=20 (instead of 10) when
+  // m_aggregationLevel > 0 OR m_isCoarseTune is true. This function
+  // forwards a per-level isCoarseTune flag (opts.isCoarseTune) and
+  // bumps loopLimit on iteration 1+.
   function findTopModulesRepeatedly(g, rng, opts) {
     opts = opts || {};
     const minImpr = 1e-10;
     const levels = [];
+    const baseLoopLimit = opts.loopLimit != null ? opts.loopLimit : 10;
+    const isCoarseTune = !!opts.isCoarseTune;
     let currentP = makePartition(g);
-    optimizeActiveNetwork(currentP, g, rng, opts);
+    // aggregation_level == 0 path: use base loopLimit unless coarseTune.
+    optimizeActiveNetwork(currentP, g, rng, {
+      loopLimit: isCoarseTune ? 20 : baseLoopLimit,
+      tuneIterationLimit: opts.tuneIterationLimit | 0,
+    });
     let lastL = currentP.codelength();
     let aggregateMembership = renumberByEncounter(currentP.moduleOf, g.n);
     levels.push({
@@ -650,7 +660,11 @@
       const collapsedG = collapseGraph(g, aggregateMembership, ncomm,
                                        null);
       const collapsedP = makePartition(collapsedG);
-      const eff = optimizeActiveNetwork(collapsedP, collapsedG, rng, opts);
+      // aggregation_level > 0 -> loopLimit=20.
+      const eff = optimizeActiveNetwork(collapsedP, collapsedG, rng, {
+        loopLimit: 20,
+        tuneIterationLimit: opts.tuneIterationLimit | 0,
+      });
       const newL = collapsedP.codelength();
       // Restore-on-no-improvement: if the super-network sweep didn't
       // strictly reduce the leaf-flat codelength (= the super-network's
@@ -900,6 +914,188 @@
     return findTopModulesRepeatedlyFromPartition(g, subOf, rng, opts);
   }
 
+  // ── Faithful outer driver: mirrors InfomapBase::partition ───────────
+  // Closer mirror of community-detection/infomap/src/core/InfomapBase.cpp
+  // partition() at line 1043-1137. Key semantics relative to the original
+  // runInfomapCanonical:
+  //   - Compound improvement gate: (newL <= oldL - 1e-10) && (newL <
+  //     oldL - initialL * 1e-5).
+  //   - coarseTune sub-Infomap runs with twoLevel=true + tuneIterationLimit=1.
+  //   - optimizeActiveNetwork loopLimit becomes 20 when m_aggregationLevel>0
+  //     OR m_isCoarseTune is true (coarseTune sub-Infomap path).
+  //   - fineTune calls restore-on-no-improvement when
+  //     numEffectiveLoops == 0 (preserves the prior consolidated state).
+  //   - One-module bail-out if the partition's codelength exceeds the
+  //     one-level codelength (everything in one module).
+  function oneLevelCodelength(g) {
+    const P = makePartition(g);
+    // Move every leaf into module 0.
+    const target = new Int32Array(g.n);
+    for (let v = 0; v < g.n; v++) target[v] = 0;
+    applyMembership(P, g, target);
+    return P.codelength();
+  }
+
+  function fineTuneFaithful(g, leafToTop, rng, opts) {
+    opts = opts || {};
+    const P = makePartition(g);
+    applyMembership(P, g, leafToTop);
+    const beforeL = P.codelength();
+    const numEff = optimizeActiveNetwork(P, g, rng, opts);
+    if (numEff === 0) {
+      // Restore-on-no-improvement: re-apply leafToTop to clear any
+      // exploratory partial moves. canonical sets the optimizer state
+      // back to the pre-sweep consolidated point.
+      const P2 = makePartition(g);
+      applyMembership(P2, g, leafToTop);
+      return { membership: renumberByEncounter(P2.moduleOf, g.n),
+               L: P2.codelength(), numEffectiveLoops: 0 };
+    }
+    return { membership: renumberByEncounter(P.moduleOf, g.n),
+             L: P.codelength(), numEffectiveLoops: numEff };
+  }
+
+  function coarseTuneFaithful(g, leafToTop, rng, opts) {
+    opts = opts || {};
+    const ncomm = maxOf(leafToTop) + 1;
+    const groups = new Array(ncomm);
+    for (let i = 0; i < ncomm; i++) groups[i] = [];
+    for (let v = 0; v < g.n; v++) groups[leafToTop[v]].push(v);
+
+    const subOf = new Int32Array(g.n);
+    let offset = 0;
+    for (let c = 0; c < ncomm; c++) {
+      const members = groups[c];
+      if (members.length < 2) {
+        for (const v of members) subOf[v] = offset;
+        offset += 1;
+        continue;
+      }
+      const remap = new Map();
+      members.forEach(function (v, i) { remap.set(v, i); });
+      const subEdges = [];
+      for (const lk of g.links) {
+        if (remap.has(lk.u) && remap.has(lk.v)) {
+          subEdges.push([remap.get(lk.u), remap.get(lk.v)]);
+        }
+      }
+      const subIds = Array.from({ length: members.length }, (_, i) => i);
+      // canonical's coarseTune sub-Infomap: setTwoLevel(true) +
+      // setTuneIterationLimit(1). This makes the partition() outer loop
+      // run at most 1 fineTune/coarseTune iteration in the sub-call
+      // (gating tuneIterationLimit !== 1 inside tryMoveEach also flips).
+      const subRes = runInfomapFaithful(subIds, subEdges, {
+        seed: opts.seed != null ? opts.seed : 1,
+        rng: rng,
+        twoLevel: true,
+        tuneIterationLimit: 1,
+        aggregationLimit: 30,
+      });
+      let maxSub = 0;
+      for (let i = 0; i < members.length; i++) {
+        const s = subRes.finalPartition[i];
+        if (s > maxSub) maxSub = s;
+        subOf[members[i]] = offset + s;
+      }
+      offset += maxSub + 1;
+    }
+    return findTopModulesRepeatedlyFromPartition(g, subOf, rng, opts);
+  }
+
+  // Faithful mirror of InfomapBase::partition (two-level path).
+  function runInfomapFaithful(nodeIds, edges, opts) {
+    opts = opts || {};
+    const g = buildGraph(nodeIds, edges);
+    const seed = opts.seed != null ? opts.seed : 1;
+    // Allow caller to inject an existing rng (for sub-Infomap recursion
+    // inside coarseTune). canonical re-uses m_rand at every level —
+    // matching that means propagating the same MT19937 instance.
+    const rng = opts.rng != null ? opts.rng : LV.MT19937(seed >>> 0);
+    const aggregationLimit = opts.aggregationLimit != null
+      ? opts.aggregationLimit : 30;
+    const tuneIterationLimit = opts.tuneIterationLimit | 0;
+    const minImpr = 1e-10;
+    const minRelTuneImpr = 1e-5;
+
+    // Compute one-level codelength up front (for the bail-out check).
+    const oneLevelL = oneLevelCodelength(g);
+
+    // First findTopModulesRepeatedly at aggregation_level = 0.
+    let r = findTopModulesRepeatedly(g, rng, {
+      aggregationLimit: aggregationLimit, loopLimit: 10,
+    });
+    let leafToTop = r.membership;
+    let lastL = r.L;
+    const initialL = oneLevelL;
+
+    let doFineTune = true;
+    let coarseTuned = false;
+    let tuneIdx = 0;
+    while (true) {
+      if (maxOf(leafToTop) + 1 <= 1) break;
+      tuneIdx += 1;
+      // canonical's `(m_tuneIterationIndex + 1) != tuneIterationLimit`:
+      // when tuneIterationLimit == 0 (default), the unsigned compare
+      // is always true (effectively unlimited). When > 0, terminate
+      // after that many iterations.
+      if (tuneIterationLimit !== 0 && tuneIdx === tuneIterationLimit) break;
+      let res;
+      if (doFineTune) {
+        const ft = fineTuneFaithful(g, leafToTop, rng, {
+          aggregationLimit: aggregationLimit, loopLimit: 10,
+          tuneIterationLimit: tuneIterationLimit,
+        });
+        if (ft.numEffectiveLoops > 0) {
+          res = findTopModulesRepeatedlyFromPartition(g, ft.membership, rng, {
+            aggregationLimit: aggregationLimit, loopLimit: 10,
+          });
+        } else {
+          res = { membership: leafToTop, L: lastL };
+        }
+      } else {
+        coarseTuned = true;
+        res = coarseTuneFaithful(g, leafToTop, rng, {
+          aggregationLimit: aggregationLimit, loopLimit: 10,
+          seed: seed,
+        });
+      }
+      const newL = res.L;
+      // Compound improvement gate: BOTH absolute AND relative.
+      const absImpr = newL <= lastL - minImpr;
+      const relImpr = newL < lastL - initialL * minRelTuneImpr;
+      const isImprovement = absImpr && relImpr;
+      if (!isImprovement) {
+        if (coarseTuned) break;
+      } else {
+        leafToTop = res.membership;
+        lastL = newL;
+      }
+      doFineTune = !doFineTune;
+    }
+
+    // One-module bail-out.
+    const partitionFinal = makePartition(g);
+    applyMembership(partitionFinal, g, leafToTop);
+    const finalL = partitionFinal.codelength();
+    if (!opts.preferModularSolution && finalL > oneLevelL) {
+      const target = new Int32Array(g.n);
+      for (let v = 0; v < g.n; v++) target[v] = 0;
+      const membership = new Map();
+      nodeIds.forEach(function (id, i) { membership.set(id, 0); });
+      return {
+        graph: g, finalPartition: target, finalL: oneLevelL,
+        membership: membership, bailedOut: true,
+      };
+    }
+    const renumbered = renumberByEncounter(leafToTop, g.n);
+    const membership = new Map();
+    nodeIds.forEach(function (id, i) { membership.set(id, renumbered[i]); });
+    return {
+      graph: g, finalPartition: renumbered, finalL: finalL,
+      membership: membership, bailedOut: false,
+    };
+  }
+
   // ── Outer driver: partition() ──────────────────────────────────────
   // Two-level Infomap. Returns a leaf->top membership Map<id, comm>.
   function runInfomapCanonical(nodeIds, edges, opts) {
@@ -977,5 +1173,6 @@
     findTopModulesRepeatedly: findTopModulesRepeatedly,
     collapseGraph: collapseGraph,
     runInfomapCanonical: runInfomapCanonical,
+    runInfomapFaithful: runInfomapFaithful,
   };
 })();
