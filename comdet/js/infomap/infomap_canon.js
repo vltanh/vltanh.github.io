@@ -322,6 +322,11 @@
     }
     enterFlow += exitNetworkFlow;
     let enterFlow_log_enterFlow = plogp(enterFlow);
+    if (typeof globalThis.__INFOMAP_INIT_DUMP === 'function') {
+      const idx = enterFlow_log_enterFlow - enter_log_enter - exitNetworkFlow_log_exitNetworkFlow;
+      const mod = -exit_log_exit + flow_log_flow - nodeFlow_log_nodeFlow;
+      globalThis.__INFOMAP_INIT_DUMP(n, idx + mod, idx, mod, enter_log_enter, exit_log_exit, flow_log_flow, nodeFlow_log_nodeFlow, exitNetworkFlow, exitNetworkFlow_log_exitNetworkFlow);
+    }
 
     // Codelength = (enterFlow_log_enterFlow - enter_log_enter -
     //               exitNetworkFlow_log_exitNetworkFlow) +
@@ -794,6 +799,14 @@
     // order than cpp once lvl >= 2 — drift compounds per level.
     let srcG = g;
     let prevP = currentP;
+    // srcGMembership[v] = leaf v's vertex-ID inside srcG at the CURRENT
+    // iter's level. Used to index prevP's running tracker (indexed by
+    // srcG-scope vertex IDs). At lvl=0 (initial), srcG = leaf graph,
+    // srcGMembership[v] = v. After each successful iter, srcGMembership
+    // = aggregateMembership BEFORE the renumber-of-next-level (i.e. =
+    // current-level cluster IDs).
+    let srcGMembership = new Int32Array(g.n);
+    for (let v = 0; v < g.n; v++) srcGMembership[v] = v;
     for (let lvl = 1; lvl < aggLimit; lvl++) {
       const ncomm = maxOf(aggregateMembership) + 1;
       if (ncomm <= 1) break;
@@ -825,6 +838,10 @@
       for (let v = 0; v < g.n; v++) {
         nextLeaf[v] = collapsedP.moduleOf[aggregateMembership[v]];
       }
+      // srcGMembership for NEXT iter = leaf v -> srcG-vertex at next iter
+      // = leaf v's CURRENT-LEVEL cluster ID = aggregateMembership BEFORE
+      // the renumber-of-next-level update. Capture before overwriting.
+      const oldAgg = aggregateMembership;
       aggregateMembership = renumberByEncounter(nextLeaf, g.n);
       levels.push({
         membership: new Int32Array(aggregateMembership),
@@ -834,8 +851,26 @@
       lastL = newL;
       srcG = collapsedG;
       prevP = collapsedP;
+      srcGMembership = oldAgg;
     }
-    return { membership: aggregateMembership, levels: levels, L: lastL };
+    // topModuleOrigOf[c] = the prev-level original module ID for
+    // renumbered top-module c. Used by coarseTuneFaithful to look up
+    // parentModuleExit / parentModuleEnter from prevP's running tracker
+    // (= cpp's m_moduleFlowData[m_orig].exitFlow at consolidate).
+    let topModuleOrigOf = null;
+    if (prevP != null) {
+      const ncomm = maxOf(aggregateMembership) + 1;
+      topModuleOrigOf = new Int32Array(ncomm);
+      const seen = new Int8Array(ncomm);
+      for (let v = 0; v < g.n; v++) {
+        const c = aggregateMembership[v];
+        if (seen[c]) continue;
+        topModuleOrigOf[c] = prevP.moduleOf[srcGMembership[v]];
+        seen[c] = 1;
+      }
+    }
+    return { membership: aggregateMembership, levels: levels, L: lastL,
+             partition: prevP, topModuleOrigOf: topModuleOrigOf };
   }
 
   // Collapse: build super-graph where each module is a single node.
@@ -1047,6 +1082,9 @@
     // isFullNetwork()). Caller passes opts.isFirstLoopOuter for the
     // very first level.
     const flOuter = opts.isFirstLoopOuter !== undefined ? !!opts.isFirstLoopOuter : false;
+    // Track leaf -> srcG-vertex chain for topModuleOrigOf computation.
+    let srcGMembership = new Int32Array(g.n);
+    for (let v = 0; v < g.n; v++) srcGMembership[v] = v;
     // D3: at each collapse, supply previous-level partition's per-cluster
     // running tracker. opts.seedPrevP / opts.seedPrevMembership let the
     // caller (e.g. coarseTuneFaithful Phase 6) seed lvl 0's prevP with
@@ -1085,10 +1123,25 @@
       for (let v = 0; v < g.n; v++) {
         next[v] = collapsedP.moduleOf[aggregateMembership[v]];
       }
+      const oldAgg = aggregateMembership;
       aggregateMembership = renumberByEncounter(next, g.n);
       lastL = newL;
+      srcGMembership = oldAgg;
     }
-    return { membership: aggregateMembership, L: lastL };
+    let topModuleOrigOf = null;
+    if (prevP != null) {
+      const ncomm = maxOf(aggregateMembership) + 1;
+      topModuleOrigOf = new Int32Array(ncomm);
+      const seen = new Int8Array(ncomm);
+      for (let v = 0; v < g.n; v++) {
+        const c = aggregateMembership[v];
+        if (seen[c]) continue;
+        topModuleOrigOf[c] = prevP.moduleOf[srcGMembership[v]];
+        seen[c] = 1;
+      }
+    }
+    return { membership: aggregateMembership, L: lastL, partition: prevP,
+             topModuleOrigOf: topModuleOrigOf };
   }
 
   // ── fineTune ──────────────────────────────────────────────────────
@@ -1201,10 +1254,10 @@
       const P2 = makePartition(g);
       applyMembership(P2, g, leafToTop);
       return { membership: renumberByEncounter(P2.moduleOf, g.n),
-               L: P2.codelength(), numEffectiveLoops: 0 };
+               L: P2.codelength(), numEffectiveLoops: 0, partition: P2 };
     }
     return { membership: renumberByEncounter(P.moduleOf, g.n),
-             L: P.codelength(), numEffectiveLoops: numEff };
+             L: P.codelength(), numEffectiveLoops: numEff, partition: P };
   }
 
   function coarseTuneFaithful(g, leafToTop, rng, opts) {
@@ -1215,17 +1268,35 @@
     for (let i = 0; i < ncomm; i++) groups[i] = [];
     for (let v = 0; v < g.n; v++) groups[leafToTop[v]].push(v);
 
-    // Per-top-module exitFlow (parent's exitNetworkFlow for sub-Infomap).
-    // Undirected: half-flow contribution from each edge crossing the
-    // module boundary. Mirrors aggregateFlowValuesFromLeafToRoot.
+    // Per-top-module exitFlow = parent's exitNetworkFlow for sub-Infomap.
+    // cpp's parent.data.exitFlow at sub-Infomap entry comes from the
+    // RUNNING TRACKER m_moduleFlowData[m_orig].exitFlow snapshotted at
+    // consolidate (NOT a fresh recompute from cross-edges). Per-move
+    // updates accumulate FP rounding that diverges from a fresh sum
+    // by O(1 ulp), and that drift propagates into every plogp call inside
+    // the sub-Infomap.
+    //
+    // opts.parentPartition + opts.parentTopModuleOrigOf provide the
+    // running tracker. parentPartition.moduleExitFlow[parentTopModule
+    // OrigOf[c]] = cpp's m_moduleFlowData snapshot for top-module c.
+    // Fall back to the fresh-recompute path only when the running
+    // tracker is unavailable (e.g., direct external call).
     const parentModuleExit = new Float64Array(ncomm);
-    for (const lk of g.links) {
-      const cu = leafToTop[lk.u];
-      const cv = leafToTop[lk.v];
-      if (cu === cv) continue;
-      const half = lk.flow * 0.5;
-      parentModuleExit[cu] += half;
-      parentModuleExit[cv] += half;
+    if (opts.parentPartition != null && opts.parentTopModuleOrigOf != null) {
+      const pP = opts.parentPartition;
+      const pOrig = opts.parentTopModuleOrigOf;
+      for (let c = 0; c < ncomm; c++) {
+        parentModuleExit[c] = pP.moduleExitFlow[pOrig[c]];
+      }
+    } else {
+      for (const lk of g.links) {
+        const cu = leafToTop[lk.u];
+        const cv = leafToTop[lk.v];
+        if (cu === cv) continue;
+        const half = lk.flow * 0.5;
+        parentModuleExit[cu] += half;
+        parentModuleExit[cv] += half;
+      }
     }
 
     // Phase 1: per top-module sub-Infomap. Mirrors canonical's
@@ -1383,6 +1454,8 @@
     });
     let leafToTop = r.membership;
     let lastL = r.L;
+    let lastPartition = r.partition;
+    let lastTopModuleOrigOf = r.topModuleOrigOf;
     const initialL = oneLevelL;
 
     let doFineTune = true;
@@ -1408,10 +1481,16 @@
         });
         if (ft.numEffectiveLoops > 0) {
           if (log) log("partition.findTopAfterFine", { tuneIdx });
+          // Pass fineTune's leaf-level Partition as seedPrevP so
+          // findTopModulesRepeatedlyFromPartition's lvl 0 collapseGraph
+          // inherits the running tracker (mirrors cpp's
+          // consolidateModules at end of fineTune copying
+          // m_moduleFlowData into the next-level super-vertices).
           res = findTopModulesRepeatedlyFromPartition(g, ft.membership, rng, {
             aggregationLimit: aggregationLimit, loopLimit: 10,
             isFirstLoopOuter: false,
             boundaryLog: log,
+            seedPrevP: ft.partition,
           });
         } else {
           res = { membership: leafToTop, L: lastL };
@@ -1424,6 +1503,13 @@
           seed: seed,
           isFirstLoopOuter: false,
           boundaryLog: log,
+          // cpp's parent.data.exitFlow at sub-Infomap entry =
+          // m_moduleFlowData[m_orig].exitFlow snapshot from the prev
+          // findTopModulesRepeatedly's last consolidate. JS mirrors via
+          // lastPartition (= last successful Partition before break) +
+          // lastTopModuleOrigOf (= orig-id-of renumbered top-module).
+          parentPartition: lastPartition,
+          parentTopModuleOrigOf: lastTopModuleOrigOf,
         });
       }
       const newL = res.L;
@@ -1436,6 +1522,8 @@
       } else {
         leafToTop = res.membership;
         lastL = newL;
+        lastPartition = res.partition;
+        lastTopModuleOrigOf = res.topModuleOrigOf;
       }
       doFineTune = !doFineTune;
     }
