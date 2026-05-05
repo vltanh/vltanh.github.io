@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>VieCut &middot; cactus mincut | Community Detection Algorithms</title>
+<link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐖</text></svg>">
+<meta name="description" content="VieCut cactus mincut explainer. The mincut backend WCC + CM use under the hood.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./shared.css">
+<style>
+body { font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif; }
+.hdr h1 { transform: rotate(-1.2deg); }
+.hdr .sub { font-family: 'IBM Plex Sans', sans-serif; color: var(--paper-2); line-height: 1.55; }
+.uc-banner {
+  max-width: var(--span-medium);
+  margin: 0 auto 2.4rem;
+  padding: 1rem 1.3rem;
+  background: var(--hl-yellow);
+  border: 1.5px solid var(--signal);
+  border-radius: 2px;
+  position: relative;
+  transform: rotate(-.5deg);
+  box-shadow: 2px 2.5px 0 rgba(27,32,51,.18);
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: .95rem; line-height: 1.55; color: var(--paper-2);
+}
+.uc-banner::before {
+  content: "under construction";
+  position: absolute; top: -10px; left: 16px;
+  transform: rotate(-2deg);
+  font-family: 'Caveat Brush', cursive;
+  font-size: .9rem; color: var(--signal);
+  background: var(--hl-yellow);
+  padding: .15rem .55rem;
+  border: 1px solid var(--signal);
+  border-radius: 2px; letter-spacing: .04em;
+  box-shadow: 1px 1px 0 rgba(27,32,51,.18);
+}
+.uc-banner strong { color: var(--paper); font-weight: 500; }
+.algo-meta {
+  max-width: var(--span-prose);
+  margin: 0 auto 2.5rem;
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 1.02rem; line-height: 1.7;
+  color: var(--paper-2);
+}
+.algo-meta em {
+  color: var(--paper); font-style: italic;
+  background: linear-gradient(180deg, transparent 58%, rgba(246,225,90,.5) 58%, rgba(246,225,90,.5) 92%, transparent 92%);
+  padding: 0 .15em;
+}
+.algo-refs {
+  display: flex; gap: 1.3rem; flex-wrap: wrap;
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .76rem; letter-spacing: .14em;
+  color: var(--paper-3);
+  margin-top: 1.1rem;
+}
+.algo-refs a {
+  color: var(--paper-3);
+  text-transform: uppercase;
+  border-bottom: 1px dashed var(--paper-3);
+  padding-bottom: 1px; background: none;
+  transition: color .18s, border-color .18s;
+}
+.algo-refs a:hover { color: var(--signal); border-bottom-color: var(--signal); }
+.algo-refs .ref-label { color: var(--paper-4); margin-right: .35rem; text-transform: uppercase; }
+.back-link {
+  display: inline-flex; align-items: center; gap: .35rem;
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .74rem; letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--paper-3);
+  border-bottom: 1px dashed var(--paper-3);
+  padding-bottom: 1px;
+  transition: color .18s, border-color .18s;
+}
+.back-link:hover { color: var(--signal); border-bottom-color: var(--signal); }
+.back-row { max-width: var(--span-wide); margin: 0 auto 1.8rem; }
+</style>
+</head>
+<body>
+<main class="page">
+
+<div class="back-row">
+  <a class="back-link" href="./">&larr; back to gallery</a>
+</div>
+
+<header class="hdr">
+  <div class="kicker">community detection &middot; primitive &middot; global minimum cut</div>
+  <h1><em>VieCut</em></h1>
+  <p class="fullname">cactus mincut + balanced-cut tie-break &middot; Henzinger-Noe-Schulz-Strash 2018</p>
+  <p class="sub">The minimum-cut engine under <a href="./wcc.html">WCC</a> + <a href="./cm.html">CM</a>. Computes the global minimum edge cut of a graph in (near-)linear time using the cactus representation, then picks the most balanced cut among ties.</p>
+</header>
+
+<div class="uc-banner">
+  <strong>Walker pending.</strong> The interactive walker for VieCut waits on the JS port of <code>cactus_mincut.h</code> (<a href="https://github.com/VieCut/VieCut">VieCut</a>'s recursive contraction + cactus tree build) and the most-balanced-cut tie-break in <code>most_balanced_minimum_cut.h</code>. Today the page surfaces the algorithm idea, why mincut tie-break matters for WCC + CM output, and why VieCut beats Stoer-Wagner on the gallery's threshold pipeline. Technical companion at <a href="https://github.com/vlttnh/community-detection/blob/main/docs/algorithms/viecut.md">docs/algorithms/viecut.md</a> is also pending.
+</div>
+
+<section class="hook">
+  <p>Take a connected graph. The <em>minimum cut</em> is the smallest set of edges you can remove to disconnect it. The cardinality of that set (<code>k</code>) is the graph's edge connectivity. Any algorithm that asks "is this cluster well-connected?" reduces to: how big is its mincut?</p>
+  <p>The naive way is Stoer-Wagner: iteratively pick a node, contract a phase, record the cut, repeat. \(O(V \cdot E)\) for a single cut. Fine for small graphs; slow on real networks where you need the cut for every cluster as part of an iterative recursion (which is exactly what <a href="./wcc.html">WCC</a> and <a href="./cm.html">CM</a> do).</p>
+  <p><em>VieCut</em> (Henzinger, Noe, Schulz, Strash, ALENEX 2018) does it differently. The cactus algorithm builds a <em>cactus representation</em> of the graph: a tree-of-cycles where every minimum cut in the original graph corresponds to either an edge-cut in the tree or a 2-edge cut crossing one of the cycles. Computing the cactus is near-linear in <code>V + E</code>, after which every minimum cut is a tree path or cycle pair away. Practical speedup over Stoer-Wagner: 10-100x on million-node networks.</p>
+  <div class="callout">
+    <div class="tag">why this matters for WCC + CM</div>
+    <p>WCC and CM call mincut on every cluster, recursively. On a network with <em>k</em> clusters of average size <em>n/k</em>, that's <em>k</em> mincut calls per round, times the recursion depth. Stoer-Wagner makes the post-proc pipeline scale as \(O(V \cdot E^2)\) on bad inputs; VieCut's cactus drops it to \(O(V \cdot E \log V)\) typical.</p>
+    <p>The other VieCut win is <em>most-balanced-cut tie-break</em>. When multiple cuts have the same minimum cardinality (which happens often: any pendant or whisker creates a cut of size 1, but so does the genuine community boundary), VieCut picks the cut that splits the graph most evenly. Stoer-Wagner picks whichever cut its phase happens to land on first. The split selection determines what gets pushed back into WCC's recursion, which determines whether the recursion converges quickly or peels nodes one at a time.</p>
+  </div>
+</section>
+
+<section class="hook">
+  <h2>Why most-balanced-cut?</h2>
+  <p>Imagine a cluster with two dense halves joined by a single bridge edge. The mincut is 1 (cut the bridge). Two valid bipartitions exist:</p>
+  <ul>
+    <li><strong>Balanced</strong>: split into the two halves directly.</li>
+    <li><strong>Pendant</strong>: peel off one isolated node + leave the rest connected. Also a cut of 1, but useless.</li>
+  </ul>
+  <p>If the cluster has additional pendants or whiskers (rare in dense parts of social networks; common in sparse parts), the mincut between any pendant and the bulk is also 1. VieCut's tie-break picks the balanced cut so WCC's recursion makes structural progress instead of stripping a node per round.</p>
+  <p>The 32-node fixture's cluster A is a small example. A's mincut is 1 (multiple cuts achieve it: the periphery's bridges to the K_5 core all have cardinality 1). With Stoer-Wagner, you peel one periphery node per round; recursion ends after several rounds. With VieCut + balanced selection, you split the periphery from the core in one move. Same final partition (both end at the K_5 core as the well-connected residual when the threshold is \(\log_{10}(n)\)) but different intermediate trace.</p>
+</section>
+
+<section class="hook">
+  <h2>The cactus, conceptually</h2>
+  <p>Karzanov's 1973 result: in any graph G, all minimum cuts can be encoded by a cactus tree T where:</p>
+  <ul>
+    <li>Each <em>node</em> in T represents a contracted set of original-graph nodes.</li>
+    <li>Each <em>edge</em> in T represents a cut of cardinality <code>k</code> (= the global mincut).</li>
+    <li>Each <em>cycle</em> in T represents a family of cuts of cardinality <code>k</code> that share two edges of the cycle.</li>
+  </ul>
+  <p>So if you find any minimum cut by classical Stoer-Wagner-like contraction, you've found one edge of the cactus. To find them all (so you can pick the most balanced one), you contract the discovered min-cut sides + recurse. VieCut's <code>cactus_mincut</code> is a careful implementation of this recursive cactus build, with engineering for cache locality, edge contraction efficiency, and parallelism.</p>
+  <p>On the gallery's 32-node fixture this is overkill; on a million-node co-citation network it is what makes WCC tractable.</p>
+</section>
+
+<section class="algo-meta">
+  <div class="algo-refs">
+    <span><span class="ref-label">paper</span><a href="https://doi.org/10.1137/1.9781611975055.6" target="_blank" rel="noopener">Henzinger 2018 (ALENEX)</a></span>
+    <span><span class="ref-label">paper</span><a href="https://doi.org/10.1145/3210377.3210393" target="_blank" rel="noopener">Henzinger 2018 (SPAA)</a></span>
+    <span><span class="ref-label">code</span><a href="https://github.com/VieCut/VieCut" target="_blank" rel="noopener">VieCut</a></span>
+    <span><span class="ref-label">used by</span><a href="./wcc.html">WCC</a></span>
+    <span><span class="ref-label">used by</span><a href="./cm.html">CM</a></span>
+  </div>
+</section>
+
+<footer class="ack">
+  <p class="tools">drawn with <a href="https://d3js.org" target="_blank" rel="noopener">d3</a></p>
+  <p class="credit">typed by vltanh, doodled with Claude</p>
+</footer>
+
+<script>
+window.MathJax = {
+  tex: {
+    inlineMath: [['\\(', '\\)'], ['$', '$'], ['$$', '$$']],
+    displayMath: [['\\[', '\\]']]
+  },
+  chtml: { scale: 1.0 }
+};
+</script>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</body>
+</html>
