@@ -109,6 +109,10 @@
     const seed = opts.seed != null ? (opts.seed >>> 0) : 0;
     const mincutFn = opts.mincutFn || C.MINCUT.stoerWagner;
     const baseAlgoFn = opts.baseAlgoFn || null; // optional injection
+    // Replay-mode oracle: keyed by sorted-cluster-ids string, returns
+    // { cutValue, inPartition, outPartition }. Used by tools/viz_check/cm
+    // to feed canonical mincut bipartitions deterministically.
+    const cutOracle = opts.cutOracle || null;
     const trace = opts.trace ? [] : null;
     function tlog(s) { if (trace) trace.push(s); }
 
@@ -116,47 +120,58 @@
     const nodeIdToIdx = new Map();
     F.nodes.forEach(function (id, i) { nodeIdToIdx.set(id, i); });
 
-    // Stage 1: bucket input + per-cluster connected components.
-    const buckets = new Map();
+    // Stage 1: residual-graph CC + lineage id assignment per cm.cpp:25-57.
+    // Build cluster_id_to_node_id_map (orig partition by cluster id),
+    // build residual graph by RemoveInterClusterEdges, take connected
+    // components in node-id BFS-root order.
+    const clusterIdToNodes = new Map();
     F.nodes.forEach(function (id, i) {
       const c = membership[i];
-      let arr = buckets.get(c);
-      if (!arr) { arr = []; buckets.set(c, arr); }
+      let arr = clusterIdToNodes.get(c);
+      if (!arr) { arr = []; clusterIdToNodes.set(c, arr); }
       arr.push(id);
     });
-
     let nextId = 0;
-    const cIds = Array.from(buckets.keys()).sort(function (a, b) { return a - b; });
-    cIds.forEach(function (cid) { if (cid + 1 > nextId) nextId = cid + 1; });
+    clusterIdToNodes.forEach(function (_, cid) {
+      if (cid + 1 > nextId) nextId = cid + 1;
+    });
+
+    const intraEdgesAll = [];
+    for (let e = 0; e < F.edges.length; e++) {
+      const a = F.edges[e][0], b = F.edges[e][1];
+      const ca = membership[nodeIdToIdx.get(a)];
+      const cb = membership[nodeIdToIdx.get(b)];
+      if (ca === cb) intraEdgesAll.push([a, b]);
+    }
+    const allComps = bfsComponents(F.nodes.slice(), intraEdgesAll)
+      .map(function (c) { return c.slice().sort(function (a, b) { return a - b; }); })
+      .filter(function (c) { return c.length > 1; });
 
     const parentToChild = {};
     let toBeMincut = [];
 
-    cIds.forEach(function (cid) {
-      const ns = buckets.get(cid);
-      const sub = inducedEdges(ns, F.edges);
-      const comps = bfsComponents(ns, sub);
-      // Mirror cm.cpp:30-57: if the cluster splits, keep first component
-      // under cid and assign a fresh id to each subsequent component;
-      // singletons drop (size > 1 only).
-      let assignedHead = false;
-      comps.forEach(function (comp) {
-        if (comp.length <= 1) return;
-        let useId;
-        if (comp.length === ns.length) {
-          useId = cid; assignedHead = true;
-        } else {
-          if (!assignedHead) {
-            // First emitted piece keeps the original id.
-            useId = cid; assignedHead = true;
-          } else {
-            useId = nextId++;
-            if (!parentToChild[cid]) parentToChild[cid] = [];
-            parentToChild[cid].push(useId);
-          }
-        }
-        toBeMincut.push({ nodes: comp.slice(), id: useId });
-      });
+    // [UPSTREAM cm.cpp:30-57] for each component: if the component is
+    // the entire original cluster, keep cid; else assign a fresh id +
+    // record (parent=-1, child=orig_cid) once + (parent=orig_cid,
+    // child=fresh_id).
+    allComps.forEach(function (comp) {
+      const firstNodeIdx = nodeIdToIdx.get(comp[0]);
+      const origCid = membership[firstNodeIdx];
+      const origSize = clusterIdToNodes.get(origCid).length;
+      const subSize = comp.length;
+      let parentClusterId = -1;
+      let currentClusterId;
+      if (origSize === subSize) {
+        currentClusterId = origCid;
+      } else {
+        if (!parentToChild[-1]) parentToChild[-1] = [];
+        if (parentToChild[-1].indexOf(origCid) < 0) parentToChild[-1].push(origCid);
+        parentClusterId = origCid;
+        currentClusterId = nextId++;
+      }
+      if (!parentToChild[parentClusterId]) parentToChild[parentClusterId] = [];
+      parentToChild[parentClusterId].push(currentClusterId);
+      toBeMincut.push({ nodes: comp.slice(), id: currentClusterId });
     });
 
     events.push({ kind: "init", initialQueue: toBeMincut.map(function (q) {
@@ -174,7 +189,9 @@
         const cur = toBeMincut.shift();
         const ns = cur.nodes;
         const sub = inducedEdges(ns, F.edges);
-        const cutResult = mincutFn(ns.slice(), sub.map(function (e) { return [e[0], e[1]]; }));
+        const cutResult = cutOracle
+          ? cutOracle(ns, sub)
+          : mincutFn(ns.slice(), sub.map(function (e) { return [e[0], e[1]]; }));
         const wc = C.WCC.isWellConnected(parsed, ns.length, cutResult.cutValue);
         const ev = {
           kind: "mincut",
@@ -199,7 +216,7 @@
           if (side.length <= 1) return;
           const sideEdges = inducedEdges(side, F.edges);
           const partition = baseAlgoFn
-            ? baseAlgoFn(side, sideEdges, { round: round, parentId: cur.id, algorithm: algorithm, resolution: resolution, seed: seed })
+            ? baseAlgoFn(side, sideEdges, { round: round, parentId: cur.id, parentNodes: ns.slice(), algorithm: algorithm, resolution: resolution, seed: seed })
             : runBaseAlgo(side, sideEdges, algorithm, resolution, seed);
           tlog("    RECLUSTER parent=" + cur.id + " side_size=" + side.length + " -> " + partition.length + " comm(s)");
           // RemoveInterClusterEdges + connected components per partition.
