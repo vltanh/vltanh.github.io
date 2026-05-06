@@ -1941,15 +1941,31 @@
       const isImprovement = absImpr && relImpr;
       // m_objective state advances on every iter regardless of gate.
       // lastL tracks m_objective for end-of-partition emit. oldL is the
-      // gate baseline, only updated on improvement. leafToTop/lastPartition
-      // also only swap on improvement.
+      // gate baseline, only updated on improvement.
       lastL = newL;
-      if (isImprovement) {
+      // leafToTop mirrors cpp's m_root tree state at end of partition().
+      // cpp coarseTune Phase 6 calls consolidateModules(true) UNCONDITIONALLY
+      // (InfomapBase.cpp:2076), so m_root is mutated to the post-Phase-4
+      // sweep state regardless of partition()-outer gate result. fineTune
+      // numEff==0 only restores m_objective (InfomapOptimizer.h:937-944);
+      // m_root is unchanged from input because moveActiveNodesToPredefined
+      // Modules at fineTune entry was a no-op (re-applied existing parents).
+      // Therefore: coarseTune branch always swaps; fineTune swaps only on
+      // improvement. Without this, equal-L coarseTune iters discard cpp's
+      // m_root mutation and the final partition diverges.
+      if (!doFineTune) {
         leafToTop = res.membership;
-        oldL = newL;
+        if (res.partition != null) lastPartition = res.partition;
+        if (res.topModuleOrigOf != null) lastTopModuleOrigOf = res.topModuleOrigOf;
+        if (res.leafTreeOrder != null) lastLeafTreeOrder = res.leafTreeOrder;
+      } else if (isImprovement) {
+        leafToTop = res.membership;
         lastPartition = res.partition;
         lastTopModuleOrigOf = res.topModuleOrigOf;
         if (res.leafTreeOrder != null) lastLeafTreeOrder = res.leafTreeOrder;
+      }
+      if (isImprovement) {
+        oldL = newL;
       } else if (coarseTuned) {
         if (typeof globalThis.__INFOMAP_TUNE_END === "function") {
           globalThis.__INFOMAP_TUNE_END(tuneIdx, doFineTune ? "fine" : "coarse",
