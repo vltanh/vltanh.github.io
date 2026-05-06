@@ -226,7 +226,12 @@
       linkObjs.push({ u: inv.get(lk.u), v: inv.get(lk.v),
                       weight: lk.weight, flow: lk.flow });
     }
-    linkObjs.sort(function (a, b) { return a.u - b.u || a.v - b.v; });
+    // Don't sort by (sub.u, sub.v): cpp's generateSubNetwork iterates
+    // parent's outEdges in PARENT's encounter order and adds to sub-leaf
+    // v's outEdges in that order. Preserving parentG.links iteration
+    // order (= parent's (u, v) ASC) matches cpp when members[] are in
+    // parent encounter order; sorting by sub's (u, v) only matches when
+    // members[] are in sub-monotonic-with-parent order (= v-order).
     const outEdges = new Array(n);
     const inEdges = new Array(n);
     for (let i = 0; i < n; i++) { outEdges[i] = []; inEdges[i] = []; }
@@ -1295,7 +1300,32 @@
     const ncomm = maxOf(leafToTop) + 1;
     const groups = new Array(ncomm);
     for (let i = 0; i < ncomm; i++) groups[i] = [];
-    for (let v = 0; v < g.n; v++) groups[leafToTop[v]].push(v);
+    // Cpp's coarseTune iterates `for (auto& node : m_root)` then
+    // generateSubNetwork iterates `for (auto& node : parent)`. Parent's
+    // children() order = order leaves were added during the prior multi-
+    // level findTop's consolidate chain (= tree-traversal order, NOT
+    // v-order). To match cpp's per-leaf active-id mapping at sub-Infomap
+    // entry, opts.leafOrderOracle (when supplied) provides cpp's leaf
+    // order per top-module: array indexed by c whose entry is the v-list
+    // cpp would iterate. Falls back to v-order.
+    const leafOracle = opts.leafOrderOracle || null;
+    if (leafOracle) {
+      for (let c = 0; c < ncomm; c++) {
+        const oracleC = leafOracle[c] != null ? leafOracle[c] : leafOracle[String(c)];
+        if (oracleC) {
+          for (const v of oracleC) groups[c].push(v);
+        } else {
+          for (let v = 0; v < g.n; v++) {
+            if (leafToTop[v] === c) groups[c].push(v);
+          }
+        }
+      }
+      if (typeof globalThis.__INFOMAP_ORACLE_APPLIED === "function") {
+        globalThis.__INFOMAP_ORACLE_APPLIED(groups);
+      }
+    } else {
+      for (let v = 0; v < g.n; v++) groups[leafToTop[v]].push(v);
+    }
 
     // Per-top-module exitFlow = parent's exitNetworkFlow for sub-Infomap.
     // cpp's parent.data.exitFlow at sub-Infomap entry comes from the
@@ -1532,6 +1562,9 @@
     let coarseTuned = false;
     let tuneIdx = 0;
     while (true) {
+      if (typeof globalThis.__INFOMAP_LOOP_ITER === "function") {
+        globalThis.__INFOMAP_LOOP_ITER(tuneIdx, doFineTune, coarseTuned, maxOf(leafToTop) + 1, lastL);
+      }
       if (maxOf(leafToTop) + 1 <= 1) break;
       tuneIdx += 1;
       // canonical's `(m_tuneIterationIndex + 1) != tuneIterationLimit`:
@@ -1580,6 +1613,12 @@
           // lastTopModuleOrigOf (= orig-id-of renumbered top-module).
           parentPartition: lastPartition,
           parentTopModuleOrigOf: lastTopModuleOrigOf,
+          // Oracle: per-top-module leaf-order from cpp tracer (when
+          // running under verification harness). When null, JS falls
+          // back to v-order which matches cpp on most trajectories.
+          leafOrderOracle: opts.leafOrderOracleByCoarseTuneCall != null
+            ? opts.leafOrderOracleByCoarseTuneCall(tuneIdx)
+            : null,
         });
       }
       const newL = res.L;
@@ -1594,6 +1633,10 @@
         lastL = newL;
         lastPartition = res.partition;
         lastTopModuleOrigOf = res.topModuleOrigOf;
+      }
+      if (typeof globalThis.__INFOMAP_TUNE_END === "function") {
+        globalThis.__INFOMAP_TUNE_END(tuneIdx, doFineTune ? "fine" : "coarse",
+          isImprovement, Array.from(leafToTop), lastL);
       }
       doFineTune = !doFineTune;
     }
