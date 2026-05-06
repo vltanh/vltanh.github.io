@@ -1372,13 +1372,22 @@
     const beforeL = P.codelength();
     const numEff = optimizeActiveNetwork(P, g, rng, opts);
     if (numEff === 0) {
-      // Restore-on-no-improvement: re-apply leafToTop to clear any
-      // exploratory partial moves. canonical sets the optimizer state
-      // back to the pre-sweep consolidated point.
+      // Mirror cpp InfomapOptimizer::restoreConsolidatedOptimizationPoint
+      // IfNoImprovement (InfomapOptimizer.h:750): `m_objective =
+      // m_consolidatedObjective`. cpp's m_objective state on no-improvement
+      // = the snapshot captured at prior consolidateModules. JS's mirror
+      // is _ftConsolStack[-1] (= m_consolidatedObjective.L). Re-apply
+      // leafToTop on a fresh partition to keep the membership consistent,
+      // but L MUST be the consolidated snapshot, NOT a fresh recompute on
+      // the leaf graph (a fresh recompute composes plogp sums in a
+      // different order than the running tracker and drifts 1 ulp).
       const P2 = makePartition(g);
       applyMembership(P2, g, leafToTop);
+      const consolL = _ftConsolStack.length > 0
+        ? _ftConsolStack[_ftConsolStack.length - 1]
+        : P2.codelength();
       return { membership: renumberByEncounter(P2.moduleOf, g.n),
-               L: P2.codelength(), numEffectiveLoops: 0, partition: P2 };
+               L: consolL, numEffectiveLoops: 0, partition: P2 };
     }
     // Mirror cpp's fineTune-end consolidate: update the running
     // L_consolidated tracker so the next findTopFromPartition gate
@@ -1640,13 +1649,20 @@
     // lvl 0 of the post-coarseTune collapse, NOT recomputing via the
     // fallback direct-sum + half-flow path.
     if (phase4NumEff === 0) {
-      // Mirror cpp: skip post-coarseTune findTop; return current
-      // post-Phase-5 mapping + current L. Compute L via fresh Partition
-      // since we don't have the running tracker for the projected leaf
-      // membership directly.
+      // Mirror cpp: skip post-coarseTune findTop (cpp's partition() outer
+      // gates with `if (numEff > 0) findTopModulesRepeatedly()`). cpp's
+      // m_objective state at end of coarseTune = post-Phase-6 consolidate
+      // = `g_last_consolidated_L_stack.back()` (mirrored in JS by
+      // _ftConsolStack[-1] which was set at line 1619 to collapsedP.
+      // codelength() right after Phase 4). Return that running tracker as
+      // L, NOT a fresh recompute on the leaf graph — the fresh-recompute
+      // path drifts 1 ulp from the accumulator under different sum order.
       const finalP = makePartition(g);
       applyMembership(finalP, g, newRenum);
-      return { membership: newRenum, L: finalP.codelength(),
+      const consolL = _ftConsolStack.length > 0
+        ? _ftConsolStack[_ftConsolStack.length - 1]
+        : finalP.codelength();
+      return { membership: newRenum, L: consolL,
                partition: finalP, topModuleOrigOf: null,
                numEffectiveLoops: 0 };
     }
@@ -1783,13 +1799,27 @@
       const absImpr = newL <= lastL - minImpr;
       const relImpr = newL < lastL - initialL * minRelTuneImpr;
       const isImprovement = absImpr && relImpr;
-      if (!isImprovement) {
-        if (coarseTuned) break;
-      } else {
+      // Mirror cpp InfomapBase::partition (line 1554): m_objective state
+      // advances on every fineTune/coarseTune call regardless of the
+      // improvement gate. Only oldCodelength stays pinned. lastL tracks
+      // m_objective for the end-of-partition emit, so update it always.
+      // m_root partition state preservation under no-improvement happens
+      // INSIDE fineTune via restoreConsolidatedOptimizationPointIfNoImprov
+      // ement (mirrored in fineTuneFaithful's numEff===0 branch + in
+      // findTopModulesRepeatedlyFromPartition's gate-fail break which
+      // returns lastL untouched = the consolidated tracker). leafToTop
+      // and lastPartition only swap on improvement.
+      lastL = newL;
+      if (isImprovement) {
         leafToTop = res.membership;
-        lastL = newL;
         lastPartition = res.partition;
         lastTopModuleOrigOf = res.topModuleOrigOf;
+      } else if (coarseTuned) {
+        if (typeof globalThis.__INFOMAP_TUNE_END === "function") {
+          globalThis.__INFOMAP_TUNE_END(tuneIdx, doFineTune ? "fine" : "coarse",
+            isImprovement, Array.from(leafToTop), lastL);
+        }
+        break;
       }
       if (typeof globalThis.__INFOMAP_TUNE_END === "function") {
         globalThis.__INFOMAP_TUNE_END(tuneIdx, doFineTune ? "fine" : "coarse",
@@ -1803,9 +1833,18 @@
     // one top-module with > 1 leaf). Without that gate, JS would bail
     // on a partition where every leaf is in its own singleton module
     // even though cpp wouldn't, drifting K_top vs cpp on tiny networks.
-    const partitionFinal = makePartition(g);
-    applyMembership(partitionFinal, g, leafToTop);
-    const finalL = partitionFinal.codelength();
+    //
+    // finalL = lastL (running m_objective tracker carried through the
+    // outer loop), NOT a fresh makePartition+applyMembership recompute.
+    // Cpp emits m_hierarchicalCodelength = getCodelength() at end of
+    // partition() = m_objective.codelength = running incremental from
+    // the FULL trajectory of moves + consolidates. A fresh leaf-graph
+    // recompute hits the same closed form but in a different sum order
+    // (singleton init -> apply membership all-at-once vs cpp's per-move
+    // accumulation through supernet levels), drifting ~6.7e-14 per
+    // 1000-node trajectory. Per-move bit-equal verification already
+    // shows JS lastL == cpp m_objective bit-for-bit throughout.
+    const finalL = lastL;
     let haveNonTrivialModules = false;
     {
       const sizes = new Int32Array(maxOf(leafToTop) + 1);
@@ -1906,15 +1945,12 @@
       }
       doFineTune = !doFineTune;
     }
-    const partitionFinal = makePartition(g);
-    applyMembership(partitionFinal, g, leafToTop);
-    const L = partitionFinal.codelength();
     const membership = new Map();
     nodeIds.forEach(function (id, i) { membership.set(id, leafToTop[i]); });
     return {
       graph: g,
       finalPartition: leafToTop,
-      finalL: L,
+      finalL: lastL,
       membership: membership,
     };
   }
