@@ -232,18 +232,27 @@
       nodeEnter[i] = parentG.nodeEnter[members[i]];
       nodeExit[i]  = parentG.nodeExit[members[i]];
     }
+    // Mirror cpp's generateSubNetwork (InfomapBase.cpp:generateSubNetwork):
+    // iterates parent's children (= sub-leaves in members[] order = cpp's
+    // tree-order) and for each child, iterates child.outEdges() in parent
+    // insertion order. Filter to (target also in members) then map to
+    // sub-id. Iterating parentG.links in (parent-u ASC) gives a different
+    // grouping when members[] is NOT parent-id-ASC (e.g. tree-order under
+    // a top-mod after replaceChildrenWithGrandChildren reorders) -- the
+    // sub-leaf adjacency ends up with edges in (parent-u ASC) order
+    // instead of cpp's (sub-id ASC) order, drifting sub-Infomap
+    // trajectory.
     const linkObjs = [];
-    for (const lk of parentG.links) {
-      if (!inv.has(lk.u) || !inv.has(lk.v)) continue;
-      linkObjs.push({ u: inv.get(lk.u), v: inv.get(lk.v),
-                      weight: lk.weight, flow: lk.flow });
+    for (let i = 0; i < n; i++) {
+      const u = members[i];
+      const oe = parentG.outEdges[u];
+      for (let j = 0; j < oe.length; j++) {
+        const lk = oe[j];
+        if (!inv.has(lk.v)) continue;
+        linkObjs.push({ u: i, v: inv.get(lk.v),
+                        weight: lk.weight, flow: lk.flow });
+      }
     }
-    // Don't sort by (sub.u, sub.v): cpp's generateSubNetwork iterates
-    // parent's outEdges in PARENT's encounter order and adds to sub-leaf
-    // v's outEdges in that order. Preserving parentG.links iteration
-    // order (= parent's (u, v) ASC) matches cpp when members[] are in
-    // parent encounter order; sorting by sub's (u, v) only matches when
-    // members[] are in sub-monotonic-with-parent order (= v-order).
     const outEdges = new Array(n);
     const inEdges = new Array(n);
     for (let i = 0; i < n; i++) { outEdges[i] = []; inEdges[i] = []; }
@@ -976,6 +985,9 @@
         });
       }
       leafTreeOrder = groups;
+      if (typeof globalThis.__INFOMAP_LEAF_TREE_ORDER === "function") {
+        globalThis.__INFOMAP_LEAF_TREE_ORDER(groups, ncomm, "ftR");
+      }
     }
     return { membership: aggregateMembership, levels: levels, L: lastL,
              partition: prevP, topModuleOrigOf: topModuleOrigOf,
