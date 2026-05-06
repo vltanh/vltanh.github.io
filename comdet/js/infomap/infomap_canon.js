@@ -500,6 +500,9 @@
     const order = opts.visitOrder
       ? opts.visitOrder
       : getRandomizedIndexVector(rng, g.n);
+    if (typeof globalThis.__INFOMAP_VISIT_ORDER === "function") {
+      globalThis.__INFOMAP_VISIT_ORDER(Array.from(order), g.n);
+    }
     const linkOrdersOracle = opts.linkOrders || null;
     let linkOrdersIdx = 0;
     const onVisit = opts.onVisit || (typeof globalThis.__INFOMAP_ONVISIT === 'function' ? globalThis.__INFOMAP_ONVISIT : null);
@@ -593,6 +596,9 @@
         const dL = P.diffMove(v, oldM, otherM,
                               oldEntry.deltaEnter, oldEntry.deltaExit,
                               entry.deltaEnter, entry.deltaExit);
+        if (typeof globalThis.__INFOMAP_DL_PROBE === "function") {
+          globalThis.__INFOMAP_DL_PROBE(v, oldM, otherM, dL, entry.deltaEnter, entry.deltaExit);
+        }
         if (dL < bestDelta - minImpr) {
           bestDelta = dL; bestModule = otherM; bestEntry = entry;
         }
@@ -641,6 +647,9 @@
       }
       P.moveNode(v, bestModule, pOldDE, pOldDX, pNewDE, pNewDX);
       nMoved += 1;
+      if (typeof globalThis.__INFOMAP_PER_MOVE === "function") {
+        globalThis.__INFOMAP_PER_MOVE(v, oldM, bestModule, pOldDE, pOldDX, pNewDE, pNewDX, P.codelength());
+      }
 
       // Mark neighbours dirty + check single-connected pull-along.
       let nodeInOldModule = -1;
@@ -762,12 +771,21 @@
         const o = oracle.next();
         if (o) { oDE = o.oDE; oDX = o.oDX; nDE = o.nDE; nDX = o.nDX; }
       }
+      // Mirror cpp moveNodeToPredefinedModule (InfomapOptimizer.h:317-322):
+      // pop_back if moduleMembers[newM] == 0 (assumes back == newM, which
+      // is FALSE under arbitrary predef moves but cpp does it anyway --
+      // this leaves m_emptyModules inconsistent with moduleMembers, and
+      // subsequent tryMoveEach reads the resulting back as its empty
+      // target). push_back if moduleMembers[oldM] == 1 (about to become 0).
+      // Both checks read moduleMembers BEFORE moveNode updates them.
+      if (P.moduleMembers[t] === 0) P.emptyModules.pop();
+      if (P.moduleMembers[oldM] === 1) P.emptyModules.push(oldM);
       P.moveNode(v, t, oDE, oDX, nDE, nDX);
     }
-    P.emptyModules.length = 0;
-    for (let c = 0; c < g.n; c++) {
-      if (P.moduleMembers[c] === 0) P.emptyModules.push(c);
-    }
+    // Do NOT rebuild emptyModules from moduleMembers at end. cpp keeps
+    // its emptyModules stack in whatever state the per-move pop/push
+    // sequence left it; rebuilding via a clean scan diverges from cpp's
+    // back() value at first tryMoveEach empty-target read.
   }
 
   // ── Multi-level findTopModulesRepeatedly + collapse ────────────────
@@ -929,8 +947,39 @@
         seen[c] = 1;
       }
     }
+    // Compute per-top-mod tree-order leaf list. cpp's m_root.children()
+    // ordering after replaceChildrenWithGrandChildren chain: leaves under
+    // top-mod c are sorted by (lvl-K-2-mem, lvl-K-3-mem, ..., lvl-0-mem,
+    // leaf-id). Equivalent to lex-sorting on each leaf's chain-of-super-
+    // vertex-IDs through every consolidate. coarseTune iterates these
+    // leaves in this order to build sub-Infomap input — JS using v-ASC
+    // gives different sub-Infomap leaf order than cpp on networks where
+    // tree-order != v-order, producing different sub-mod assignments
+    // (moreno_taro s42, dolphins s2147483646, etc.).
+    let leafTreeOrder = null;
+    {
+      const K = levels.length;
+      const ncomm = maxOf(aggregateMembership) + 1;
+      const groups = new Array(ncomm);
+      for (let c = 0; c < ncomm; c++) groups[c] = [];
+      for (let v = 0; v < g.n; v++) groups[aggregateMembership[v]].push(v);
+      // Sort each group by (lvl-K-2-mem, ..., lvl-0-mem, v) ASC. Final-
+      // level mem is constant within a group, so skip it.
+      for (let c = 0; c < ncomm; c++) {
+        groups[c].sort((a, b) => {
+          for (let k = K - 2; k >= 0; k--) {
+            const ma = levels[k].membership[a];
+            const mb = levels[k].membership[b];
+            if (ma !== mb) return ma - mb;
+          }
+          return a - b;
+        });
+      }
+      leafTreeOrder = groups;
+    }
     return { membership: aggregateMembership, levels: levels, L: lastL,
-             partition: prevP, topModuleOrigOf: topModuleOrigOf };
+             partition: prevP, topModuleOrigOf: topModuleOrigOf,
+             leafTreeOrder: leafTreeOrder };
   }
 
   // Collapse: build super-graph where each module is a single node.
@@ -983,22 +1032,37 @@
     // any renumbered position. JS renumbered IDs may not preserve the
     // orig-ID order, so swapping by renumbered would put the source
     // edge on the wrong side (outEdges vs inEdges) of v's adjacency.
+    //
+    // Iteration order MUST mirror cpp's `for (auto& node : network)
+    // for (auto& e : node->outEdges())` (cpp tracer line 882-899). cpp
+    // visits each cross-module edge through its SOURCE node's outEdges,
+    // grouped by source compact ID ASC. Aggregating multiple edges into
+    // one (m1, m2) bucket sums in source-node-order × within-node
+    // outEdge-position order. Iterating g.links (sorted by orig pair)
+    // groups edges by (m1, m2) endpoint, NOT by source node — sums then
+    // accumulate in a different order, drifting by 1 ulp on networks
+    // where multiple source nodes contribute edges to the same (m1, m2)
+    // bucket. polbooks s1 lvl=2 hit this drift.
     const linkMap = new Map();
-    for (const lk of g.links) {
-      let cu = membership[lk.u];
-      let cv = membership[lk.v];
-      if (cu === cv) continue;
-      // Swap so cu's ORIGINAL id < cv's. Mirrors cpp's moduleLinks insert
-      // with (m1, m2) sorted by orig.
-      if (origOf[cu] > origOf[cv]) { const t = cu; cu = cv; cv = t; }
-      const key = cu + "|" + cv;
-      const w = lk.weight;
-      const f = lk.flow;
-      if (linkMap.has(key)) {
-        const r = linkMap.get(key);
-        r.weight += w; r.flow += f;
-      } else {
-        linkMap.set(key, { u: cu, v: cv, weight: w, flow: f });
+    for (let u = 0; u < g.n; u++) {
+      const oe = g.outEdges[u];
+      for (let i = 0; i < oe.length; i++) {
+        const lk = oe[i];
+        let cu = membership[lk.u];
+        let cv = membership[lk.v];
+        if (cu === cv) continue;
+        // Swap so cu's ORIGINAL id < cv's. Mirrors cpp's moduleLinks insert
+        // with (m1, m2) sorted by orig.
+        if (origOf[cu] > origOf[cv]) { const t = cu; cu = cv; cv = t; }
+        const key = cu + "|" + cv;
+        const w = lk.weight;
+        const f = lk.flow;
+        if (linkMap.has(key)) {
+          const r = linkMap.get(key);
+          r.weight += w; r.flow += f;
+        } else {
+          linkMap.set(key, { u: cu, v: cv, weight: w, flow: f });
+        }
       }
     }
     // cpp's InfomapOptimizer::consolidateModules creates
@@ -1172,6 +1236,10 @@
     let prevMembership = opts.seedPrevMembership != null
       ? opts.seedPrevMembership : null;
     const ftConsolStack2 = _ftConsolStack;
+    // Track per-level memberships for tree-order computation. levels[0]
+    // = seedMembership (post-fineTune leaves -> top-mods), then each
+    // successful collapse appends. Used at end to build leafTreeOrder.
+    const levels = [{ membership: new Int32Array(seedRenum) }];
     for (let lvl = 0; lvl < aggLimit; lvl++) {
       const ncomm = maxOf(aggregateMembership) + 1;
       if (ncomm <= 1) break;
@@ -1224,6 +1292,7 @@
       }
       const oldAgg = aggregateMembership;
       aggregateMembership = renumberByEncounter(next, g.n);
+      levels.push({ membership: new Int32Array(aggregateMembership) });
       lastL = newL;
       srcGMembership = oldAgg;
     }
@@ -1239,8 +1308,30 @@
         seen[c] = 1;
       }
     }
+    // Per-top-mod tree-order leaf list (mirror cpp's tree post-replace
+    // ChildrenWithGrandChildren chain). Same algorithm as in
+    // findTopModulesRepeatedly's return.
+    let leafTreeOrder = null;
+    {
+      const K = levels.length;
+      const ncomm = maxOf(aggregateMembership) + 1;
+      const groups = new Array(ncomm);
+      for (let c = 0; c < ncomm; c++) groups[c] = [];
+      for (let v = 0; v < g.n; v++) groups[aggregateMembership[v]].push(v);
+      for (let c = 0; c < ncomm; c++) {
+        groups[c].sort((a, b) => {
+          for (let k = K - 2; k >= 0; k--) {
+            const ma = levels[k].membership[a];
+            const mb = levels[k].membership[b];
+            if (ma !== mb) return ma - mb;
+          }
+          return a - b;
+        });
+      }
+      leafTreeOrder = groups;
+    }
     return { membership: aggregateMembership, L: lastL, partition: prevP,
-             topModuleOrigOf: topModuleOrigOf };
+             topModuleOrigOf: topModuleOrigOf, leafTreeOrder: leafTreeOrder };
   }
 
   // ── fineTune ──────────────────────────────────────────────────────
@@ -1373,21 +1464,28 @@
     const numEff = optimizeActiveNetwork(P, g, rng, opts);
     if (numEff === 0) {
       // Mirror cpp InfomapOptimizer::restoreConsolidatedOptimizationPoint
-      // IfNoImprovement (InfomapOptimizer.h:750): `m_objective =
-      // m_consolidatedObjective`. cpp's m_objective state on no-improvement
-      // = the snapshot captured at prior consolidateModules. JS's mirror
-      // is _ftConsolStack[-1] (= m_consolidatedObjective.L). Re-apply
-      // leafToTop on a fresh partition to keep the membership consistent,
-      // but L MUST be the consolidated snapshot, NOT a fresh recompute on
-      // the leaf graph (a fresh recompute composes plogp sums in a
-      // different order than the running tracker and drifts 1 ulp).
-      const P2 = makePartition(g);
-      applyMembership(P2, g, leafToTop);
+      // IfNoImprovement (InfomapOptimizer.h:937-944): conditional restore.
+      //   if (m_objective.getCodelength()
+      //       >= m_consolidatedObjective.getCodelength()
+      //          - minimumSingleNodeCodelengthImprovement)
+      //     m_objective = m_consolidatedObjective;
+      // i.e. only restore when post-projection m_objective is NOT a strict
+      // improvement over the prior consolidated snapshot. When projection
+      // produces a BETTER L than the snapshot (rare but happens, e.g.
+      // football s13 fineTune_3), cpp KEEPS the new value. Returning the
+      // consolidated tracker unconditionally diverges by up to several
+      // ulps and trips partition() outer's improvement gate differently.
       const consolL = _ftConsolStack.length > 0
         ? _ftConsolStack[_ftConsolStack.length - 1]
-        : P2.codelength();
-      return { membership: renumberByEncounter(P2.moduleOf, g.n),
-               L: consolL, numEffectiveLoops: 0, partition: P2 };
+        : P.codelength();
+      const postOptL = P.codelength();
+      const restored = postOptL >= consolL - 1e-16;
+      const finalL = restored ? consolL : postOptL;
+      if (typeof globalThis.__INFOMAP_FT_NEFF0 === "function") {
+        globalThis.__INFOMAP_FT_NEFF0(consolL, postOptL, restored, finalL);
+      }
+      return { membership: renumberByEncounter(P.moduleOf, g.n),
+               L: finalL, numEffectiveLoops: 0, partition: P };
     }
     // Mirror cpp's fineTune-end consolidate: update the running
     // L_consolidated tracker so the next findTopFromPartition gate
@@ -1606,6 +1704,11 @@
       globalThis.__INFOMAP_CT_PROBE("phase4.preOpt",
         { activeN: collapsedG.n, L: collapsedP.codelength() });
     }
+    if (typeof globalThis.__INFOMAP_PHASE4_STRUCT === "function") {
+      const oe = collapsedG.outEdges.map(es => es.map(e => ({u: e.u, v: e.v, flow: e.flow})));
+      const ie = collapsedG.inEdges.map(es => es.map(e => ({u: e.u, v: e.v, flow: e.flow})));
+      globalThis.__INFOMAP_PHASE4_STRUCT({ subToTop: Array.from(subToTop), outEdges: oe, inEdges: ie });
+    }
     if (typeof globalThis.__INFOMAP_PHASE4_DUMP === "function") {
       globalThis.__INFOMAP_PHASE4_DUMP(collapsedG.nodeFlow, collapsedG.nodeEnter,
         collapsedG.nodeExit, collapsedG.n, PsubLeaf);
@@ -1723,9 +1826,16 @@
       boundaryLog: log,
     });
     let leafToTop = r.membership;
+    // Mirror cpp partition() (InfomapBase.cpp:1503-1561): TWO state vars.
+    //   oldCodelength: cpp's gate baseline. Updated ONLY on improvement.
+    //   m_objective.codelength (= JS lastL): cpp's running optimizer state.
+    //     Updated by every fineTune/coarseTune call regardless of gate.
+    //     This is what end-of-partition emits as m_hierarchicalCodelength.
+    let oldL = r.L;
     let lastL = r.L;
     let lastPartition = r.partition;
     let lastTopModuleOrigOf = r.topModuleOrigOf;
+    let lastLeafTreeOrder = r.leafTreeOrder;
     const initialL = oneLevelL;
 
     let doFineTune = true;
@@ -1766,13 +1876,30 @@
             seedPrevP: ft.partition,
           });
         } else {
-          res = { membership: leafToTop, L: lastL };
+          // numEff==0: cpp partition() doesn't call findTopModulesRepeatedly
+          // after fineTune. Outer's gate then reads getCodelength() = m_objective
+          // state set by fineTune internals (post-projection if conditional
+          // restore didn't fire, else the consolidated snapshot). ft.L holds
+          // that exact value (computed in fineTuneFaithful's numEff===0 branch).
+          // Don't reuse stale lastL — that diverges from cpp when the
+          // projection produced an L different from the prior tracker.
+          res = { membership: leafToTop, L: ft.L };
         }
       } else {
         coarseTuned = true;
         if (log) log("partition.coarseTune.iter", { tuneIdx });
         const subRenumO = opts.subRenumOracleByCoarseTuneCall != null
           ? opts.subRenumOracleByCoarseTuneCall(tuneIdx) : null;
+        // cpp's coarseTune iterates m_root.children() for each top-mod c,
+        // then for each leaf in node.children() (= cpp tree-order set by
+        // chain of replaceChildrenWithGrandChildren during prior consolidates).
+        // Tree-order != v-order on most networks. Pass the running tree-
+        // order from the most recent findTopModulesRepeatedly* call as the
+        // implicit leafOrderOracle so JS sub-Infomaps see the same leaf
+        // sequence cpp's generateSubNetwork would.
+        const implicitLeafOrder = (opts.leafOrderOracleByCoarseTuneCall != null)
+          ? opts.leafOrderOracleByCoarseTuneCall(tuneIdx)
+          : lastLeafTreeOrder;
         res = coarseTuneFaithful(g, leafToTop, rng, {
           aggregationLimit: aggregationLimit, loopLimit: 10,
           seed: seed,
@@ -1786,34 +1913,31 @@
           // lastTopModuleOrigOf (= orig-id-of renumbered top-module).
           parentPartition: lastPartition,
           parentTopModuleOrigOf: lastTopModuleOrigOf,
-          // Oracle: per-top-module leaf-order from cpp tracer (when
-          // running under verification harness). When null, JS falls
-          // back to v-order which matches cpp on most trajectories.
-          leafOrderOracle: opts.leafOrderOracleByCoarseTuneCall != null
-            ? opts.leafOrderOracleByCoarseTuneCall(tuneIdx)
-            : null,
+          // implicitLeafOrder = lastLeafTreeOrder (computed in JS findTop
+          // calls, mirrors cpp's tree post-replaceChildrenWithGrandChildren).
+          // Falls through to v-order only if no findTop call has populated
+          // tree-order yet (shouldn't happen in normal flow).
+          leafOrderOracle: implicitLeafOrder,
         });
       }
       const newL = res.L;
-      // Compound improvement gate: BOTH absolute AND relative.
-      const absImpr = newL <= lastL - minImpr;
-      const relImpr = newL < lastL - initialL * minRelTuneImpr;
+      // Mirror cpp InfomapBase::partition (line 1554): improvement gate
+      // compares newCodelength vs oldCodelength (cpp's gate baseline,
+      // pinned across no-improvement iters). Both absolute + relative.
+      const absImpr = newL <= oldL - minImpr;
+      const relImpr = newL < oldL - initialL * minRelTuneImpr;
       const isImprovement = absImpr && relImpr;
-      // Mirror cpp InfomapBase::partition (line 1554): m_objective state
-      // advances on every fineTune/coarseTune call regardless of the
-      // improvement gate. Only oldCodelength stays pinned. lastL tracks
-      // m_objective for the end-of-partition emit, so update it always.
-      // m_root partition state preservation under no-improvement happens
-      // INSIDE fineTune via restoreConsolidatedOptimizationPointIfNoImprov
-      // ement (mirrored in fineTuneFaithful's numEff===0 branch + in
-      // findTopModulesRepeatedlyFromPartition's gate-fail break which
-      // returns lastL untouched = the consolidated tracker). leafToTop
-      // and lastPartition only swap on improvement.
+      // m_objective state advances on every iter regardless of gate.
+      // lastL tracks m_objective for end-of-partition emit. oldL is the
+      // gate baseline, only updated on improvement. leafToTop/lastPartition
+      // also only swap on improvement.
       lastL = newL;
       if (isImprovement) {
         leafToTop = res.membership;
+        oldL = newL;
         lastPartition = res.partition;
         lastTopModuleOrigOf = res.topModuleOrigOf;
+        if (res.leafTreeOrder != null) lastLeafTreeOrder = res.leafTreeOrder;
       } else if (coarseTuned) {
         if (typeof globalThis.__INFOMAP_TUNE_END === "function") {
           globalThis.__INFOMAP_TUNE_END(tuneIdx, doFineTune ? "fine" : "coarse",
