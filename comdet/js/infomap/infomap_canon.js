@@ -208,7 +208,7 @@
   // tie-breaks differently from cpp.
   // exitNetworkFlow is the parent module's exitFlow — propagates into
   // sub-Infomap MapEquation as the constant exitNetworkFlow term.
-  function buildSubGraph(parentG, members, exitNetworkFlow) {
+  function buildSubGraph(parentG, members, exitNetworkFlow, parentFlow) {
     const n = members.length;
     const inv = new Map();
     members.forEach(function (v, i) { inv.set(v, i); });
@@ -250,6 +250,10 @@
       sumWeightedDegree: parentG.sumWeightedDegree,
       exitNetworkFlow: exitNetworkFlow || 0,
       leafNodeFlowLogNodeFlow: leafNFLNF,
+      // cpp's parent.data.flow at sub-Infomap entry comes from the running
+      // tracker (m_moduleFlowData[m_orig].flow). Caller threads it; otherwise
+      // oneLevelCodelength sums g.nodeFlow as a fallback (close, not bit-equal).
+      parentFlow: (parentFlow != null) ? +parentFlow : null,
     };
   }
 
@@ -1231,12 +1235,37 @@
   //   - One-module bail-out if the partition's codelength exceeds the
   //     one-level codelength (everything in one module).
   function oneLevelCodelength(g) {
-    const P = makePartition(g);
-    // Move every leaf into module 0.
-    const target = new Int32Array(g.n);
-    for (let v = 0; v < g.n; v++) target[v] = 0;
-    applyMembership(P, g, target);
-    return P.codelength();
+    // Mirrors cpp MapEquation<>::calcCodelengthOnModuleOfLeafNodes(m_root)
+    // (MapEquation.h:263). cpp's m_oneLevelCodelength = calcCodelength(m_root)
+    // is computed at init() when m_root has each leaf as a direct child;
+    // calcCodelength dispatches to calcCodelengthOnModuleOfLeafNodes since
+    // m_root.isLeafModule(). Closed-form for "m_root is the only module
+    // containing all leaves":
+    //   T = parent.flow + parent.exitFlow
+    //   indexLength = -SUM(plogp(leaf.flow / T)) - plogp(parentExit / T)
+    //   L = T * indexLength
+    // For top-level: parent.flow = 1, parent.exitFlow = 0 -> L collapses
+    // to -SUM(plogp(leaf.flow)). For sub-Infomap: parent's flow + exit are
+    // inherited from the parent module's running tracker (g.parentFlow /
+    // g.exitNetworkFlow respectively); without these JS's all-in-one path
+    // double-counts q via `enterFlow += exitNetworkFlow` and over-shoots
+    // the baseline by ~q*log(q), flipping the bail-out gate vs cpp.
+    let parentFlow;
+    if (g.parentFlow != null) {
+      parentFlow = +g.parentFlow;
+    } else {
+      parentFlow = 0;
+      for (let v = 0; v < g.n; v++) parentFlow += g.nodeFlow[v];
+    }
+    const parentExit = g.exitNetworkFlow != null ? +g.exitNetworkFlow : 0;
+    const T = parentFlow + parentExit;
+    if (T < 1e-16) return 0.0;
+    let indexLength = 0;
+    for (let v = 0; v < g.n; v++) {
+      indexLength -= plogp(g.nodeFlow[v] / T);
+    }
+    indexLength -= plogp(parentExit / T);
+    return T * indexLength;
   }
 
   function fineTuneFaithful(g, leafToTop, rng, opts) {
@@ -1282,12 +1311,16 @@
     // Fall back to the fresh-recompute path only when the running
     // tracker is unavailable (e.g., direct external call).
     const parentModuleExit = new Float64Array(ncomm);
+    const parentModuleFlow = new Float64Array(ncomm);
+    let haveParentFlow = false;
     if (opts.parentPartition != null && opts.parentTopModuleOrigOf != null) {
       const pP = opts.parentPartition;
       const pOrig = opts.parentTopModuleOrigOf;
       for (let c = 0; c < ncomm; c++) {
         parentModuleExit[c] = pP.moduleExitFlow[pOrig[c]];
+        parentModuleFlow[c] = pP.moduleFlow[pOrig[c]];
       }
+      haveParentFlow = true;
     } else {
       for (const lk of g.links) {
         const cu = leafToTop[lk.u];
@@ -1304,11 +1337,18 @@
     // setTuneIterationLimit(1)).
     const subOf = new Int32Array(g.n);
     let offset = 0;
+    // [TRACE-IM coarseTune sub probe] only emit when this is the main
+    // coarseTune (opts.isMain not explicitly false). Sub-Infomap with
+    // setTwoLevel(true) shouldn't recurse into coarseTune anyway.
+    const csProbe = (opts.isCoarseTuneMain !== false)
+                    && (typeof globalThis.__INFOMAP_COARSETUNE_SUB === "function")
+                    ? globalThis.__INFOMAP_COARSETUNE_SUB : null;
     for (let c = 0; c < ncomm; c++) {
       const members = groups[c];
       if (members.length < 2) {
         for (const v of members) subOf[v] = offset;
         offset += 1;
+        if (csProbe) csProbe(c, members.length, members.length, 1, offset, true);
         continue;
       }
       // D2: build sub-graph that inherits parent leaf nodeFlow + edge
@@ -1318,7 +1358,8 @@
       // and ΔL magnitudes / decisions diverge from cpp.
       const exitNetworkFlow = parentModuleExit != null
         ? parentModuleExit[c] : 0;
-      const subG = buildSubGraph(g, members, exitNetworkFlow);
+      const subParentFlow = haveParentFlow ? parentModuleFlow[c] : null;
+      const subG = buildSubGraph(g, members, exitNetworkFlow, subParentFlow);
       const subIds = Array.from({ length: members.length }, (_, i) => i);
       // canonical's getSubInfomap creates a fresh InfomapBase whose
       // InfomapConfig ctor re-seeds m_rand from the same
@@ -1345,7 +1386,9 @@
         if (s > maxSub) maxSub = s;
         subOf[members[i]] = offset + s;
       }
-      offset += maxSub + 1;
+      const kSub = maxSub + 1;
+      offset += kSub;
+      if (csProbe) csProbe(c, members.length, members.length, kSub, offset, false);
     }
 
     // Phase 2: project leaves to sub-modules (canonical lines 1472-1480
@@ -1571,6 +1614,14 @@
         if (sizes[c] > 1) { haveNonTrivialModules = true; break; }
       }
       if (maxOf(leafToTop) + 1 <= 1) haveNonTrivialModules = false;
+    }
+    if (typeof globalThis.__INFOMAP_SUBRUN === "function") {
+      globalThis.__INFOMAP_SUBRUN({
+        n: g.n, isMain: isMain, oneLevelL: oneLevelL, finalL: finalL,
+        haveNonTrivialModules: haveNonTrivialModules,
+        kBeforeBail: maxOf(leafToTop) + 1,
+        bailedOut: !opts.preferModularSolution && haveNonTrivialModules && finalL > oneLevelL,
+      });
     }
     if (!opts.preferModularSolution && haveNonTrivialModules
         && finalL > oneLevelL) {
