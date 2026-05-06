@@ -1120,6 +1120,9 @@
         ...opts, boundaryLog: log, isFirstLoop: isFirstLoopThis,
       });
       const newL = collapsedP.codelength();
+      if (typeof globalThis.__INFOMAP_FTP_LVL === "function") {
+        globalThis.__INFOMAP_FTP_LVL(lvl, ncomm, newL, lastL, newL >= lastL - minImpr);
+      }
       // canonical break is purely codelength-based (mirrors
       // restoreConsolidatedOptimizationPointIfNoImprovement). Drop the
       // eff === 0 early break for parity with findTopModulesRepeatedly.
