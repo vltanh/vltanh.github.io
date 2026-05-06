@@ -34,6 +34,18 @@
   const C = window.COMDET;
   const LV = C.LOUVAIN;
 
+  // Module-level stack tracking the running m_consolidatedObjective.L
+  // (== cpp's last consolidate's m_objective.codelength) per
+  // partition()-level recursion. Each runInfomapFaithful call pushes a
+  // fresh entry on entry + pops on exit. Updates fire at every JS-side
+  // consolidate-equivalent (findTop iter consol, fineTune end,
+  // coarseTune end). Mirrors cpp's m_consolidatedObjective for the gate
+  // threshold inside findTopModulesRepeatedly /
+  // findTopModulesRepeatedlyFromPartition. Without this, JS uses a
+  // fresh-recompute leaf-graph codelength which can drift 1 ulp from
+  // cpp's incremental accumulator + flip the gate decision.
+  const _ftConsolStack = [];
+
   // plogp's log2 must match the cpp tracer's bit-equal log2 on the kernel
   // hot path. glibc std::log2 + V8 Math.log2 drift by 1 ulp on roughly 1 in
   // 1e5 inputs (verified at tools/viz_check/infomap/L2_log2/). Route through
@@ -781,7 +793,15 @@
     // findTopModulesRepeatedly invocation (tuneIterationIndex == 0).
     if (log) log("findTopModulesRepeatedly.level0", { n: g.n });
     const flOuter = opts.isFirstLoopOuter !== undefined ? !!opts.isFirstLoopOuter : true;
-    optimizeActiveNetwork(currentP, g, rng, {
+    // [TRACE-IM] mirror cpp's findTop_iters probe (lvl 0 = leaf-network
+    // optimize, haveModules=false at entry, kPre = g.n via singleton init).
+    // Cpp's m_consolidatedObjective.L at this gate-time = whatever the
+    // outer caller left (default 0 from singleton init).
+    const ftConsolStack = _ftConsolStack;
+    const lvl0_L_pre = currentP.codelength();
+    const lvl0_L_consol = ftConsolStack.length
+      ? ftConsolStack[ftConsolStack.length - 1] : 0;
+    const lvl0_numOpt = optimizeActiveNetwork(currentP, g, rng, {
       loopLimit: isCoarseTune ? 20 : baseLoopLimit,
       tuneIterationLimit: opts.tuneIterationLimit | 0,
       isFirstLoop: flOuter,
@@ -789,6 +809,18 @@
     });
     let lastL = currentP.codelength();
     let aggregateMembership = renumberByEncounter(currentP.moduleOf, g.n);
+    if (typeof globalThis.__INFOMAP_FT_ITER === "function") {
+      globalThis.__INFOMAP_FT_ITER({
+        fn: "findTopModulesRepeatedly", lvl: 0, kPre: g.n, haveMod: 0,
+        activeN: g.n, L_pre: lvl0_L_pre, numOptLoops: lvl0_numOpt | 0,
+        L_post: lastL, L_consol: lvl0_L_consol, minImpr: minImpr,
+        gateFail: 0, L_aft: lastL, consol: 1, L_postConsol: lastL,
+        kPost: maxOf(aggregateMembership) + 1,
+      });
+    }
+    if (ftConsolStack.length) {
+      ftConsolStack[ftConsolStack.length - 1] = lastL;
+    }
     levels.push({
       membership: new Int32Array(aggregateMembership),
       L: lastL,
@@ -829,6 +861,9 @@
       const collapsedG = collapseGraph(srcG, srcToTgt, ncomm, prevP);
       const collapsedP = makePartition(collapsedG);
       if (log) log("findTopModulesRepeatedly.lvl", { lvl, n: collapsedG.n });
+      const lvlPre = collapsedP.codelength();
+      const lvlConsol = ftConsolStack.length
+        ? ftConsolStack[ftConsolStack.length - 1] : lastL;
       const eff = optimizeActiveNetwork(collapsedP, collapsedG, rng, {
         loopLimit: 20,
         tuneIterationLimit: opts.tuneIterationLimit | 0,
@@ -836,7 +871,23 @@
         boundaryLog: log,
       });
       const newL = collapsedP.codelength();
-      if (newL >= lastL - minImpr) break;
+      const willBreak = newL >= lastL - minImpr;
+      if (typeof globalThis.__INFOMAP_FT_ITER === "function") {
+        globalThis.__INFOMAP_FT_ITER({
+          fn: "findTopModulesRepeatedly", lvl: lvl, kPre: ncomm, haveMod: 1,
+          activeN: collapsedG.n, L_pre: lvlPre, numOptLoops: eff | 0,
+          L_post: newL, L_consol: lvlConsol, minImpr: minImpr,
+          gateFail: willBreak ? 1 : 0,
+          L_aft: willBreak ? lvlConsol : newL,
+          consol: willBreak ? 0 : 1,
+          L_postConsol: willBreak ? 0 : newL,
+          kPost: willBreak ? ncomm : (maxOf(collapsedP.moduleOf) + 1),
+        });
+      }
+      if (willBreak) break;
+      if (ftConsolStack.length) {
+        ftConsolStack[ftConsolStack.length - 1] = newL;
+      }
       // Compose leaf->aggregate chain. aggregateMembership[v] is leaf v's
       // current-level cluster (in [0, ncomm)); collapsedP.moduleOf maps
       // current-level cluster -> next-level module. srcToTgt is NOT in
@@ -1078,11 +1129,26 @@
     const log = opts.boundaryLog || null;
     const seedRenum = renumberByEncounter(seedMembership, g.n);
     let aggregateMembership = seedRenum;
-    let lastL = (function () {
-      const P = makePartition(g);
-      applyMembership(P, g, seedRenum);
-      return P.codelength();
-    })();
+    // Prefer the running L-consolidated tracker over a fresh leaf-graph
+    // recompute. Cpp's gate at lvl 0 of the post-coarseTune /
+    // post-fineTune findTopModulesRepeatedly compares m_objective.L (=
+    // initPartition recompute on super-modules) against
+    // m_consolidatedObjective.L (= incremental accumulator from prev
+    // consolidate). The two are mathematically equal but bit-different
+    // due to per-move FP rounding accumulation. Using the running
+    // tracker bit-equals cpp's gate threshold; falling back to fresh
+    // recompute mirrors the recompute path cpp would NEVER hit (since
+    // m_consolidatedObjective is an accumulator).
+    let lastL;
+    if (_ftConsolStack.length > 0 && opts.useConsolL !== false) {
+      lastL = _ftConsolStack[_ftConsolStack.length - 1];
+    } else {
+      lastL = (function () {
+        const P = makePartition(g);
+        applyMembership(P, g, seedRenum);
+        return P.codelength();
+      })();
+    }
     const aggLimit = opts.aggregationLimit != null
       ? opts.aggregationLimit : 30;
     // First level here mirrors canonical's setActiveNetworkFromChildrenOfRoot
@@ -1105,6 +1171,7 @@
     let prevP = opts.seedPrevP != null ? opts.seedPrevP : null;
     let prevMembership = opts.seedPrevMembership != null
       ? opts.seedPrevMembership : null;
+    const ftConsolStack2 = _ftConsolStack;
     for (let lvl = 0; lvl < aggLimit; lvl++) {
       const ncomm = maxOf(aggregateMembership) + 1;
       if (ncomm <= 1) break;
@@ -1116,6 +1183,9 @@
       // subsequent lvls > 0. isFirstLoop tracks (tuneIterationIndex==0 &&
       // aggregationLevel==0).
       const isFirstLoopThis = flOuter && lvl === 0;
+      const lvlPre = collapsedP.codelength();
+      const lvlConsol = ftConsolStack2.length
+        ? ftConsolStack2[ftConsolStack2.length - 1] : lastL;
       const eff = optimizeActiveNetwork(collapsedP, collapsedG, rng, {
         ...opts, boundaryLog: log, isFirstLoop: isFirstLoopThis,
       });
@@ -1123,10 +1193,27 @@
       if (typeof globalThis.__INFOMAP_FTP_LVL === "function") {
         globalThis.__INFOMAP_FTP_LVL(lvl, ncomm, newL, lastL, newL >= lastL - minImpr);
       }
+      const willBreakP = newL >= lastL - minImpr;
+      if (typeof globalThis.__INFOMAP_FT_ITER === "function") {
+        globalThis.__INFOMAP_FT_ITER({
+          fn: "findTopModulesRepeatedlyFromPartition",
+          lvl: lvl, kPre: ncomm, haveMod: 1,
+          activeN: collapsedG.n, L_pre: lvlPre, numOptLoops: eff | 0,
+          L_post: newL, L_consol: lvlConsol, minImpr: minImpr,
+          gateFail: willBreakP ? 1 : 0,
+          L_aft: willBreakP ? lvlConsol : newL,
+          consol: willBreakP ? 0 : 1,
+          L_postConsol: willBreakP ? 0 : newL,
+          kPost: willBreakP ? ncomm : (maxOf(collapsedP.moduleOf) + 1),
+        });
+      }
       // canonical break is purely codelength-based (mirrors
       // restoreConsolidatedOptimizationPointIfNoImprovement). Drop the
       // eff === 0 early break for parity with findTopModulesRepeatedly.
-      if (newL >= lastL - minImpr) break;
+      if (willBreakP) break;
+      if (ftConsolStack2.length) {
+        ftConsolStack2[ftConsolStack2.length - 1] = newL;
+      }
       // See note in findTopModulesRepeatedly: prevMembership for lvl+1 =
       // pre-update aggregateMembership at this iteration.
       prevMembership = new Int32Array(aggregateMembership);
@@ -1293,6 +1380,14 @@
       return { membership: renumberByEncounter(P2.moduleOf, g.n),
                L: P2.codelength(), numEffectiveLoops: 0, partition: P2 };
     }
+    // Mirror cpp's fineTune-end consolidate: update the running
+    // L_consolidated tracker so the next findTopFromPartition gate
+    // compares newL vs post-fineTune-optimize L (== cpp's
+    // m_consolidatedObjective.L), NOT vs a fresh leaf-graph recompute
+    // (which can drift 1 ulp from the accumulator).
+    if (_ftConsolStack.length > 0) {
+      _ftConsolStack[_ftConsolStack.length - 1] = P.codelength();
+    }
     return { membership: renumberByEncounter(P.moduleOf, g.n),
              L: P.codelength(), numEffectiveLoops: numEff, partition: P };
   }
@@ -1435,7 +1530,34 @@
     // module is a node. Then move sub-modules to former top-modules
     // (canonical lines 1490-1500: moveActiveNodesToPredefinedModules(
     // modules)). Deterministic; no RNG.
-    const subRenum = renumberByEncounter(subOf, g.n);
+    //
+    // Cpp's sub-module ordering at Phase 4 entry is determined by tree-
+    // structure: replaceChildrenWithGrandChildren in consolidateModules
+    // (true)+level=2 promotes sub-mods to root in (top-mod-ordinal,
+    // addChild-order-within-top-mod) order. JS must mirror this:
+    // group-by-top-mod, then first-occurrence-by-v WITHIN each top-mod.
+    // A flat renumberByEncounter(subOf) iterates leaves in pure v-order
+    // and interleaves sub-mods across top-mods -- diverges from cpp on
+    // dnc s137 where sub-mods get swapped between top-mods at adjacent
+    // v positions.
+    let subRenum;
+    if (opts.subRenumOracle != null) {
+      subRenum = opts.subRenumOracle;
+    } else {
+      subRenum = new Int32Array(g.n);
+      const subSeen = new Map();
+      let subNext = 0;
+      for (let c = 0; c < ncomm; c++) {
+        const members = groups[c];
+        for (let i = 0; i < members.length; i++) {
+          const v = members[i];
+          const k = subOf[v];
+          let id = subSeen.get(k);
+          if (id === undefined) { id = subNext++; subSeen.set(k, id); }
+          subRenum[v] = id;
+        }
+      }
+    }
     const numSub = maxOf(subRenum) + 1;
     const subToTop = new Int32Array(numSub);
     {
@@ -1471,12 +1593,31 @@
     // multi-level Louvain pass that cpp never executes, drifting
     // partition + L from cpp on long trajectories.
     if (log) log("coarseTune.subModuleOpt", { n: collapsedG.n });
+    if (typeof globalThis.__INFOMAP_CT_PROBE === "function") {
+      globalThis.__INFOMAP_CT_PROBE("phase4.preOpt",
+        { activeN: collapsedG.n, L: collapsedP.codelength() });
+    }
+    if (typeof globalThis.__INFOMAP_PHASE4_DUMP === "function") {
+      globalThis.__INFOMAP_PHASE4_DUMP(collapsedG.nodeFlow, collapsedG.nodeEnter,
+        collapsedG.nodeExit, collapsedG.n, PsubLeaf);
+    }
     const phase4NumEff = optimizeActiveNetwork(collapsedP, collapsedG, rng, {
       loopLimit: 20,
       tuneIterationLimit: opts.tuneIterationLimit | 0,
       isFirstLoop: false,
       boundaryLog: log,
     });
+    if (typeof globalThis.__INFOMAP_CT_PROBE === "function") {
+      globalThis.__INFOMAP_CT_PROBE("phase4.postOpt",
+        { numEff: phase4NumEff, L: collapsedP.codelength() });
+    }
+    // Mirror cpp's coarseTune-end consolidate (line 2045 in
+    // InfomapBase.cpp): m_consolidatedObjective = m_objective. The next
+    // findTop iter's gate compares newL against this post-Phase-4
+    // accumulator.
+    if (_ftConsolStack.length > 0) {
+      _ftConsolStack[_ftConsolStack.length - 1] = collapsedP.codelength();
+    }
 
     // Phase 5: project optimized sub-module-of-sub-modules back to
     // leaves to produce the new leaf->top membership.
@@ -1548,6 +1689,16 @@
     // this so sub-Infomap's tryMoveEach sees isFirstLoop == false even
     // at aggregation_level == 0.
     const isMain = opts.isMain !== undefined ? !!opts.isMain : true;
+    // Push a fresh L-consolidated tracker for this partition() level
+    // (main + each sub-Infomap inside coarseTune). Pops on exit (see
+    // __ftPopOnExit below). Mirrors cpp's per-Infomap-instance
+    // m_consolidatedObjective lifetime.
+    _ftConsolStack.push(0.0);
+    // Also expose to harness probes via globalThis (depth counter for
+    // filtering main-level iters).
+    if (typeof globalThis.__INFOMAP_FT_DEPTH === "number" && !isMain) {
+      globalThis.__INFOMAP_FT_DEPTH = (globalThis.__INFOMAP_FT_DEPTH | 0) + 1;
+    }
     if (log) log("partition.firstFindTop", { n: g.n });
     let r = findTopModulesRepeatedly(g, rng, {
       aggregationLimit: aggregationLimit, loopLimit: 10,
@@ -1604,10 +1755,13 @@
       } else {
         coarseTuned = true;
         if (log) log("partition.coarseTune.iter", { tuneIdx });
+        const subRenumO = opts.subRenumOracleByCoarseTuneCall != null
+          ? opts.subRenumOracleByCoarseTuneCall(tuneIdx) : null;
         res = coarseTuneFaithful(g, leafToTop, rng, {
           aggregationLimit: aggregationLimit, loopLimit: 10,
           seed: seed,
           isFirstLoopOuter: false,
+          subRenumOracle: subRenumO,
           boundaryLog: log,
           // cpp's parent.data.exitFlow at sub-Infomap entry =
           // m_moduleFlowData[m_orig].exitFlow snapshot from the prev
@@ -1669,12 +1823,23 @@
         bailedOut: !opts.preferModularSolution && haveNonTrivialModules && finalL > oneLevelL,
       });
     }
+    // Pop the L-consolidated tracker entry pushed at function entry
+    // (mirrors cpp's m_consolidatedObjective going out of scope when
+    // an InfomapBase instance is destroyed). Also decrement depth
+    // counter for harness probes.
+    const __ftPopOnExit = () => {
+      if (_ftConsolStack.length > 0) _ftConsolStack.pop();
+      if (typeof globalThis.__INFOMAP_FT_DEPTH === "number" && !isMain) {
+        globalThis.__INFOMAP_FT_DEPTH = Math.max(0, (globalThis.__INFOMAP_FT_DEPTH | 0) - 1);
+      }
+    };
     if (!opts.preferModularSolution && haveNonTrivialModules
         && finalL > oneLevelL) {
       const target = new Int32Array(g.n);
       for (let v = 0; v < g.n; v++) target[v] = 0;
       const membership = new Map();
       nodeIds.forEach(function (id, i) { membership.set(id, 0); });
+      __ftPopOnExit();
       return {
         graph: g, finalPartition: target, finalL: oneLevelL,
         membership: membership, bailedOut: true,
@@ -1683,6 +1848,7 @@
     const renumbered = renumberByEncounter(leafToTop, g.n);
     const membership = new Map();
     nodeIds.forEach(function (id, i) { membership.set(id, renumbered[i]); });
+    __ftPopOnExit();
     return {
       graph: g, finalPartition: renumbered, finalL: finalL,
       membership: membership, bailedOut: false,
