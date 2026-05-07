@@ -121,25 +121,38 @@
   // separation test: feed canonical C++'s RNG outputs into JS, verify
   // JS deterministic computation matches canonical's downstream output.
   let m_oracle = null;
+  // Observer hook: side-effect-free callback invoked on every RNG call.
+  // Read-only; never perturbs return value or generator state. Used by
+  // the diff harness to collect a JS-side trace bit-comparable to
+  // canonical's [TRACE-RNG] stderr stream. Inert when null.
+  let m_observer = null;
 
   function setSeed(seed) {
     m_seed = seed;
     m_mt = new MT19937(seed);
+    if (m_observer !== null) m_observer({ kind: "setSeed", seed: (seed >>> 0) });
   }
   function setOracle(queue) { m_oracle = queue; }
   function clearOracle() { m_oracle = null; }
+  function setObserver(cb) { m_observer = cb; }
+  function clearObserver() { m_observer = null; }
 
   function getSeed() { return m_seed; }
   function next() {
+    let val;
     if (m_oracle !== null) {
       const e = m_oracle.shift();
       if (!e || e.kind !== "next")
         throw new Error(`oracle exhausted/wrong kind for next(): ${JSON.stringify(e)}`);
-      return e.val >>> 0;
+      val = e.val >>> 0;
+    } else {
+      val = m_mt.next();
     }
-    return m_mt.next();
+    if (m_observer !== null) m_observer({ kind: "next", val });
+    return val;
   }
   function nextInt(lb, rb) {
+    let val;
     if (m_oracle !== null) {
       const e = m_oracle.shift();
       if (!e || e.kind !== "nextInt")
@@ -147,38 +160,49 @@
       if (e.lb !== lb || e.rb !== rb) {
         throw new Error(`oracle nextInt range mismatch: oracle=(${e.lb},${e.rb}) caller=(${lb},${rb})`);
       }
-      return e.val;
+      val = e.val;
+    } else {
+      val = uniformInt(m_mt, lb, rb);
     }
-    return uniformInt(m_mt, lb, rb);
+    if (m_observer !== null) m_observer({ kind: "nextInt", lb, rb, val });
+    return val;
   }
   function nextBool() {
+    let val;
     if (m_oracle !== null) {
       const e = m_oracle.shift();
       if (!e || e.kind !== "nextBool")
         throw new Error(`oracle wrong kind for nextBool(): ${JSON.stringify(e)}`);
-      return e.val;
+      val = e.val;
+    } else {
+      val = uniformInt(m_mt, 0, 1) === 1;
     }
-    return uniformInt(m_mt, 0, 1) === 1;
+    if (m_observer !== null) m_observer({ kind: "nextBool", val });
+    return val;
   }
   function nextDouble(lb, rb) {
+    let val;
     if (m_oracle !== null) {
       const e = m_oracle.shift();
       if (!e || e.kind !== "nextDouble")
         throw new Error(`oracle wrong kind for nextDouble(): ${JSON.stringify(e)}`);
-      return e.val;
+      val = e.val;
+    } else {
+      // libstdc++ uniform_real picks 53-bit fraction via two uint32 draws;
+      // not used by cactus path. Provide a simple version for completeness.
+      const a = m_mt.next() >>> 5;        // 27 bits
+      const b = m_mt.next() >>> 6;        // 26 bits
+      const u = (a * Math.pow(2, 26) + b) / Math.pow(2, 53);
+      val = lb + u * (rb - lb);
     }
-    // libstdc++ uniform_real picks 53-bit fraction via two uint32 draws;
-    // not used by cactus path. Provide a simple version for completeness.
-    const a = m_mt.next() >>> 5;        // 27 bits
-    const b = m_mt.next() >>> 6;        // 26 bits
-    const u = (a * Math.pow(2, 26) + b) / Math.pow(2, 53);
-    return lb + u * (rb - lb);
+    if (m_observer !== null) m_observer({ kind: "nextDouble", lb, rb, val });
+    return val;
   }
 
   NS.MT19937 = MT19937;
   NS.uniformInt = uniformInt;
   NS.random_functions = {
-    setSeed, getSeed, setOracle, clearOracle,
+    setSeed, getSeed, setOracle, clearOracle, setObserver, clearObserver,
     next, nextInt, nextBool, nextDouble,
     getMT: () => m_mt,
   };
