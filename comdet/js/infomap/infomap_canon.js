@@ -375,6 +375,10 @@
         // pre-flow-init). Used by level_membership_diff.mjs to localise
         // identity-vs-flow divergences.
         leafToActive: opts.leafToActive ? Array.from(opts.leafToActive) : null,
+        // outEdges per vertex, ref to g.outEdges (cheap; consumer copies if
+        // needed). Used by edge-flow diff harnesses to localise super-edge
+        // 1-ulp drift in collapseGraph linkMap aggregation.
+        outEdges: g.outEdges,
       });
     }
 
@@ -1351,9 +1355,7 @@
     // isFullNetwork()). Caller passes opts.isFirstLoopOuter for the
     // very first level.
     const flOuter = opts.isFirstLoopOuter !== undefined ? !!opts.isFirstLoopOuter : false;
-    // Track leaf -> srcG-vertex chain for topModuleOrigOf computation.
-    let srcGMembership = new Int32Array(g.n);
-    for (let v = 0; v < g.n; v++) srcGMembership[v] = v;
+    // (srcGMembership declared below alongside srcG threading.)
     // D3: at each collapse, supply previous-level partition's per-cluster
     // running tracker. opts.seedPrevP / opts.seedPrevMembership let the
     // caller (e.g. coarseTuneFaithful Phase 6) seed lvl 0's prevP with
@@ -1370,12 +1372,48 @@
     // = seedMembership (post-fineTune leaves -> top-mods), then each
     // successful collapse appends. Used at end to build leafTreeOrder.
     const levels = [{ membership: new Int32Array(seedRenum) }];
+    // srcG threading: mirror cpp's findTopModulesRepeatedly which
+    // aggregates from the prev-level super-net at every iter, NOT from
+    // the leaf graph. cpp's consolidateModules iterates m_activeNetwork
+    // (= prev super-net super-vertices) and sums super-edge flows in
+    // super-vertex-position outer order + super-edge-insertion inner
+    // order. JS used to pass the LEAF graph as srcG at every iter,
+    // aggregating leaf-edge flows in leaf-position outer order + leaf-
+    // edge-insertion inner order -- same total per (cu, cv) pair but
+    // sum-order DIFFERS, drifting by ~1 ulp per multi-edge cluster pair
+    // and accumulating across deep super-nets. Visible on bitcoin_trust
+    // s5076 lvl 7 super-edge (0,34) where the same pair received 52
+    // leaf-edge contributions in JS vs 2 super-edge contributions in
+    // cpp; sum order differed and drifted 1 ulp.
+    let srcG = g;
+    // srcGMembership[v] = leaf v's vertex POSITION in srcG. At lvl 0
+    // srcG = leaf graph, identity. After each iter, srcG advances to
+    // collapsedG and srcGMembership = aggregateMembership BEFORE the
+    // post-iter renumber. Doubles as topModuleOrigOf chain consumer at
+    // function exit (= leaf -> last-srcG-pos).
+    let srcGMembership = new Int32Array(g.n);
+    for (let v = 0; v < g.n; v++) srcGMembership[v] = v;
     for (let lvl = 0; lvl < aggLimit; lvl++) {
       const ncomm = maxOf(aggregateMembership) + 1;
       if (ncomm <= 1) break;
       if (log) log("findTopFromPartition.lvl", { lvl, n: ncomm });
-      const collapsedG = collapseGraph(g, aggregateMembership, ncomm,
-                                       prevP, prevMembership);
+      // srcToTgt: srcG vertex ID -> tgt-level cluster ID. At lvl 0 srcG=
+      // leaves, srcToTgt=aggregateMembership (leaf-indexed). At lvl 1+
+      // srcG=prev collapsedG, srcToTgt=renumberByEncounter(prevP.moduleOf,
+      // srcG.n) -- mirrors cpp's m_activeNetwork iteration over prev-
+      // level super-vertices.
+      const srcToTgt = (lvl === 0)
+        ? aggregateMembership
+        : renumberByEncounter(prevP.moduleOf, srcG.n);
+      // collapseGraph's prevMembership maps srcG-vertex POSITION ->
+      // prevP-scope POSITION. At lvl 0, srcG=leaf graph; if caller seeded
+      // prevP (typically leaf-indexed) it also seeded prevMembership --
+      // pass through verbatim. At lvl 1+, srcG = prev iter's collapsedG
+      // and prevP = prev iter's collapsedP (both super-net-indexed at the
+      // same level), so srcG-vertex pos == prevP-scope pos: pass null and
+      // collapseGraph falls back to identity inside its loop.
+      const prevMembArg = (lvl === 0) ? prevMembership : null;
+      const collapsedG = collapseGraph(srcG, srcToTgt, ncomm, prevP, prevMembArg);
       const collapsedP = makePartition(collapsedG, { leafToActive: aggregateMembership });
       // First lvl here = aggregationLevel 0 from this call's perspective;
       // subsequent lvls > 0. isFirstLoop tracks (tuneIterationIndex==0 &&
@@ -1416,6 +1454,11 @@
       // pre-update aggregateMembership at this iteration.
       prevMembership = new Int32Array(aggregateMembership);
       prevP = collapsedP;
+      // Advance srcG to the just-built super-net for next iter's collapse.
+      // srcGMembership update happens in the renum block below
+      // (`srcGMembership = oldAgg`) which is also pre-renum aggregate
+      // Membership = leaf -> pos in new srcG.
+      srcG = collapsedG;
       // Iterate super-vertices (0..ncomm-1) for renumber-by-encounter
       // to mirror cpp's consolidateModules m_activeNetwork iteration.
       // See findTopModulesRepeatedly for the equivalent fix + reasoning.
