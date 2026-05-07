@@ -959,15 +959,32 @@
       // this chain — it was the input map (srcG-vertex -> current cluster)
       // used by collapseGraph to AGGREGATE edges; the leaf->cluster chain
       // is independent.
-      const nextLeaf = new Int32Array(g.n);
-      for (let v = 0; v < g.n; v++) {
-        nextLeaf[v] = collapsedP.moduleOf[aggregateMembership[v]];
-      }
-      // srcGMembership for NEXT iter = leaf v -> srcG-vertex at next iter
-      // = leaf v's CURRENT-LEVEL cluster ID = aggregateMembership BEFORE
-      // the renumber-of-next-level update. Capture before overwriting.
+      //
+      // Renumber-by-encounter must iterate the ACTIVE network at this
+      // level (= super-vertices in 0..ncomm-1) to mirror cpp's
+      // consolidateModules: cpp's `for (auto& node : m_activeNetwork)`
+      // walks super-vertices in 0..ncomm-1 push-back order and assigns
+      // first-encounter IDs to their moduleIndex. Iterating leaves
+      // (0..g.n) instead drives the first-encounter order by leaf-id,
+      // which diverges from cpp's super-id order whenever leaf 0 lands
+      // in a higher-numbered super-vertex than leaf-id-of-first-other-
+      // module's super-vertex. Visible on euroroad s1023 lvl=350 (super
+      // -net iter 2), where the JS-vs-cpp relabel split candidate IDs
+      // [2, 8] vs [23, 110] under byte-identical flow values.
+      const renumSuper = renumberByEncounter(collapsedP.moduleOf, ncomm);
       const oldAgg = aggregateMembership;
-      aggregateMembership = renumberByEncounter(nextLeaf, g.n);
+      const newAgg = new Int32Array(g.n);
+      for (let v = 0; v < g.n; v++) {
+        newAgg[v] = renumSuper[aggregateMembership[v]];
+      }
+      aggregateMembership = newAgg;
+      // [TRACE] aggregate-membership probe: dumps leaf->active mapping
+      // post-renumber. Conditional hook, zero-cost in production. Used
+      // by visit_decision_diff to localize relabel divergences against
+      // cpp's level.leaf_to_active.
+      if (typeof globalThis.__INFOMAP_AGG_DUMP === 'function') {
+        globalThis.__INFOMAP_AGG_DUMP('fTM', lvl, ncomm, Array.from(aggregateMembership));
+      }
       levels.push({
         membership: new Int32Array(aggregateMembership),
         L: newL,
@@ -1336,12 +1353,19 @@
       // pre-update aggregateMembership at this iteration.
       prevMembership = new Int32Array(aggregateMembership);
       prevP = collapsedP;
-      const next = new Int32Array(g.n);
-      for (let v = 0; v < g.n; v++) {
-        next[v] = collapsedP.moduleOf[aggregateMembership[v]];
-      }
+      // Iterate super-vertices (0..ncomm-1) for renumber-by-encounter
+      // to mirror cpp's consolidateModules m_activeNetwork iteration.
+      // See findTopModulesRepeatedly for the equivalent fix + reasoning.
+      const renumSuperFP = renumberByEncounter(collapsedP.moduleOf, ncomm);
       const oldAgg = aggregateMembership;
-      aggregateMembership = renumberByEncounter(next, g.n);
+      const newAgg = new Int32Array(g.n);
+      for (let v = 0; v < g.n; v++) {
+        newAgg[v] = renumSuperFP[aggregateMembership[v]];
+      }
+      aggregateMembership = newAgg;
+      if (typeof globalThis.__INFOMAP_AGG_DUMP === 'function') {
+        globalThis.__INFOMAP_AGG_DUMP('fTMfP', lvl, ncomm, Array.from(aggregateMembership));
+      }
       levels.push({ membership: new Int32Array(aggregateMembership) });
       lastL = newL;
       srcGMembership = oldAgg;
@@ -1803,11 +1827,22 @@
 
     // Phase 5: project optimized sub-module-of-sub-modules back to
     // leaves to produce the new leaf->top membership.
-    const newLeafToTop = new Int32Array(g.n);
+    //
+    // Renumber-by-encounter must iterate the ACTIVE network at this
+    // point (= sub-module super-vertices in 0..numSub-1) to mirror
+    // cpp's consolidateModules(true) iteration. Iterating leaves
+    // (0..g.n) drives encounter order by leaf-id, which diverges
+    // from cpp's sub-module-id order whenever leaf 0's sub-module is
+    // not sub-module 0. Visible on euroroad s1023 lvl=350 (post-coarse
+    // -Tune main super-net iter 2): JS labelled v=117's lvl=350
+    // neighbours [2, 8] vs cpp [23, 110] under byte-identical flow
+    // values — same partition, different label assignment that
+    // propagates through every subsequent visit's cand_modules.
+    const renumByCollapsedM = renumberByEncounter(collapsedP.moduleOf, numSub);
+    const newRenum = new Int32Array(g.n);
     for (let v = 0; v < g.n; v++) {
-      newLeafToTop[v] = collapsedP.moduleOf[subRenum[v]];
+      newRenum[v] = renumByCollapsedM[subRenum[v]];
     }
-    const newRenum = renumberByEncounter(newLeafToTop, g.n);
 
     // Phase 6: continue with findTopModulesRepeatedlyFromPartition on
     // the new leaf-level membership (canonical's findTopModulesRepeatedly
