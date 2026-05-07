@@ -1663,11 +1663,27 @@
     if (opts.subRenumOracle != null) {
       subRenum = opts.subRenumOracle;
     } else {
+      // cpp Phase 3 consolidate iterates active=leaves in V-ORDER (set via
+      // setActiveFromLeafs at InfomapBase.cpp:2035). Sub-mod IDs assigned
+      // by first-encounter-of-cluster in v-order WITHIN each top-mod (cpp
+      // line 870-876: modules[moduleIndex] created if first encounter,
+      // grouped per parent top-mod via the consolidate(true)+level=2
+      // chain). JS must mirror v-order within each top-mod, NOT oracle
+      // (tree) order which is consumed only by sub-Infomap input
+      // (generateSubNetwork). Without this split, sub-mod IDs assigned by
+      // tree-order encounter diverge from cpp's v-order encounter
+      // assignment when tree-order != v-order under a top-mod (after
+      // coarseTune chain that restructures tree). Visible on euroroad s11
+      // coarseTune_2 top#73: cpp ID 128 = cluster encountered third in
+      // v-order, JS ID 128 = cluster encountered third in tree order.
+      const groupsByV = new Array(ncomm);
+      for (let c = 0; c < ncomm; c++) groupsByV[c] = [];
+      for (let v = 0; v < g.n; v++) groupsByV[leafToTop[v]].push(v);
       subRenum = new Int32Array(g.n);
       const subSeen = new Map();
       let subNext = 0;
       for (let c = 0; c < ncomm; c++) {
-        const members = groups[c];
+        const members = groupsByV[c];
         for (let i = 0; i < members.length; i++) {
           const v = members[i];
           const k = subOf[v];
@@ -1676,6 +1692,10 @@
           subRenum[v] = id;
         }
       }
+    }
+    if (typeof globalThis.__INFOMAP_SUBRENUM_DUMP === "function") {
+      globalThis.__INFOMAP_SUBRENUM_DUMP(subRenum, (globalThis.__INFOMAP_CT_IDX || 0));
+      globalThis.__INFOMAP_CT_IDX = (globalThis.__INFOMAP_CT_IDX || 0) + 1;
     }
     const numSub = maxOf(subRenum) + 1;
     const subToTop = new Int32Array(numSub);
