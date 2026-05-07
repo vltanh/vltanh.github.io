@@ -228,6 +228,12 @@
     opts = opts || {};
     const recordTrace = !!opts.recordTrace;
     const refinePartition = opts.refinePartition !== false;
+    // maxOuterLevels: cap the multi-level aggregate loop. Stress-matrix
+    // top-level byte-equal verification sets this to 1 so JS doesn't
+    // burn time on inner-level moveNodes that hit the visit-cap due to
+    // the deferred Partition admin algebra mismatch (audit row M).
+    const maxOuterLevels = opts.maxOuterLevels != null
+                         ? opts.maxOuterLevels : 100;
     const rng = LV.MT19937(seed >>> 0);
     let P = LV.Partition(graph, null, qualityFn);
     const levels = [];
@@ -242,7 +248,9 @@
 
     let _safety = 0;
     while (aggregateFurther) {
-      if (++_safety > 100) {
+      if (++_safety > maxOuterLevels) {
+        if (maxOuterLevels < 100)
+          break;        // expected bound (e.g. stress mode)
         console.warn("[leiden] aggregate loop exceeded 100 levels; bailing out");
         break;
       }
@@ -250,11 +258,13 @@
       const moveOut = moveNodes(collapsedP, rng, {
         recordTrace: recordTrace, considerEmpty: true,
       });
-      // Mirror libleidenalg Optimiser.cpp:792: renumber after move_nodes
-      // so collapsedP.ncomm() reflects the post-move community count
-      // (otherwise stale empty-comm allocations leave ncomm pinned at
-      // singleton-count, breaking the aggregate_further check below).
-      collapsedP.renumber();
+      // Mirror libleidenalg Optimiser.cpp:737 (move_nodes) +
+      // MutableVertexPartition::renumber_communities (which routes to
+      // rank_order_communities, csize-DESC + cnodes-DESC + id-ASC).
+      // Using the Louvain original-id-ASC variant here desyncs collapsed-
+      // graph node ids from cpp at every level transition, breaking
+      // inner-level byte-equal claims.
+      collapsedP.renumberLeiden();
       const memColl = collapsedP.membership();
       for (let v = 0; v < graph.vcount(); v++) {
         fineMembership[v] = memColl[aggregateNodePerFine[v]];
@@ -271,7 +281,10 @@
         });
       }
       const refinedP = refinePartition ? subCollapsedP : collapsedP;
-      refinedP.renumber();
+      // Optimiser.cpp:1427 (merge_nodes_constrained renumber) + the
+      // collapse step at :255 read sub-partition ids in csize-DESC
+      // order; use the libleidenalg-shape renumber to match.
+      refinedP.renumberLeiden();
       const refinedNcomm = refinedP.ncomm();
       const newCollapsed = collapsedGraph.collapse(refinedP.membership(), refinedNcomm);
       const newCollapsedMembership = new Int32Array(refinedNcomm);
@@ -316,7 +329,9 @@
       level += 1;
     }
     P.setMembership(fineMembership);
-    P.renumber();
+    // Final renumber: cpp Optimiser.cpp:357 calls
+    // partitions[0]->renumber_communities() (csize-DESC).
+    P.renumberLeiden();
     return { partition: P, levels: levels, quality: P.quality() };
   }
 

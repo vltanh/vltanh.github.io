@@ -106,12 +106,25 @@
       // Lemire's debiased multiplication. Used by Leiden so its
       // int(lo, hi) draws bit-equal to igraph's igraph_rng_get_integer
       // (which uses Lemire). Independent from Louvain's plain int().
+      //
+      // Rejection threshold = 2^32 % range. cpp computes via uint32
+      // wrap: `(-range) % range` where -range underflows to 2^32-range
+      // and the C `%` gives `(2^32-range) % range = 2^32 % range`. JS
+      // BigInt arithmetic has no fixed bit width: `(-r64) % r64` of a
+      // negative BigInt returns a negative-or-zero remainder (truncated-
+      // toward-zero modulo), giving the wrong threshold (0 for any
+      // range that divides exactly into -range/range, which is always
+      // since BigInt(-range)/BigInt(range) = -1n exact). The correct
+      // form below uses (1n << 32n) % r64 directly. Without it, JS
+      // never rejects while cpp rejects at rate range/2^32, desyncing
+      // the shuffle stream on graphs where any draw lands in cpp's
+      // reject window (probability ≈ n*range/2^32 per shuffle).
       intLemire: function (lo, hi) {
         if (hi === lo) return lo;
         const range = hi - lo + 1;
         if (range <= 0) return lo;
         const r64 = BigInt(range);
-        const t = ((-r64) % r64 + r64) % r64;
+        const t = (1n << 32n) % r64;
         let m, l;
         do {
           const x = BigInt(next());
@@ -564,6 +577,36 @@
           order.push(c);
         }
       }
+      applyRenumberOrder(remap, order);
+    }
+
+    // renumberLeiden: libleidenalg's MutableVertexPartition::
+    // renumber_communities() routes to rank_order_communities
+    // (MutableVertexPartition.cpp:370-417) which sorts surviving comms
+    // via orderCSize (GraphHelper.cpp:16-28): primary csize DESC,
+    // secondary cnodes DESC, tertiary original-id ASC. Largest comm
+    // becomes new id 0. Differs from Louvain's original-id-ASC
+    // convention; Leiden code paths must use this variant so collapsed-
+    // graph node ids match cpp's at every level transition.
+    function renumberLeiden() {
+      const surv = [];
+      for (let c = 0; c < ncomm; c++) {
+        if (cnodes[c] > 0) surv.push(c);
+      }
+      surv.sort(function (A, B) {
+        if (csize[A] !== csize[B]) return csize[B] - csize[A];
+        if (cnodes[A] !== cnodes[B]) return cnodes[B] - cnodes[A];
+        return A - B;
+      });
+      const remap = new Int32Array(ncomm);
+      for (let c = 0; c < ncomm; c++) remap[c] = -1;
+      for (let i = 0; i < surv.length; i++) remap[surv[i]] = i;
+      applyRenumberOrder(remap, surv);
+    }
+
+    // Shared admin-rewrite given a remap[old]→new and an order[new]→old
+    // (used by both renumber + renumberLeiden).
+    function applyRenumberOrder(remap, order) {
       for (let v = 0; v < n; v++) membership[v] = remap[membership[v]];
       const newN = order.length;
       const newIn = new Float64Array(newN);
@@ -604,6 +647,7 @@
       totalWeightInAllComms: function () { return totalWeightInAllComms; },
       totalPossibleEdgesInAllComms: function () { return totalPossibleEdgesInAllComms; },
       moveNode: moveNode,
+      renumberLeiden: renumberLeiden,
       // Canonical sweep primitives — exposed so the outer driver does
       // remove/gain/insert per the canonical body.
       neighComm: neighComm,
@@ -638,55 +682,80 @@
     };
   }
 
-  // ── Modularity quality function (canonical modularity.cpp:58-71) ─
-  // Q = Σ_c (in[c] - tot[c]^2/m2) / m2; m2 = total_weight.
-  // diffMove returns ΔQ in the same units the legacy JS callers expect
-  // (Leiden uses it). For Louvain.sweep we use the canonical
-  // remove + gain pattern instead — diffMove here is a fallback.
+  // ── Modularity quality function ─────────────────────────────────
+  // Mirrors libleidenalg ModularityVertexPartition byte-for-byte
+  // (ModularityVertexPartition.cpp:35-120 diff_move +
+  //  ModularityVertexPartition.cpp:129-162 quality):
+  //   total_weight = graph.total_weight() * (2 - directed)
+  //   diff_old = (w_to_old - k_out*K_in_old/tw) + (w_from_old - k_in*K_out_old/tw)
+  //   diff_new = (w_to_new + sw - k_out*K_in_new/tw) + (w_from_new + sw - k_in*K_out_new/tw)
+  //   m = directed ? graph.total_weight() : 2*graph.total_weight()
+  //   return (diff_new - diff_old) / m
+  //
+  // JS Graph.totalWeight() returns Σ weighted_degree = 2*m_cpp for
+  // undirected (where m_cpp = libleidenalg Graph::total_weight() = Σ
+  // edge weights). Halve to recover m_cpp.
+  //
+  // Used only via Partition.diffMove path (Leiden's moveNodes /
+  // mergeNodesConstrained route here when LEIDEN.Modularity is the
+  // qualityFn). Louvain's sweep uses modGain (Modularity::gain after
+  // remove) directly and is unaffected.
+  //
+  // The Modularity.totalWeightInComm convention requires explanation:
+  // Partition.rebuildAdmin stores inC[c] = 2*intra_c + Σ self-loops
+  // (Louvain Modularity::in convention; lines 388/380). cpp libleidenalg
+  // stores _total_weight_in_comm[c] = intra_c + (self-loops contribute
+  // w/2 per move_node:695). On collapsed graphs both end up effectively
+  // = intra_c + self-loop weight via different per-edge accumulators.
+  // For top-level (no self-loops), JS inC = 2*intra_c, cpp = intra_c —
+  // halve to bridge in the quality sum.
   function Modularity() {
     return {
       name: "Modularity",
       resolution: 1.0,
-      // Equivalent to canonical's (gain[c]_after_remove - gain[vComm]_after_remove)
-      // computed in one shot. Leiden uses this for its move-decisions
-      // because Leiden doesn't run the canonical Louvain remove + gain
-      // pattern.
       diffMove: function (P, v, newComm) {
         const oldComm = P.memberOf(v);
         if (oldComm === newComm) return 0;
         const G = P.graph;
-        const m2 = G.totalWeight();
-        if (m2 <= 0) return 0;
-        const kv = G.weightedDegree(v);
+        const m_orig = G.totalWeight() / 2;            // = m_cpp
+        if (m_orig <= 0) return 0;
+        const directed = G.isDirected();
+        const total_weight = m_orig * (2.0 - (directed ? 1 : 0));
         const wToOld = P.weightToComm(v, oldComm);
+        const wFromOld = P.weightFromComm(v, oldComm);
         const wToNew = P.weightToComm(v, newComm);
-        const Kold = P.totalWeightToComm(oldComm);
-        const Knew = P.totalWeightToComm(newComm);
-        // After-remove form: gain[c]_after = dnc - tot[c]·kv/m2.
-        // For c != vComm, dnc = wToNew, tot[c] unchanged.
-        // For c == vComm (the no-move baseline), dnc = 0 and
-        // tot[vComm]_after = Kold - kv.
-        const gainNew = wToNew - Knew * kv / m2;
-        const gainOld = 0 - (Kold - kv) * kv / m2;
-        // Express ΔQ in Q units (canonical gain returns "gain units"
-        // = gain * m2; divide by m2 once for ΔQ).
-        return (gainNew - gainOld) / m2;
+        const wFromNew = P.weightFromComm(v, newComm);
+        const k_out = G.weightedDegree(v);
+        const k_in = directed ? G.weightedDegree(v) : k_out;
+        const sw = G.nodeSelfWeight(v);
+        const K_out_old = P.totalWeightFromComm(oldComm);
+        const K_in_old  = P.totalWeightToComm(oldComm);
+        const K_out_new = P.totalWeightFromComm(newComm) + k_out;
+        const K_in_new  = P.totalWeightToComm(newComm) + k_in;
+        const diff_old = (wToOld - k_out * K_in_old / total_weight)
+                       + (wFromOld - k_in * K_out_old / total_weight);
+        const diff_new = (wToNew + sw - k_out * K_in_new / total_weight)
+                       + (wFromNew + sw - k_in * K_out_new / total_weight);
+        const diff = diff_new - diff_old;
+        const m = directed ? m_orig : 2.0 * m_orig;
+        return diff / m;
       },
       quality: function (P) {
         const G = P.graph;
-        const m2 = G.totalWeight();
-        if (m2 <= 0) return 0;
-        let q = 0;
-        // Filter on tot > 0 (canonical modularity.cpp:64); cnodes == 0
-        // would diverge when a comm is emptied through a remove/insert
-        // chain that leaves tot at a tiny positive FP residual.
+        const m_orig = G.totalWeight() / 2;
+        if (m_orig <= 0) return 0;
+        const directed = G.isDirected();
+        const m = directed ? m_orig : 2.0 * m_orig;
+        let mod = 0;
         for (let c = 0; c < P.ncomm(); c++) {
-          const Kc = P.totalWeightToComm(c);
-          if (Kc <= 0) continue;
-          const ec = P.totalWeightInComm(c);
-          q += ec - Kc * Kc / m2;
+          // inC convention bridge: see header comment.
+          const w = P.totalWeightInComm(c) / 2;
+          const w_out = P.totalWeightFromComm(c);
+          const w_in = P.totalWeightToComm(c);
+          mod += w - w_out * w_in / ((directed ? 1.0 : 4.0) * m_orig);
         }
-        return q / m2;
+        const q = (2.0 - (directed ? 1 : 0)) * mod;
+        return q / m;
       },
     };
   }
