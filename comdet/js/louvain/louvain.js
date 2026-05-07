@@ -179,6 +179,19 @@
       ev[i] = edges[i][1] | 0;
       ew[i] = edges[i].length > 2 ? +edges[i][2] : 1.0;
     }
+    // sortAdj=true implies igraph-canonical mode: cpp's igraph stores
+    // undirected edges with the larger vertex id as `from` (verified
+    // empirically via libleidenalg adjnoun trace; all 425 stored edges
+    // have from >= to). collapseLeiden's `if (from !== v) continue`
+    // filter then keeps only the higher-id-side per underlying edge,
+    // which determines which super-node iteration emits the collapsed
+    // edge. Without this normalization, JS splits a super-pair into
+    // two separate level-N+1 edges where cpp emits one combined edge.
+    if (!directed && sortAdj) {
+      for (let i = 0; i < m; i++) {
+        if (eu[i] < ev[i]) { const t = eu[i]; eu[i] = ev[i]; ev[i] = t; }
+      }
+    }
     // Per-node adjacency: each non-self edge appears in BOTH endpoint
     // lists; self-loop appears in one list ONCE. Mirrors canonical
     // graph_binary's links[] layout.
@@ -222,6 +235,13 @@
     // total_weight = Σ_v weighted_degree(v). Mirrors graph_binary.cpp:91-92.
     let totalWeight = 0;
     for (let v = 0; v < n; v++) totalWeight += wDeg[v];
+    // totalEdgeWeight = Σ_e edge_weight(e). Mirrors libleidenalg
+    // Graph::total_weight() (sum over edges, each once). Differs from
+    // totalWeight() by Σ_self_loop w because totalWeight counts self
+    // loops once but non-self edges twice (per Louvain canonical).
+    // Use this when porting Modularity formulas that need cpp's m_orig.
+    let totalEdgeWeight = 0;
+    for (let e = 0; e < m; e++) totalEdgeWeight += ew[e];
 
     return {
       vcount: function () { return n; },
@@ -244,6 +264,7 @@
       // canonMod adapter + LeidenPartition rebuildAdmin.
       strengthLeiden: function (v) { return wDeg[v] + nbSelfLoops[v]; },
       totalWeight: function () { return totalWeight; },
+      totalEdgeWeight: function () { return totalEdgeWeight; },
       neighbours: function (v) { return adjN[v]; },
       neighbourEdges: function (v) { return adjE[v]; },
       neighbourWeights: function (v) { return adjW[v]; },
@@ -389,8 +410,13 @@
               const from = eu[e], to = ev[e];
               if (from !== v) continue;
               const u_comm = renumber[membership[to]];
-              let w_e = ew[e];
-              if (from === to && !directed) w_e = w_e / 2;
+              // No halving for self-loops here. cpp halves because its
+              // IGRAPH_LOOPS_TWICE inclist iteration hits each self-loop
+              // edge twice per vertex (so two w/2 contributions sum to
+              // w). JS Graph stores self-loops ONCE in adj — no double
+              // hit, no compensating halve. Net contribution is w on
+              // both sides.
+              const w_e = ew[e];
               if (!ewAdded[u_comm]) {
                 ewAdded[u_comm] = 1;
                 neighList.push(u_comm);

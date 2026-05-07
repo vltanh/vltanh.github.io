@@ -306,21 +306,29 @@
           const u = adjN[i];
           const w = adjW[i];
           const u_comm = membership[u];
-          if (pass === 0) {
-            totFromC[oldComm] -= w;
-            totFromC[newComm] += w;
-          } else {
-            totToC[oldComm] -= w;
-            totToC[newComm] += w;
-          }
-          const int_weight = w / (directed ? 1 : 2) / (u === v ? 2 : 1);
-          if (oldComm === u_comm) {
-            inC[oldComm] -= int_weight;
-            totalWeightInAllComms -= int_weight;
-          }
-          if ((newComm === u_comm) || (u === v)) {
-            inC[newComm] += int_weight;
-            totalWeightInAllComms += int_weight;
+          // cpp's get_neighbour_edges(v, IGRAPH_OUT/IN) under undirected
+          // routes to IGRAPH_ALL with default IGRAPH_LOOPS_TWICE — every
+          // self-loop appears TWICE per mode iteration (libleidenalg
+          // GraphHelper.cpp:294). JS adj stores self-loops ONCE. Mirror
+          // cpp by applying the per-edge contribution twice when u===v.
+          const reps = (!directed && u === v) ? 2 : 1;
+          for (let r = 0; r < reps; r++) {
+            if (pass === 0) {
+              totFromC[oldComm] -= w;
+              totFromC[newComm] += w;
+            } else {
+              totToC[oldComm] -= w;
+              totToC[newComm] += w;
+            }
+            const int_weight = w / (directed ? 1 : 2) / (u === v ? 2 : 1);
+            if (oldComm === u_comm) {
+              inC[oldComm] -= int_weight;
+              totalWeightInAllComms -= int_weight;
+            }
+            if ((newComm === u_comm) || (u === v)) {
+              inC[newComm] += int_weight;
+              totalWeightInAllComms += int_weight;
+            }
           }
         }
       }
@@ -340,12 +348,20 @@
       return out;
     }
     function getNeighCommsConstrained(v, constrained) {
+      // Mirror libleidenalg merge_nodes_constrained ALL_NEIGH_COMMS
+      // (Optimiser.cpp:1295-1310). cpp walks IGRAPH_ALL neighbours
+      // (includes self-loop u=v under LOOPS_TWICE) and adds
+      // membership[u] for any u with constrained[u] == constrained[v].
+      // Self-loop encounter adds v_comm at adj-iteration position, NOT
+      // at the end. Subsequent merge_nodes_constrained loop processes
+      // c == v_comm via diff_move (returns 0) under `>=` tie-break:
+      // any non-self c with d=0 BEFORE v_comm in adj order picks c;
+      // any non-self c=0 AFTER v_comm reverts max_comm to v_comm.
       const adjN = graph.neighbours(v);
       const cv = constrained[v];
       const seen = new Set();
       for (let i = 0; i < adjN.length; i++) {
         const u = adjN[i];
-        if (u === v) continue;
         if (constrained[u] !== cv) continue;
         seen.add(membership[u]);
       }
@@ -573,16 +589,17 @@
       const vComm = P.memberOf(v);
       if (P.cnodes(vComm) !== 1) continue;
       const cands = P.getNeighCommsConstrained(v, constrained);
-      if (cands.indexOf(vComm) < 0) cands.push(vComm);
       let maxComm = vComm;
       let maxImprov = 0;
       const deltas = [];
       for (let j = 0; j < cands.length; j++) {
         const c = cands[j];
-        if (c === vComm) {
-          deltas.push({ comm: c, delta: 0 });
-          continue;
-        }
+        // Mirror cpp Optimiser.cpp:1374-1378 — every cand goes through
+        // diff_move + `>=` compare. For c == v_comm, diff_move returns
+        // 0 via cpp short-circuit (CPMVertexPartition.cpp:51 / Modular-
+        // ityVertexPartition.cpp:46), `0 >= 0` updates max_comm = c.
+        // JS canonCPM/canonMod return 0 the same way. Don't skip the
+        // self case — order matters under `>=` tie-break.
         const d = P.diffMove(v, c);
         deltas.push({ comm: c, delta: d });
         if (d >= maxImprov) {
@@ -622,6 +639,12 @@
     // the deferred Partition admin algebra mismatch (audit row M).
     const maxOuterLevels = opts.maxOuterLevels != null
                          ? opts.maxOuterLevels : 100;
+    // onLevelEntry: optional hook fired at level=0 (initial graph +
+    // partition) and after each level transition (post-collapse swap).
+    // Used by tracer harnesses to dump per-level graph + admin state for
+    // byte-equal cross-check vs cpp. Inert when unset.
+    const onLevelEntry = typeof opts.onLevelEntry === "function"
+                       ? opts.onLevelEntry : null;
     const rng = LV.MT19937(seed >>> 0);
     let P = LeidenPartition(graph, null, qualityFn);
     const levels = [];
@@ -629,6 +652,7 @@
     let aggregateFurther = true;
     let collapsedGraph = graph;
     let collapsedP = P;
+    if (onLevelEntry) onLevelEntry(0, collapsedGraph, collapsedP);
     let aggregateNodePerFine = new Int32Array(graph.vcount());
     for (let i = 0; i < graph.vcount(); i++) aggregateNodePerFine[i] = i;
     let fineMembership = new Int32Array(graph.vcount());
@@ -678,6 +702,22 @@
       // GraphHelper.cpp:703-784). Each inter pair emitted ONCE, self-loop
       // emitted ONCE with weight = intra_c, so super-graph
       // nodeSelfWeight + adj-via-neighComm match cpp at level 1+.
+      // [TRACE-LD-LG] Dump SUB + MAIN partition membership at the moment
+      // collapseLeiden reads from them. Bit-equal with cpp's matching
+      // SUB_MEM / MAIN_MEM probe localizes any pre-collapse divergence.
+      if (onLevelEntry) {
+        const tag = "SUB";
+        const subM = refinedP.membership();
+        const mainM = collapsedP.membership();
+        const _emit = function (kind, mem) {
+          console.error(`[TRACE-LD-LG] ${kind} level=${level} n=${mem.length} ncomm=${kind === "SUB" ? refinedP.ncomm() : collapsedP.ncomm()}`);
+          for (let v = 0; v < mem.length; v++) {
+            console.error(`[TRACE-LD-LG] ${kind}_MEM level=${level} v=${v} c=${mem[v]}`);
+          }
+        };
+        _emit("SUB", subM);
+        _emit("MAIN", mainM);
+      }
       const newCollapsed = collapsedGraph.collapseLeiden(refinedP.membership(), refinedNcomm);
       const newCollapsedMembership = new Int32Array(refinedNcomm);
       const seenSuper = new Uint8Array(refinedNcomm);
@@ -719,6 +759,7 @@
       collapsedGraph = newCollapsed;
       collapsedP = newCollapsedP;
       level += 1;
+      if (onLevelEntry) onLevelEntry(level, collapsedGraph, collapsedP);
     }
     P.setMembership(fineMembership);
     // Final renumber: cpp Optimiser.cpp:357 calls
