@@ -372,7 +372,7 @@
         // by the caller (findTopModulesRepeatedly / coarseTune sub-Infomap
         // entry / fineTune sub-stage). undefined when the call site has no
         // leaf scope (e.g. raw super-net partitions inside collapseGraph
-        // pre-flow-init). Used by level_membership_diff.mjs to localise
+        // pre-flow-init). Used by level_flow_diff.mjs to localise
         // identity-vs-flow divergences.
         leafToActive: opts.leafToActive ? Array.from(opts.leafToActive) : null,
         // outEdges per vertex, ref to g.outEdges (cheap; consumer copies if
@@ -539,6 +539,11 @@
     const linkOrdersOracle = opts.linkOrders || null;
     let linkOrdersIdx = 0;
     const onVisit = opts.onVisit || (typeof globalThis.__INFOMAP_ONVISIT === 'function' ? globalThis.__INFOMAP_ONVISIT : null);
+    // Hoist probe-hook check once per call. When no harness is installed
+    // (production browser walker), avoid per-visit + per-inner-iter array
+    // allocations + push()s used only for the per-visit decision probe.
+    // ~1-10M wasted push-ops on big nets without this guard.
+    const _decProbeOn = (typeof globalThis.__INFOMAP_VISIT_DECISION === "function");
     let nMoved = 0;
 
     // Reused across nodes: per-iter `clear()` is much cheaper than
@@ -620,13 +625,14 @@
       let strongestExit = oldEntry.deltaExit; // 0 initially
       let strongestDelta = 0;
       let strongestEntry = oldEntry;
-      // [TRACE-IM] candidate set probe (mirrors cpp tracer exactly).
-      // Filled in moduleEnumeration/linkOrder traversal order; same-module
-      // entry skipped, same as cpp.
-      const _probe_candM = [];
-      const _probe_candDE = [];
-      const _probe_candDX = [];
-      const _probe_candDL = [];
+      // [TRACE-IM] candidate set probe (mirrors cpp tracer). Filled in
+      // moduleEnumeration/linkOrder traversal order. Allocated only when
+      // __INFOMAP_VISIT_DECISION harness installed (zero-cost in
+      // production browser walker).
+      const _probe_candM = _decProbeOn ? [] : null;
+      const _probe_candDE = _decProbeOn ? [] : null;
+      const _probe_candDX = _decProbeOn ? [] : null;
+      const _probe_candDL = _decProbeOn ? [] : null;
 
       for (let k = 0; k < numLinks; k++) {
         const j = linkOrder[k];
@@ -639,10 +645,12 @@
         if (typeof globalThis.__INFOMAP_DL_PROBE === "function") {
           globalThis.__INFOMAP_DL_PROBE(v, oldM, otherM, dL, entry.deltaEnter, entry.deltaExit);
         }
-        _probe_candM.push(otherM);
-        _probe_candDE.push(entry.deltaEnter);
-        _probe_candDX.push(entry.deltaExit);
-        _probe_candDL.push(dL);
+        if (_decProbeOn) {
+          _probe_candM.push(otherM);
+          _probe_candDE.push(entry.deltaEnter);
+          _probe_candDX.push(entry.deltaExit);
+          _probe_candDL.push(dL);
+        }
         if (dL < bestDelta - minImpr) {
           bestDelta = dL; bestModule = otherM; bestEntry = entry;
         }
@@ -669,7 +677,7 @@
       if (bestModule === oldM) {
         dirty[v] = 0;
         if (onVisit) onVisit(v, false, oldM, P.codelength(), P.indexCodelength(), P.moduleCodelength(), P.enterFlow(), P.enterLogEnter(), P.exitLogExit(), P.flowLogFlow(), P.nodeFlowLogNodeFlow());
-        if (typeof globalThis.__INFOMAP_VISIT_DECISION === "function") {
+        if (_decProbeOn) {
           globalThis.__INFOMAP_VISIT_DECISION(v,
             _probe_candM, _probe_candDE, _probe_candDX, _probe_candDL,
             _probe_bestM_pre, _probe_bestDL,
@@ -761,7 +769,7 @@
         }
       }
       if (onVisit) onVisit(v, true, bestModule, P.codelength(), P.indexCodelength(), P.moduleCodelength(), P.enterFlow(), P.enterLogEnter(), P.exitLogExit(), P.flowLogFlow(), P.nodeFlowLogNodeFlow());
-      if (typeof globalThis.__INFOMAP_VISIT_DECISION === "function") {
+      if (_decProbeOn) {
         globalThis.__INFOMAP_VISIT_DECISION(v,
           _probe_candM, _probe_candDE, _probe_candDX, _probe_candDL,
           _probe_bestM_pre, _probe_bestDL,
@@ -812,7 +820,7 @@
       if (typeof globalThis.__INFOMAP_PARTITION_DUMP === 'function') {
         globalThis.__INFOMAP_PARTITION_DUMP({
           n: g.n,
-          nMoved: nMoved | 0,
+          nMoved: nMoved,
           L: newL,
           moduleOf: Array.from(P.moduleOf),
         });
