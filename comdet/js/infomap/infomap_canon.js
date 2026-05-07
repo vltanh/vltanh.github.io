@@ -596,6 +596,13 @@
       let strongestExit = oldEntry.deltaExit; // 0 initially
       let strongestDelta = 0;
       let strongestEntry = oldEntry;
+      // [TRACE-IM] candidate set probe (mirrors cpp tracer exactly).
+      // Filled in moduleEnumeration/linkOrder traversal order; same-module
+      // entry skipped, same as cpp.
+      const _probe_candM = [];
+      const _probe_candDE = [];
+      const _probe_candDX = [];
+      const _probe_candDL = [];
 
       for (let k = 0; k < numLinks; k++) {
         const j = linkOrder[k];
@@ -608,6 +615,10 @@
         if (typeof globalThis.__INFOMAP_DL_PROBE === "function") {
           globalThis.__INFOMAP_DL_PROBE(v, oldM, otherM, dL, entry.deltaEnter, entry.deltaExit);
         }
+        _probe_candM.push(otherM);
+        _probe_candDE.push(entry.deltaEnter);
+        _probe_candDX.push(entry.deltaExit);
+        _probe_candDL.push(dL);
         if (dL < bestDelta - minImpr) {
           bestDelta = dL; bestModule = otherM; bestEntry = entry;
         }
@@ -618,15 +629,30 @@
           strongestEntry = entry;
         }
       }
+      // [TRACE-IM] snapshot best-vs-strongest BEFORE tie-break.
+      const _probe_bestM_pre = bestModule;
+      const _probe_bestDL = bestDelta;
+      const _probe_strongM = strongestModule;
+      const _probe_strongDL = strongestDelta;
+      let _probe_strongPicked = false;
       // Prefer strongest connected module on tie.
       if (strongestModule !== bestModule
           && strongestDelta <= bestDelta + minImpr) {
         bestModule = strongestModule;
         bestEntry = strongestEntry;
+        _probe_strongPicked = true;
       }
       if (bestModule === oldM) {
         dirty[v] = 0;
         if (onVisit) onVisit(v, false, oldM, P.codelength(), P.indexCodelength(), P.moduleCodelength(), P.enterFlow(), P.enterLogEnter(), P.exitLogExit(), P.flowLogFlow(), P.nodeFlowLogNodeFlow());
+        if (typeof globalThis.__INFOMAP_VISIT_DECISION === "function") {
+          globalThis.__INFOMAP_VISIT_DECISION(v,
+            _probe_candM, _probe_candDE, _probe_candDX, _probe_candDL,
+            _probe_bestM_pre, _probe_bestDL,
+            _probe_strongM, _probe_strongDL, _probe_strongPicked,
+            /*nLnkInOld*/0, /*pairPullV*/-1, /*pairPullOldM*/oldM,
+            /*pairPullTriggered*/false);
+        }
         continue;
       }
       // Apply move + maintain emptyModules.
@@ -680,7 +706,11 @@
         }
       }
       // Move single connected node to same module.
+      let _probe_pairPullTriggered = false;
+      let _probe_pairPullV = -1;
       if (numLinkedInOld === 1 && P.moduleMembers[oldM] === 1) {
+        _probe_pairPullTriggered = true;
+        _probe_pairPullV = nodeInOldModule;
         if (opts.onPairPull) opts.onPairPull(v, nodeInOldModule, oldM, bestModule);
         const w = nodeInOldModule;
         // Build deltaFlow for w restricted to oldM and bestModule.
@@ -707,6 +737,14 @@
         }
       }
       if (onVisit) onVisit(v, true, bestModule, P.codelength(), P.indexCodelength(), P.moduleCodelength(), P.enterFlow(), P.enterLogEnter(), P.exitLogExit(), P.flowLogFlow(), P.nodeFlowLogNodeFlow());
+      if (typeof globalThis.__INFOMAP_VISIT_DECISION === "function") {
+        globalThis.__INFOMAP_VISIT_DECISION(v,
+          _probe_candM, _probe_candDE, _probe_candDX, _probe_candDL,
+          _probe_bestM_pre, _probe_bestDL,
+          _probe_strongM, _probe_strongDL, _probe_strongPicked,
+          numLinkedInOld, _probe_pairPullV, oldM,
+          _probe_pairPullTriggered);
+      }
     }
     return nMoved;
   }
