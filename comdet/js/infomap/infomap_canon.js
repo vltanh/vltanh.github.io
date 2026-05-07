@@ -357,6 +357,26 @@
       const mod = -exit_log_exit + flow_log_flow - nodeFlow_log_nodeFlow;
       globalThis.__INFOMAP_INIT_DUMP(n, idx + mod, idx, mod, enter_log_enter, exit_log_exit, flow_log_flow, nodeFlow_log_nodeFlow, exitNetworkFlow, exitNetworkFlow_log_exitNetworkFlow);
     }
+    // Per-level per-super-vertex flow dump. Mirrors cpp tracer's
+    // InfomapTraceLevel { init_flow, init_enter, init_exit }. Called by
+    // visit_decision_diff / level_flow_diff harnesses to localise first
+    // level where super-vertex flow state diverges between cpp + JS.
+    // Zero cost when hook not installed.
+    if (typeof globalThis.__INFOMAP_LEVEL_DUMP === 'function') {
+      globalThis.__INFOMAP_LEVEL_DUMP({
+        n: n,
+        flow: Array.from(g.nodeFlow),
+        enter: Array.from(g.nodeEnter),
+        exit: Array.from(g.nodeExit),
+        // leafToActive[leaf_v] = super-vertex ID at this level, threaded
+        // by the caller (findTopModulesRepeatedly / coarseTune sub-Infomap
+        // entry / fineTune sub-stage). undefined when the call site has no
+        // leaf scope (e.g. raw super-net partitions inside collapseGraph
+        // pre-flow-init). Used by level_membership_diff.mjs to localise
+        // identity-vs-flow divergences.
+        leafToActive: opts.leafToActive ? Array.from(opts.leafToActive) : null,
+      });
+    }
 
     // Codelength = (enterFlow_log_enterFlow - enter_log_enter -
     //               exitNetworkFlow_log_exitNetworkFlow) +
@@ -778,6 +798,21 @@
       });
       const newL = P.codelength();
       if (log) log("tryMoveEach.end", { nMoved, newL });
+      // Per-call partition dump. Mirrors cpp's m_activeNetwork[i]->index
+      // snapshot at end of each tryMoveEachNodeIntoBestModule. Used by
+      // partition_diff_per_call.mjs to localise the FIRST sweep where
+      // post-sweep moduleOf diverges between cpp + JS, even when every
+      // recorded visit decision (cand / candDL / bM / sM / sPick / ppV / ppT)
+      // byte-equal cpp's. Catches ID-relabel drift that visit_decision_diff
+      // can't see (e.g., a tied tie-break flipped silently mid-sweep).
+      if (typeof globalThis.__INFOMAP_PARTITION_DUMP === 'function') {
+        globalThis.__INFOMAP_PARTITION_DUMP({
+          n: g.n,
+          nMoved: nMoved | 0,
+          L: newL,
+          moduleOf: Array.from(P.moduleOf),
+        });
+      }
       if (nMoved === 0 || newL >= oldL - minImpr) break;
       numEffective += 1;
       oldL = newL;
@@ -851,7 +886,10 @@
     const baseLoopLimit = opts.loopLimit != null ? opts.loopLimit : 10;
     const isCoarseTune = !!opts.isCoarseTune;
     const log = opts.boundaryLog || null;
-    let currentP = makePartition(g);
+    // leafToActive at lvl 0 = identity (each leaf is its own super-vertex).
+    const _ftLeafToActive0 = new Int32Array(g.n);
+    for (let v = 0; v < g.n; v++) _ftLeafToActive0[v] = v;
+    let currentP = makePartition(g, { leafToActive: _ftLeafToActive0 });
     // aggregation_level == 0 path: use base loopLimit unless coarseTune.
     // isFirstLoop = (tuneIterationIndex == 0 && isFullNetwork). caller
     // forwards opts.isFirstLoopOuter; default true for the very first
@@ -924,7 +962,12 @@
         ? aggregateMembership
         : renumberByEncounter(prevP.moduleOf, srcG.n);
       const collapsedG = collapseGraph(srcG, srcToTgt, ncomm, prevP);
-      const collapsedP = makePartition(collapsedG);
+      // leafToActive at this lvl = leaf v's super-vertex ID =
+      // aggregateMembership[v] (mapped through prev-level if srcG is
+      // not the leaf graph). At lvl 1 srcG=leaves so aggregateMembership
+      // is leaf->lvl-1-super-vertex directly. At lvl 2+, the chain has
+      // already been composed into aggregateMembership before this point.
+      const collapsedP = makePartition(collapsedG, { leafToActive: aggregateMembership });
       if (log) log("findTopModulesRepeatedly.lvl", { lvl, n: collapsedG.n });
       const lvlPre = collapsedP.codelength();
       const lvlConsol = ftConsolStack.length
@@ -1258,7 +1301,27 @@
     opts = opts || {};
     const minImpr = 1e-16; // minimumSingleNodeCodelengthImprovement (restoreConsolidatedOptimizationPointIfNoImprovement)
     const log = opts.boundaryLog || null;
-    const seedRenum = renumberByEncounter(seedMembership, g.n);
+    // Pass seedMembership verbatim (NO re-renumber). Both callers
+    // (fineTuneFaithful + coarseTuneFaithful) hand in 0..K-1 sequential
+    // membership already in cpp's m_root.children encounter order:
+    //   - fineTune: ft.membership = renumberByEncounter(P.moduleOf, g.n)
+    //     = leaf-v-order encounter, matching cpp's post-fineTune
+    //     consolidateModules(false) which iterates active=leaves in
+    //     leaf-v-order.
+    //   - coarseTune: newRenum = renumByCollapsedM[subRenum[v]] is
+    //     sub-mod-position-order encounter, matching cpp's post-
+    //     coarseTune consolidateModules(true) Phase 6 which iterates
+    //     active=sub-mods super-net in sub-mod-position order.
+    // Re-applying renumberByEncounter here would re-rank by leaf-v-order,
+    // a no-op for the fineTune path (already in that order) but a
+    // SHUFFLE for the coarseTune path -- cluster k from coarseTune ends
+    // up at rank `first-leaf-v-with-cluster-k` instead of `sub-mod-
+    // position-with-cluster-k`. Visible on euroroad s1023 lvl 350: leaf
+    // 105's top-mod ID becomes 28 instead of cpp's 29 (off-by-one in
+    // first-encounter position), then v=117's lvl 350 cand_modules
+    // diverge under byte-identical flow values. Discovered via
+    // partition_diff_per_call.mjs + level_flow_diff.mjs membership probe.
+    const seedRenum = seedMembership;
     let aggregateMembership = seedRenum;
     // Prefer the running L-consolidated tracker over a fresh leaf-graph
     // recompute. Cpp's gate at lvl 0 of the post-coarseTune /
@@ -1313,7 +1376,7 @@
       if (log) log("findTopFromPartition.lvl", { lvl, n: ncomm });
       const collapsedG = collapseGraph(g, aggregateMembership, ncomm,
                                        prevP, prevMembership);
-      const collapsedP = makePartition(collapsedG);
+      const collapsedP = makePartition(collapsedG, { leafToActive: aggregateMembership });
       // First lvl here = aggregationLevel 0 from this call's perspective;
       // subsequent lvls > 0. isFirstLoop tracks (tuneIterationIndex==0 &&
       // aggregationLevel==0).
@@ -1532,7 +1595,9 @@
     opts = opts || {};
     const log = opts.boundaryLog || null;
     if (log) log("fineTune.begin", { n: g.n });
-    const P = makePartition(g);
+    const _ftIdentity = new Int32Array(g.n);
+    for (let v = 0; v < g.n; v++) _ftIdentity[v] = v;
+    const P = makePartition(g, { leafToActive: _ftIdentity });
     applyMembership(P, g, leafToTop);
     const beforeL = P.codelength();
     const numEff = optimizeActiveNetwork(P, g, rng, opts);
@@ -1703,7 +1768,9 @@
     // Phase 2: project leaves to sub-modules (canonical lines 1472-1480
     // moveActiveNodesToPredefinedModules(subModules)). Deterministic; no
     // RNG.
-    const PsubLeaf = makePartition(g);
+    const _ctIdentity = new Int32Array(g.n);
+    for (let v = 0; v < g.n; v++) _ctIdentity[v] = v;
+    const PsubLeaf = makePartition(g, { leafToActive: _ctIdentity });
     applyMembership(PsubLeaf, g, subOf);
 
     // Phase 3: collapse leaves -> sub-modules super-net (canonical's
@@ -1778,7 +1845,7 @@
     // moveActiveNodesToPredefinedModules). Without this, fallback path
     // recomputes from cross-edge half-flows + drifts O(1 ulp) from cpp.
     const collapsedG = collapseGraph(g, subRenum, numSub, PsubLeaf);
-    const collapsedP = makePartition(collapsedG);
+    const collapsedP = makePartition(collapsedG, { leafToActive: subRenum });
     // Move sub-modules to their former top-modules. After this,
     // collapsedP.moduleOf == subToTop.
     applyMembership(collapsedP, collapsedG, subToTop);
