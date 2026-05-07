@@ -376,8 +376,13 @@
 
   RecursiveCactus.prototype._findFlowEdge = function (G) {
     let s = NS.random_functions.nextInt(0, G.n() - 1);
+    // [UPSTREAM recursive_cactus.h:584-586] cpp draws nextInt(0, max_edge)
+    // where max_edge = get_first_invalid_edge(s) - 1; the value is discarded
+    // by the inner `e = 0` assignment but the RNG draw matters for stream
+    // parity per audit row B. Mirror the discard.
+    const max_edge = G.get_first_invalid_edge(s) - 1;
+    let e = NS.random_functions.nextInt(0, max_edge);
     let edge_found = false;
-    let e = 0;
     while (!edge_found) {
       while (G.isEmpty(s)) {
         s = (s + 1) % G.n();
