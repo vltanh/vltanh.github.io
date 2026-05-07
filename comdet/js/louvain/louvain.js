@@ -235,7 +235,14 @@
       nbSelfLoops: function (v) { return nbSelfLoops[v]; },
       degree: function (v) { return adjN[v].length; },
       weightedDegree: function (v) { return wDeg[v]; },
-      strength: function (v) { return wDeg[v]; },  // alias for legacy
+      strength: function (v) { return wDeg[v]; },  // alias (Louvain conv: self once)
+      // strengthLeiden(v) = wDeg[v] + nbSelfLoops[v]. Mirrors igraph's
+      // strength(v) under default IGRAPH_LOOPS_TWICE (used by libleiden-
+      // alg's Modularity / partition admin: cpp counts self-loop edges
+      // TWICE in strength for undirected graphs, so the contribution of
+      // a self-loop with weight w is 2*w to strength). Used by Leiden's
+      // canonMod adapter + LeidenPartition rebuildAdmin.
+      strengthLeiden: function (v) { return wDeg[v] + nbSelfLoops[v]; },
       totalWeight: function () { return totalWeight; },
       neighbours: function (v) { return adjN[v]; },
       neighbourEdges: function (v) { return adjE[v]; },
@@ -318,6 +325,94 @@
           sortAdj: sortAdj, // propagate to collapsed graph
         });
       },
+      // libleidenalg-shape collapse (Graph::collapse_graph,
+      // GraphHelper.cpp:703-784). Walks each underlying edge ONCE, bucketing:
+      //   self-loop  (u==v, cu==cv): += w/2 to (cu, cu)  (cpp halves
+      //                                  the IGRAPH_OUT-listed self-loop
+      //                                  per line 743-744)
+      //   non-self intra (u!=v, cu==cv): += w to (cu, cu)
+      //   non-self inter (cu!=cv): += w to (cu, cv)  (single emission;
+      //                              cpp's `if (from != v) continue` at
+      //                              line 734-737 skips the cv-side walk)
+      // Emits ONE edge per (c, t) pair. Graph constructor's u!=v branch
+      // gives both-side adj for inter; self-loops list ONCE in adj with
+      // edge weight = intra_c (matching cpp's igraph_create result).
+      // `nodeSelfWeight(super_c)` then equals intra_c (matching cpp's
+      // `node_self_weight` from the single self-loop edge).
+      //
+      // Differs from .collapse() (Louvain canonical convention) which
+      // emits each inter pair TWICE and self-loop with weight 2·intra_c
+      // for compatibility with gen-louvain's partition2graph_binary.
+      collapseLeiden: function (membership, ncomm) {
+        // Renumber surviving comms preserving incoming order (caller
+        // expected to have run Partition.renumberLeiden, csize-DESC).
+        const renumber = new Int32Array(ncomm);
+        for (let c = 0; c < ncomm; c++) renumber[c] = -1;
+        for (let v = 0; v < n; v++) renumber[membership[v]] = 1;
+        let last = 0;
+        for (let i = 0; i < ncomm; i++) if (renumber[i] !== -1) renumber[i] = last++;
+        const nbc = last;
+        // commNodes[c] = constituents of c, in node-id ASC order
+        // (matching cpp's MutableVertexPartition::get_communities which
+        // pushes nodes in ASC iteration of `for v=0..n-1`).
+        const commNodes = new Array(nbc);
+        for (let c = 0; c < nbc; c++) commNodes[c] = [];
+        const newSizes = new Array(nbc).fill(0);
+        for (let v = 0; v < n; v++) {
+          const nc = renumber[membership[v]];
+          commNodes[nc].push(v);
+          newSizes[nc] += nodeSizes[v];
+        }
+        // Mirror cpp Graph::collapse_graph (GraphHelper.cpp:703-784)
+        // exactly so the resulting edge-insertion order in the new
+        // Graph matches cpp's igraph_create order; subsequent init_admin
+        // sums then match bit-for-bit.
+        // Outer loop: v_comm = 0..nbc-1 (ASC).
+        // Inner loop: per constituent v of v_comm in ASC order, walk
+        // adjE[v] (edge ids) in adj order. For each edge: skip if
+        // from-endpoint != v (cpp's `if (from != v) continue`).
+        // Self-loop weight halved for undirected. neighbour_communities
+        // pushed in first-encounter order. Edges emitted in
+        // (v_comm, u_comm-encounter) order.
+        const newEdges = [];
+        const ewAccum = new Float64Array(nbc);
+        const ewAdded = new Uint8Array(nbc);
+        const neighList = [];
+        for (let v_comm = 0; v_comm < nbc; v_comm++) {
+          const constituents = commNodes[v_comm];
+          neighList.length = 0;
+          for (let i = 0; i < constituents.length; i++) {
+            const v = constituents[i];
+            const aE = adjE[v];
+            for (let k = 0; k < aE.length; k++) {
+              const e = aE[k];
+              const from = eu[e], to = ev[e];
+              if (from !== v) continue;
+              const u_comm = renumber[membership[to]];
+              let w_e = ew[e];
+              if (from === to && !directed) w_e = w_e / 2;
+              if (!ewAdded[u_comm]) {
+                ewAdded[u_comm] = 1;
+                neighList.push(u_comm);
+              }
+              ewAccum[u_comm] += w_e;
+            }
+          }
+          for (let i = 0; i < neighList.length; i++) {
+            const u_comm = neighList[i];
+            newEdges.push([v_comm, u_comm, ewAccum[u_comm]]);
+            ewAccum[u_comm] = 0;
+            ewAdded[u_comm] = 0;
+          }
+        }
+        return Graph(nbc, newEdges, {
+          directed: directed,
+          correctSelfLoops: correctSelfLoops,
+          nodeSizes: newSizes,
+          collapsed: true,
+          sortAdj: sortAdj,    // propagate (cpp's level-1+ adj sorts ASC)
+        });
+      },
     };
   }
 
@@ -327,6 +422,60 @@
   // mutate in[c] / tot[c] exactly as canonical does. neigh_comm(v) fills
   // a per-Partition scratch (neigh_pos / neigh_weight / neigh_last) so
   // sweep can reuse it without reallocation.
+  //
+  // ┌─────────────────────────────────────────────────────────────────┐
+  // │ Two Partition substrates                                        │
+  // │                                                                 │
+  // │ This LV.Partition is the OLDER substrate, faithful to the       │
+  // │ Louvain externals canonical (Blondel 2008, gen-louvain v0.3 —   │
+  // │ modularity.h Modularity::in/tot/gain). It uses the              │
+  // │ Louvain-Modularity convention:                                  │
+  // │                                                                 │
+  // │   in[c]  = 2·intra_c + Σ self-loops                             │
+  // │   tot[c] = Σ weighted_degree(constituents)                      │
+  // │                                                                 │
+  // │ neighComm fills neigh_weight[neighbour-comm] for non-self       │
+  // │ adj entries only; self-loop weight is folded into modRemove /   │
+  // │ modInsert separately via nbSelfLoops(v):                        │
+  // │                                                                 │
+  // │   modRemove(v, c, dnc):  in[c] -= 2*dnc + nbSelfLoops(v)        │
+  // │   modInsert(v, c, dnc):  in[c] += 2*dnc + nbSelfLoops(v)        │
+  // │                                                                 │
+  // │ Louvain's externals tracer at tools/viz_check/louvain depends   │
+  // │ on this convention bit-for-bit; do NOT change it.               │
+  // │                                                                 │
+  // │ Leiden was added later (libleidenalg 0.12.0; Traag-Waltman-     │
+  // │ van Eck 2019). Its canonical (libleidenalg                      │
+  // │ MutableVertexPartition.cpp) uses a DIFFERENT convention:        │
+  // │                                                                 │
+  // │   _total_weight_in_comm[c] = intra_c                            │
+  // │       (non-self intra contributes w; self-loop contributes      │
+  // │        w/2 for undirected per move_node mode-loop algebra at    │
+  // │        line 695)                                                │
+  // │   cache_neigh_communities INCLUDES self-loop in                 │
+  // │   weight_to_comm[v_comm] (cpp halves the IGRAPH_ALL twice-      │
+  // │   listed self-loop entry; net = w; libleidenalg's diff_move     │
+  // │   then uses (w_to_old + w_from_old - sw) / (w_to_new +          │
+  // │   w_from_new + sw) per CPMVertexPartition.cpp:90-101 +          │
+  // │   ModularityVertexPartition.cpp:95-101).                        │
+  // │                                                                 │
+  // │ The two algebras agree at level 0 (no self-loops in input       │
+  // │ graphs) but diverge at level 1+ where collapsed super-nodes     │
+  // │ carry intra-comm weight as self-loops. To keep both Louvain     │
+  // │ and Leiden tracers byte-equal to their respective canonicals,   │
+  // │ we ship two Partition factories:                                │
+  // │                                                                 │
+  // │   LV.Partition       (this file) — Louvain-shape, used by       │
+  // │                                    LV.sweep + LV.run.           │
+  // │   COMDET.LEIDEN.Partition         — libleidenalg-shape,         │
+  // │                  defined in comdet/js/leiden/leiden.js          │
+  // │                  (LeidenPartition factory). Used by Leiden's    │
+  // │                  moveNodes + mergeNodesConstrained +            │
+  // │                  optimisePartition.                             │
+  // │                                                                 │
+  // │ See leiden_dossier.md "Two Partition substrates" for the full   │
+  // │ algebra divergence table.                                       │
+  // └─────────────────────────────────────────────────────────────────┘
   function Partition(graph, init, qualityFn) {
     const n = graph.vcount();
     let membership = new Int32Array(n);
