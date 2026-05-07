@@ -224,11 +224,14 @@
             : runBaseAlgo(side, sideEdges, algorithm, resolution, seed);
           tlog("    RECLUSTER parent=" + cur.id + " side_size=" + side.length + " -> " + partition.length + " comm(s)");
           // RemoveInterClusterEdges + connected components per partition.
+          // [UPSTREAM cm.h:138-148] canonical pushes EVERY translated
+          // component into to_be_clustered regardless of size; no size>1
+          // filter at this site (the prior filter here caused JS over-split
+          // on dnc per cm_audit.md row I open question). JS now mirrors.
           partition.forEach(function (clust) {
             const clustEdges = inducedEdges(clust, sideEdges);
             const comps = bfsComponents(clust, clustEdges);
             comps.forEach(function (comp) {
-              if (comp.length <= 1) return;
               toBeClustered.push({ nodes: comp.slice(), parent: cur.id });
             });
           });

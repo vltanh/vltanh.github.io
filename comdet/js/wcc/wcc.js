@@ -74,7 +74,16 @@
     spec = String(spec || "").trim();
     if (spec === "0") return { kind: "simple" };
     let m = spec.match(/^([0-9.]+)log_([0-9.]+)\(n\)$/);
-    if (m) return { kind: "logarithmic", c: parseFloat(m[1]), x: parseFloat(m[2]) };
+    if (m) {
+      const c = parseFloat(m[1]);
+      const x = parseFloat(m[2]);
+      // [UPSTREAM constrained.cpp:235] preLog = c / log(x) is precomputed
+      // ONCE at startup; per-call threshold uses preLog * log(n) (one log,
+      // one mul). The naive `c * log(n) / log(x)` (two logs, one mul, one
+      // div) introduces rounding-order divergence vs canonical -- audit row
+      // E. JS mirrors canonical's evaluation order via this preLog field.
+      return { kind: "logarithmic", c: c, x: x, preLog: c / Math.log(x) };
+    }
     m = spec.match(/^([0-9.]+)n\^([0-9.]+)$/);
     if (m) return { kind: "exponential", c: parseFloat(m[1]), x: parseFloat(m[2]) };
     if (spec === "piecewise") return { kind: "custom", customString: "piecewise" };
@@ -84,7 +93,7 @@
   function threshold(parsed, nCluster) {
     if (parsed.kind === "simple") return 0;
     if (parsed.kind === "logarithmic") {
-      return parsed.c * Math.log(nCluster) / Math.log(parsed.x);
+      return parsed.preLog * Math.log(nCluster);
     }
     if (parsed.kind === "exponential") {
       return parsed.c * Math.pow(nCluster, parsed.x);
