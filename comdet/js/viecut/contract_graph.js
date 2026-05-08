@@ -56,10 +56,16 @@
     }
     for (let i = 0; i < reverse_mapping.length; i++) {
       if (reverse_mapping[i].length > 1) {
-        const set = new Set();
+        // [UPSTREAM contract_graph.h:187 vtx_to_ctr std::unordered_set]
+        // Mirrors cpp TRACER_MODE swap to std::set: id-ASC iteration so
+        // contractVertexSet's vec walk + downstream edge-merge order
+        // matches cpp byte-for-byte.
+        const positions = [];
         for (const v of reverse_mapping[i]) {
-          set.add(H.getCurrentPosition(v));
+          positions.push(H.getCurrentPosition(v));
         }
+        positions.sort((a, b) => a - b);
+        const set = new Set(positions);
         H.contractVertexSet(set);
       }
     }
@@ -101,7 +107,11 @@
           }
         }
       }
-      for (const tgt of edge_positions) {
+      // [UPSTREAM contract_graph.h:258 edge_positions std::unordered_set]
+      // Mirrors cpp TRACER_MODE swap to std::set: id-ASC iteration so
+      // contracted's adjacency order matches cpp byte-for-byte.
+      const sorted_positions = [...edge_positions].sort((a, b) => a - b);
+      for (const tgt of sorted_positions) {
         contracted.new_edge(p, tgt, weights[tgt]);
       }
     }
