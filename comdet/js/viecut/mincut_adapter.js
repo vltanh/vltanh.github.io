@@ -65,4 +65,10 @@
   }
 
   M.viecut = viecut;
+  // [UPSTREAM tools/random_functions.h:187-191] expose setSeed so kernel
+  // verification harnesses can pin the chained-mincut RNG state to the
+  // tracer's argv seed (cpp tracer calls random_functions::setSeed(seed)
+  // at startup; JS must mirror to get bit-equal start_vertex per pop).
+  // Production walkers don't call this; m_mt persists at default 5489.
+  M.viecut.setSeed = function (s) { C.VIECUT.random_functions.setSeed(s); };
 })();
