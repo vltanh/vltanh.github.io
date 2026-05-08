@@ -8,6 +8,10 @@ keywords: The-Anh Vu-Le, vltanh, UIUC, Tandy Warnow, network science, community 
 # subtitle: <a href='#'>Affiliations</a>. Address. Contacts. Motto. Etc.
 
 og_image: /assets/img/prof_pic.jpg
+og_image_alt: The-Anh Vu-Le profile photo
+og_image_width: 666
+og_image_height: 888
+og_image_type: image/jpeg
 
 profile:
   align: right
