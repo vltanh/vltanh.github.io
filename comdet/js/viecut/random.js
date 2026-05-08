@@ -113,8 +113,13 @@
   }
 
   // ---- random_functions facade matching VieCut's static API ------------
-  let m_seed = 0;
-  let m_mt = new MT19937(0);
+  // [UPSTREAM tools/random_functions.h:27-28] static MersenneTwister m_mt;
+  // libstdc++ std::mt19937() default-constructs with seed=5489 (default_seed).
+  // Mirror so chained mincut calls (CM/WCC) without explicit setSeed produce
+  // bit-equal RNG stream vs canonical (where mincut_custom.cpp:37 leaves
+  // setSeed COMMENTED OUT and m_mt stays default-constructed for the run).
+  let m_seed = 5489;
+  let m_mt = new MT19937(5489);
   // Oracle queue: when set, next/nextInt/etc. consume from this queue
   // (each entry is { kind: "next"|"nextInt"|"nextBool"|"nextDouble", val })
   // instead of advancing the MT19937. Used by the random/deterministic

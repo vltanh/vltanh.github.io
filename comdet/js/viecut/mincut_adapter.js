@@ -52,8 +52,12 @@
     }
     G.finish_construction();
 
-    const seed = opts.seed === undefined ? 0 : opts.seed;
-    const result = C.VIECUT.cactus_mincut(G, { seed });
+    // [UPSTREAM mincut_custom.cpp:37] setSeed COMMENTED OUT; chained mincut
+    // calls share m_mt state for the run. Pass through opts.seed only when
+    // caller explicitly provides one (standalone tracer); chained WCC/CM
+    // calls leave it unset so cactus_mincut keeps prior RNG state.
+    const cactusOpts = (opts.seed !== undefined) ? { seed: opts.seed } : {};
+    const result = C.VIECUT.cactus_mincut(G, cactusOpts);
     const inP = result.inPartition.map((i) => nodeIds[i]);
     const outP = result.outPartition.map((i) => nodeIds[i]);
     return { cutValue: result.cutValue, inPartition: inP, outPartition: outP,

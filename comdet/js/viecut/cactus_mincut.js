@@ -97,7 +97,13 @@
   // Returns { cutValue, inPartition, outPartition }.
   function cactus_mincut(G, opts) {
     if (!opts) opts = {};
-    NS.random_functions.setSeed(opts.seed === undefined ? 0 : opts.seed);
+    // [UPSTREAM mincut_custom.cpp:37] setSeed COMMENTED OUT; m_mt persists
+    // across mincut calls for the run. Only re-seed when caller explicitly
+    // requests it (standalone tests pass opts.seed; chained WCC/CM calls
+    // do not, so m_mt stays in its run-evolved state matching cpp).
+    if (opts.seed !== undefined) {
+      NS.random_functions.setSeed(opts.seed);
+    }
     const graphs = [G];
     const result = findAllMincuts(graphs, opts.known_mincut);
     if (result.mincut <= 0 || !result.out_graph) {
