@@ -12,6 +12,11 @@
   const C = window.COMDET;
   const NS = (C.VIECUT = C.VIECUT || {});
 
+  function emit(event, payload) {
+    const h = (typeof globalThis !== "undefined") && globalThis.__VIECUT_HOOK;
+    if (typeof h === "function") h(event, payload);
+  }
+
   function findBipartitionFromCactus(cactus, n_orig, dfsOut) {
     const { best_n, best_e, best_n2, best_e2 } = dfsOut;
     const n1 = best_n;
@@ -31,9 +36,12 @@
     checked[rev_n1] = 1;
     checked[rev_n2] = 1;
 
+    emit("mb_init", { n1, n2, rev_n1, rev_n2 });
     while (qhead < q.length) {
       const top = q[qhead++];
-      for (const v of cactus.containedVertices(top)) inCut[v] = 1;
+      const contained = cactus.containedVertices(top).slice();
+      for (const v of contained) inCut[v] = 1;
+      emit("mb_visit", { cactus_node: top, contained });
       const ne = cactus.get_first_invalid_edge(top);
       for (let e = 0; e < ne; e++) {
         const t = cactus.getEdgeTarget(top, e);

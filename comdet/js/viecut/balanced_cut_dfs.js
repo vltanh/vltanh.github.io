@@ -18,6 +18,11 @@
   const C = window.COMDET;
   const NS = (C.VIECUT = C.VIECUT || {});
 
+  function emit(event, payload) {
+    const h = (typeof globalThis !== "undefined") && globalThis.__VIECUT_HOOK;
+    if (typeof h === "function") h(event, payload);
+  }
+
   // [UPSTREAM common/definitions.h:50-55] DFSVertexStatus
   const UNDISCOVERED = 0;
   const ACTIVE = 1;
@@ -114,6 +119,7 @@
           best_in_cycle = false;
           best_n = f.node; best_e = e;
           best_weight = lighterBlock(subtree_weight[t]);
+          emit("bcd_best", { node: f.node, edge: e, target: t, weight: best_weight, kind: "tree" });
         }
         f.children_weight += subtree_weight[t];
         f.awaiting = -1;
