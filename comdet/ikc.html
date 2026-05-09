@@ -88,7 +88,7 @@ with \(L\) = total edges of the original graph. Shipped IKC short-circuits this 
 <section class="stage">
   <div class="stage-num">fixture &middot; 32 nodes, four planted communities</div>
   <h2>Painted by ground-truth, before any peeling runs.</h2>
-  <p>The comdet gallery shares one small graph across every algorithm. <em>A</em> (12 nodes, blue) is a \(K_5\) on \(\{0..4\}\) plus a 7-node periphery hanging off the \(K_5\) vertices. <em>B</em> (8 nodes, ochre) is two \(K_4\)'s joined by the single bridge edge \((15, 16)\). <em>C</em> (6 nodes, green) is two disconnected 3-cycles. <em>D</em> (4 nodes, plum) is two 2-cliques bridged by \((27, 28)\). Outliers 30 + 31 dangle off A's periphery.</p>
+  <p>Hover a node for its label and degree.</p>
   <div class="graph" id="g-input">
     <div class="graph-chrome">
       <span>32 nodes &middot; 52 edges &middot; 4 planted communities + 2 outliers</span>
@@ -96,14 +96,13 @@ with \(L\) = total edges of the original graph. Shipped IKC short-circuits this 
     </div>
     <div class="graph-canvas" id="g-input-cy"></div>
   </div>
-  <p>The fixture's max core is \(K^* = 4\), held by the \(K_5\) in A. The 3-core adds B's two \(K_4\)'s; the 2-core adds D's 2-cliques, C's 3-cycles, and a chunk of A's periphery; the 1-core adds the dangling pendants. IKC therefore walks four iterations from \(k = K^*\) down to \(k = 1\). At \(k_{\mathrm{floor}} \ge 5\) the loop bails on iteration 0 and emits no clusters. At \(k_{\mathrm{floor}} = 4\) only the \(K_5\) clears. At \(k_{\mathrm{floor}} = 2\) four clusters clear: the \(K_5\), B's bridged 8-block, and both halves of C.</p>
 </section>
 
 <!-- ─────────── Preflight · core decomposition ─────────── -->
 <section class="stage">
   <div class="stage-num">preflight &middot; every node's core number</div>
   <h2>One integer per node: the densest k-core it survives.</h2>
-  <p>Before any peeling iteration runs, every node has a fixed <em>core number</em>: the largest \(k\) such that the node belongs to the \(k\)-core. The 32-node fixture's distribution lives in the bar below. Each iteration of IKC's outer loop targets one \(k\) bin, in descending order. Shipped IKC computes core numbers via NetworKit's standard core decomposition; the JS port mirrors the Batagelj-Zaversnik bucket-queue algorithm (pop-min, decrement neighbours, repeat). Both then take the slice of nodes with core number \(\ge\) max_k as the kcore subgraph for the iteration.</p>
+  <p>Slide \(k\) from 4 down to 1. The 4-core is just the \(K_5\) in A. Each step down adds the next sturdiest substructure to the same picture: \(k\)-cores nest, so a node with core number \(k\) sits inside every smaller core too.</p>
   <div class="graph" id="g-cores">
     <div class="graph-chrome">
       <span>colour = core number; intensity scales with \(k\)</span>
@@ -117,15 +116,13 @@ with \(L\) = total edges of the original graph. Shipped IKC short-circuits this 
     </div>
   </div>
   <div class="kcore-bar" id="g-cores-bar"></div>
-  <p>A node with core number \(k\) belongs to <em>every</em> core down to \(k = 1\), so the \(k\)-core nests inside the \((k - 1)\)-core. IKC exploits the nesting by extracting the \(K^*\)-core first (here just nodes 0..4, the \(K_5\)), removing those nodes, then running core decomposition on the residual graph, where \(K^*\) of the residual drops to 3, and so on. The same nesting gives IKC its determinism: iteration order follows from the input graph and \(k\)-floor.</p>
 </section>
 
 <!-- ─────────── Outer loop · peel + gate ─────────── -->
 <section class="stage">
   <div class="stage-num">outer loop &middot; peel, gate, repeat</div>
   <h2>One core tier per iteration, peeled off the residual.</h2>
-  <p>The IKC outer loop walks the residual graph, not the original. At each iteration: compute \(K^*\) of the current residual; if \(K^* < k_{\mathrm{floor}}\), bail and dump the rest as singletons; otherwise extract the \(K^*\)-core, split it into connected components, and gate each component independently. Surviving components become clusters; their nodes drop out of the residual; the loop iterates with one fewer \(K^*\).</p>
-  <p>The walker below replays each iteration. The main canvas shows the residual graph for that iteration; the highlighted nodes are the current \(K^*\)-core; the side panel lists every connected component the gate visited, with its \(k\)-validity + modularity verdict.</p>
+  <p>Step the walker. Each click runs one iteration: compute \(K^*\) of the residual, extract the \(K^*\)-core, split it into connected components, gate each component on \(k\)-validity, peel the survivors. The loop bails when \(K^* < k_{\mathrm{floor}}\). Slide \(k_{\mathrm{floor}}\) to change the floor; toggle the strict-mod gate to compare partitions.</p>
   <div class="graph" id="g-loop">
     <div class="graph-chrome">
       <span><span class="level-pill" id="g-loop-level">it 0</span><span id="g-loop-status">iteration &middot; &middot;</span></span>
@@ -158,7 +155,7 @@ with \(L\) = total edges of the original graph. Shipped IKC short-circuits this 
   <div id="g-loop-panel"></div>
   <div class="callout">
     <div class="tag">why the residual matters</div>
-    <p>The residual is what makes IKC progress. Each accepted cluster removes its nodes from the residual, which lowers the residual's max core and exposes the next tier. Without the removal step the loop would re-find the same top core every iteration. On this fixture at \(k_{\mathrm{floor}} = 2\): iteration 0 takes the \(K_5\), iteration 1 sees max core 3 (B's bridged 8-block), iteration 2 sees max core 2 (C's two 3-cycles), iteration 3 sees max core 1 and bails.</p>
+    <p>Each accepted cluster removes its nodes from the residual, which lowers the residual's max core and exposes the next tier. Without the removal step the loop would keep finding the same top core every iteration. The walker's iteration counter and \(K^*\) readout track this descent.</p>
   </div>
 </section>
 
@@ -166,7 +163,6 @@ with \(L\) = total edges of the original graph. Shipped IKC short-circuits this 
 <section class="stage">
   <div class="stage-num">result &middot; partition vs planted ground truth</div>
   <h2>The IKC partition next to the planted ground truth.</h2>
-  <p>At default \(k_{\mathrm{floor}} = 2\) on the 32-node fixture, IKC accepts four clusters: the \(K_5\) (5 nodes, k = 4), B's bridged 8-block (8 nodes, k = 3), and both halves of C (3 nodes each, k = 2). 13 nodes drop into the singleton bucket (A's full periphery, D, the outliers). Compare with planted ground-truth: A's periphery + D's modular pair never make it back to their parent cluster; C's two halves are kept separate (planted GT keeps them merged, accepting the disconnect). Singleton clusters never reach the output CSV: the writer strips any cluster of size \(\le 1\) before writing <code>com.csv</code>, so the dropped count above counts nodes filtered at that step plus nodes peeled by failed gates.</p>
   <div class="gt-compare">
     <div class="panel-mini">
       <div class="cap">IKC output (\(k_{\mathrm{floor}}\) = <span id="g-final-k">2</span>) &middot; <span id="g-final-acc">·</span> clusters &middot; <span id="g-final-drop">·</span> dropped</div>
@@ -183,9 +179,8 @@ with \(L\) = total edges of the original graph. Shipped IKC short-circuits this 
   </table>
   <div class="callout">
     <div class="tag">on this fixture, by region</div>
-    <p>At \(k_{\mathrm{floor}} = 2\): A's K_5 surfaces alone in iteration 0, leaving the periphery dangling on edges that no longer count toward k-validity (every periphery node has \(\le 1\) periphery neighbour). B's 8-block survives because the bridge edge \((15, 16)\) still gives every \(K_4\) member a 3rd intra-cluster neighbour. C's two 3-cycles each independently meet \(k = 2\) (every node has 2 neighbours within its triangle). D's two 2-cliques fail (each 2-clique node has only 1 internal neighbour, so they can't reach \(k = 2\)). Outliers 30 + 31 stay singletons by construction.</p>
-    <p>At higher floors the partition shrinks. \(k = 3\) keeps B's 8-block but loses C's triangles. \(k = 4\) keeps only the \(K_5\). \(k = 5\) bails on iteration 0 and writes an empty <code>com.csv</code>, since the fixture has no 5-core. \(k = 2\) is the most permissive setting that still rejects D, the periphery, and the pendants.</p>
-    <p>At lower floors the gate barely filters. \(k = 1\) admits dangling pendants, since a leaf has degree 1 inside its component. \(k = 0\) admits every node, so the partition reduces almost to connected components of the residual. Almost, because the writer still strips singletons before output, so any size-1 component drops out at write time. Connected-component-equivalent in shape, not in size.</p>
+    <p>At \(k_{\mathrm{floor}} = 2\): A's \(K_5\) clears at \(k = 4\) and the periphery never recovers (every periphery node has at most one periphery neighbour). B's 8-block clears at \(k = 3\) thanks to the bridge edge \((15, 16)\), which gives every \(K_4\) member a third intra-cluster neighbour. C's two triangles each meet \(k = 2\) and clear independently. D's two 2-cliques fail (each member has only one internal neighbour). Outliers 30 + 31 stay singletons.</p>
+    <p>Slide the floor on the walker to see the partition shrink at higher \(k\) and barely filter at lower \(k\). At \(k = 0\) the partition reduces almost to connected components of the residual, with size-1 components stripped by the output writer.</p>
   </div>
   <div class="callout warn">
     <div class="tag">shipped vs paper</div>
