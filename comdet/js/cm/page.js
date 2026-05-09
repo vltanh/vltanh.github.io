@@ -14,8 +14,23 @@
   const idxByNode = {};
   F.nodes.forEach(function (id, i) { idxByNode[id] = i; });
 
+  // Seed-in-URL: ?seed=N reproduces a specific run. CM chains TWO RNG
+  // streams: VieCut's MT19937 (mincut backend) + Leiden's igraph MT19937
+  // (recluster). Both seeded to the same value so the trace is fully
+  // reproducible. Default seed=0 matches cm.cpp's hardcoded value.
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlSeed = parseInt(urlParams.get("seed"), 10);
+  const seed = Number.isFinite(urlSeed) ? urlSeed : 0;
+  if (C.MINCUT && C.MINCUT.viecut && typeof C.MINCUT.viecut.setSeed === "function") {
+    C.MINCUT.viecut.setSeed(seed);
+  }
+  if (!urlParams.has("seed")) {
+    urlParams.set("seed", String(seed));
+    window.history.replaceState(null, "", "?" + urlParams.toString());
+  }
+
   const result = C.CM.runCM(F.gt, {
-    criterion: "1log_10(n)", algorithm: "leiden-cpm", resolution: 0.0001, seed: 0,
+    criterion: "1log_10(n)", algorithm: "leiden-cpm", resolution: 0.0001, seed: seed,
   });
 
   // Stage 0: input.

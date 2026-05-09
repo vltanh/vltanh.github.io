@@ -14,6 +14,24 @@
   const idxByNode = {};
   F.nodes.forEach(function (id, i) { idxByNode[id] = i; });
 
+  // Seed-in-URL: ?seed=N reproduces a specific run. WCC has no RNG of
+  // its own but chains VieCut's MT19937 via the mincut adapter, so the
+  // same seed produces the same per-pop bipartition orientation on
+  // tied cuts. Default seed=0 matches mincut_custom.cpp's default.
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlSeed = parseInt(urlParams.get("seed"), 10);
+  const seed = Number.isFinite(urlSeed) ? urlSeed : 0;
+  if (C.MINCUT && C.MINCUT.viecut && typeof C.MINCUT.viecut.setSeed === "function") {
+    C.MINCUT.viecut.setSeed(seed);
+  }
+  // Reflect the seed back into the URL so the link is copy-paste-able
+  // even if no ?seed= was passed. history.replaceState avoids a back-
+  // button trap.
+  if (!urlParams.has("seed")) {
+    urlParams.set("seed", String(seed));
+    window.history.replaceState(null, "", "?" + urlParams.toString());
+  }
+
   const result = C.WCC.runWCC(F.gt, { criterion: "1log_10(n)" });
 
   // Stage 0: input.
