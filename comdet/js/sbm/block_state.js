@@ -27,7 +27,14 @@
     const useDegreeDl = opts.degreeDl !== false && degCorr;
 
     const N = graph.vcount();
-    const E = graph.totalWeight();
+    // E = sum of edge weights (each edge counted once). Per Peixoto
+    // 2017 Eq 23 + graph-tool's get_edges_dl(B, E, g), edges_dl uses
+    // the raw edge-weight sum, not the stub-pair sum (= 2E_w for
+    // undirected, which is graph.totalWeight()). Mirrors cpp tracer's
+    // `g.E += w per edge record`. At level 0 (unweighted) this equals
+    // ecount(); at nested level >=1 each edge carries an e_rs weight,
+    // so this is the multigraph total e_rs sum.
+    const E = graph.totalEdgeWeight();
 
     // Per-vertex degree term sum_i log(k_i!) — appears in DC's
     // P(A|k,e,b) only (Eq 43 numerator). Constant in the partition b
