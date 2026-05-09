@@ -61,7 +61,7 @@
 </header>
 
 <div class="uc-banner">
-  <strong>Draft.</strong> JS port of <a href="https://github.com/MinhyukPark/cm_pipeline" target="_blank" rel="noopener">community-detection/src/ikc/run_ikc.py</a> against the 32-node fixture; gate verdicts traced per iteration. Modularity gate is computed from the paper's formula \(\mathrm{mod}(s) = \ell_s/L - (d_s/2L)^2\) but defaults to canonical's pass-through (<code>POSITIVE_VALUE = 1</code> in shipped <code>modular()</code>); enable the strict gate via the toggle in stage 3.
+  <strong>Draft.</strong> JS port of <a href="https://github.com/MinhyukPark/cm_pipeline" target="_blank" rel="noopener">community-detection/src/ikc/run_ikc.py</a> against the 32-node fixture; gate verdicts traced per iteration. Shipped IKC's modularity gate is hard-coded to always pass; the page recreates the paper formula for display, with a strict-gate toggle in stage 3.
 </div>
 
 <section class="hook">
@@ -70,7 +70,9 @@
   <div class="defs">
     <div><span class="term">k-core</span> the maximal induced subgraph where every node has degree \(\ge k\). Computed by iterative peel: repeatedly remove every node currently below \(k\); whatever survives is the \(k\)-core.</div>
     <div><span class="term">k-validity</span> a candidate cluster \(C\) is \(k\)-valid iff every node in \(C\) has \(\ge k\) other \(C\)-nodes among its neighbours <em>within</em> the kcore subgraph. Stricter than belonging to the \(k\)-core globally: a node in the global \(k\)-core can still fail \(k\)-validity for its component if its \(k\) qualifying neighbours sit in a different component of the kcore subgraph. The \(k\)-core is necessary, not sufficient.</div>
-    <div><span class="term">modularity gate</span> paper formula \(\mathrm{mod}(s) = \ell_s/L - (d_s/2L)^2\) with \(L\) = total edges of the original graph. Canonical runs short-circuit to \(\mathrm{mod} = 1\) (<code>POSITIVE_VALUE</code> in shipped <code>modular()</code>), so the gate is effectively a no-op in shipped IKC. The toggle below switches this off.</div>
+    <div><span class="term">modularity gate</span> paper formula
+\[\mathrm{mod}(s) = \ell_s/L - (d_s/2L)^2\]
+with \(L\) = total edges of the original graph. Shipped IKC short-circuits this to a constant, so the gate is effectively a no-op. The strict-gate toggle in stage 2 switches the constant off and runs the formula.</div>
   </div>
 </section>
 
@@ -101,7 +103,7 @@
 <section class="stage">
   <div class="stage-num">stage 1 &middot; core decomposition</div>
   <h2>Every node has a core number; IKC walks it from the top down.</h2>
-  <p>Before any peeling iteration runs, every node has a fixed <em>core number</em>: the largest \(k\) such that the node belongs to the \(k\)-core. The 32-node fixture's distribution lives in the bar below. Each iteration of IKC's outer loop targets one \(k\) bin, in descending order. Shipped IKC computes core numbers via NetworKit's <code>CoreDecomposition</code>; the JS port mirrors the Batagelj-Zaversnik bucket-queue algorithm (pop-min, decrement neighbours, repeat). Both then take the slice of nodes with core number \(\ge\) max_k as the kcore subgraph for the iteration.</p>
+  <p>Before any peeling iteration runs, every node has a fixed <em>core number</em>: the largest \(k\) such that the node belongs to the \(k\)-core. The 32-node fixture's distribution lives in the bar below. Each iteration of IKC's outer loop targets one \(k\) bin, in descending order. Shipped IKC computes core numbers via NetworKit's standard core decomposition; the JS port mirrors the Batagelj-Zaversnik bucket-queue algorithm (pop-min, decrement neighbours, repeat). Both then take the slice of nodes with core number \(\ge\) max_k as the kcore subgraph for the iteration.</p>
   <div class="graph" id="g-cores">
     <div class="graph-chrome">
       <span>colour = core number; intensity scales with \(k\)</span>
@@ -164,7 +166,7 @@
 <section class="stage">
   <div class="stage-num">stage 3 &middot; final</div>
   <h2>The IKC partition, side by side with planted ground-truth.</h2>
-  <p>At default \(k_{\mathrm{floor}} = 2\) on the 32-node fixture, IKC accepts four clusters: the \(K_5\) (5 nodes, k = 4), B's bridged 8-block (8 nodes, k = 3), and both halves of C (3 nodes each, k = 2). 13 nodes drop into the singleton bucket (A's full periphery, D, the outliers). Compare with planted ground-truth: A's periphery + D's modular pair never make it back to their parent cluster; C's two halves are kept separate (planted GT keeps them merged, accepting the disconnect). Singleton clusters never reach the output CSV: <code>print_clusters</code> strips any cluster of size \(\le 1\) before writing <code>com.csv</code>, so the dropped count above counts nodes filtered at that step plus nodes peeled by failed gates.</p>
+  <p>At default \(k_{\mathrm{floor}} = 2\) on the 32-node fixture, IKC accepts four clusters: the \(K_5\) (5 nodes, k = 4), B's bridged 8-block (8 nodes, k = 3), and both halves of C (3 nodes each, k = 2). 13 nodes drop into the singleton bucket (A's full periphery, D, the outliers). Compare with planted ground-truth: A's periphery + D's modular pair never make it back to their parent cluster; C's two halves are kept separate (planted GT keeps them merged, accepting the disconnect). Singleton clusters never reach the output CSV: the writer strips any cluster of size \(\le 1\) before writing <code>com.csv</code>, so the dropped count above counts nodes filtered at that step plus nodes peeled by failed gates.</p>
   <div class="gt-compare">
     <div class="panel-mini">
       <div class="cap">IKC output (\(k_{\mathrm{floor}}\) = <span id="g-final-k">2</span>) &middot; <span id="g-final-acc">·</span> clusters &middot; <span id="g-final-drop">·</span> dropped</div>
@@ -183,7 +185,7 @@
     <div class="tag">on this fixture, by region</div>
     <p>At \(k_{\mathrm{floor}} = 2\): A's K_5 surfaces alone in iteration 0, leaving the periphery dangling on edges that no longer count toward k-validity (every periphery node has \(\le 1\) periphery neighbour). B's 8-block survives because the bridge edge \((15, 16)\) still gives every \(K_4\) member a 3rd intra-cluster neighbour. C's two 3-cycles each independently meet \(k = 2\) (every node has 2 neighbours within its triangle). D's two 2-cliques fail (each 2-clique node has only 1 internal neighbour, so they can't reach \(k = 2\)). Outliers 30 + 31 stay singletons by construction.</p>
     <p>Slide \(k_{\mathrm{floor}}\) up: at \(k = 3\), B's 8-block survives but C's triangles fall through; at \(k = 4\), only the \(K_5\) makes it; at \(k = 5\), nothing does (the fixture has no 5-core), so iteration 0 bails immediately and <code>com.csv</code> writes empty. Slide it down to \(k = 2\) (the floor of this slider) is the sweet spot: maximally permissive while still rejecting D, the periphery, and the pendants.</p>
-    <p>Below the slider: at \(k = 1\) the loop runs all the way to a 1-core residual, so dangling pendants pass \(k\)-validity (a leaf has degree 1 \(\ge\) 1 inside its component); at \(k = 0\) the gate is trivially true for every node, so the partition reduces almost to "connected components of the residual". Almost, because <code>print_clusters</code> still strips singletons before writing <code>com.csv</code>, so any size-1 component (e.g. an isolated outlier) drops out at output time. Connected-component-equivalent in shape; not in size.</p>
+    <p>Below the slider: at \(k = 1\) the loop runs all the way to a 1-core residual, so dangling pendants pass \(k\)-validity (a leaf has degree 1 \(\ge\) 1 inside its component); at \(k = 0\) the gate is trivially true for every node, so the partition reduces almost to "connected components of the residual". Almost, because the writer still strips singletons before writing <code>com.csv</code>, so any size-1 component (e.g. an isolated outlier) drops out at output time. Connected-component-equivalent in shape; not in size.</p>
   </div>
   <div class="callout warn">
     <div class="tag">shipped vs paper</div>
