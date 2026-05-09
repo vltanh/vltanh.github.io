@@ -190,6 +190,29 @@
       }
       ss.innerHTML = "accepted: " + acc + " &middot; dropped: " + drop;
     }
+    // Per-iter readout strip.
+    const rn = document.getElementById("g-loop-rn");
+    const rm = document.getElementById("g-loop-rm");
+    const kcm = document.getElementById("g-loop-kcm");
+    const kept = document.getElementById("g-loop-kept");
+    const term = document.getElementById("g-loop-term");
+    if (!ev) {
+      if (rn) rn.textContent = F.nodes.length;
+      if (rm) rm.textContent = F.edges.length;
+      if (kcm) kcm.textContent = "·";
+      if (kept) kept.textContent = "·";
+      if (term) term.textContent = "·";
+    } else {
+      if (rn) rn.textContent = ev.residualNodes.length;
+      if (rm) rm.textContent = ev.residualEdges.length;
+      if (kcm) kcm.textContent = ev.bailed ? 0 : ev.kcoreEdges.length;
+      if (kept) kept.textContent = ev.accepted.length;
+      if (term) {
+        if (ev.bailed) term.textContent = "K* < k_floor";
+        else if (idx === result.iterations.length) term.textContent = "residual empty";
+        else term.textContent = "running";
+      }
+    }
     renderLoopPanel(idx, ev, acceptedSoFar);
   }
 

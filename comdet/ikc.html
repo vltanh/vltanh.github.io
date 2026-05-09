@@ -78,7 +78,7 @@
   <p>The structure is dual to most CD methods. Louvain and Leiden grow communities by absorbing neighbours; IKC prunes communities by stripping their thinly-attached members. Coverage is loose: anything below \(k\)-validity drops out of the partition entirely (singletons or dropped nodes), so IKC's recall is the lowest in the gallery. Per-cluster <em>core density</em> is the highest: every accepted cluster's induced minimum degree is \(\ge k\) by construction, so it is the sturdiest in the gallery against further peeling. The Wedell paper situates IKC as Stage 1 of a four-stage <em>kmp-clustering</em> pipeline (\(k\)-validity, modularity, and \(p\)-validity for noncore augmentation); this page covers Stage 1 only.</p>
   <div class="defs">
     <div><span class="term">k-core</span> the maximal induced subgraph where every node has degree \(\ge k\). Computed by iterative peel: repeatedly remove every node currently below \(k\); whatever survives is the \(k\)-core.</div>
-    <div><span class="term">k-validity</span> a candidate cluster \(C\) is \(k\)-valid iff every node in \(C\) has \(\ge k\) other \(C\)-nodes among its neighbours <em>within</em> the kcore subgraph (run_ikc.py:264-275). Stricter than belonging to the \(k\)-core globally.</div>
+    <div><span class="term">k-validity</span> a candidate cluster \(C\) is \(k\)-valid iff every node in \(C\) has \(\ge k\) other \(C\)-nodes among its neighbours <em>within</em> the kcore subgraph (run_ikc.py:266-277). Stricter than belonging to the \(k\)-core globally: a node in the global \(k\)-core can still fail \(k\)-validity for its component if its \(k\) qualifying neighbours sit in a different component of the kcore subgraph. The \(k\)-core is necessary, not sufficient.</div>
     <div><span class="term">modularity gate</span> paper formula \(\mathrm{mod}(s) = \ell_s/L - (d_s/2L)^2\) with \(L\) = total edges of the original graph. Canonical runs short-circuit to \(\mathrm{mod} = 1\) (<code>POSITIVE_VALUE</code> in <code>run_ikc.py:280</code>), so the gate is effectively a no-op in shipped IKC. The toggle below switches this off.</div>
   </div>
 </section>
@@ -102,7 +102,7 @@
 <section class="stage">
   <div class="stage-num">stage 1 &middot; core decomposition</div>
   <h2>Every node has a core number; IKC walks it from the top down.</h2>
-  <p>Before any peeling iteration runs, every node has a fixed <em>core number</em>: the largest \(k\) such that the node belongs to the \(k\)-core. The 32-node fixture's distribution lives in the bar below. Each iteration of IKC's outer loop targets one \(k\) bin, in descending order.</p>
+  <p>Before any peeling iteration runs, every node has a fixed <em>core number</em>: the largest \(k\) such that the node belongs to the \(k\)-core. The 32-node fixture's distribution lives in the bar below. Each iteration of IKC's outer loop targets one \(k\) bin, in descending order. Shipped IKC computes core numbers via NetworKit's <code>CoreDecomposition</code> inside <code>kc()</code> at run_ikc.py:224-263; the JS port mirrors the Batagelj-Zaversnik bucket-queue algorithm at <code>ikc.js:54</code> (pop-min, decrement neighbours, repeat). Both then take the slice of nodes with core number \(\ge\) max_k as the kcore subgraph for the iteration.</p>
   <div class="graph" id="g-cores">
     <div class="graph-chrome">
       <span>colour = core number; intensity scales with \(k\)</span>
@@ -123,7 +123,7 @@
 <section class="stage">
   <div class="stage-num">stage 2 &middot; outer loop</div>
   <h2>Compute the residual's max-core, peel it, gate every component.</h2>
-  <p>The IKC outer loop walks the residual graph, not the original. At each iteration: compute \(K^*\) of the current residual; if \(K^* < k_{\mathrm{floor}}\), bail and dump the rest as singletons; otherwise extract the \(K^*\)-core, split it into connected components, and gate each component independently. Surviving components become clusters; their nodes drop out of the residual; the loop iterates with one fewer \(K^*\).</p>
+  <p>The IKC outer loop walks the residual graph, not the original (run_ikc.py:83-221). At each iteration: compute \(K^*\) of the current residual; if \(K^* < k_{\mathrm{floor}}\), bail and dump the rest as singletons; otherwise extract the \(K^*\)-core, split it into connected components, and gate each component independently. Surviving components become clusters; their nodes drop out of the residual; the loop iterates with one fewer \(K^*\).</p>
   <p>The walker below replays each iteration. The main canvas shows the residual graph for that iteration; the highlighted nodes are the current \(K^*\)-core; the side panel lists every connected component the gate visited, with its \(k\)-validity + modularity verdict.</p>
   <div class="graph" id="g-loop">
     <div class="graph-chrome">
@@ -131,6 +131,12 @@
       <span class="right" id="g-loop-stats">accepted: &middot; &middot; dropped: &middot;</span>
     </div>
     <div class="graph-canvas" id="g-loop-cy"></div>
+    <div class="q-readout" id="g-loop-readout">
+      <span class="item">residual <b id="g-loop-rn">&middot;</b>n / <b id="g-loop-rm">&middot;</b>m</span>
+      <span class="item">kcore <b id="g-loop-kcm">&middot;</b>m</span>
+      <span class="item">kept this iter <b id="g-loop-kept">&middot;</b></span>
+      <span class="item">terminated <b id="g-loop-term">&middot;</b></span>
+    </div>
     <div class="widget-row">
       <button class="btn" id="g-loop-reset" type="button">reset</button>
       <button class="btn" id="g-loop-prev" type="button">back</button>
@@ -153,13 +159,37 @@
     <div class="tag">why the residual matters</div>
     <p>If IKC ran at every \(k\) on the original graph instead of the residual, every iteration would re-find the same \(K^*\)-core and the loop would not progress. Removing accepted clusters between iterations is what shifts the residual's \(K^*\) downward + lets lower-\(k\) structure surface. On this fixture: iteration 0 at \(k_{\mathrm{floor}} = 2\) yanks \(K_5\) out; iteration 1 sees the residual's max core = 3 (B's bridged 8-block); iteration 2 sees max core = 2 (C's two 3-cycles); iteration 3 finds max core = 1 and bails because that's below \(k_{\mathrm{floor}}\).</p>
   </div>
+  <div class="callout">
+    <div class="tag">invariants at every iteration boundary</div>
+    <ul>
+      <li>Accepted clusters are pairwise disjoint, and once a node lands in one it never returns to the residual.</li>
+      <li>Every accepted cluster has size \(\ge 2\) and is \(k\)-valid: every member has \(\ge k\) neighbours <em>inside</em> the cluster.</li>
+      <li>Each iteration's \(K^*\) is monotonically non-increasing: \(K^*(\mathrm{it} + 1) \le K^*(\mathrm{it})\), strictly less whenever any node is peeled.</li>
+      <li>Every accepted cluster carries <code>modularity = 1</code> in the output column (dead-gate placeholder from <code>run_ikc.py:280</code>), regardless of its actual paper-modularity.</li>
+    </ul>
+  </div>
+  <div class="callout">
+    <div class="tag">variable name map &middot; canonical to JS to page</div>
+    <table class="cand-table" style="margin-top:.4rem">
+      <thead><tr><th>run_ikc.py</th><th>ikc.js</th><th>this page</th></tr></thead>
+      <tbody>
+        <tr><td><code>graph</code></td><td><code>remG</code> + <code>remaining[]</code></td><td>residual</td></tr>
+        <tr><td><code>max_k</code></td><td><code>maxK</code></td><td>\(K^*\)</td></tr>
+        <tr><td><code>subgraph</code></td><td><code>kcoreMask</code></td><td>\(K^*\)-core</td></tr>
+        <tr><td><code>component</code></td><td><code>compLocal</code></td><td>candidate cluster</td></tr>
+        <tr><td><code>final_clusters</code></td><td><code>accepted</code></td><td>accepted clusters</td></tr>
+        <tr><td><code>singletons</code></td><td><code>dropped</code></td><td>unclustered nodes</td></tr>
+        <tr><td><code>L</code></td><td><code>fullL</code></td><td>\(L\) (full-graph edges)</td></tr>
+      </tbody>
+    </table>
+  </div>
 </section>
 
 <!-- ─────────── Stage 3 · Final ─────────── -->
 <section class="stage">
   <div class="stage-num">stage 3 &middot; final</div>
   <h2>The IKC partition, side by side with planted ground-truth.</h2>
-  <p>At default \(k_{\mathrm{floor}} = 2\) on the 32-node fixture, IKC accepts four clusters: the \(K_5\) (5 nodes, k = 4), B's bridged 8-block (8 nodes, k = 3), and both halves of C (3 nodes each, k = 2). 13 nodes drop into the singleton bucket (A's full periphery, D, the outliers). Compare with planted ground-truth: A's periphery + D's modular pair never make it back to their parent cluster; C's two halves are kept separate (planted GT keeps them merged, accepting the disconnect).</p>
+  <p>At default \(k_{\mathrm{floor}} = 2\) on the 32-node fixture, IKC accepts four clusters: the \(K_5\) (5 nodes, k = 4), B's bridged 8-block (8 nodes, k = 3), and both halves of C (3 nodes each, k = 2). 13 nodes drop into the singleton bucket (A's full periphery, D, the outliers). Compare with planted ground-truth: A's periphery + D's modular pair never make it back to their parent cluster; C's two halves are kept separate (planted GT keeps them merged, accepting the disconnect). Singleton clusters never reach the output CSV: <code>print_clusters</code> at run_ikc.py:45-80 strips any cluster of size \(\le 1\) before writing <code>com.csv</code>, so the dropped count above counts nodes filtered at that step plus nodes peeled by failed gates.</p>
   <div class="gt-compare">
     <div class="panel-mini">
       <div class="cap">IKC output (\(k_{\mathrm{floor}}\) = <span id="g-final-k">2</span>) &middot; <span id="g-final-acc">·</span> clusters &middot; <span id="g-final-drop">·</span> dropped</div>
@@ -177,11 +207,23 @@
   <div class="callout">
     <div class="tag">on this fixture, by region</div>
     <p>At \(k_{\mathrm{floor}} = 2\): A's K_5 surfaces alone in iteration 0, leaving the periphery dangling on edges that no longer count toward k-validity (every periphery node has \(\le 1\) periphery neighbour). B's 8-block survives because the bridge edge \((15, 16)\) still gives every \(K_4\) member a 3rd intra-cluster neighbour. C's two 3-cycles each independently meet \(k = 2\) (every node has 2 neighbours within its triangle). D's two 2-cliques fail (each 2-clique node has only 1 internal neighbour, so they can't reach \(k = 2\)). Outliers 30 + 31 stay singletons by construction.</p>
-    <p>Slide \(k_{\mathrm{floor}}\) up: at \(k = 3\), B's 8-block survives but C's triangles fall through; at \(k = 4\), only the \(K_5\) makes it; at \(k = 5\), nothing does (the fixture has no 5-core). Slide it down to \(k = 2\) (the floor of this slider) is the sweet spot: maximally permissive while still rejecting D, the periphery, and the pendants.</p>
+    <p>Slide \(k_{\mathrm{floor}}\) up: at \(k = 3\), B's 8-block survives but C's triangles fall through; at \(k = 4\), only the \(K_5\) makes it; at \(k = 5\), nothing does (the fixture has no 5-core), so iteration 0 bails immediately and <code>com.csv</code> writes empty. Slide it down to \(k = 2\) (the floor of this slider) is the sweet spot: maximally permissive while still rejecting D, the periphery, and the pendants.</p>
+    <p>Below the slider: at \(k = 1\) the loop runs all the way to a 1-core residual, so dangling pendants pass \(k\)-validity (a leaf has degree 1 \(\ge\) 1 inside its component); at \(k = 0\) the gate is trivially true for every node, so the partition reduces almost to "connected components of the residual". Almost, because <code>print_clusters</code> at run_ikc.py:45-80 still strips singletons before writing <code>com.csv</code>, so any size-1 component (e.g. an isolated outlier) drops out at output time. Connected-component-equivalent in shape; not in size.</p>
   </div>
   <div class="callout warn">
-    <div class="tag">caveat &middot; modularity gate is a no-op</div>
-    <p>The shipped <code>run_ikc.py</code> hard-codes the modularity gate to <code>POSITIVE_VALUE = 1</code> (line 280), short-circuiting the paper's \(\mathrm{mod}(s) = \ell_s/L - (d_s/2L)^2\) formula. In practice IKC's only filter is \(k\)-validity. The page computes and displays the paper's \(\mathrm{mod}(s)\) value in stage 2 for diagnostic interest; the "strict mod gate" toggle in that stage enforces \(\mathrm{mod}(s) > 0\). On the 32-node fixture every accepted cluster has positive modularity already, so the strict gate does not change the partition. On larger benchmarks it would.</p>
+    <div class="tag">shipped vs paper &middot; four divergences</div>
+    <p>The shipped <code>run_ikc.py</code> implements a strict subset of Wedell 2022. Four places where the binary diverges from the paper:</p>
+    <ol>
+      <li><em>Modularity gate is dead.</em> <code>modular()</code> at run_ikc.py:280-282 begins with <code>return POSITIVE_VALUE = 1</code>, so the paper's \(\mathrm{mod}(s) = \ell_s/L - (d_s/2L)^2\) at run_ikc.py:284-296 is never reached. \(k\)-validity is the only real filter. The page computes the paper formula in stage 2 for display only; the "strict mod gate" toggle there enforces \(\mathrm{mod}(s) > 0\) for educational comparison (page-only; canonical never runs it). On this fixture every accepted cluster has positive paper-modularity, so the toggle leaves the partition unchanged; on larger benchmarks it shifts.</li>
+      <li><em>m-validity is never enforced.</em> Paper §2.2.2 defines a cluster as m-valid iff its core-induced subgraph is connected and has positive modularity. The connectedness half is satisfied by construction since the gate input is already a weakly-connected component of the kcore subgraph. The modularity half rides on the dead gate above, so the m-valid predicate as a whole reduces to "connected", which is always true.</li>
+      <li><em>p-validity is not implemented.</em> Paper §2.2.3 defines a four-stage <em>kmp-clustering</em> pipeline; p-validity is the Stage 3 noncore augmentation that grows each accepted core cluster by attaching outside nodes whose connection to the cluster meets a separate threshold. Shipped <code>src/ikc/</code> covers Stage 1 only, so every accepted cluster is exactly its core; no peripheral nodes get reattached.</li>
+      <li><em>Modularity column in <code>com.csv</code> is a placeholder.</em> Each accepted cluster is written with <code>modularity = 1</code>, the dead-gate constant, not a measurement. Downstream consumers reading the column see 1 for every cluster regardless of structure.</li>
+    </ol>
+  </div>
+  <div class="callout">
+    <div class="tag">what the page actually runs</div>
+    <p>The JavaScript kernel under this page is a code-faithful port of <a href="https://github.com/MinhyukPark/cm_pipeline" target="_blank" rel="noopener">community-detection/src/ikc/run_ikc.py</a>. Per-step verification is a 2-leg pipeline: an instrumented Python tracer (NetworKit canonical) and the JS kernel both emit the same per-step JSON trace; a diff harness walks the two streams in lockstep and bit-compares every numeric value. The pipeline closes 63 of 63 cells across the cd_stress_tiers panel (T1 + T2 + T3, n = 800..23k, \(k_{\mathrm{floor}} \in \{2, 3, 5, 8, 10\}\)), with 0 mismatches over 10,481 cumulative records. IKC has no RNG, so the playbook's million-record FP/seed bar collapses; the operative bar is full-panel byte-equal under matching input.</p>
+    <p>Two canonical-source quirks worth knowing. <code>format_graph</code> at run_ikc.py:303-330 promotes the input to a directed weighted graph with weight = <code>degreeIn(u)</code>; the weight is never read by the kernel, and \(k\)-validity sums <code>degreeIn + degreeOut</code> so each undirected edge counts once. Same routine calls <code>removeSelfLoops()</code> at line 326 before the kernel ever sees the graph, so self-loops are stripped at the boundary; the JS port mirrors this in <code>compactSubgraph</code>. Container-iteration order on the kcore subgraph is canonicalized to lex-smallest BFS on both sides, which is what allowed the H-row of the audit grid to close.</p>
   </div>
 </section>
 
