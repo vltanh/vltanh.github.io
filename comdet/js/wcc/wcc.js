@@ -63,6 +63,17 @@
           seen[w] = 1; queue.push(w);
         }
       }
+      // [UPSTREAM constrained.h:393-419 GetConnectedComponents] cpp
+      // bucket-fills via `for node_id = 0..vcount-1` and pushes node_id
+      // into `component_id_to_member_vector_map[cid]`. Each component's
+      // member vector is therefore in NODE-ASC order (per induced-subgraph
+      // local id, which is ASC of input vertex selector). VieCut's local
+      // id 0 = nodeIds[0] in the adapter, so component vertex order
+      // determines RNG-input ordering through the cactus build. Without
+      // this sort, JS feeds VieCut in BFS-discovery order while cpp feeds
+      // ASC, producing different cactus origin-mapping at chained pops
+      // (audit row L for WCC).
+      comp.sort(function (a, b) { return a - b; });
       comps.push(comp);
     }
     return comps;

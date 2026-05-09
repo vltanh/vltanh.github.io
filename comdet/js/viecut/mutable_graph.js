@@ -424,9 +424,18 @@
     this.node_in_cut.pop();
     this.contained_in_this.pop();
 
-    for (let ed = 0; ed < this.vertices[target].length; ed++) {
-      const re = this.vertices[target][ed];
-      this.vertices[re.target][re.rev].target = target;
+    // [UPSTREAM mutable_graph.h:647-650] cpp iterates edges_of(target) to
+    // remap reverse-edge .target pointers from the old back-position to the
+    // new target slot. When target == lastIdx (the deleted vertex WAS the
+    // back), no swap happened and vertices[target] is past-the-end after
+    // pop_back; cpp's loop then dereferences UB memory. JS .pop() makes the
+    // slot undefined and crashes. The loop is a no-op in this case (no
+    // vertex moved); skip it explicitly.
+    if (target !== lastIdx) {
+      for (let ed = 0; ed < this.vertices[target].length; ed++) {
+        const re = this.vertices[target][ed];
+        this.vertices[re.target][re.rev].target = target;
+      }
     }
 
     this._internalDeleteEdge(node, del_id);
