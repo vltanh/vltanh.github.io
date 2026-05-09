@@ -5,11 +5,57 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>VieCut &middot; cactus mincut | Community Detection Algorithms</title>
 <link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐖</text></svg>">
-<meta name="description" content="VieCut cactus mincut explainer. The mincut backend WCC + CM use under the hood.">
+<meta name="description" content="VieCut cactus mincut explainer + walker. The mincut backend WCC + CM use under the hood.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="./shared.css">
+<style>
+  /* viecut-walker scoped styles */
+  .vc-chips { display:flex; flex-wrap:wrap; gap:6px; margin:14px 0 18px; }
+  .vc-chip { padding:6px 12px; border-radius:14px; border:1px solid #c8c0b0; background:#fafaf6;
+              font: 500 13px "IBM Plex Sans", system-ui, sans-serif; cursor:pointer; }
+  .vc-chip:hover { background:#f0eee5; }
+  .vc-chip-on { background:#d6c89a; border-color:#a5946a; }
+  .vc-chip-skip { color:#aaa; cursor:not-allowed; background:#f5f5f0; }
+  .vc-walker-grid { display:grid; grid-template-columns: 1.2fr 1fr; gap:18px; margin-top:12px; }
+  @media (max-width: 760px) { .vc-walker-grid { grid-template-columns: 1fr; } }
+  .vc-pane { border:1px solid #d8d2c2; border-radius:8px; background:#fcfaf3; padding:10px; }
+  .vc-pane h4 { margin:2px 0 6px; font-size:13px; color:#666; font-weight:600;
+                text-transform:uppercase; letter-spacing:0.06em; }
+  .vc-graph, .vc-cactus { width:100%; height:auto; display:block; background:#fefcf5; border-radius:6px; }
+  .vc-edge { stroke:#9b9580; stroke-width:1.4; }
+  .vc-edge-hot { stroke:#c46a3b; stroke-width:2.6; }
+  .vc-cedge { stroke:#5a8a52; stroke-width:1.8; }
+  .vc-node { fill:#e8e2cf; stroke:#7d6f4d; stroke-width:1.4; }
+  .vc-node-active { fill:#d6a649; stroke:#7d4f12; stroke-width:2.4; }
+  .vc-node-uni { fill:#a8c590; stroke:#3f6a35; }
+  .vc-node-in { fill:#7b9bd6; stroke:#2c4a86; }
+  .vc-node-out { fill:#bd8da0; stroke:#7c2c4a; }
+  .vc-cnode { fill:#eaf4e3; stroke:#5a8a52; stroke-width:1.6; }
+  .vc-label, .vc-clabel { font: 600 11px "IBM Plex Sans"; fill:#222; pointer-events:none; }
+  .vc-csub { font: 400 9px "IBM Plex Sans"; fill:#5a7a4d; pointer-events:none; }
+  .vc-empty { color:#999; font-style:italic; padding:20px; text-align:center; }
+  .vc-controls { display:flex; align-items:center; gap:8px; margin:10px 0 6px; flex-wrap:wrap; }
+  .vc-btn { padding:5px 12px; border:1px solid #b8a886; border-radius:5px; background:#fff;
+            font:500 13px "IBM Plex Sans"; cursor:pointer; }
+  .vc-btn:hover { background:#f0eee5; }
+  .vc-btn-pri { background:#d6c89a; }
+  .vc-step-label { font:500 12px "IBM Plex Sans"; color:#666; margin-left:auto; }
+  .vc-phase-label { font:600 14px "IBM Plex Sans"; color:#7d4f12; margin:6px 0; }
+  .vc-prose p { margin:6px 0; line-height:1.5; font-size:14px; }
+  .vc-prose ul { margin:4px 0 8px 18px; font-size:13px; }
+  .vc-prose code { background:#f0eee5; padding:1px 5px; border-radius:3px; font-size:12px; }
+  .vc-tag { font-size:10px; padding:1px 6px; border-radius:9px; margin-left:4px; }
+  .vc-tag-go { background:#a8c590; color:#1f3818; }
+  .vc-state-row { font:12px "IBM Plex Mono", monospace; margin:3px 0; color:#444; }
+  .vc-cell { display:inline-block; padding:1px 5px; margin:1px; background:#f0eee5;
+              border-radius:3px; }
+  .vc-summary { margin-top:14px; padding:10px 14px; background:#f5f1e0; border-left:3px solid #7d4f12;
+                font-size:14px; border-radius:4px; }
+  .vc-edges { margin:8px 0; padding:8px 12px; background:#f5f1e0; border-left:3px solid #c46a3b;
+              border-radius:4px; font-size:13px; }
+</style>
 </head>
 <body>
 <main class="page">
@@ -44,7 +90,6 @@
     <li><strong>Pendant</strong>: peel off one isolated node + leave the rest connected. Also a cut of 1, but useless.</li>
   </ul>
   <p>If the cluster has additional pendants or whiskers (rare in dense parts of social networks; common in sparse parts), the mincut between any pendant and the bulk is also 1. VieCut's tie-break picks the balanced cut so WCC's recursion makes structural progress instead of stripping a node per round.</p>
-  <p>The 32-node fixture's cluster A is a small example. A's mincut is 1 (multiple cuts achieve it: the periphery's bridges to the K_5 core all have cardinality 1). With Stoer-Wagner, you peel one periphery node per round; recursion ends after several rounds. With VieCut + balanced selection, you split the periphery from the core in one move. Same final partition (both end at the K_5 core as the well-connected residual when the threshold is \(\log_{10}(n)\)) but different intermediate trace.</p>
 </section>
 
 <section class="hook">
@@ -56,7 +101,6 @@
     <li>Each <em>cycle</em> in T represents a family of cuts of cardinality <code>k</code> that share two edges of the cycle.</li>
   </ul>
   <p>So if you find any minimum cut by classical Stoer-Wagner-like contraction, you've found one edge of the cactus. To find them all (so you can pick the most balanced one), you contract the discovered min-cut sides + recurse. VieCut's <code>cactus_mincut</code> is a careful implementation of this recursive cactus build, with engineering for cache locality, edge contraction efficiency, and parallelism.</p>
-  <p>On the gallery's 32-node fixture this is overkill; on a million-node co-citation network it is what makes WCC tractable.</p>
 </section>
 
 <section class="algo-meta">
@@ -68,6 +112,85 @@
     <span><span class="ref-label">used by</span><a href="./cm.html">CM</a></span>
   </div>
   <p class="algo-prov">Byte-equal vs VieCut/build/mincut (1700 cells, 1,033,212 records, 0 mismatches).</p>
+</section>
+
+<!-- ─────────── Walker stage 0 · fixture ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 0 &middot; the example fixture</div>
+  <h2>An 8-node graph designed to exercise every phase.</h2>
+  <p>The cactus pipeline has seven phases. To see them all on one canvas, the walker uses a small hand-tuned graph: two K3 triangles {0,1,2} and {3,4,5} plus a bridge edge (2,3), plus pendant nodes 6 (attached to 2) and 7 (attached to 3), plus two cross-edges (0,4) and (1,5) so the push-relabel max-flow has interesting work to do. Twelve edges total. The global minimum cut is 1 (cut the pendant edge or the bridge).</p>
+</section>
+
+<!-- ─────────── Walker stage 1 · phase walker ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 1 &middot; phase walker</div>
+  <h2>Step through the cactus pipeline.</h2>
+  <p>Each event below corresponds to one logged step inside the canonical implementation. Click a phase chip to jump; advance with the controls.</p>
+
+  <div id="g-chips" class="vc-chips"></div>
+  <div id="g-phase-label" class="vc-phase-label">Setup</div>
+
+  <div class="vc-walker-grid">
+    <div class="vc-pane">
+      <h4>input graph (state per step)</h4>
+      <div id="g-input"></div>
+      <div class="vc-controls">
+        <button class="vc-btn" type="button" id="g-first">|&laquo;</button>
+        <button class="vc-btn" type="button" id="g-prev">&larr; prev</button>
+        <button class="vc-btn vc-btn-pri" type="button" id="g-next">next &rarr;</button>
+        <button class="vc-btn" type="button" id="g-last">&raquo;|</button>
+        <span class="vc-step-label">step <b id="g-step-label">1 / 1</b></span>
+      </div>
+    </div>
+    <div class="vc-pane">
+      <h4>narration + state</h4>
+      <div id="g-prose" class="vc-prose"></div>
+      <div id="g-state" class="vc-prose" style="margin-top:8px"></div>
+    </div>
+  </div>
+
+  <div class="vc-walker-grid" style="margin-top:14px">
+    <div class="vc-pane">
+      <h4>cactus tree (final, emitted after Phase E)</h4>
+      <div id="g-cactus"></div>
+    </div>
+    <div class="vc-pane">
+      <h4>summary</h4>
+      <div id="g-summary" class="vc-summary"></div>
+    </div>
+  </div>
+</section>
+
+<section class="stage">
+  <div class="stage-num">edge cases</div>
+  <h2>Branches the walker may not show.</h2>
+  <details>
+    <summary><strong>What if mincut = 0?</strong></summary>
+    <p>The graph is already disconnected. <code>cactus_mincut</code> short-circuits before Phase E and returns the existing components as the partition. The cactus build never runs.</p>
+  </details>
+  <details>
+    <summary><strong>What if n = 2?</strong></summary>
+    <p>Recursion base case in <code>internalRecursiveCactus</code>. A 2-node graph has exactly one cut, so the cactus is just two nodes joined by a single edge of weight = mincut.</p>
+  </details>
+  <details>
+    <summary><strong>What if the singleton-cut variant fires?</strong></summary>
+    <p>When push-relabel finds <code>max_flow = mincut</code>, the SCC decomposition produces 2 components, AND one of <code>deg(s) = mincut</code> or <code>deg(t) = mincut</code> holds, the cactus build takes a special branch. The full algorithm contracts (s,t), recursively builds the cactus on the contracted graph, then attaches a fresh node holding the contracted-side originals. This preserves the singleton's cut as a tree edge.</p>
+  </details>
+  <details>
+    <summary><strong>What if shrinkage is below 1%?</strong></summary>
+    <p>The outer-while loop in <code>findAllMincuts</code> exits. The contraction phases (A through D) stop reducing the graph, so the algorithm hands off to Phase E (recursive cactus) to finish.</p>
+  </details>
+</section>
+
+<section class="stage">
+  <div class="stage-num">used by</div>
+  <h2>VieCut's place in the gallery.</h2>
+  <p>VieCut is a primitive: not a clustering algorithm itself, but the engine other post-processors call when they need exact minimum cuts. In this gallery:</p>
+  <ul>
+    <li><a href="./wcc.html">WCC</a> calls VieCut on every cluster to check its well-connectedness threshold + recursively split clusters that fail.</li>
+    <li><a href="./cm.html">CM</a> does the same and also re-clusters each half with the base algorithm (Leiden / Louvain).</li>
+  </ul>
+  <p>Both pipelines are byte-equal verified against the canonical <code>constrained-clustering</code> binary because VieCut is byte-equal verified against <code>VieCut/build/mincut</code>.</p>
 </section>
 
 <footer class="ack">
@@ -84,7 +207,31 @@ window.MathJax = {
   chtml: { scale: 1.0 }
 };
 </script>
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+<!-- VieCut kernel (byte-equal verified) + page glue. -->
+<script src="./js/viecut/random.js"></script>
+<script src="./js/viecut/union_find.js"></script>
+<script src="./js/viecut/node_bucket_pq.js"></script>
+<script src="./js/viecut/fifo_node_bucket_pq.js"></script>
+<script src="./js/viecut/mutable_graph.js"></script>
+<script src="./js/viecut/cactus_graph.js"></script>
+<script src="./js/viecut/balanced_cut_dfs.js"></script>
+<script src="./js/viecut/most_balanced.js"></script>
+<script src="./js/viecut/minimum_cut_helpers.js"></script>
+<script src="./js/viecut/contract_graph.js"></script>
+<script src="./js/viecut/contraction_tests.js"></script>
+<script src="./js/viecut/scc.js"></script>
+<script src="./js/viecut/noi_minimum_cut.js"></script>
+<script src="./js/viecut/viecut_heuristic.js"></script>
+<script src="./js/viecut/push_relabel.js"></script>
+<script src="./js/viecut/heavy_edges.js"></script>
+<script src="./js/viecut/graph_modification.js"></script>
+<script src="./js/viecut/recursive_cactus.js"></script>
+<script src="./js/viecut/cactus_mincut.js"></script>
+<script src="./js/viecut/index.js"></script>
+<script src="./js/viecut/page.js"></script>
 
 </body>
 </html>
