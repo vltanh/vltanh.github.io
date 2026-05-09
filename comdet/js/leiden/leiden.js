@@ -467,7 +467,15 @@
         const selfTerm = correctSelfLoops ? 1 : 0;
         const possNew = nv * (2 * csizeNew + nv - selfTerm);
         const possOldDelta = nv * (2 * (csizeOld - nv) + nv - selfTerm);
-        const diff = (newEdges + sw) - (oldEdges + sw)
+        // libleidenalg CPMVertexPartition.cpp:104-110: diff_old subtracts
+        // self_weight (-sw); diff_new adds self_weight (+sw); diff = diff_new
+        // - diff_old → effective +2*sw contribution. Earlier JS coded
+        // (oldEdges + sw) which cancels sw on undirected paths with
+        // node_self_weight > 0 (collapsed-graph aggregation regime). At
+        // resolution = 0.0001, the missing +2*sw term flips sign on
+        // beneficial super-node merges (e.g. CM's per-side recluster on
+        // n=8 in-side merging {6,7} into {0..5} loses sign without it).
+        const diff = (newEdges + sw) - (oldEdges - sw)
                    - this.resolution * (possNew - possOldDelta);
         return directed ? diff : diff / 2.0;
       },
