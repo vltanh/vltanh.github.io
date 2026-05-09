@@ -624,13 +624,18 @@ body {{
   border: 1px solid rgba(139,117,65,.4);
   box-shadow: 0 1px 2px rgba(27,32,51,.15);
 }}
-.stage-num {{
+.stage-card .stage-num {{
   font-family: 'Caveat Brush', cursive;
   font-size: 1.6rem;
   color: var(--cobalt);
   letter-spacing: .04em;
   transform: rotate(-2deg);
   display: inline-block;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  text-transform: none;
 }}
 .stage-name {{
   font-family: 'Special Elite', 'Courier New', monospace;
