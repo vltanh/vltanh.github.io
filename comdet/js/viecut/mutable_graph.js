@@ -260,9 +260,15 @@
     this.partition_index.pop();
     this.node_in_cut.pop();
     this.contained_in_this.pop();
-    for (let ed = 0; ed < this.vertices[target].length; ed++) {
-      const re = this.vertices[target][ed];
-      this.vertices[re.target][re.rev].target = target;
+    // [UPSTREAM mutable_graph.h:516-564 contractEdgeSparseTarget] Same
+    // target==lastIdx UB as contractEdge: when the deleted vertex was the
+    // back, the remap loop would access out-of-range vertices[target].
+    // No vertex moved, so the loop is a no-op; skip it.
+    if (target !== lastIdx) {
+      for (let ed = 0; ed < this.vertices[target].length; ed++) {
+        const re = this.vertices[target][ed];
+        this.vertices[re.target][re.rev].target = target;
+      }
     }
     return target;
   };
