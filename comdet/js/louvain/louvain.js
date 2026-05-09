@@ -194,19 +194,32 @@
     }
     // Per-node adjacency: each non-self edge appears in BOTH endpoint
     // lists; self-loop appears in one list ONCE. Mirrors canonical
-    // graph_binary's links[] layout.
-    const adjE = new Array(n);
-    const adjN = new Array(n);
-    const adjW = new Array(n);
-    for (let i = 0; i < n; i++) { adjE[i] = []; adjN[i] = []; adjW[i] = []; }
-    for (let e = 0; e < m; e++) {
-      const u = eu[e], v = ev[e], w = ew[e];
-      adjE[u].push(e); adjN[u].push(v); adjW[u].push(w);
-      if (u !== v) {
-        adjE[v].push(e); adjN[v].push(u); adjW[v].push(w);
+    // graph_binary's links[] layout. If preBuiltAdj is supplied
+    // (canonical-faithful collapse path) it is consumed directly,
+    // bypassing the edge-push round-trip — required for level-1+
+    // collapsed graphs to mirror externals/louvain partition2graph_binary
+    // which writes per-comm adj directly from std::map<int,double> (key-
+    // ASC, per-direction-ONCE) without going through an edge list.
+    let adjE, adjN, adjW;
+    if (opts.preBuiltAdj) {
+      adjN = opts.preBuiltAdj.adjN;
+      adjW = opts.preBuiltAdj.adjW;
+      adjE = opts.preBuiltAdj.adjE
+        || adjN.map(function (lst) { return lst.map(function () { return -1; }); });
+    } else {
+      adjE = new Array(n);
+      adjN = new Array(n);
+      adjW = new Array(n);
+      for (let i = 0; i < n; i++) { adjE[i] = []; adjN[i] = []; adjW[i] = []; }
+      for (let e = 0; e < m; e++) {
+        const u = eu[e], v = ev[e], w = ew[e];
+        adjE[u].push(e); adjN[u].push(v); adjW[u].push(w);
+        if (u !== v) {
+          adjE[v].push(e); adjN[v].push(u); adjW[v].push(w);
+        }
       }
     }
-    if (sortAdj) {
+    if (sortAdj && !opts.preBuiltAdj) {
       for (let v = 0; v < n; v++) {
         const idxs = adjN[v].map(function (_, i) { return i; });
         idxs.sort(function (a, b) {
@@ -273,18 +286,20 @@
         if (correctSelfLoops) p += sz;
         return p;
       },
-      // Canonical partition2graph_binary (louvain.cpp:147-211): renumber
-      // surviving comms by ORIGINAL-id-ASC; for each comm c, walk every
-      // constituent v's adj list, accumulate per-target-comm weights into
-      // a sorted map; emit edges. Each non-self pair appears TWICE in
-      // the output adj (once from each endpoint's walk) → super-edge
-      // weight as stored is total contribution from one side, but the
-      // emitted graph stores both directions like graph_binary. For
-      // intra (cu==cv): m[c] accumulates 2·intra_c (each intra edge
-      // contributes from both u's and v's walks). For inter (cu!=cv):
-      // m_at_cu[cv] accumulates inter_{c,c'} from cu-side; m_at_cv[cu]
-      // accumulates the same from cv-side, so the new graph has both
-      // directions stored correctly.
+      // Canonical partition2graph_binary (externals/louvain
+      // louvain.cpp:147-211): renumber surviving comms by ORIGINAL-id-
+      // ASC; for each comm c, walk every constituent v's adj list,
+      // accumulate per-target-comm weights into a std::map<int,double>
+      // (key-ASC iteration); emit g2.links/weights = m's flat slice.
+      // adj[c] post-emission = m's keys in target-id-ASC order; each
+      // non-self pair (a,b) appears in adj[a] ONCE (from a's m) and
+      // adj[b] ONCE (from b's m). Self-loops appear ONCE in adj[c] with
+      // weight = 2·intra_c (a's adj iteration finds b and vice versa
+      // both contribute w to bucket[a][a] when (a,b) is intra-a).
+      //
+      // To mirror this layout in JS we build the new Graph DIRECTLY
+      // from per-comm bucket maps (bypassing the edge-push round-trip
+      // through the Graph constructor, which would double inter pairs).
       collapse: function (membership, ncomm) {
         // Step 1 — comm renumber by original-id-ASC. Mirrors
         // louvain.cpp:147-160.
@@ -296,7 +311,7 @@
           if (renumber[i] !== -1) renumber[i] = last++;
         }
         const nbc = last;
-        // Step 2 — comm_nodes[c] = list of constituents.
+        // Step 2 — comm_nodes[c] = list of constituents (push-order).
         const commNodes = new Array(nbc);
         for (let c = 0; c < nbc; c++) commNodes[c] = [];
         const newSizes = new Array(nbc).fill(0);
@@ -305,14 +320,17 @@
           commNodes[nc].push(v);
           newSizes[nc] += nodeSizes[v];
         }
-        // Step 3 — for each new comm c, walk constituents' adj; bucket
-        // weights by target-new-comm using a sorted map (canonical
-        // std::map<int, long double> iteration order = key-ascending).
-        // Emit one entry per (c, target) pair.
-        const newEdges = [];
+        // Step 3 — per-comm bucket; emit per-direction-once into
+        // direct adj. Flat eu/ev/ew is built per-comm slice mirroring
+        // canonical g2's flat links/weights output.
+        const newAdjN = new Array(nbc);
+        const newAdjW = new Array(nbc);
+        const newAdjE = new Array(nbc);
+        for (let c = 0; c < nbc; c++) { newAdjN[c] = []; newAdjW[c] = []; newAdjE[c] = []; }
+        const newEu = [];
+        const newEv = [];
+        const newEw = [];
         for (let c = 0; c < nbc; c++) {
-          // Map<int_target_comm, double_weight_sum> — aggregate first,
-          // then iterate in key-ASC order to mirror canonical std::map.
           const bucket = new Map();
           const constituents = commNodes[c];
           for (let i = 0; i < constituents.length; i++) {
@@ -324,26 +342,33 @@
               bucket.set(targetNew, (bucket.get(targetNew) || 0) + aw[k]);
             }
           }
-          // Iterate bucket in key-ASC order (canonical std::map order).
           const targets = Array.from(bucket.keys()).sort(function (a, b) { return a - b; });
           for (let t = 0; t < targets.length; t++) {
             const tc = targets[t];
             const w = bucket.get(tc);
-            newEdges.push([c, tc, w]);
+            newAdjN[c].push(tc);
+            newAdjW[c].push(w);
+            newAdjE[c].push(newEu.length);
+            newEu.push(c);
+            newEv.push(tc);
+            newEw.push(w);
           }
         }
-        // Note: each non-self pair (c, tc) appears TWICE in newEdges
-        // (once with c=A,tc=B and once with c=B,tc=A) so the new graph
-        // builder produces a both-directions adj layout that matches
-        // canonical graph_binary. Self-loops appear ONCE per comm with
-        // weight = 2·intra_c (canonical's m[c] captures both directions
-        // of intra edges).
-        return Graph(nbc, newEdges, {
+        // Build the new Graph from pre-built adj. Edge list mirrors
+        // canonical's flat per-comm slice (each (c, target) appears once
+        // per c's emission; pair (c0, c1) appears twice across the flat
+        // list = once from c0's slice as (c0,c1) and once from c1's
+        // slice as (c1,c0), but each per-node adj has the entry only
+        // ONCE = canonical layout).
+        const collapsedEdges = [];
+        for (let i = 0; i < newEu.length; i++) collapsedEdges.push([newEu[i], newEv[i], newEw[i]]);
+        return Graph(nbc, collapsedEdges, {
           directed: directed,
           correctSelfLoops: correctSelfLoops,
           nodeSizes: newSizes,
-          collapsed: true,  // signal that adj is pre-doubled
-          sortAdj: sortAdj, // propagate to collapsed graph
+          collapsed: true,
+          sortAdj: sortAdj,
+          preBuiltAdj: { adjN: newAdjN, adjW: newAdjW, adjE: newAdjE },
         });
       },
       // libleidenalg-shape collapse (Graph::collapse_graph,
@@ -916,21 +941,32 @@
         return diff / m;
       },
       quality: function (P) {
+        // Mirrors externals/louvain Modularity::quality()
+        // (modularity.cpp:58-71) byte-for-byte:
+        //   q = 0
+        //   for c: if tot[c] > 0: q += in[c] - (tot[c] * tot[c]) / m2
+        //   q /= m2
+        // Operand order matches cpp exactly so per-c sub-ulp drift is
+        // bit-identical with the L4 tracer at every accumulation step.
+        // P.totalWeightInComm(c) returns canonical in[c] (= 2·intra_c +
+        // Σ self-loops, set by Partition.rebuildAdmin per canonical
+        // Modularity::in convention). P.totalWeightToComm(c) returns
+        // tot[c] (Σ weighted_degree of c's constituents). m2 =
+        // graph.totalWeight() (= 2m for undirected, doubles per level
+        // because canonical's partition2graph_binary emits per-direction
+        // = 2·intra self-loops + per-direction inter).
         const G = P.graph;
-        const m_orig = G.totalWeight() / 2;
-        if (m_orig <= 0) return 0;
-        const directed = G.isDirected();
-        const m = directed ? m_orig : 2.0 * m_orig;
-        let mod = 0;
+        const m2 = G.totalWeight();
+        if (m2 <= 0) return 0;
+        let q = 0;
         for (let c = 0; c < P.ncomm(); c++) {
-          // inC convention bridge: see header comment.
-          const w = P.totalWeightInComm(c) / 2;
-          const w_out = P.totalWeightFromComm(c);
-          const w_in = P.totalWeightToComm(c);
-          mod += w - w_out * w_in / ((directed ? 1.0 : 4.0) * m_orig);
+          const tot = P.totalWeightToComm(c);
+          if (tot > 0) {
+            const inv = P.totalWeightInComm(c);
+            q += inv - (tot * tot) / m2;
+          }
         }
-        const q = (2.0 - (directed ? 1 : 0)) * mod;
-        return q / m;
+        return q / m2;
       },
     };
   }
@@ -1006,6 +1042,13 @@
           // consumers that need the canonical bit-equal compare.
           deltaGain: moved ? bestIncrease : 0,
           candidates: deltas,
+          // Running-tracker probes (audit row M / general admin). Read
+          // post-modInsert; mirrors cpp tracer's inC_*_bits / totC_*_bits.
+          // For no-move case (bestComm === vComm) both pairs coincide.
+          inCfrom: P.totalWeightInComm(vComm),
+          inCto: P.totalWeightInComm(bestComm),
+          totCfrom: P.totalWeightToComm(vComm),
+          totCto: P.totalWeightToComm(bestComm),
         });
       }
     }
@@ -1029,15 +1072,21 @@
     } else {
       shuffle(visitOrder, rng);
     }
-    let pass = 0;
+    // Canonical externals/louvain one_level (louvain.cpp:235-277):
+    //   do { ... } while (nb_moves > 0 && new_qual - cur_qual > eps_impr);
+    // No pass cap. Canonical converges naturally by either (a) zero
+    // moves or (b) Q-gain ≤ eps. Earlier JS code carried a `pass > 50`
+    // cap that diverged from canonical on large graphs (e.g. empirical
+    // google n=15763 needs 69 L0 passes to converge); removed for byte-
+    // equal vs canonical-faithful tracer.
     let curQ = qualityFn.quality(P);
     while (true) {
       const before = curQ;
       const out = sweep(P, rng, { recordTrace: recordTrace, visitOrder: visitOrder });
       const after = qualityFn.quality(P);
+      out.qualityAfter = after;
       sweeps.push(out);
-      pass += 1;
-      if (out.nbMoves === 0 || (after - before) <= 1e-6 || pass > 50) break;
+      if (out.nbMoves === 0 || (after - before) <= 1e-6) break;
       curQ = after;
     }
     return { partition: P, sweeps: sweeps };
@@ -1068,7 +1117,9 @@
         fineMembership[v] = memColl[aggregateMap[v]];
       }
       const collapsedNcomm = collP.ncomm();
+      const totalWeightPre = collapsedG.totalWeight();
       const newCollapsed = collapsedG.collapse(memColl, collapsedNcomm);
+      const totalWeightPost = newCollapsed.totalWeight();
       const newAggregate = new Int32Array(graph.vcount());
       for (let v = 0; v < graph.vcount(); v++) {
         newAggregate[v] = memColl[aggregateMap[v]];
@@ -1081,11 +1132,17 @@
         collapsedNcomm: collapsedNcomm,
         finePost: new Int32Array(fineMembership),
         newCollapsedVcount: newCollapsed.vcount(),
+        // Probes (audit row N / multi-level flag).
+        totalWeightPre: totalWeightPre,
+        totalWeightPost: totalWeightPost,
+        nAfterCollapse: newCollapsed.vcount(),
       });
       if (newCollapsed.vcount() >= prevVcount || newCollapsed.vcount() <= 1) break;
       collapsedG = newCollapsed;
       level += 1;
-      if (level > 30) break;
+      // Canonical externals/louvain main_louvain.cpp:275-310 has no
+      // level cap; the do/while terminates on improvement=false.
+      // Removed prior `level > 30` safety cap for byte-equal parity.
     }
     const P = Partition(graph, fineMembership, qualityFn);
     P.renumber();
