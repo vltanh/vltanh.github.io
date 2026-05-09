@@ -52,6 +52,12 @@
     return "cluster " + ev.clusterIn + " &middot; " + verb;
   }
 
+  // Per-step tooltip prose — sourced from cc_dossier.md tooltip seed
+  // table. Each phrase cites the canonical line that drives the
+  // observed behaviour so instructor screenshots are honest.
+  const TIP_FINALIZE = "Component complete. BFS root selected as the lowest unvisited node-id (components.c:144). Component id = current count of completed BFSes (components.c:179).";
+  const TIP_EMIT     = "Cluster id assigned by WriteClusterQueue FIFO pop position (constrained.cpp:135-152). Within-cluster contents are node-id ASC by construction (constrained.h:403 bucket-fill loop).";
+
   function panelHTML(idx, ev) {
     if (!ev) {
       return '<div class="step-desc">Pre-walk. Each input cluster will be BFS-split into its connected pieces.</div>';
@@ -68,6 +74,8 @@
             + '</td></tr>';
     });
     html += '</tbody></table>';
+    const tip = ev.components.length > 1 ? TIP_FINALIZE : TIP_EMIT;
+    html += '<div class="step-tip">' + tip + '</div>';
     return html;
   }
 

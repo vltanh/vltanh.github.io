@@ -125,6 +125,12 @@
           : ('split into ' + (ev.pushedBack.length || 'no surviving') + ' chunk(s)'));
   }
 
+  // Per-step tooltip prose — sourced from wcc_dossier.md tooltip seed
+  // table. Each phrase cites the canonical line driving the observed
+  // behaviour. Threshold value injected at render time.
+  const TIP_KEEP = "Cut value c exceeds threshold t = pre_log * log(n) (constrained.h:430-432). Cluster kept as survivor. Survivor index = FIFO pop order in WriteClusterQueue (constrained.cpp:135-152).";
+  const TIP_PUSH = "Cut value c ≤ threshold t (within 1e-9 epsilon). Split into in/out partitions, find connected components per side, push every size>1 component back onto queue (in-side before out-side; mincut_only.h:97-122).";
+
   function panelHTML(idx, ev) {
     if (!ev) {
       return '<div class="step-desc">Press <b>next pop</b> to drain the queue.</div>';
@@ -140,6 +146,8 @@
             + '</td></tr>';
     });
     html += '</tbody></table>';
+    const tip = ev.wellConnected ? TIP_KEEP : TIP_PUSH;
+    html += '<div class="step-tip">' + tip + '</div>';
     return html;
   }
 

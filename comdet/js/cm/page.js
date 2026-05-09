@@ -105,6 +105,12 @@
       + ev.children.length + " child cluster(s)";
   }
 
+  // Per-step tooltip prose — sourced from cm_dossier.md tooltip seed
+  // table. Each phrase cites the canonical line driving the observed
+  // behaviour.
+  const TIP_MINCUT    = "VieCut cactus mincut on induced subgraph (cm.h:77-81). Threshold = pre_computed_log * log(size); strict < after 1e-9 tolerance (constrained.h:431-433).";
+  const TIP_RECLUSTER = "Side > 1: re-cluster via Leiden CPM (cm.h:137 → constrained.h:301-323). Each Leiden component gets pushed back with parent's cid; fresh cid assigned at end-of-round drain (cm.cpp:90-92).";
+
   function panelHTML(idx, ev) {
     if (!ev) return '<div class="step-desc">Press <b>next event</b> to begin.</div>';
     if (ev.kind === "mincut") {
@@ -119,6 +125,7 @@
               + '</td></tr>';
       });
       html += '</tbody></table>';
+      html += '<div class="step-tip">' + TIP_MINCUT + '</div>';
       return html;
     }
     let html = '<div class="step-desc">parent cluster id <b>' + ev.parentId
@@ -133,6 +140,7 @@
             + '</td></tr>';
     });
     html += '</tbody></table>';
+    html += '<div class="step-tip">' + TIP_RECLUSTER + '</div>';
     return html;
   }
 
