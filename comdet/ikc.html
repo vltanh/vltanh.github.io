@@ -65,8 +65,8 @@
 </div>
 
 <section class="hook">
-  <p>Given a network \(G\) and a connectivity floor \(k\), IKC peels the graph one core tier at a time. Each iteration extracts the densest core of the current residual, splits it into connected components, gates every component on \(k\)-validity (each node has \(\ge k\) neighbours inside its component) and a modularity check, accepts the survivors as clusters, removes their nodes, and repeats. The loop terminates when the residual's max core drops below \(k\). The CM paper uses \(k = 10\) by default; this page sweeps \(k \in [2, 5]\) because the 32-node fixture has no 5-core.</p>
-  <p>The structure is dual to most CD methods. Louvain and Leiden grow communities by absorbing neighbours; IKC prunes communities by stripping their thinly-attached members. Coverage is loose: anything below \(k\)-validity drops out of the partition entirely (singletons or dropped nodes), so IKC's recall is the lowest in the gallery. Per-cluster <em>core density</em> is the highest: every accepted cluster's induced minimum degree is \(\ge k\) by construction, so it is the sturdiest in the gallery against further peeling. The Wedell paper situates IKC as Stage 1 of a four-stage <em>kmp-clustering</em> pipeline (\(k\)-validity, modularity, and \(p\)-validity for noncore augmentation); this page covers Stage 1 only.</p>
+  <p>If a cluster is supposed to mean <em>every member connects to enough others inside it</em>, the densest structure that satisfies the constraint is the \(k\)-core: the maximal subgraph where every node has at least \(k\) intra-subgraph neighbours. On this fixture the \(K_5\) is a 4-core, B's two \(K_4\)'s are 3-cores, C's two triangles are 2-cores, and A's periphery dangles below any \(k \ge 2\). IKC walks these tiers from top down: extract the densest core of the residual, accept every connected component whose nodes still hit the \(k\) threshold inside the component, peel the accepted nodes, repeat. The loop ends when the residual's max core drops below the floor.</p>
+  <p>Where Louvain and Leiden grow communities by absorbing neighbours, IKC strips communities of their loosely-attached members. Coverage is loose; per-cluster core density is high. Wedell 2022 situates IKC as Stage 1 of a four-stage <em>kmp-clustering</em> pipeline (\(k\)-validity, modularity, \(p\)-validity for noncore augmentation); this page covers Stage 1 only.</p>
   <div class="defs">
     <div><span class="term">k-core</span> the maximal induced subgraph where every node has degree \(\ge k\). Computed by iterative peel: repeatedly remove every node currently below \(k\); whatever survives is the \(k\)-core.</div>
     <div><span class="term">k-validity</span> a candidate cluster \(C\) is \(k\)-valid iff every node in \(C\) has \(\ge k\) other \(C\)-nodes among its neighbours <em>within</em> the kcore subgraph. Stricter than belonging to the \(k\)-core globally: a node in the global \(k\)-core can still fail \(k\)-validity for its component if its \(k\) qualifying neighbours sit in a different component of the kcore subgraph. The \(k\)-core is necessary, not sufficient.</div>
@@ -189,19 +189,17 @@ with \(L\) = total edges of the original graph. Shipped IKC short-circuits this 
   </div>
   <div class="callout warn">
     <div class="tag">shipped vs paper</div>
-    <p>Shipped IKC has four documented divergences from Wedell 2022 (the dead modularity gate is the headline; m-validity never enforced, p-validity not implemented, and the modularity column placeholder are the others). The technical reference at <a href="../../docs/algorithms/ikc.md">docs/algorithms/ikc.md</a> covers each.</p>
-  </div>
-  <div class="callout">
-    <div class="tag">what the page actually runs</div>
-    <p>The JavaScript kernel under this page is a code-faithful port of <code>run_ikc.py</code>, byte-equal verified across the cd_stress_tiers panel; see the technical reference for the verification harness.</p>
+    <p>The shipped <code>run_ikc.py</code> is a strict subset of Wedell 2022. Four places where the binary departs from the paper:</p>
+    <ol>
+      <li><em>Modularity gate is dead.</em> The shipped <code>modular()</code> begins with a constant return, so the paper's \(\mathrm{mod}(s)\) formula at the bottom of the function is never reached. \(k\)-validity is the only filter that actually fires. The strict-gate toggle on the walker re-enables the formula for comparison; on this fixture every accepted cluster has positive paper-modularity, so the toggle leaves the partition unchanged.</li>
+      <li><em>m-validity is never enforced.</em> Paper §2.2.2 calls a cluster m-valid iff its core-induced subgraph is connected and has positive modularity. The connectedness half holds by construction, since the gate sees only weakly-connected components of the kcore. The modularity half rides on the dead gate above, so m-validity collapses to "connected", which is always true.</li>
+      <li><em>p-validity is not implemented.</em> Paper §2.2.3 defines a four-stage <em>kmp-clustering</em> pipeline; \(p\)-validity is the Stage 3 augmentation that grows each accepted core cluster by attaching outside nodes adjacent to enough core members. Shipped <code>src/ikc/</code> covers Stage 1 only, so every accepted cluster is exactly its core.</li>
+      <li><em>Modularity column is a placeholder.</em> Each accepted cluster is written with <code>modularity = 1</code>, the dead-gate constant, not a measurement. Downstream consumers reading the column see 1 for every cluster regardless of structure.</li>
+    </ol>
   </div>
 </section>
 
 <div id="kin"></div>
-
-<aside class="tech-companion">
-  <a href="https://github.com/vltanh/community-detection/blob/main/docs/algorithms/ikc.md" target="_blank" rel="noopener">technical companion: docs/algorithms/ikc.md</a>
-</aside>
 <footer class="ack">
   <p class="tools">drawn with <a href="https://d3js.org" target="_blank" rel="noopener">d3</a></p>
   <p class="credit">typed by vltanh, doodled with Claude</p>
