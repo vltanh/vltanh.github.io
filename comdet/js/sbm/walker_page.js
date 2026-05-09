@@ -5,8 +5,9 @@
 (function () {
   "use strict";
   if (!window.COMDET || !COMDET.PAGE || !COMDET.SBM
-      || !COMDET.SBM.BlockState || !COMDET.LOUVAIN || !COMDET.FIXTURE) return;
-  const C = COMDET, P = C.PAGE, SBM = C.SBM, F = C.FIXTURE, LV = C.LOUVAIN;
+      || !COMDET.SBM.BlockState || !COMDET.SBM.Graph
+      || !COMDET.SBM.MT19937 || !COMDET.FIXTURE) return;
+  const C = COMDET, P = C.PAGE, SBM = C.SBM, F = C.FIXTURE, U = SBM.UTIL;
 
   function mountWalkerPage(cfg) {
     const blockOpts = cfg.blockOpts;
@@ -18,16 +19,20 @@
       document.getElementById("links").innerHTML = C.linksRow({ gen: cfg.gen });
     }
 
-    const G = P.buildLeidenGraph();
+    // SBM owns its Graph + RNG; do not borrow from Leiden / Louvain.
+    // SBM.Graph uses Peixoto's self-twice strength convention required
+    // by Eq 43's dcDegreeConst. Built directly from the fixture so the
+    // input layer is self-contained per repo convention.
+    const G = SBM.Graph(F.nodes.length, F.edges, { correctSelfLoops: false });
     let seed = cfg.initialSeed == null ? 7 : cfg.initialSeed;
     let run = null;
 
     function buildRun(s) {
-      const rng = LV.MT19937(s >>> 0);
+      const rng = SBM.MT19937(s >>> 0);
       const N = F.nodes.length;
       const init = new Int32Array(N);
-      const order = LV.range(N);
-      LV.shuffle(order, rng);
+      const order = U.range(N);
+      U.shuffle(order, rng);
       for (let i = 0; i < N; i++) init[order[i]] = i % INIT_B;
       const state = SBM.BlockState(G, Object.assign({ init: init }, blockOpts));
       const initialMembership = state.blockMembership();

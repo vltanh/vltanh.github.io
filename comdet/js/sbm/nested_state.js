@@ -21,9 +21,8 @@
   "use strict";
   if (!window.COMDET || !window.COMDET.SBM
       || !window.COMDET.SBM.BlockState
-      || !window.COMDET.LOUVAIN) return;
+      || !window.COMDET.SBM.Graph) return;
   const SBM = window.COMDET.SBM;
-  const LV = window.COMDET.LOUVAIN;
 
   // Build a level-(l+1) (graph, init) pair from a level-l (graph, state).
   // Edges of the new graph carry the e_rs counts of the parent state
@@ -70,7 +69,7 @@
       if (rr < 0 || ss < 0) continue;
       edges.push([rr, ss, w]);
     }
-    const newGraph = LV.Graph(Bne, edges, { correctSelfLoops: false });
+    const newGraph = SBM.Graph(Bne, edges, { correctSelfLoops: false });
     const init = new Int32Array(Bne);
     // OOB parent ids (mid-mcmc "open new block" candidates) coerce to 0;
     // cpp's flat_traced.cpp:buildLevelGraph defaults the same way.

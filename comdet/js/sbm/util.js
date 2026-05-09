@@ -35,9 +35,25 @@
   function xlogx(x)  { return x > 0 ? x * Math.log(x) : 0; }
   function safelog(x) { return x > 0 ? Math.log(x) : 0; }
 
+  // Backward Fisher-Yates. Mirrors cpp tracer's jsShuffle
+  // (community-detection/tools/viz_check/sbm/instrumented/flat_traced.cpp:62)
+  // and graph-tool's std::shuffle (libstdc++ backward direction). Distinct
+  // from louvain.js's LV.shuffle (forward direction, mirrors gen-louvain
+  // canonical louvain.cpp:222-229). Same RNG family, different consumption
+  // sequence; SBM matches its own canonical here.
+  function shuffle(arr, rng) {
+    for (let idx = arr.length - 1; idx >= 1; idx--) {
+      const j = rng.int(0, idx);
+      const t = arr[idx]; arr[idx] = arr[j]; arr[j] = t;
+    }
+  }
+
+  function range(n) { const a = new Array(n); for (let i = 0; i < n; i++) a[i] = i; return a; }
+
   NS.SBM = NS.SBM || {};
   NS.SBM.UTIL = {
     lgamma: lgamma, lbinom: lbinom, logChooseRep: logChooseRep,
     xlogx: xlogx, safelog: safelog,
+    shuffle: shuffle, range: range,
   };
 })();

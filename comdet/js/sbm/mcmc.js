@@ -9,9 +9,9 @@
   "use strict";
   if (!window.COMDET || !window.COMDET.SBM
       || !window.COMDET.SBM.BlockState
-      || !window.COMDET.LOUVAIN) return;
+      || !window.COMDET.SBM.UTIL) return;
   const SBM = window.COMDET.SBM;
-  const LV = window.COMDET.LOUVAIN;
+  const U = SBM.UTIL;
 
   function mcmcSweep(state, rng, opts) {
     opts = opts || {};
@@ -28,7 +28,9 @@
     } else {
       order = new Array(N);
       for (let v = 0; v < N; v++) order[v] = v;
-      LV.shuffle(order, rng);
+      // Backward Fisher-Yates via SBM.UTIL.shuffle (mirrors cpp tracer's
+      // jsShuffle at flat_traced.cpp:62).
+      U.shuffle(order, rng);
     }
 
     const traces = recordTrace ? [] : null;
