@@ -7,16 +7,41 @@
  *
  * Internals operate on compact 0..n-1 indices via Int32Array adjacency;
  * external API takes / returns original node ids.
+ *
+ * Hook gating (gold-standard byte-equal-tracer playbook):
+ *   The same file serves as production browser walker AND verification
+ *   JS-tracer. When `globalThis.__IKC_HOOK` is undefined the helper is a
+ *   zero-cost no-op (one typeof check + early return). When a harness
+ *   installs a function on `globalThis.__IKC_HOOK` before requiring this
+ *   file, every site populates the trace schema at
+ *   community-detection/tools/viz_check/ikc/TRACE_SCHEMA.md.
+ *
+ *   Behaviour invariant: kernel return value MUST be byte-identical with
+ *   vs without the hook installed. See test_hook_equivalence.mjs.
  */
 (function () {
   "use strict";
   if (!window.COMDET) return;
   const C = window.COMDET;
 
+  // Hook emit helper. Cheap when no harness installed (single typeof
+  // check + early return); fires the harness callback when one is set.
+  function __ikc_hook(eventName, payload) {
+    const h = (typeof globalThis !== "undefined" && globalThis.__IKC_HOOK);
+    if (typeof h === "function") h(eventName, payload);
+  }
+
   // Compact a (nodeIds, edges) pair into Int32Array CSR-ish adjacency.
   // Returns {n, ids, idx, adjN, adjStarts, m} where adjN is a flat
   // Int32Array of neighbour-indices and adjStarts[i] is the offset of
   // node i's neighbour list (length = adjStarts[i+1] - adjStarts[i]).
+  //
+  // Per-node neighbour lists are sorted ASC. This makes BFS in
+  // connectedComponentsCompact a "lex-smallest BFS" (deterministic
+  // function of the residual node-set + adjacency, independent of edge
+  // insertion order). The TRACE_SCHEMA's members_iter_order is defined
+  // as lex-smallest BFS so JS + canonical-tracer (which sorts components
+  // similarly post-getComponents) agree on a single canonical order.
   function compactSubgraph(nodeIds, edges) {
     const n = nodeIds.length;
     const idx = new Map();
@@ -40,6 +65,14 @@
       const u = eu[i], v = ev[i];
       adjN[adjStarts[u] + cursor[u]++] = v;
       adjN[adjStarts[v] + cursor[v]++] = u;
+    }
+    // Sort each node's neighbour list ASC for lex-smallest BFS.
+    for (let i = 0; i < n; i++) {
+      const lo = adjStarts[i], hi = adjStarts[i + 1];
+      if (hi - lo > 1) {
+        const slice = adjN.subarray(lo, hi);
+        slice.sort();
+      }
     }
     return { n: n, ids: nodeIds, idx: idx, adjN: adjN, adjStarts: adjStarts, m: m };
   }
@@ -95,6 +128,10 @@
     return { core: core, max: mx };
   }
 
+  // Lex-smallest BFS over the (mask-restricted) compact graph. Outer
+  // scan is ascending compact id; per-node neighbour list is already
+  // sorted ASC (compactSubgraph + buildResidualG both sort). BFS frontier
+  // expansion therefore visits the smallest-id unseen neighbour first.
   function connectedComponentsCompact(g, mask) {
     const n = g.n;
     const seen = new Uint8Array(n);
@@ -124,6 +161,10 @@
   // have degree >= kFloor counting only neighbours in the same kcore.
   // Implemented via a Uint8 mask of kcore membership; per-node degree
   // is the count of neighbours whose mask-bit is set.
+  //
+  // Returns {ok: bool, failingId: int | null} so the trace can record
+  // the first failing compact id (component-local) for the tracer's
+  // k_valid_failing_compact_id field.
   function kValidCompact(g, component, kcoreMask, kFloor) {
     for (let i = 0; i < component.length; i++) {
       const v = component[i];
@@ -132,9 +173,9 @@
       for (let k = lo; k < hi; k++) {
         if (kcoreMask[g.adjN[k]]) d += 1;
       }
-      if (d < kFloor) return false;
+      if (d < kFloor) return { ok: false, failingId: v };
     }
-    return true;
+    return { ok: true, failingId: null };
   }
 
   // Iteration-scoped batch modularity. One O(E_full) sweep over fullEU/EV
@@ -158,10 +199,41 @@
     return out;
   }
 
+  // Build residual subgraph (compact 0..remCount-1) with sorted-ASC
+  // neighbour lists. The compaction is identity-on-residual (old-id-asc),
+  // matching canonical's getCompactedGraph(getContinuousNodeIds(graph)).
+  function buildResidualG(globalN, remEU, remEV, localOfGlobal, remCount) {
+    const remDeg = new Int32Array(remCount);
+    for (let i = 0; i < remEU.length; i++) {
+      remDeg[localOfGlobal[remEU[i]]] += 1;
+      remDeg[localOfGlobal[remEV[i]]] += 1;
+    }
+    const remStarts = new Int32Array(remCount + 1);
+    for (let i = 0; i < remCount; i++) remStarts[i + 1] = remStarts[i] + remDeg[i];
+    const remAdjN = new Int32Array(remStarts[remCount]);
+    const cursor = new Int32Array(remCount);
+    for (let i = 0; i < remEU.length; i++) {
+      const lu = localOfGlobal[remEU[i]], lv = localOfGlobal[remEV[i]];
+      remAdjN[remStarts[lu] + cursor[lu]++] = lv;
+      remAdjN[remStarts[lv] + cursor[lv]++] = lu;
+    }
+    // Sort each node's neighbour list ASC for lex-smallest BFS.
+    for (let i = 0; i < remCount; i++) {
+      const lo = remStarts[i], hi = remStarts[i + 1];
+      if (hi - lo > 1) {
+        const slice = remAdjN.subarray(lo, hi);
+        slice.sort();
+      }
+    }
+    return { n: remCount, ids: null, idx: null,
+             adjN: remAdjN, adjStarts: remStarts, m: remEU.length };
+  }
+
   function runIKC(nodeIds, fullEdges, opts) {
     opts = opts || {};
     const kFloor = opts.kFloor != null ? opts.kFloor : 4;
     const canonicalGate = opts.canonicalGate !== false;
+    const fixture = opts.fixture != null ? opts.fixture : null;
 
     // Top-level compaction (stable globalIdx for fullEdges).
     const top = compactSubgraph(nodeIds, fullEdges);
@@ -177,11 +249,24 @@
     });
     const fullL = top.m;
 
+    // Tracer init event: fixture name + post-self-loop n/m + node id map.
+    __ikc_hook("init", {
+      fixture: fixture,
+      k_floor: kFloor,
+      n_orig: nodeIds.length,
+      m_orig: top.m,
+      node_id_map: nodeIds.map(function (id, i) {
+        return { orig: String(id), compact: i };
+      }),
+    });
+
     const remaining = new Uint8Array(globalN); remaining.fill(1);
     const accepted = []; // {iteration, k, members:originalIds, modularity}
+    const acceptedTrace = []; // {max_k_at_acceptance, members_compact_in_orig_id} for "final" hook
     const iterations = [];
     let it = 0;
     const dropped = []; // originalIds
+    let terminated = null;
 
     while (true) {
       let remCount = 0;
@@ -203,22 +288,18 @@
         if (!remaining[gi]) continue;
         localOfGlobal[gi] = li; globalOfLocal[li] = gi; li += 1;
       }
-      const remDeg = new Int32Array(remCount);
-      for (let i = 0; i < remEU.length; i++) {
-        remDeg[localOfGlobal[remEU[i]]] += 1;
-        remDeg[localOfGlobal[remEV[i]]] += 1;
-      }
-      const remStarts = new Int32Array(remCount + 1);
-      for (let i = 0; i < remCount; i++) remStarts[i + 1] = remStarts[i] + remDeg[i];
-      const remAdjN = new Int32Array(remStarts[remCount]);
-      const cursor = new Int32Array(remCount);
-      for (let i = 0; i < remEU.length; i++) {
-        const lu = localOfGlobal[remEU[i]], lv = localOfGlobal[remEV[i]];
-        remAdjN[remStarts[lu] + cursor[lu]++] = lv;
-        remAdjN[remStarts[lv] + cursor[lv]++] = lu;
-      }
-      const remG = { n: remCount, ids: null, idx: null,
-                     adjN: remAdjN, adjStarts: remStarts, m: remEU.length };
+      const remG = buildResidualG(globalN, remEU, remEV, localOfGlobal, remCount);
+
+      // Tracer iter_start: residual_compact_ids_sorted is always
+      // [0,1,...,remCount-1] because the recompaction is identity-on-residual.
+      const residualCompactIdsSorted = new Array(remCount);
+      for (let i = 0; i < remCount; i++) residualCompactIdsSorted[i] = i;
+      __ikc_hook("iter_start", {
+        iter: it,
+        residual_n_before: remCount,
+        residual_m_before: remEU.length,
+        residual_compact_ids_sorted: residualCompactIdsSorted,
+      });
 
       const cn = coreNumbersCompact(remG);
       const maxK = cn.max;
@@ -249,10 +330,28 @@
 
       if (maxK < kFloor) {
         itRec.bailed = true;
+        terminated = "max_k_below_floor";
+        // Emit max_k event for the bailed iter so the trace is uniform.
+        const coreNumbersSortedBail = new Array(remCount);
+        for (let i = 0; i < remCount; i++) coreNumbersSortedBail[i] = [i, cn.core[i]];
+        __ikc_hook("max_k", {
+          iter: it,
+          max_k: maxK,
+          kcore_n: 0,
+          kcore_m: 0,
+          kcore_compact_ids_sorted: [],
+          core_numbers_sorted: coreNumbersSortedBail,
+        });
         for (let i = 0; i < remCount; i++) {
           dropped.push(residualOrigIds[i]);
           remaining[globalOfLocal[i]] = 0;
         }
+        __ikc_hook("iter_end", {
+          iter: it,
+          nodes_to_remove_sorted: [],
+          kept_clusters_this_iter: 0,
+          terminated: terminated,
+        });
         iterations.push(itRec);
         break;
       }
@@ -262,21 +361,37 @@
       for (let i = 0; i < remCount; i++) if (cn.core[i] >= maxK) kcoreMask[i] = 1;
       const kcoreNodesLocal = [];
       const kcoreNodesOrig = [];
+      const kcoreCompactIdsSorted = [];
       for (let i = 0; i < remCount; i++) {
         if (kcoreMask[i]) {
           kcoreNodesLocal.push(i);
           kcoreNodesOrig.push(residualOrigIds[i]);
+          kcoreCompactIdsSorted.push(i);
         }
       }
+      let kcoreM = 0;
       const kcoreEdgesOrig = [];
       for (let i = 0; i < remEU.length; i++) {
         const lu = localOfGlobal[remEU[i]], lv = localOfGlobal[remEV[i]];
         if (kcoreMask[lu] && kcoreMask[lv]) {
           kcoreEdgesOrig.push([nodeIds[remEU[i]], nodeIds[remEV[i]]]);
+          kcoreM += 1;
         }
       }
       itRec.kcoreNodes = kcoreNodesOrig;
       itRec.kcoreEdges = kcoreEdgesOrig;
+
+      // Tracer max_k event.
+      const coreNumbersSorted = new Array(remCount);
+      for (let i = 0; i < remCount; i++) coreNumbersSorted[i] = [i, cn.core[i]];
+      __ikc_hook("max_k", {
+        iter: it,
+        max_k: maxK,
+        kcore_n: kcoreNodesLocal.length,
+        kcore_m: kcoreM,
+        kcore_compact_ids_sorted: kcoreCompactIdsSorted,
+        core_numbers_sorted: coreNumbersSorted,
+      });
 
       const compsLocal = connectedComponentsCompact(remG, kcoreMask);
 
@@ -288,8 +403,12 @@
       });
       const mods = batchModularitiesCompact(compsLocal, memberOf, fullEU, fullEV, fullL);
 
+      const nodesToRemoveThisIter = [];
+      let keptClustersThisIter = 0;
+
       compsLocal.forEach(function (compLocal, cIdx) {
-        const okK = kValidCompact(remG, compLocal, kcoreMask, kFloor);
+        const kvRes = kValidCompact(remG, compLocal, kcoreMask, kFloor);
+        const okK = kvRes.ok;
         const mod = mods[cIdx];
         const okMod = canonicalGate ? true : (mod > 0);
         const compOrig = compLocal.map(function (li) { return residualOrigIds[li]; });
@@ -301,25 +420,69 @@
           accepted: okK && okMod,
           fateReason: null,
         };
+        // Tracer per-component event.
+        const membersIterOrder = compLocal.slice();
+        const membersSorted = compLocal.slice().sort(function (a, b) { return a - b; });
+        // canonicalGate: mirror dead-gate constant (modular_value=1.0).
+        // canonicalGate=false: emit the paper formula value but tracer
+        // schema fixes modular_value at 1.0 since dead-gate output is the
+        // contract; the gate result lives in modular_pos / kept.
+        const modularValue = canonicalGate ? 1.0 : mod;
+        let fateReason;
         if (cRec.accepted) {
           cRec.fateReason = "accepted";
+          fateReason = "accepted";
           accepted.push({ iteration: it, k: maxK, members: compOrig.slice(), modularity: mod });
           itRec.accepted.push(cRec);
-          compLocal.forEach(function (li) { remaining[globalOfLocal[li]] = 0; });
+          // accepted_canonical_order entry (compact-at-acceptance ids).
+          acceptedTrace.push({
+            max_k_at_acceptance: maxK,
+            members_compact_in_orig_id: compLocal.slice(),
+          });
+          compLocal.forEach(function (li) {
+            remaining[globalOfLocal[li]] = 0;
+            nodesToRemoveThisIter.push(li);
+          });
+          keptClustersThisIter += 1;
         } else if (!okK) {
           cRec.fateReason = "failed k-valid";
+          fateReason = "failed k-valid";
           compLocal.forEach(function (li) {
             dropped.push(residualOrigIds[li]);
             remaining[globalOfLocal[li]] = 0;
+            nodesToRemoveThisIter.push(li);
           });
         } else {
           cRec.fateReason = "failed modularity";
+          fateReason = "failed modularity";
           compLocal.forEach(function (li) {
             dropped.push(residualOrigIds[li]);
             remaining[globalOfLocal[li]] = 0;
+            nodesToRemoveThisIter.push(li);
           });
         }
         itRec.components.push(cRec);
+        __ikc_hook("component", {
+          iter: it,
+          comp_idx: cIdx,
+          comp_n: compLocal.length,
+          members_iter_order: membersIterOrder,
+          members_sorted: membersSorted,
+          k_valid: okK,
+          k_valid_failing_compact_id: kvRes.failingId,
+          modular_value: modularValue,
+          modular_pos: okMod,
+          kept: cRec.accepted,
+          fate_reason: fateReason,
+        });
+      });
+      // iter_end
+      const nodesRemoveSorted = nodesToRemoveThisIter.slice().sort(function (a, b) { return a - b; });
+      __ikc_hook("iter_end", {
+        iter: it,
+        nodes_to_remove_sorted: nodesRemoveSorted,
+        kept_clusters_this_iter: keptClustersThisIter,
+        terminated: null,
       });
       iterations.push(itRec);
       it += 1;
@@ -333,6 +496,39 @@
     });
     nodeIds.forEach(function (id) {
       if (!membership.has(id)) membership.set(id, -1);
+    });
+
+    // Tracer final event. Schema's `members_compact_in_orig_id` is the
+    // compact-at-acceptance ids mapped back to ORIG names via
+    // node_id_map (canonical writes the orig name as a string; JS
+    // string-coerces for round-trip parity with the diff harness).
+    const acceptedCanonicalOrder = acceptedTrace.map(function (e, idx) {
+      const cl = accepted[idx];
+      return {
+        max_k_at_acceptance: e.max_k_at_acceptance,
+        members_compact_in_orig_id: cl.members.map(function (origId) {
+          return String(origId);
+        }),
+      };
+    });
+    // Match canonical run_ikc.py's `len(final_clusters)`: every accepted
+    // cluster + every node that ended up unaccepted (bail residual + every
+    // failed-gate component, all appended as singletons in canonical's
+    // final_clusters list before print_clusters filters size <= 1).
+    const nClustersPre = accepted.length + dropped.length;
+    let csvLines = 0;
+    let nClustersPost = 0;
+    accepted.forEach(function (cl) {
+      if (cl.members.length > 1) {
+        csvLines += cl.members.length;
+        nClustersPost += 1;
+      }
+    });
+    __ikc_hook("final", {
+      n_final_clusters_pre_singleton_filter: nClustersPre,
+      n_final_clusters_post_singleton_filter: nClustersPost,
+      csv_lines: csvLines,
+      accepted_canonical_order: acceptedCanonicalOrder,
     });
 
     return {
