@@ -46,9 +46,26 @@
       const key = lo + "," + hi;
       wgtMap.set(key, (wgtMap.get(key) || 0) + 1);
     }
-    for (const [key, w] of wgtMap) {
+    // [UPSTREAM mincut_custom.cpp:50-72 + igraph_induced_subgraph_map]
+    // cpp reads edges via igraph_induced_subgraph_map which canonicalizes
+    // edges; the resulting mutable_graph adj lists are neighbour-ID ASC
+    // per node. mutable_graph.h:131-144 new_edge(src, tgt) only fires on
+    // src < tgt, appending to adj[src] then adj[tgt]; insertion order
+    // determines adj iteration. To mirror cpp's ASC adj, sort wgtMap
+    // entries by (lo, hi) ASC before adding. Without this, JS adj lists
+    // follow input edge order, producing different capforest / pr12 / pr34
+    // contractions on the same input — root cause of WCC pseed=1
+    // FAIL_HARD on whole-graph clusters.
+    const sortedKeys = [];
+    for (const key of wgtMap.keys()) sortedKeys.push(key);
+    sortedKeys.sort((a, b) => {
+      const [ax, ay] = a.split(",").map(Number);
+      const [bx, by] = b.split(",").map(Number);
+      return ax !== bx ? ax - bx : ay - by;
+    });
+    for (const key of sortedKeys) {
       const [lo, hi] = key.split(",").map(Number);
-      G.new_edge(lo, hi, w);
+      G.new_edge(lo, hi, wgtMap.get(key));
     }
     G.finish_construction();
 
