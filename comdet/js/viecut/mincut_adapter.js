@@ -46,22 +46,36 @@
       const key = lo + "," + hi;
       wgtMap.set(key, (wgtMap.get(key) || 0) + 1);
     }
-    // [UPSTREAM mincut_custom.cpp:50-72 + igraph_induced_subgraph_map]
-    // cpp reads edges via igraph_induced_subgraph_map which canonicalizes
-    // edges; the resulting mutable_graph adj lists are neighbour-ID ASC
-    // per node. mutable_graph.h:131-144 new_edge(src, tgt) only fires on
-    // src < tgt, appending to adj[src] then adj[tgt]; insertion order
-    // determines adj iteration. To mirror cpp's ASC adj, sort wgtMap
-    // entries by (lo, hi) ASC before adding. Without this, JS adj lists
-    // follow input edge order, producing different capforest / pr12 / pr34
-    // contractions on the same input. Root cause of WCC pseed=1
-    // FAIL_HARD on whole-graph clusters.
+    // [UPSTREAM mincut_custom.cpp:50-72 + kernel_check.cpp:121-134 +
+    // igraph_induced_subgraph_map (subgraph.c:96-209) + igraph_incident
+    // (type_indexededgelist.c:1775-1850)] cpp's new_edge call sequence:
+    // igraph_i_induced_subgraph_create_from_scratch iterates new_vid
+    // Y=0..n-1 ASC (subgraph.c:171; the vertex selector is pre-sorted at
+    // subgraph.c:154 — WCC's cur is already orig-ASC via bfsComponentsLocal
+    // sort at wcc.js:76 so new_vid order == orig-ASC order). For each Y,
+    // it calls igraph_incident(orig, Y_orig, OUT, LOOPS); the loops at
+    // type_indexededgelist.c:1826-1850 walk the oi / ii index blocks which
+    // are sorted by OTHER-ENDPOINT-ID ASC (the explicit invariant at
+    // :1816-1822: "the output is sorted by the vertex IDs of the other
+    // endpoint"). It then emits new_edge(other_new, Y_new, 1) only when
+    // Y_orig is the larger orig endpoint (subgraph.c:201; igraph stores
+    // undirected edges with from = max). Because cur is orig-ASC, "other
+    // < Y_orig" == "other_new < Y_new" == lo_new < hi_new; the filtered
+    // emission order at iteration Y is therefore lo_new ASC. Net cpp
+    // new_edge call sequence: PRIMARY hi_new ASC, SECONDARY lo_new ASC.
+    // mutable_graph::new_edge (mutable_graph.h:131-144) appends to
+    // adj[src] AND adj[tgt] in this call order, so adj-list contents at
+    // each vertex inherit the same primary/secondary order. (hi, lo) ASC
+    // is the in-principle mirror; (lo, hi) ASC was wrong-primary, masked
+    // by structural symmetry on most clusters but exposed on chained
+    // sbm-flat-pp clusters where cluster topology forces capforest /
+    // pr12 / pr34 to walk the diverged adj order.
     const sortedKeys = [];
     for (const key of wgtMap.keys()) sortedKeys.push(key);
     sortedKeys.sort((a, b) => {
       const [ax, ay] = a.split(",").map(Number);
       const [bx, by] = b.split(",").map(Number);
-      return ax !== bx ? ax - bx : ay - by;
+      return ay !== by ? ay - by : ax - bx;
     });
     for (const key of sortedKeys) {
       const [lo, hi] = key.split(",").map(Number);
