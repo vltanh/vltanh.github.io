@@ -496,6 +496,71 @@
     };
   }
 
+  // ── LeidenMod quality (libleidenalg ModularityVertexPartition.cpp) ──
+  // Mirrors libleidenalg's `ModularityVertexPartition::diff_move` +
+  // `quality` byte-for-byte. Identical shape to canonMod() in
+  // tools/viz_check/leiden/self_rng_check.mjs (canonical-anchored L4
+  // closed on this qfn 2026-05-07). Differs from LV.Modularity (Louvain
+  // admin algebra) in the m_orig scaling and the +sw / -k_x*K_x sign
+  // structure. Required for byte-equal CM under --algorithm leiden-mod
+  // (cm.cpp:19,71 routes to `ConstrainedClustering::GetCommunities` ->
+  // `ModularityVertexPartition` inside libleidenalg).
+  function LeidenMod() {
+    return {
+      name: "LeidenMod",
+      resolution: 1.0,
+      diffMove: function (P, v, newComm) {
+        const oldComm = P.memberOf(v);
+        if (oldComm === newComm) return 0;
+        const Gp = P.graph;
+        // libleidenalg's graph->total_weight() = sum of edge weights once.
+        const m_orig = Gp.totalEdgeWeight();
+        if (m_orig === 0) return 0;
+        const directed = Gp.isDirected();
+        const total_weight = m_orig * (directed ? 1.0 : 2.0);
+        const w_to_old = P.weightToComm(v, oldComm);
+        const w_from_old = P.weightFromComm(v, oldComm);
+        const w_to_new = P.weightToComm(v, newComm);
+        const w_from_new = P.weightFromComm(v, newComm);
+        // igraph strength under default IGRAPH_LOOPS_TWICE: self-loops
+        // counted twice for undirected. Graph.strengthLeiden returns
+        // wDeg + nbSelfLoops (= cpp strength).
+        const k_out = Gp.strengthLeiden(v);
+        const k_in = directed ? Gp.strengthLeiden(v) : k_out;
+        const sw = Gp.nodeSelfWeight(v);
+        const K_out_old = P.totalWeightFromComm(oldComm);
+        const K_in_old  = P.totalWeightToComm(oldComm);
+        const K_out_new = P.totalWeightFromComm(newComm) + k_out;
+        const K_in_new  = P.totalWeightToComm(newComm) + k_in;
+        const diff_old = (w_to_old - k_out * K_in_old / total_weight)
+                       + (w_from_old - k_in * K_out_old / total_weight);
+        const diff_new = (w_to_new + sw - k_out * K_in_new / total_weight)
+                       + (w_from_new + sw - k_in * K_out_new / total_weight);
+        const diff = diff_new - diff_old;
+        const m = directed ? m_orig : 2.0 * m_orig;
+        return diff / m;
+      },
+      quality: function (P) {
+        const Gp = P.graph;
+        const m_orig = Gp.totalEdgeWeight();
+        if (m_orig === 0) return 0;
+        const directed = Gp.isDirected();
+        const m = directed ? m_orig : 2.0 * m_orig;
+        let mod = 0;
+        for (let c = 0; c < P.ncomm(); c++) {
+          // LeidenPartition: totalWeightInComm IS intra_c directly
+          // (libleidenalg convention). No /2 bridge.
+          const w = P.totalWeightInComm(c);
+          const w_out = P.totalWeightFromComm(c);
+          const w_in = P.totalWeightToComm(c);
+          mod += w - w_out * w_in / ((directed ? 1.0 : 4.0) * m_orig);
+        }
+        const q = (directed ? 1.0 : 2.0) * mod;
+        return q / m;
+      },
+    };
+  }
+
   // ── moveNodes (fast local move with queue) ──────────────────────
   // Optimiser.cpp:490-749 default path. Differs from Louvain's sweep
   // by maintaining a FIFO queue + re-pushing stable neighbours of any
@@ -641,6 +706,12 @@
     opts = opts || {};
     const recordTrace = !!opts.recordTrace;
     const refinePartition = opts.refinePartition !== false;
+    // initialMembership: optional Int32Array | Array | null. When set,
+    // LeidenPartition starts with the given membership (mirroring
+    // canonical's chained `for i in [0, num_iter): optimise_partition(p)`
+    // pattern where iter 2 continues from iter 1's partition state).
+    // CM uses this to mirror constrained.h:359 num_iter=2.
+    const initialMembership = opts.initialMembership || null;
     // maxOuterLevels: cap the multi-level aggregate loop. Stress-matrix
     // top-level byte-equal verification sets this to 1 so JS doesn't
     // burn time on inner-level moveNodes that hit the visit-cap due to
@@ -654,7 +725,7 @@
     const onLevelEntry = typeof opts.onLevelEntry === "function"
                        ? opts.onLevelEntry : null;
     const rng = LV.MT19937(seed >>> 0);
-    let P = LeidenPartition(graph, null, qualityFn);
+    let P = LeidenPartition(graph, initialMembership, qualityFn);
     const levels = [];
     let level = 0;
     let aggregateFurther = true;
@@ -791,6 +862,7 @@
     // Leiden-specific (LeidenPartition replaces LV.Partition).
     Partition: LeidenPartition,
     CPM: CPM,
+    LeidenMod: LeidenMod,
     moveNodes: moveNodes,
     mergeNodesConstrained: mergeNodesConstrained,
     optimisePartition: optimisePartition,

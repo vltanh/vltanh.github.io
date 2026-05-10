@@ -74,6 +74,18 @@
 
   // Run the base algorithm on a vertex set + its induced edges. Returns
   // the resulting partition as a list of clusters (each = [original ids]).
+  // [UPSTREAM constrained.h:301-324, 359] RunLeidenAndUpdatePartition runs
+  // `for (int i = 0; i < num_iter; i++) optimiser.optimise_partition(part);`
+  // with num_iter = 2 (constrained.h:359). JS mirrors via two
+  // optimisePartition calls; the 2nd call seeds membership from the 1st's
+  // result via opts.initialMembership (canonical libleidenalg's iter 2
+  // continues from iter 1's partition state).
+  //
+  // CAVEAT: canonical also continues the RNG state across iters (one
+  // Optimiser instance, one RNG). JS re-seeds the RNG on each
+  // optimisePartition call (new MT19937 from seed). This is a SANCTIONED
+  // RNG-stream divergence; the canonical-tracer must mirror by re-seeding
+  // before iter 2 to keep both sides aligned (see kernel_check.cpp).
   function runBaseAlgo(nodes, edges, algorithm, resolution, seed) {
     const n = nodes.length;
     if (n <= 1) return [nodes.slice()];
@@ -82,12 +94,28 @@
     const compEdges = edges.map(function (e) {
       return [idx.get(e[0]), idx.get(e[1])];
     });
-    const G = C.LEIDEN.Graph(n, compEdges, { correctSelfLoops: false });
+    // sortAdj:true mirrors libleidenalg's igraph_lazy_adjlist iteration
+    // order (chain Leiden audit row H closure). Required for byte-equal
+    // greedy pick under matching seed across nested optimise_partition.
+    const G = C.LEIDEN.Graph(n, compEdges, { correctSelfLoops: false, sortAdj: true });
+    // [UPSTREAM constrained.h:335-391] GetCommunities branches on algorithm:
+    //   "leiden-cpm"  -> CPMVertexPartition(resolution)
+    //   "leiden-mod"  -> ModularityVertexPartition (libleidenalg shape)
+    //   "louvain"     -> Louvain's Modularity (Louvain wrapper; not in CM
+    //                    deployment per pipeline.sh default).
     let qfn;
     if (algorithm === "leiden-cpm") qfn = C.LEIDEN.CPM(resolution);
-    else if (algorithm === "leiden-mod" || algorithm === "louvain") qfn = C.LEIDEN.Modularity();
+    else if (algorithm === "leiden-mod") qfn = C.LEIDEN.LeidenMod();
+    else if (algorithm === "louvain") qfn = C.LEIDEN.Modularity();
     else throw new Error("CM: unsupported algorithm '" + algorithm + "'");
-    const result = C.LEIDEN.optimisePartition(G, qfn, seed >>> 0);
+    // iter 1.
+    let result = C.LEIDEN.optimisePartition(G, qfn, seed >>> 0);
+    // iter 2: same seed (RNG re-seeded), but starting partition =
+    // iter 1's result. Mirrors canonical's `for i in [0,2)` chain.
+    const iter1Mem = result.partition.membership();
+    result = C.LEIDEN.optimisePartition(G, qfn, seed >>> 0, {
+      initialMembership: iter1Mem,
+    });
     const mem = result.partition.membership();
     const buckets = new Map();
     for (let i = 0; i < n; i++) {
