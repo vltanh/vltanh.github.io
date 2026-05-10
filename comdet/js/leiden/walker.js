@@ -38,7 +38,7 @@
   // every move event in level L, post-refine snapshot for refine events.
   // Sufficient for a 32-node fixture; per-event-exact would need replaying
   // moveNodes one-step-at-a-time.
-  function buildSnapshots(result, fixture) {
+  function buildSnapshots(result) {
     const snaps = [];
     result.levels.forEach(function (lv) {
       const post = Array.from(lv.finePostMove);
@@ -50,7 +50,7 @@
   }
 
   // Cluster colour palette: cycle netgen's outlier_palette + cluster slots.
-  function colorOf(c, fixture, idxToId) {
+  function colorOf(c) {
     if (c == null || c < 0) return C.COLORS.OUT || "#888";
     // Try cluster-c1..c4 first, then outlier palette.
     const slots = [
@@ -69,7 +69,11 @@
     if (!F) { console.warn("[leiden walker] COMDET.FIXTURE missing"); return; }
     let resolution = (opts.resolution != null) ? +opts.resolution : null;
     let seed = (opts.seed != null) ? (opts.seed >>> 0) : 42;
-    let qualityFn = (resolution != null) ? L.CPM(resolution) : L.Modularity();
+    // L.LeidenMod = libleidenalg ModularityVertexPartition, matches the
+    // LeidenPartition admin algebra used by optimisePartition.
+    // L.Modularity (Louvain shape) reads totalWeightInComm under Louvain
+    // semantics and would produce wrong dQ on LeidenPartition.
+    let qualityFn = (resolution != null) ? L.CPM(resolution) : L.LeidenMod();
 
     // Fixture → COMDET.VIZ-friendly inputs.
     const POSITIONS = {};
@@ -94,7 +98,7 @@
     viz.setEdges(EDGES, { duration: 0 });
 
     // Initial state: every node singleton.
-    let initialMembership = NODES.map(function (id) { return id; });
+    const initialMembership = NODES.map(function (id) { return id; });
 
     // Replay run, build timeline + snapshots.
     let result, timeline, snapshots;
@@ -102,7 +106,7 @@
       const G = L.Graph(NODES.length, F.edges, { correctSelfLoops: false });
       result = L.optimisePartition(G, qualityFn, seed, { recordTrace: true });
       timeline = buildTimeline(result);
-      snapshots = buildSnapshots(result, F);
+      snapshots = buildSnapshots(result);
     }
     rebuild();
 
@@ -158,11 +162,11 @@
 
     // Render at idx.
     function renderAt(idx) {
-      const mem = (idx === 0) ? initialMembership.slice() : snapshots[idx - 1];
+      const mem = (idx === 0) ? initialMembership : snapshots[idx - 1];
       // Update node colours.
       NODES.forEach(function (id, i) {
         const c = mem[i];
-        viz.setNodeStyle(id, { color: colorOf(c, F, NODES) });
+        viz.setNodeStyle(id, { color: colorOf(c) });
         viz.removeNodeClass(id, "hi");
         viz.removeNodeClass(id, "dim");
       });

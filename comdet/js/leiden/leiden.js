@@ -21,7 +21,7 @@
 (function () {
   "use strict";
   if (!window.COMDET || !window.COMDET.LOUVAIN) {
-    console.warn("[leiden] COMDET.LOUVAIN missing — load louvain.js first");
+    console.warn("[leiden] COMDET.LOUVAIN missing; load louvain.js first");
     return;
   }
   const LV = window.COMDET.LOUVAIN;
@@ -785,7 +785,6 @@
       // collapseLeiden reads from them. Bit-equal with cpp's matching
       // SUB_MEM / MAIN_MEM probe localizes any pre-collapse divergence.
       if (onLevelEntry) {
-        const tag = "SUB";
         const subM = refinedP.membership();
         const mainM = collapsedP.membership();
         const _emit = function (kind, mem) {

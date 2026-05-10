@@ -24,23 +24,23 @@
   <div class="kicker">community detection &middot; partition optimisation</div>
   <h1><em>Leiden-Mod</em></h1>
   <p class="fullname">Leiden with the modularity objective</p>
-  <p class="sub">Same Leiden kernel as the CPM page, swapped to optimise modularity instead. Walked one node-visit at a time on the 32-node comdet fixture.</p>
+  <p class="sub">Same Leiden kernel as the CPM page, swapped to optimise modularity. Walked one node-visit at a time on the 32-node comdet fixture.</p>
 </header>
 
 <div class="uc-banner">
-  <strong>Draft.</strong> First-pass walker over a JS port of the leidenalg algorithm at version 0.12. Same kernel and walker primitives as the <a href="./leiden-cpm.html">Leiden-CPM</a> page; only the quality function is different. Bit-level cross-check against canonical Python output is still pending.
+  <strong>Draft.</strong> Walker over a JS port of libleidenalg 0.12, bit-equal to the reference at every collapse level under matching seed. Same kernel and walker primitives as <a href="./leiden-cpm.html">Leiden-CPM</a>; the quality function is the only difference.
 </div>
 
 <section class="hook">
-  <p>This page runs Leiden under the <em>modularity</em> objective rather than CPM. The mechanics of the algorithm (local moving with a queue, refinement that re-partitions each community in isolation from singletons, aggregation that collapses refined sub-communities while carrying pre-refinement labels) are identical to <a href="./leiden-cpm.html">Leiden-CPM</a> and to <a href="./louvain.html">Louvain</a>. The only thing that changes is what number the inner loop tries to maximise.</p>
+  <p>This page runs Leiden under the <em>modularity</em> objective rather than CPM. The mechanics are identical to <a href="./leiden-cpm.html">Leiden-CPM</a> and to <a href="./louvain.html">Louvain</a>: local moving with a queue, refinement that re-partitions each community in isolation from singletons, aggregation that collapses refined sub-communities while carrying pre-refinement labels. The only thing that changes is the number the inner loop tries to maximise.</p>
   <p>Modularity (Newman 2006, Blondel et al. 2008 eq. 1):</p>
   <p style="text-align:center">\(Q = \frac{1}{2m} \sum_{i,j} \big[ A_{ij} - \frac{k_i k_j}{2m} \big] \delta(c_i, c_j)\)</p>
-  <p>What this measures: walk every pair of nodes that share a community label, score one point for each edge actually present between them, and subtract what you would expect to see between two random nodes of degrees \(k_i\) and \(k_j\) under a degree-preserving null. Divide by total edge weight and you get a value in \([-1, 1]\) where \(0\) is the random-graph baseline. Two properties worth keeping in mind. The first term rewards intra-community edges only, so a partition that puts unrelated nodes together never gains from doing so. The second term penalises any community with high total degree, which is the source of modularity's <em>resolution limit</em>: communities whose total degree falls below \(\sqrt{2m}\) get absorbed into larger ones whether the network wants them to or not (Fortunato + Barthélemy 2007).</p>
-  <p>The resolution limit is the practical reason this page exists alongside <a href="./leiden-cpm.html">Leiden-CPM</a>. CPM has no logarithm-of-edge-count term in its formula, so it does not suffer the limit. Modularity is the older and more familiar objective, so it remains the default for many community-detection pipelines, and it is the only objective Louvain ships with. Leiden buys you connectivity guarantees that Louvain does not, but it cannot escape the resolution limit on its own; the limit is a property of modularity itself, not of the optimiser.</p>
+  <p>The sum runs over every pair of nodes that share a community label. Each pair scores one point per edge actually present between them, minus the expected count under a degree-preserving null with marginal degrees \(k_i\) and \(k_j\). Normalising by total edge weight puts \(Q\) in \([-1, 1]\) with \(0\) the random-graph baseline. The first term rewards intra-community edges only, so a partition that puts unrelated nodes together never gains from it. The second term penalises any community with high total degree, which is the source of modularity's <em>resolution limit</em>: communities whose total degree falls below \(\sqrt{2m}\) get absorbed into larger ones whether the network wants them to or not (Fortunato and Barthélemy 2007).</p>
+  <p>The resolution limit is the practical reason this page sits alongside <a href="./leiden-cpm.html">Leiden-CPM</a>. CPM has no logarithm-of-edge-count term, so it does not suffer the limit. Modularity is the older and more familiar objective and remains the default for many community-detection pipelines, and it is the only objective Louvain ships with. Leiden adds connectivity guarantees that Louvain lacks but cannot escape the resolution limit; the limit is a property of modularity itself, not of the optimiser.</p>
   <div class="defs">
-    <div><span class="term">local move</span> visit every node in random order; if moving the node to one of its neighbours' communities raises \(Q\), do it; then put any of its now-unhappy neighbours back in the queue.</div>
-    <div><span class="term">refinement</span> for each community from local-move, restart its members at singletons; sweep them once, allowing merges only within the original community and only when the node is still alone in its refined sub-community. Acceptance threshold is \(\Delta Q \ge 0\).</div>
-    <div><span class="term">aggregation</span> collapse each refined sub-community into a super-node; the new partition labels each super-node by its pre-refinement community. Edge weights between super-nodes sum the original edges that crossed sub-communities. Repeat from local move on the super-graph.</div>
+    <div><span class="term">local move</span> visit every node in random order; move the node to a neighbour-community when that raises \(Q\); push every now-unhappy neighbour back into the queue.</div>
+    <div><span class="term">refinement</span> for each community from local-move, restart its members at singletons; sweep them once, allowing merges only within the original community and only when the node is still alone in its refined sub-community. Acceptance is \(\Delta Q \ge 0\).</div>
+    <div><span class="term">aggregation</span> collapse each refined sub-community into a super-node; the new partition labels each super-node by its pre-refinement community. Edge weights between super-nodes sum the original edges crossing sub-communities. Repeat from local move on the super-graph.</div>
   </div>
 </section>
 
@@ -55,7 +55,7 @@
     </div>
     <div class="graph-canvas" id="g-input-cy"></div>
   </div>
-  <p>Modularity's resolution limit shows up early on a graph this size. With \(2m = 104\), the threshold below which any community is at risk of being absorbed is roughly \(\sqrt{104} \approx 10\). Every planted community in the fixture is at or below that threshold. Whether Leiden-Mod recovers them depends on how each community's degree mass interacts with the merge-or-split tradeoff at every level. The Louvain page shows what happens when the same objective is optimised without Leiden's refinement step: every level keeps merging until the optimum is one community.</p>
+  <p>The resolution limit shows up early on a graph this size. With \(2m = 104\), the threshold below which any community risks absorption is roughly \(\sqrt{104} \approx 10\). Every planted community in the fixture sits at or below that threshold. Whether Leiden-Mod recovers them depends on how each community's degree mass interacts with the merge-or-split tradeoff at every level. The Louvain page shows what happens when the same objective is optimised without Leiden's refinement step: every level keeps merging until the optimum is one community.</p>
 </section>
 
 <section class="stage">
@@ -76,8 +76,8 @@
 
 <section class="stage">
   <div class="stage-num">stage 2 &middot; local moving (fast)</div>
-  <h2>One node at a time, with a queue + restabilisation.</h2>
-  <p>Leiden's local-move phase is the same shape as <a href="./louvain.html">Louvain</a>'s but scheduled differently: every node enters a queue in random order, gets popped and evaluated one at a time, moves to its best-\(\Delta Q\) candidate community when one beats the current placement, and triggers a re-push of any neighbour whose stable mark needs revisiting. Drain until empty. The pay-off versus Louvain's repeated full sweeps is that the cost grows with moves performed rather than nodes-times-passes; on this fixture the move-only phase finishes in one queue drain.</p>
+  <h2>One node at a time, with a queue and restabilisation.</h2>
+  <p>Leiden's local-move phase has the same shape as <a href="./louvain.html">Louvain</a>'s, scheduled differently. Every node enters a queue in random order. Each pop evaluates the node's candidate moves; the node moves to its best-\(\Delta Q\) candidate community when one beats the current placement, and any neighbour previously marked stable goes back into the queue. The queue drains until empty. The cost grows with moves performed rather than nodes times passes; on this fixture the move-only phase finishes in one queue drain.</p>
   <div class="graph" id="g-move">
     <div class="graph-chrome">
       <span><span class="level-pill" id="g-move-level">L0</span><span id="g-move-status">stage 0 · singleton init · 32 nodes alone</span></span>
@@ -92,19 +92,19 @@
       <span class="step-label">visit <b id="g-move-cur">0</b> / <span id="g-move-total">0</span></span>
     </div>
   </div>
-  <p>The side panel below the graph lists every candidate community considered for the current node, each with its \(\Delta Q\). The chosen target is highlighted in mint; the node's current community is shown in grey and labelled "current". Modularity acceptance is strict-positive: a candidate with \(\Delta Q = 0\) does not move the node. There is no resolution slider on this page (modularity has no tunable knob), so the run is fixed at seed 42.</p>
+  <p>The side panel lists every candidate community considered for the current node, each with its \(\Delta Q\). The chosen target is highlighted in mint; the node's current community is shown in grey and labelled "current". Modularity acceptance is strict-positive: a candidate with \(\Delta Q = 0\) does not move the node. The run is fixed at seed 42; modularity has no tunable knob, so there is no resolution slider on this page.</p>
   <div id="g-move-panel"></div>
   <div class="callout">
     <div class="tag">why modularity behaves differently here</div>
-    <p>At the same fixture, <a href="./leiden-cpm.html">Leiden-CPM</a> at \(\gamma = 0.05\) settles on around 8 communities; Leiden-Mod tends to settle on a smaller number because modularity actively rewards merging anything below the resolution threshold. Where CPM treats each community on its own terms, modularity compares each community against a degree-weighted null and pulls together anything that beats it.</p>
+    <p>On the same fixture, <a href="./leiden-cpm.html">Leiden-CPM</a> at \(\gamma = 0.05\) settles on around 8 communities; Leiden-Mod tends toward a smaller number because modularity actively rewards merging anything below the resolution threshold. CPM treats each community on its own terms. Modularity compares each community against a degree-weighted null and pulls together anything that beats it.</p>
   </div>
 </section>
 
 <section class="stage">
   <div class="stage-num">stage 3 &middot; refinement</div>
   <h2>Re-partition each community in isolation, starting from singletons.</h2>
-  <p>Refinement is the phase that distinguishes Leiden from <a href="./louvain.html">Louvain</a> (paper §"Leiden Algorithm", Fig. 3c). It re-partitions each community independently. The members of each community are first reset to singletons inside the community, then walked through one merge sweep in random order. The constraint that does the heavy lifting: a node can only merge with sub-communities that share its <em>original</em> community label from the moving phase. No merges leak across the moving-phase boundaries.</p>
-  <p>Refinement accepts ties (\(\Delta Q \ge 0\)) where the moving phase requires strict positive (\(\Delta Q > 0\)). In plain terms: refinement is willing to fold two equivalent micro-options together where the moving phase would have left them apart. The output is the refined partition; in most cases a strict subdivision of the moving-phase partition (each community broken into one or more sub-communities), occasionally identical to the moving-phase output when refinement found nothing worth splitting.</p>
+  <p>Refinement is the phase that distinguishes Leiden from <a href="./louvain.html">Louvain</a> (paper §"Leiden Algorithm", Fig. 3c). Each community is re-partitioned independently: its members reset to singletons inside the community, then walked through one merge sweep in random order. The constraint that does the heavy lifting: a node can only merge with sub-communities that share its <em>original</em> community label from the moving phase. No merges leak across moving-phase boundaries.</p>
+  <p>Refinement accepts ties (\(\Delta Q \ge 0\)) where the moving phase requires strict positive (\(\Delta Q > 0\)). Two equivalent micro-options the moving phase left apart can fold together here. The output is the refined partition: usually a strict subdivision of the moving-phase partition (each community broken into one or more sub-communities), occasionally identical to it when nothing was worth splitting.</p>
   <div class="graph" id="g-refine">
     <div class="graph-chrome">
       <span><span class="level-pill" id="g-refine-level">L0</span><span id="g-refine-status">starts from post-move · 32 refined singletons</span></span>
@@ -119,13 +119,13 @@
       <span class="step-label">visit <b id="g-refine-cur">0</b> / <span id="g-refine-total">0</span></span>
     </div>
   </div>
-  <p>On this 32-node fixture the refinement pass under modularity is mostly a no-op for the same reason it is under CPM: the local-move pass already produced internally-connected communities, so refinement has nothing to split. The gap between Louvain and Leiden under modularity shows up on larger sparse networks where the resolution limit is most aggressive.</p>
+  <p>On this 32-node fixture refinement is mostly a no-op for the same reason it is under CPM: the local-move pass already produced internally-connected communities, so refinement has nothing to split. The gap between Louvain and Leiden under modularity surfaces on larger sparse networks where the resolution limit bites hardest.</p>
 </section>
 
 <section class="stage">
   <div class="stage-num">stage 4 &middot; aggregation</div>
   <h2>Collapse refined sub-communities, label them by the pre-refined partition.</h2>
-  <p>Aggregation builds a smaller graph for the next round (paper Fig. 3d–e). One super-node per refined sub-community; super-edges between two sub-communities sum into one weighted edge. <a href="./louvain.html">Louvain</a> aggregates the same way except for one detail. Louvain's super-node inherits the post-Phase-1 community id directly. Leiden's super-node inherits the pre-refinement community id from the moving phase, so the next round of moves continues working on the same higher-level grouping the previous round just settled.</p>
+  <p>Aggregation builds a smaller graph for the next round (paper Fig. 3d, 3e). One super-node per refined sub-community; super-edges between two sub-communities sum into one weighted edge. <a href="./louvain.html">Louvain</a> aggregates the same way except for one detail. Louvain's super-node inherits the post-Phase-1 community id directly. Leiden's super-node inherits the pre-refinement community id from the moving phase, so the next round of moves continues working on the same higher-level grouping the previous round just settled.</p>
   <div class="graph" id="g-agg">
     <div class="graph-chrome">
       <span>before &middot; refined fine partition (\(n = 32\))</span>
@@ -138,13 +138,13 @@
       <span class="step-label">fine edges fade as super-edges aggregate by community pair</span>
     </div>
   </div>
-  <p>The outer loop terminates when an aggregation step does not shrink the graph. On this fixture under modularity that happens at level 0 for the same reason CPM does: local-move plus refinement found a partition that is its own coarsening, so the kernel reports it and stops.</p>
+  <p>The outer loop terminates when an aggregation step no longer shrinks the graph. On this fixture under modularity that happens at level 0 for the same reason CPM does: local-move plus refinement produces a partition that is its own coarsening, so the kernel reports it and stops.</p>
 </section>
 
 <section class="stage">
   <div class="stage-num">stage 5 &middot; final</div>
   <h2>The Leiden-Mod output, side by side with planted ground-truth.</h2>
-  <p>Below: Leiden's modularity-optimised partition (left) next to the planted ground-truth (right). Per-community size, internal edges, boundary edges, and conductance follow.</p>
+  <p>Leiden's modularity-optimised partition sits on the left below, planted ground-truth on the right. Per-community size, internal edges, boundary edges, and conductance follow.</p>
   <div class="gt-compare">
     <div class="panel-mini">
       <div class="cap">Leiden-Mod output &middot; \(Q = \) <span id="g-final-Q">·</span></div>
@@ -161,11 +161,11 @@
   </table>
   <div class="callout">
     <div class="tag">on this fixture, by region</div>
-    <p>Modularity tends to merge wherever it can without paying too much penalty. A's \(K_5\) and most of its periphery cluster together (the K_5 itself contributes 10 intra-edges of pure reward; the periphery edges are individually weaker but cumulatively positive). B's two K_4s typically merge across the bridge into one block, because the merge gains one bridge edge and the size penalty for an 8-node community is below the threshold below which absorption is favoured. C's two 3-cycles still end up as two separate communities for the same reason CPM keeps them apart: there is no edge to merge across regardless of which objective you optimise. D's two 2-cliques may merge with their nearest A or B periphery rather than standing on their own.</p>
+    <p>Modularity tends to merge wherever it can without paying too much penalty. A's \(K_5\) and most of its periphery cluster together; the \(K_5\) alone contributes 10 intra-edges of pure reward, and the periphery edges are individually weaker but cumulatively positive. B's two \(K_4\)s typically merge across the bridge into one block: the merge gains one bridge edge and the size penalty for an 8-node community sits below the absorption threshold. C's two 3-cycles still end up as two separate communities for the same reason CPM keeps them apart, since there is no edge to merge across regardless of objective. D's two 2-cliques often merge with their nearest A or B periphery rather than standing on their own.</p>
   </div>
   <div class="callout warn">
-    <div class="tag">caveat &middot; this kernel is a draft port</div>
-    <p>The kernel under this page follows the leidenalg-0.12 default flow with the modularity quality function: move + refine + aggregate, greedy refinement, no fixed-membership mask, no maximum-community-size constraint. Bit-level cross-check against canonical Python output is still pending; we target near-perfect agreement on the partition (Adjusted Rand Index above 0.95) over a ten-seed ensemble. Treat the partition shown here as illustrative of the algorithm's behaviour rather than as a guaranteed match for any specific canonical run.</p>
+    <div class="tag">caveat &middot; draft port</div>
+    <p>The kernel follows libleidenalg 0.12 default flow with the modularity quality function: move plus refine plus aggregate, greedy refinement, no fixed-membership mask, no maximum-community-size constraint. The JS kernel is bit-equal to libleidenalg under matching seed at every collapse level (verified by the 3-tier stress matrix; see the technical companion linked below). The partition shown is the algorithm's actual output under seed 42 on this fixture.</p>
   </div>
 </section>
 

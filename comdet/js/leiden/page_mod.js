@@ -15,7 +15,9 @@
 
   const seed = 42;
   const G = P.buildLeidenGraph();
-  const result = L.optimisePartition(G, L.Modularity(), seed, { recordTrace: true });
+  // L.LeidenMod mirrors libleidenalg ModularityVertexPartition; it matches
+  // the LeidenPartition admin algebra used inside optimisePartition.
+  const result = L.optimisePartition(G, L.LeidenMod(), seed, { recordTrace: true });
 
   // Stage 0 + Stage 1.
   P.renderFixture("g-input-cy", { useGT: true, pinned: true });
