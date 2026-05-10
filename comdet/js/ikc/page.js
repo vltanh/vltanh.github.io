@@ -109,29 +109,51 @@
   //   ST.RESIDUAL : not yet processed
   //   ST.DROPPED  : k-validity fail / mod fail / bail singleton
   //   >= 0        : accepted-cluster id
-  function snapshotAt(idx) {
+  //
+  // snapshots[i] = state after applying iterations[0..i-1]; index 0 = empty.
+  // Built once per rerun; renderIter looks up by idx instead of re-walking
+  // the iteration prefix every scrub tick.
+  let snapshots = [];
+  function buildSnapshots() {
+    snapshots = [];
     const snap = {};
     F.nodes.forEach(function (id) { snap[id] = ST.RESIDUAL; });
     let acceptedSeen = 0;
-    for (let i = 0; i < idx; i++) {
+    let accTotal = 0, dropTotal = 0;
+    snapshots.push({
+      snap: Object.assign({}, snap),
+      acceptedSoFar: acceptedSeen,
+      acc: accTotal,
+      drop: dropTotal,
+    });
+    for (let i = 0; i < result.iterations.length; i++) {
       const it = result.iterations[i];
       it.accepted.forEach(function (cRec) {
         cRec.nodes.forEach(function (id) { snap[id] = acceptedSeen; });
         acceptedSeen += 1;
+        accTotal += cRec.nodes.length;
       });
       it.components.forEach(function (cRec) {
         if (!cRec.accepted) {
           cRec.nodes.forEach(function (id) { snap[id] = ST.DROPPED; });
+          dropTotal += cRec.nodes.length;
         }
       });
       if (it.bailed) {
         it.residualNodes.forEach(function (id) {
           if (snap[id] === ST.RESIDUAL) snap[id] = ST.DROPPED;
         });
+        dropTotal += it.residualNodes.length;
       }
+      snapshots.push({
+        snap: Object.assign({}, snap),
+        acceptedSoFar: acceptedSeen,
+        acc: accTotal,
+        drop: dropTotal,
+      });
     }
-    return { snap: snap, acceptedSoFar: acceptedSeen };
   }
+  function snapshotAt(idx) { return snapshots[idx]; }
 
   function colorForState(s) {
     if (s === ST.RESIDUAL) return "#3a3f4a";
@@ -146,7 +168,7 @@
 
   function renderIter(idx) {
     const ev = result.iterations[idx - 1] || null;
-    const { snap, acceptedSoFar } = snapshotAt(idx);
+    const { snap, acceptedSoFar, acc, drop } = snapshotAt(idx);
     const inKcore = new Set(ev ? ev.kcoreNodes : []);
     const compOf = new Map();
     if (ev) {
@@ -177,17 +199,11 @@
     const ss = document.getElementById("g-loop-stats");
     if (lv) lv.textContent = ev ? ("it " + ev.iteration) : "init";
     if (st) {
-      if (!ev) st.innerHTML = "all 32 nodes residual &middot; pre-iteration 0";
+      if (!ev) st.innerHTML = "all " + F.nodes.length + " nodes residual &middot; pre-iteration 0";
       else if (ev.bailed) st.innerHTML = "K* = " + ev.maxK + " &lt; k_floor &middot; bailed &middot; " + ev.residualNodes.length + " nodes drop";
       else st.innerHTML = "K* = " + ev.maxK + " &middot; kcore = " + ev.kcoreNodes.length + " nodes &middot; " + ev.components.length + " component(s)";
     }
     if (ss) {
-      let acc = 0, drop = 0;
-      for (let i = 0; i < idx; i++) {
-        result.iterations[i].accepted.forEach(function (c) { acc += c.nodes.length; });
-        result.iterations[i].components.forEach(function (c) { if (!c.accepted) drop += c.nodes.length; });
-        if (result.iterations[i].bailed) drop += result.iterations[i].residualNodes.length;
-      }
       ss.innerHTML = "accepted: " + acc + " &middot; dropped: " + drop;
     }
     // Per-iter readout strip.
@@ -220,7 +236,7 @@
     const panel = document.getElementById("g-loop-panel");
     if (!panel) return;
     if (!ev) {
-      panel.innerHTML = '<div class="step-desc">Pre-iteration. Residual = full graph (32 nodes). Click "next iteration" to compute the first \\(K^*\\)-core.</div>';
+      panel.innerHTML = '<div class="step-desc">Pre-iteration. Residual = full graph (' + F.nodes.length + ' nodes). Click "next iteration" to compute the first \\(K^*\\)-core.</div>';
       retypeset(panel);
       return;
     }
@@ -257,10 +273,12 @@
   }
 
   function retypeset(target) {
-    if (typeof MathJax !== "undefined" && MathJax.typesetPromise) {
-      MathJax.typesetPromise([target]);
-    }
+    if (typeof MathJax === "undefined" || !MathJax.typesetPromise) return;
+    if (target) MathJax.typesetPromise([target]);
+    else MathJax.typesetPromise();
   }
+
+  buildSnapshots();
 
   let loopCtl = null;
   function rebuildLoopController() {
@@ -307,12 +325,11 @@
   // ── k_floor slider + strict-mod toggle ──────────────────────────
   function rerun() {
     result = I.runFixture(kFloor, canonicalGate);
+    buildSnapshots();
     rebuildLoopController();
     loopCtl.set(0);
     rebuildFinal();
-    if (typeof MathJax !== "undefined" && MathJax.typesetPromise) {
-      MathJax.typesetPromise();
-    }
+    retypeset();
   }
 
   const kIn = document.getElementById("g-loop-k");
@@ -335,7 +352,5 @@
     });
   }
 
-  if (typeof MathJax !== "undefined" && MathJax.typesetPromise) {
-    MathJax.typesetPromise();
-  }
+  retypeset();
 })();

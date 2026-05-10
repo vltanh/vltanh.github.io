@@ -55,14 +55,16 @@
       if (u == null || v == null) return;
       eu.push(u); ev.push(v); m += 1;
     });
+    const eU = new Int32Array(eu);
+    const eV = new Int32Array(ev);
     const deg = new Int32Array(n);
-    for (let i = 0; i < m; i++) { deg[eu[i]] += 1; deg[ev[i]] += 1; }
+    for (let i = 0; i < m; i++) { deg[eU[i]] += 1; deg[eV[i]] += 1; }
     const adjStarts = new Int32Array(n + 1);
     for (let i = 0; i < n; i++) adjStarts[i + 1] = adjStarts[i] + deg[i];
     const adjN = new Int32Array(adjStarts[n]);
     const cursor = new Int32Array(n);
     for (let i = 0; i < m; i++) {
-      const u = eu[i], v = ev[i];
+      const u = eU[i], v = eV[i];
       adjN[adjStarts[u] + cursor[u]++] = v;
       adjN[adjStarts[v] + cursor[v]++] = u;
     }
@@ -74,7 +76,8 @@
         slice.sort();
       }
     }
-    return { n: n, ids: nodeIds, idx: idx, adjN: adjN, adjStarts: adjStarts, m: m };
+    return { n: n, ids: nodeIds, idx: idx, adjN: adjN, adjStarts: adjStarts,
+             m: m, eU: eU, eV: eV };
   }
 
   function nbStart(g, i) { return g.adjStarts[i]; }
@@ -235,18 +238,13 @@
     const canonicalGate = opts.canonicalGate !== false;
     const fixture = opts.fixture != null ? opts.fixture : null;
 
-    // Top-level compaction (stable globalIdx for fullEdges).
+    // Top-level compaction (stable globalIdx for fullEdges). compactSubgraph
+    // already filtered self-loops + missing-endpoint edges into top.eU/top.eV
+    // in original edge order; reuse those instead of re-walking fullEdges.
     const top = compactSubgraph(nodeIds, fullEdges);
     const globalN = top.n;
-    const fullEU = new Int32Array(top.m);
-    const fullEV = new Int32Array(top.m);
-    let fillI = 0;
-    fullEdges.forEach(function (e) {
-      if (e[0] === e[1]) return;
-      const u = top.idx.get(e[0]); const v = top.idx.get(e[1]);
-      if (u == null || v == null) return;
-      fullEU[fillI] = u; fullEV[fillI] = v; fillI += 1;
-    });
+    const fullEU = top.eU;
+    const fullEV = top.eV;
     const fullL = top.m;
 
     // Tracer init event: fixture name + post-self-loop n/m + node id map.
