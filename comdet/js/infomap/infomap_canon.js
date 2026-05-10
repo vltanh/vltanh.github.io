@@ -13,7 +13,7 @@
  * + dnc + matching the Infomap two-level mode used by canonical_run.py).
  * Self-loops not supported (none in the fixtures). Markov time = 1.
  *
- * RNG: LOUVAIN.MT19937 + a libstdc++-style uniform_int_distribution
+ * RNG: COMDET.COMMON.MT19937 + a libstdc++-style uniform_int_distribution
  * rejection sampler so randInt(min, max) and getRandomizedIndexVector
  * match canonical Infomap (Random.h) byte-for-byte. The canonical
  * Infomap binary built in this repo uses libstdc++; matching that on
@@ -27,12 +27,14 @@
  */
 (function () {
   "use strict";
-  if (!window.COMDET || !window.COMDET.LOUVAIN) {
-    console.warn("[infomap_canon] COMDET.LOUVAIN missing; load louvain.js first");
+  if (!window.COMDET || !window.COMDET.COMMON) {
+    console.warn("[infomap_canon] COMDET.COMMON missing; load common/common.js first");
     return;
   }
   const C = window.COMDET;
-  const LV = C.LOUVAIN;
+  // MT19937 lives under COMDET.COMMON since the 2026-05-10 cross-algo
+  // isolation refactor (previously COMDET.LOUVAIN.MT19937).
+  const CC = C.COMMON;
 
   // Module-level stack tracking the running m_consolidatedObjective.L
   // (== cpp's last consolidate's m_objective.codelength) per
@@ -1795,7 +1797,7 @@
       const subSeed = opts.seed != null ? opts.seed : 1;
       const subRes = runInfomapFaithful(subIds, [], {
         seed: subSeed,
-        rng: LV.MT19937(subSeed >>> 0), // fresh per sub-Infomap (cpp parity)
+        rng: CC.MT19937(subSeed >>> 0), // fresh per sub-Infomap (cpp parity)
         presetGraph: subG,              // D2: inherit parent flows
         twoLevel: true,
         tuneIterationLimit: 1,
@@ -2012,7 +2014,7 @@
     // Allow caller to inject an existing rng (for sub-Infomap recursion
     // inside coarseTune). canonical re-uses m_rand at every level —
     // matching that means propagating the same MT19937 instance.
-    const rng = opts.rng != null ? opts.rng : LV.MT19937(seed >>> 0);
+    const rng = opts.rng != null ? opts.rng : CC.MT19937(seed >>> 0);
     const aggregationLimit = opts.aggregationLimit != null
       ? opts.aggregationLimit : 30;
     const tuneIterationLimit = opts.tuneIterationLimit | 0;
@@ -2263,7 +2265,7 @@
     opts = opts || {};
     const g = buildGraph(nodeIds, edges);
     const seed = opts.seed != null ? opts.seed : 1;
-    const rng = LV.MT19937(seed >>> 0);
+    const rng = CC.MT19937(seed >>> 0);
     const aggregationLimit = opts.aggregationLimit != null
       ? opts.aggregationLimit : 30;
     // findTopModulesRepeatedly does one full multi-level Louvain pass.

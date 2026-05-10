@@ -36,21 +36,25 @@
  */
 (function () {
   "use strict";
-  if (!window.COMDET || !window.COMDET.LOUVAIN) {
-    console.warn("[infomap] COMDET.LOUVAIN missing; load louvain.js first");
+  if (!window.COMDET || !window.COMDET.COMMON) {
+    console.warn("[infomap] COMDET.COMMON missing; load common/common.js first");
     return;
   }
   const C = window.COMDET;
-  const LV = C.LOUVAIN;
+  // Graph + MT19937 now live under COMDET.COMMON (cross-algo isolation
+  // refactor 2026-05-10). Before that they were reached via COMDET.LOUVAIN
+  // and Infomap loaded louvain.js as a substrate; that dep is gone.
+  const CC = C.COMMON;
 
   function plogp(p) {
     if (p <= 0) return 0;
     return p * Math.log2(p);
   }
 
-  // Wrap LOUVAIN.Graph + add the {ids, idx, adj, deg, m, n} shim that
-  // greedyJoin/tune/subLevelPartition expect. LOUVAIN.Graph requires
-  // 0..n-1 integer nodes, so map external ids to compact indices.
+  // Wrap COMDET.COMMON.Graph + add the {ids, idx, adj, deg, m, n}
+  // shim that greedyJoin/tune/subLevelPartition expect. COMMON.Graph
+  // requires 0..n-1 integer nodes, so map external ids to compact
+  // indices.
   function buildGraph(nodeIds, edges) {
     const n = nodeIds.length;
     const idx = new Map();
@@ -61,7 +65,7 @@
       if (u == null || v == null || u === v) return;
       compactEdges.push([u, v]);
     });
-    const lg = LV.Graph(n, compactEdges, { correctSelfLoops: false });
+    const lg = CC.Graph(n, compactEdges, { correctSelfLoops: false });
     const adj = new Array(n);
     const deg = new Array(n);
     for (let i = 0; i < n; i++) {
@@ -202,8 +206,8 @@
     const Tmin = opts.Tmin != null ? opts.Tmin : 1e-3;
     const cooling = opts.cooling != null ? opts.cooling : 0.85;
     const passesMax = opts.passesMax != null ? opts.passesMax : 40;
-    const LV = window.COMDET && window.COMDET.LOUVAIN;
-    const rng = LV ? LV.MT19937((opts.seed | 0) >>> 0) : null;
+    const _CC = window.COMDET && window.COMDET.COMMON;
+    const rng = _CC ? _CC.MT19937((opts.seed | 0) >>> 0) : null;
     function rand() {
       if (rng) return rng.raw() / 0x100000000;
       return Math.random();
