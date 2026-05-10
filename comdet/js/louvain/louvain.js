@@ -1,4 +1,4 @@
-/* Louvain kernel — JS port faithful to externals/louvain (Blondel 2008
+/* Louvain kernel. JS port faithful to externals/louvain (Blondel 2008
  * et al., gen-louvain v0.3 src/louvain.cpp + modularity.cpp +
  * graph_binary.cpp). The JS code structure mirrors the canonical
  * cpp source, not the paper: every per-step computation lands on the
@@ -92,7 +92,7 @@
         mti = mtiSave;
         return out;
       },
-      // int(lo, hi) — rejection sampling on [lo, hi]. Used by Louvain
+      // int(lo, hi): rejection sampling on [lo, hi]. Used by Louvain
       // shuffle. Matches the cpp tracer's int_inclusive helper bit-for-
       // bit (range = hi-lo+1; limit = floor(2^32/range)*range).
       int: function (lo, hi) {
@@ -196,7 +196,7 @@
     // lists; self-loop appears in one list ONCE. Mirrors canonical
     // graph_binary's links[] layout. If preBuiltAdj is supplied
     // (canonical-faithful collapse path) it is consumed directly,
-    // bypassing the edge-push round-trip — required for level-1+
+    // bypassing the edge-push round-trip, required for level-1+
     // collapsed graphs to mirror externals/louvain partition2graph_binary
     // which writes per-comm adj directly from std::map<int,double> (key-
     // ASC, per-direction-ONCE) without going through an edge list.
@@ -301,7 +301,7 @@
       // from per-comm bucket maps (bypassing the edge-push round-trip
       // through the Graph constructor, which would double inter pairs).
       collapse: function (membership, ncomm) {
-        // Step 1 — comm renumber by original-id-ASC. Mirrors
+        // Step 1. Comm renumber by original-id-ASC. Mirrors
         // louvain.cpp:147-160.
         const renumber = new Int32Array(ncomm);
         for (let c = 0; c < ncomm; c++) renumber[c] = -1;
@@ -311,7 +311,7 @@
           if (renumber[i] !== -1) renumber[i] = last++;
         }
         const nbc = last;
-        // Step 2 — comm_nodes[c] = list of constituents (push-order).
+        // Step 2. comm_nodes[c] = list of constituents (push-order).
         const commNodes = new Array(nbc);
         for (let c = 0; c < nbc; c++) commNodes[c] = [];
         const newSizes = new Array(nbc).fill(0);
@@ -320,7 +320,7 @@
           commNodes[nc].push(v);
           newSizes[nc] += nodeSizes[v];
         }
-        // Step 3 — per-comm bucket; emit per-direction-once into
+        // Step 3. Per-comm bucket; emit per-direction-once into
         // direct adj. Flat eu/ev/ew is built per-comm slice mirroring
         // canonical g2's flat links/weights output.
         const newAdjN = new Array(nbc);
@@ -438,7 +438,7 @@
               // No halving for self-loops here. cpp halves because its
               // IGRAPH_LOOPS_TWICE inclist iteration hits each self-loop
               // edge twice per vertex (so two w/2 contributions sum to
-              // w). JS Graph stores self-loops ONCE in adj — no double
+              // w). JS Graph stores self-loops ONCE in adj, no double
               // hit, no compensating halve. Net contribution is w on
               // both sides.
               const w_e = ew[e];
@@ -477,8 +477,8 @@
   // ┌─────────────────────────────────────────────────────────────────┐
   // │ Two Partition substrates                                        │
   // │                                                                 │
-  // │ This LV.Partition is the OLDER substrate, faithful to the       │
-  // │ Louvain externals canonical (Blondel 2008, gen-louvain v0.3 —   │
+  // │ This LV.Partition is the older substrate, faithful to the      │
+  // │ Louvain externals canonical (Blondel 2008, gen-louvain v0.3:   │
   // │ modularity.h Modularity::in/tot/gain). It uses the              │
   // │ Louvain-Modularity convention:                                  │
   // │                                                                 │
@@ -516,9 +516,9 @@
   // │ and Leiden tracers byte-equal to their respective canonicals,   │
   // │ we ship two Partition factories:                                │
   // │                                                                 │
-  // │   LV.Partition       (this file) — Louvain-shape, used by       │
+  // │   LV.Partition       (this file): Louvain-shape, used by       │
   // │                                    LV.sweep + LV.run.           │
-  // │   COMDET.LEIDEN.Partition         — libleidenalg-shape,         │
+  // │   COMDET.LEIDEN.Partition         : libleidenalg-shape,         │
   // │                  defined in comdet/js/leiden/leiden.js          │
   // │                  (LeidenPartition factory). Used by Leiden's    │
   // │                  moveNodes + mergeNodesConstrained +            │
@@ -572,7 +572,7 @@
       // canonical init (modularity.cpp:46-50): in[i] = nb_selfloops(i),
       // tot[i] = weighted_degree(i) for the SINGLETON case. For non-
       // singleton init we have to play back insert/remove from singleton
-      // to target — easier to recompute directly:
+      // to target. Easier to recompute directly:
       //   in[c] = 2·intra_c + Σ self-loops in c
       //   tot[c] = Σ weighted_degree(v) for v in c
       const m = graph.ecount();
@@ -663,7 +663,7 @@
       if (cnodes[comm] === 0) emptiesAdd(comm);
     }
     function modInsert(node, comm, dnc) {
-      // Fresh comm id — grow admin.
+      // Fresh comm id: grow admin.
       if (comm >= ncomm) growAdmin(comm + 1);
       inC[comm]  += 2 * dnc + graph.nbSelfLoops(node);
       totC[comm] += graph.weightedDegree(node);
@@ -705,23 +705,11 @@
       return out;
     }
 
-    function getEmptyCommunity() {
-      if (empties.length > 0) {
-        return empties[empties.length - 1];
-      }
-      const newId = ncomm;
-      growAdmin(newId + 1);
-      emptiesAdd(newId);
-      return newId;
-    }
-
-    // moveNode is a thin wrapper around remove + insert for callers
-    // (Leiden) that prefer the high-level "move v to target" verb.
-    // Internally: do a neigh_comm scan to find dnc to vComm and dnc
-    // to target, then remove + insert. This duplicates the scan
-    // sweep already does, so Louvain.sweep does NOT call moveNode —
-    // it calls remove + insert directly. moveNode is the legacy
-    // surface kept for Leiden's refinement code path.
+    // moveNode is a thin wrapper around remove + insert for the page-side
+    // trace replay (page.js rebuildPhase1Trace). Internally: neighComm to
+    // find dnc to old/target, then remove + insert. The Louvain sweep
+    // does NOT call moveNode (it calls remove + insert directly to avoid
+    // the duplicated neighComm scan).
     function moveNode(v, target) {
       const old = membership[v];
       if (old === target) return;
@@ -730,36 +718,6 @@
       const dncNew = neighWeight[target] === -1 ? 0 : neighWeight[target];
       modRemove(v, old, dncOld);
       modInsert(v, target, dncNew);
-    }
-
-    // weightToComm / weightFromComm / getNeighComms: caller-visible
-    // accessors that build a full neighbour-cache for v. Used by Leiden
-    // diffMove (which needs ΔQ vs target without the remove-then-gain
-    // pattern). For Louvain.sweep we use neigh_comm / neigh_weight
-    // directly.
-    function weightToComm(v, comm) {
-      neighComm(v);
-      const w = neighWeight[comm];
-      return w === -1 ? 0 : w;
-    }
-    function weightFromComm(v, comm) { return weightToComm(v, comm); }
-    function getNeighComms(v) {
-      neighComm(v);
-      const out = new Array(neighLast);
-      for (let i = 0; i < neighLast; i++) out[i] = neighPos[i];
-      return out;
-    }
-    function getNeighCommsConstrained(v, constrained) {
-      const adjN = graph.neighbours(v);
-      const cv = constrained[v];
-      const seen = new Set();
-      for (let i = 0; i < adjN.length; i++) {
-        const u = adjN[i];
-        if (u === v) continue;
-        if (constrained[u] !== cv) continue;
-        seen.add(membership[u]);
-      }
-      return Array.from(seen);
     }
 
     // renumber: canonical partition2graph_binary's renumber by
@@ -780,32 +738,7 @@
       applyRenumberOrder(remap, order);
     }
 
-    // renumberLeiden: libleidenalg's MutableVertexPartition::
-    // renumber_communities() routes to rank_order_communities
-    // (MutableVertexPartition.cpp:370-417) which sorts surviving comms
-    // via orderCSize (GraphHelper.cpp:16-28): primary csize DESC,
-    // secondary cnodes DESC, tertiary original-id ASC. Largest comm
-    // becomes new id 0. Differs from Louvain's original-id-ASC
-    // convention; Leiden code paths must use this variant so collapsed-
-    // graph node ids match cpp's at every level transition.
-    function renumberLeiden() {
-      const surv = [];
-      for (let c = 0; c < ncomm; c++) {
-        if (cnodes[c] > 0) surv.push(c);
-      }
-      surv.sort(function (A, B) {
-        if (csize[A] !== csize[B]) return csize[B] - csize[A];
-        if (cnodes[A] !== cnodes[B]) return cnodes[B] - cnodes[A];
-        return A - B;
-      });
-      const remap = new Int32Array(ncomm);
-      for (let c = 0; c < ncomm; c++) remap[c] = -1;
-      for (let i = 0; i < surv.length; i++) remap[surv[i]] = i;
-      applyRenumberOrder(remap, surv);
-    }
-
-    // Shared admin-rewrite given a remap[old]→new and an order[new]→old
-    // (used by both renumber + renumberLeiden).
+    // Shared admin-rewrite given a remap[old]→new and an order[new]→old.
     function applyRenumberOrder(remap, order) {
       for (let v = 0; v < n; v++) membership[v] = remap[membership[v]];
       const newN = order.length;
@@ -838,17 +771,13 @@
       ncomm: function () { return ncomm; },
       csize: function (c) { return c < ncomm ? csize[c] : 0; },
       cnodes: function (c) { return c < ncomm ? cnodes[c] : 0; },
-      // in[c] / tot[c] are canonical Modularity admin. The legacy
-      // names totalWeightInComm / totalWeightToComm / totalWeightFromComm
-      // are kept as aliases so Leiden + page glue keep working.
-      totalWeightInComm:    function (c) { return c < ncomm ? inC[c] : 0; },
-      totalWeightToComm:    function (c) { return c < ncomm ? totC[c] : 0; },
-      totalWeightFromComm:  function (c) { return c < ncomm ? totC[c] : 0; },
-      totalWeightInAllComms: function () { return totalWeightInAllComms; },
-      totalPossibleEdgesInAllComms: function () { return totalPossibleEdgesInAllComms; },
+      // Canonical Modularity admin (modularity.h::in/tot). totalWeightInComm
+      // = in[c] = 2·intra_c + Σ self-loops; totalWeightToComm = tot[c] =
+      // Σ weighted_degree of constituents.
+      totalWeightInComm: function (c) { return c < ncomm ? inC[c] : 0; },
+      totalWeightToComm: function (c) { return c < ncomm ? totC[c] : 0; },
       moveNode: moveNode,
-      renumberLeiden: renumberLeiden,
-      // Canonical sweep primitives — exposed so the outer driver does
+      // Canonical sweep primitives. Exposed so the outer driver does
       // remove/gain/insert per the canonical body.
       neighComm: neighComm,
       neighWeight: function (c) {
@@ -860,86 +789,19 @@
       modRemove: modRemove,
       modInsert: modInsert,
       modGain: modGain,
-      // Legacy accessors — keep Leiden + page diffMove paths alive.
-      weightToComm: weightToComm,
-      weightFromComm: weightFromComm,
-      getNeighComms: getNeighComms,
-      getNeighCommsConstrained: getNeighCommsConstrained,
-      getEmptyCommunity: getEmptyCommunity,
       renumber: renumber,
       rebuildAdmin: rebuildAdmin,
-      diffMove: function (v, target) { return qualityFn.diffMove(this, v, target); },
       quality: function () { return qualityFn.quality(this); },
-      qualityFn: qualityFn,
-      setMembership: function (m) {
-        for (let i = 0; i < n; i++) membership[i] = m[i] | 0;
-        rebuildAdmin();
-      },
-      fromCoarsePartition: function (coarse, mapping) {
-        for (let v = 0; v < n; v++) membership[v] = coarse[mapping[v]];
-        rebuildAdmin();
-      },
     };
   }
 
   // ── Modularity quality function ─────────────────────────────────
-  // Mirrors libleidenalg ModularityVertexPartition byte-for-byte
-  // (ModularityVertexPartition.cpp:35-120 diff_move +
-  //  ModularityVertexPartition.cpp:129-162 quality):
-  //   total_weight = graph.total_weight() * (2 - directed)
-  //   diff_old = (w_to_old - k_out*K_in_old/tw) + (w_from_old - k_in*K_out_old/tw)
-  //   diff_new = (w_to_new + sw - k_out*K_in_new/tw) + (w_from_new + sw - k_in*K_out_new/tw)
-  //   m = directed ? graph.total_weight() : 2*graph.total_weight()
-  //   return (diff_new - diff_old) / m
-  //
-  // JS Graph.totalWeight() returns Σ weighted_degree = 2*m_cpp for
-  // undirected (where m_cpp = libleidenalg Graph::total_weight() = Σ
-  // edge weights). Halve to recover m_cpp.
-  //
-  // Used only via Partition.diffMove path (Leiden's moveNodes /
-  // mergeNodesConstrained route here when LEIDEN.Modularity is the
-  // qualityFn). Louvain's sweep uses modGain (Modularity::gain after
-  // remove) directly and is unaffected.
-  //
-  // The Modularity.totalWeightInComm convention requires explanation:
-  // Partition.rebuildAdmin stores inC[c] = 2*intra_c + Σ self-loops
-  // (Louvain Modularity::in convention; lines 388/380). cpp libleidenalg
-  // stores _total_weight_in_comm[c] = intra_c + (self-loops contribute
-  // w/2 per move_node:695). On collapsed graphs both end up effectively
-  // = intra_c + self-loop weight via different per-edge accumulators.
-  // For top-level (no self-loops), JS inC = 2*intra_c, cpp = intra_c —
-  // halve to bridge in the quality sum.
+  // Louvain's sweep computes per-visit ΔQ inline via Partition.modGain
+  // (canonical Modularity::gain after remove). The quality() entry here
+  // is the absolute-Q evaluator called by phase1's level-convergence
+  // gate + the page's per-level Q_after readout.
   function Modularity() {
     return {
-      name: "Modularity",
-      resolution: 1.0,
-      diffMove: function (P, v, newComm) {
-        const oldComm = P.memberOf(v);
-        if (oldComm === newComm) return 0;
-        const G = P.graph;
-        const m_orig = G.totalWeight() / 2;            // = m_cpp
-        if (m_orig <= 0) return 0;
-        const directed = G.isDirected();
-        const total_weight = m_orig * (2.0 - (directed ? 1 : 0));
-        const wToOld = P.weightToComm(v, oldComm);
-        const wFromOld = P.weightFromComm(v, oldComm);
-        const wToNew = P.weightToComm(v, newComm);
-        const wFromNew = P.weightFromComm(v, newComm);
-        const k_out = G.weightedDegree(v);
-        const k_in = directed ? G.weightedDegree(v) : k_out;
-        const sw = G.nodeSelfWeight(v);
-        const K_out_old = P.totalWeightFromComm(oldComm);
-        const K_in_old  = P.totalWeightToComm(oldComm);
-        const K_out_new = P.totalWeightFromComm(newComm) + k_out;
-        const K_in_new  = P.totalWeightToComm(newComm) + k_in;
-        const diff_old = (wToOld - k_out * K_in_old / total_weight)
-                       + (wFromOld - k_in * K_out_old / total_weight);
-        const diff_new = (wToNew + sw - k_out * K_in_new / total_weight)
-                       + (wFromNew + sw - k_in * K_out_new / total_weight);
-        const diff = diff_new - diff_old;
-        const m = directed ? m_orig : 2.0 * m_orig;
-        return diff / m;
-      },
       quality: function (P) {
         // Mirrors externals/louvain Modularity::quality()
         // (modularity.cpp:58-71) byte-for-byte:
@@ -1000,7 +862,7 @@
       const neighLast = P.neighLast();
       // Canonical remove(v, vComm, neigh_weight[vComm]). neigh_comm
       // initialised neigh_weight[vComm] to 0 + accumulated the weights
-      // from v to non-self neighbours that are CURRENTLY in vComm — at
+      // from v to non-self neighbours that are CURRENTLY in vComm: at
       // singleton init that's 0, but inside a sweep where prior visits
       // have moved nodes into vComm it's strictly positive.
       P.modRemove(v, vComm, P.neighWeight(vComm));
@@ -1062,7 +924,7 @@
     const sweeps = [];
     // Canonical louvain.cpp:221-229: random_order is computed ONCE per
     // level, shuffled in place, then reused for every pass in the
-    // do/while. JS mirrors that — shuffle once, inject the same
+    // do/while. JS mirrors that: shuffle once, inject the same
     // visitOrder into every sweep call.
     const n = P.n();
     const visitOrder = new Array(n);

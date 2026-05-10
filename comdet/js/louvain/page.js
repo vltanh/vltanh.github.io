@@ -1,5 +1,5 @@
 /* Louvain page glue. Walker over the Blondel 2008 algorithm:
- * Phase 1 (modularity sweep — full passes until quiet) and Phase 2
+ * Phase 1 (modularity sweep, full passes until quiet) and Phase 2
  * (aggregation), iterated until the graph stops shrinking.
  *
  * Reroll convention follows netgen's matcher / SBM / nPSO walkers
@@ -31,7 +31,7 @@
     document.getElementById("links").innerHTML = C.linksRow({ gen: "louvain" });
   }
 
-  // ?seed=N URL parameter — pedagogical reproducibility per the
+  // ?seed=N URL parameter for pedagogical reproducibility per the
   // dossier. Falls back to default 42 when absent / non-integer so
   // the static landing card stays deterministic.
   const urlSeed = (function () {
