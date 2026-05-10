@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>SBM-flat-pp &middot; planted-partition flat SBM | Community Detection Algorithms</title>
 <link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐖</text></svg>">
-<meta name="description" content="Planted-partition flat SBM walked one Metropolis-Hastings move at a time on a 32-node fixture. Per-stage viz over a faithful graph-tool BlockState port.">
+<meta name="description" content="Planted-partition flat SBM walked one Metropolis-Hastings move at a time on a 32-node fixture. Per-stage viz over a Zhang+Peixoto two-rate Bernoulli kernel.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
@@ -20,22 +20,22 @@
   <div class="kicker">community detection &middot; bayesian inference</div>
   <h1><em>SBM-flat-pp</em></h1>
   <p class="fullname">planted-partition flat stochastic block model</p>
-  <p class="sub">Walk through the Bayesian planted-partition fit one Metropolis-Hastings proposal at a time, on the 32-node comdet fixture.</p>
+  <p class="sub">Collapse the full \(\boldsymbol{e}\) matrix into two scalars \(E_{\text{in}}\) and \(E_{\text{out}}\); minimise \(\Sigma\) by single-vertex Metropolis-Hastings.</p>
 </header>
 
 <div class="uc-banner">
-  <strong>Draft.</strong> First-pass walker over a JS port of graph-tool's <code>PPBlockState</code>. Bernoulli-entropy form follows Zhang + Peixoto 2020 (<a href="https://doi.org/10.1103/PhysRevResearch.2.043271" target="_blank" rel="noopener">10.1103/PhysRevResearch.2.043271</a>); partition prior from Peixoto's review (<a href="https://doi.org/10.1002/9781119483298.ch11" target="_blank" rel="noopener">10.1002/9781119483298.ch11</a>) Eq 17. The proposal distribution here is uniform over current blocks (graph-tool's \(c \to \infty\) limit); the canonical local-neighbourhood proposal is on the follow-up. Bit-level cross-check against canonical Python output is still pending.
+  <strong>Draft.</strong> Walker over a JS port of the Zhang + Peixoto 2020 planted-partition kernel (<a href="https://doi.org/10.1103/PhysRevResearch.2.043271" target="_blank" rel="noopener">10.1103/PhysRevResearch.2.043271</a>), with the partition prior from Peixoto's review (<a href="https://doi.org/10.1002/9781119483298.ch11" target="_blank" rel="noopener">10.1002/9781119483298.ch11</a>) Eq 17. The JS PP likelihood is the microcanonical two-rate form, distinct from graph-tool's <code>PPBlockState</code> (the degree-corrected Peixoto 2018 form); the cpp tracer mirrors the JS form exactly. Proposal is uniform over current blocks (the \(c \to \infty\) limit of <code>sample_block</code>). Byte-equal to the cpp tracer under matched MT19937 across the 17-fixture 3-tier stress panel.
 </div>
 
 <section class="hook">
-  <p>The SBM frames community detection as a Bayesian inference problem. Posit a generative model: nodes carry a block label \(b_i \in \{1,\dots,B\}\); the number of edges between block \(r\) and block \(s\) is some count \(e_{rs}\); the actual graph is one specific realisation drawn uniformly from all simple graphs with those exact block-block edge counts. Then ask: given the graph we observed, what is the most probable partition?</p>
-  <p>Most probable in what sense? the Bayesian formulation gives a clean answer: the partition that minimises the <em>description length</em> \(\Sigma = -\log P(\boldsymbol{A}, \boldsymbol{e}, \boldsymbol{b})\). Every possible model (the partition + the edge counts that fall out of it) carries a cost in bits; the best partition is the one that compresses the graph the most. \(\Sigma\) penalises both the data fit (sparse entropy of \(\boldsymbol{e}\)) <em>and</em> the model complexity (description length of \(B\), \(\boldsymbol{b}\), and \(\boldsymbol{e}\)). A trivial partition into one giant block fits the data perfectly but pays a huge penalty for nothing-modelled. A partition into \(N\) singletons pays a huge model-complexity bill. The optimum sits in the middle.</p>
-  <p>The walker on this page minimises \(\Sigma\) for the <em>planted-partition</em> SBM. The model collapses the full \(B(B+1)/2\)-parameter \(\boldsymbol{e}\) matrix into two scalars: a within-block edge density \(p_{\text{in}}\) and a between-block density \(p_{\text{out}}\). The partition that wins is the one that maximises the contrast between the two. Strong assortative prior; cleanly recovers communities defined by "more edges inside than outside", and trips on networks where some blocks are sparse and others dense.</p>
+  <p>Community detection as Bayesian inference: posit a generative model where each node carries a block label \(b_i \in \{1,\dots,B\}\) and the model freezes the count of edges inside and across blocks. The inference problem is the inverse: given the observed graph, find the partition that compresses it the most.</p>
+  <p>The microcanonical formulation gives a clean target: the partition that minimises \(\Sigma = -\log P(\boldsymbol{A}, \boldsymbol{e}, \boldsymbol{b})\). Each candidate partition carries a cost in nats, split between data fit and model complexity. The minimum sits in the middle.</p>
+  <p>The PP variant collapses the full \(B(B+1)/2\)-parameter matrix \(\boldsymbol{e}\) into two scalars: \(E_{\text{in}}\) (the total intra-block edge count) and \(E_{\text{out}}\) (the inter-block count). Likelihood is a uniform draw from the simple graphs that have exactly those two aggregate counts: \(\log\binom{M_{\text{in}}}{E_{\text{in}}} + \log\binom{M_{\text{out}}}{E_{\text{out}}}\), where \(M_{\text{in}} = \sum_r \binom{n_r}{2}\) is the count of intra-block pairs and \(M_{\text{out}} = \binom{N}{2} - M_{\text{in}}\) is the count of inter-block pairs. Strong assortative prior: the partition wins by maximising the contrast between intra-block and inter-block densities. The walker pushes \(\Sigma\) down by single-vertex MH moves: pick a vertex, sample a target block uniformly, compute \(\Delta\Sigma\), accept with \(\min(1, e^{-\beta\Delta\Sigma})\) at \(\beta = 1\). Iterate until \(\Sigma\) stops dropping.</p>
   <div class="defs">
-    <div><span class="term">Bernoulli entropy</span> the data-fit term: \(M_{\text{in}} \cdot H(p_{\text{in}}) + M_{\text{out}} \cdot H(p_{\text{out}})\) with \(p_{\text{in}} = E_{\text{in}}/M_{\text{in}}\), \(p_{\text{out}} = E_{\text{out}}/M_{\text{out}}\), \(H(p) = -p\log p - (1-p)\log(1-p)\). Drops when the within-block density rises above the between-block density.</div>
-    <div><span class="term">edges DL</span> two scalars \(E_{\text{in}}\) and \(E_{\text{out}}\) (a uniform prior over an integer in \([0, \min(E, M_{\text{in}})]\)). Almost negligible in absolute size; the model is parsimonious by construction.</div>
-    <div><span class="term">partition DL</span> the cost of writing down which node lives in which block: \(\log N! - \sum_r \log n_r! + \log\binom{N-1}{B-1} + \log N\). Same Bayesian-hierarchical prior as the DC and NDC variants.</div>
-    <div><span class="term">no per-block edge counts</span> the planted-partition model never tracks individual \(e_{rs}\) values, only their global aggregates \(E_{\text{in}}\) and \(E_{\text{out}}\). The state still stores the full \(\boldsymbol{e}\) matrix internally so that move ΔΣ can be computed in \(O(\deg(v))\), but the entropy collapses everything to the two scalars before scoring.</div>
+    <div><span class="term">PP likelihood</span> the data-fit term: \(\log\binom{M_{\text{in}}}{E_{\text{in}}} + \log\binom{M_{\text{out}}}{E_{\text{out}}}\). Two-rate Bernoulli; drops when within-block density rises above between-block density.</div>
+    <div><span class="term">edges DL (PP)</span> the cost of writing down the two scalars: \(\log(\min(E, M_{\text{in}}) + 1)\), a uniform prior on \(E_{\text{in}}\) (\(E_{\text{out}}\) follows from \(E\)). Almost negligible in absolute size; the model is parsimonious by construction.</div>
+    <div><span class="term">partition DL</span> the cost of writing down which node is in which block: \(\log N! - \sum_r \log n_r! + \log\binom{N-1}{B-1} + \log N\). Same Bayesian-hierarchical prior as the DC and NDC variants.</div>
+    <div><span class="term">no per-block edge counts</span> the planted-partition model tracks only the two aggregates \(E_{\text{in}}\) and \(E_{\text{out}}\); the per-pair \(e_{rs}\) values are stored internally so that \(\Delta\Sigma\) can be computed in \(O(\deg(v))\), but the entropy collapses everything to the two scalars before scoring.</div>
   </div>
 </section>
 
@@ -43,7 +43,7 @@
 <section class="stage">
   <div class="stage-num">stage 0 &middot; input</div>
   <h2>The 32-node fixture, painted by planted ground-truth.</h2>
-  <p>The comdet gallery shares one small graph across every algorithm. Composition: <em>A</em> (12 nodes, blue) is a \(K_5\) on \(\{0..4\}\) plus a 7-node periphery hanging off the \(K_5\) vertices. <em>B</em> (8 nodes, ochre) is two \(K_4\)s joined by the single bridge edge \((15,16)\). <em>C</em> (6 nodes, green) is two 3-cycles with no edge between them; both labelled the same in ground-truth. <em>D</em> (4 nodes, plum) is two 2-cliques joined by \((27,28)\). Outliers 30 + 31 dangle off the A periphery.</p>
+  <p>The comdet gallery shares one small graph across every algorithm. <em>A</em> (12 nodes, blue) is a \(K_5\) on \(\{0..4\}\) plus a 7-node periphery hanging off the \(K_5\). <em>B</em> (8 nodes, ochre) is two \(K_4\)s bridged by the single edge \((15,16)\). <em>C</em> (6 nodes, green) is two 3-cycles with no edge between them, both labelled the same in ground-truth. <em>D</em> (4 nodes, plum) is two 2-cliques joined by \((27,28)\). Outliers 30 + 31 dangle off A.</p>
   <div class="graph" id="g-input">
     <div class="graph-chrome">
       <span>32 nodes &middot; 52 edges &middot; 4 planted communities + 2 outliers</span>
@@ -51,17 +51,17 @@
     </div>
     <div class="graph-canvas" id="g-input-cy"></div>
   </div>
-  <p>The PP variant assumes assortative structure: edges fall denser inside blocks than between. C (two disconnected triangles labelled as one community) tests that assumption directly, since both internal-pair densities are zero across the disconnect. The K_5-anchored A and the bridged B are clean assortative cases the model handles well.</p>
+  <p>The PP variant assumes assortative structure: edges fall denser inside blocks than between. C (two disconnected triangles labelled identically) tests that assumption head-on, since the cross-disconnect density is zero. The \(K_5\)-anchored A and the bridged B are clean assortative cases the model handles well.</p>
 </section>
 
 <!-- ─────────── Stage 1 · Random init ─────────── -->
 <section class="stage">
   <div class="stage-num">stage 1 &middot; random init</div>
-  <h2>Start from a random partition with \(B_0\) blocks.</h2>
-  <p>Unlike Leiden (which starts from singletons and grows clusters by greedy merge) MCMC starts from any valid partition and migrates nodes via Metropolis-Hastings. The walker initialises with \(B_0 = \) <span id="g-init-B0">8</span> blocks: each vertex hashes randomly into one of eight bins. This gives the chain something to tear apart and re-glue.</p>
+  <h2>Random partition with \(B_0\) blocks; \(\Sigma_0\) on display.</h2>
+  <p>MCMC starts from any valid partition. The chain initialises with \(B_0 = \) <span id="g-init-B0">8</span> blocks: the kernel shuffles the identity permutation under MT19937 and assigns block \(i \bmod B_0\) to vertex \(\sigma(i)\). The shuffle is backward Fisher-Yates, matching <code>std::shuffle</code> in the cpp tracer.</p>
   <div class="graph" id="g-init">
     <div class="graph-chrome">
-      <span>random init &middot; \(\Sigma_0 = \) <span id="g-init-S0">·</span> bits</span>
+      <span>random init &middot; \(\Sigma_0 = \) <span id="g-init-S0">·</span> nats</span>
       <span class="right">colour = block id (random)</span>
     </div>
     <div class="graph-canvas" id="g-init-cy"></div>
@@ -74,21 +74,21 @@
       <span class="step-label">re-runs the chain &middot; init + 20 sweeps</span>
     </div>
   </div>
-  <p>\(\Sigma_0\) is large because the random partition is uninformative: \(p_{\text{in}}\) and \(p_{\text{out}}\) come out roughly equal, so the Bernoulli-entropy term gets no contrast discount, and we still pay the partition-DL cost. MCMC's job is to push \(\Sigma\) down by re-routing nodes until the within-block pairs are denser than the between-block pairs.</p>
+  <p>\(\Sigma_0\) is large because the random partition produces near-equal \(p_{\text{in}}\) and \(p_{\text{out}}\): the two Bernoulli rates have no contrast, the likelihood is at its uniform maximum, and the chain still pays the partition-DL cost. MCMC's job is to push \(\Sigma\) down by re-routing nodes until the within-block pairs are denser than the between-block pairs.</p>
 </section>
 
 <!-- ─────────── Stage 2 · MCMC walker ─────────── -->
 <section class="stage">
   <div class="stage-num">stage 2 &middot; one move at a time</div>
-  <h2>Each step: pick a vertex, propose a target block, accept or reject.</h2>
-  <p>One sweep visits every vertex in shuffled order. For each visit:</p>
+  <h2>Each visit: pick a vertex, propose a target block, accept or reject.</h2>
+  <p>One sweep visits every vertex once in shuffled order. Each visit runs four steps:</p>
   <ol>
-    <li>Build the candidate pool: every currently-non-empty block, plus one fresh empty slot when removing the vertex from its block wouldn't already empty it.</li>
-    <li>Sample a target uniformly from that pool (graph-tool's \(c \to \infty\) limit of <code>sample_block</code>; the canonical proposal weights candidates by neighbour-block frequencies).</li>
-    <li>Compute \(\Delta\Sigma\) for the proposed move via the BlockState's <code>virtualMove</code>.</li>
-    <li>Accept with \(\min(1, e^{-\beta\Delta\Sigma})\) at \(\beta = 1\). On accept, commit the move; on reject, leave the partition unchanged.</li>
+    <li>Build the candidate pool: every currently non-empty block, plus one fresh empty slot when the vertex's current block holds more than one member.</li>
+    <li>Sample a target uniformly from the pool (the \(c \to \infty\) limit of graph-tool's <code>sample_block</code>; the canonical proposal weights candidates by neighbour-block frequencies).</li>
+    <li>Compute \(\Delta\Sigma\) for the move via <code>virtualMove</code>. PP's likelihood depends on the global aggregates \(E_{\text{in}}\) + \(M_{\text{in}}\), so the kernel falls back to a full PP recompute rather than the analytic subset path DC and NDC use.</li>
+    <li>Accept with \(\min(1, e^{-\beta\Delta\Sigma})\) at \(\beta = 1\). On accept, commit; on reject, leave the partition unchanged.</li>
   </ol>
-  <p>Moves with \(\Delta\Sigma \le 0\) always commit. Moves with \(\Delta\Sigma > 0\) commit with exponentially-decaying probability, which lets the chain escape local minima. Over enough sweeps the chain samples from the posterior \(P(\boldsymbol{b}|\boldsymbol{A}) \propto e^{-\Sigma}\); for the small 32-node fixture, 20 sweeps is more than enough to find the mode.</p>
+  <p>Moves with \(\Delta\Sigma \le 0\) always commit (the RNG draw is skipped to keep the stream aligned with the cpp tracer). Moves with \(\Delta\Sigma > 0\) commit with exponentially-decaying probability, which gives the chain room to walk over saddle points. Over enough sweeps the chain samples from the posterior \(P(\boldsymbol{b} \mid \boldsymbol{A}) \propto e^{-\Sigma}\); on the 32-node fixture, 20 sweeps reaches the mode.</p>
   <div class="graph" id="g-mcmc">
     <div class="graph-chrome">
       <span><span id="g-mcmc-status">visit · &middot; · &middot;</span></span>
@@ -103,11 +103,11 @@
       <span class="step-label">visit <b id="g-mcmc-cur">0</b> / <span id="g-mcmc-total">0</span></span>
     </div>
   </div>
-  <p>The side panel below lists every candidate block considered for the current vertex with its exact \(\Delta\Sigma\). The picked target is highlighted in mint when the proposal was accepted, in dim grey when rejected; the vertex's current block is marked "current". A negative \(\Delta\Sigma\) means the move improves \(\Sigma\); a small positive \(\Delta\Sigma\) is gambler-friendly (likely accepted at \(\beta = 1\)); a large positive \(\Delta\Sigma\) is almost always rejected.</p>
+  <p>The side panel lists every candidate block considered for the current vertex with its exact \(\Delta\Sigma\). The picked target shows mint when the proposal was accepted, dim grey when rejected. The vertex's current block is marked "current". A negative \(\Delta\Sigma\) means the move improves \(\Sigma\); a small positive \(\Delta\Sigma\) is gambler-friendly (likely accepted at \(\beta = 1\)); a large positive \(\Delta\Sigma\) is almost always rejected.</p>
   <div id="g-mcmc-panel"></div>
   <div class="callout">
     <div class="tag">why MH instead of greedy</div>
-    <p>A pure greedy step (always take the best candidate) collapses to a local minimum quickly; on the 32-node fixture you'd see \(\Sigma\) plateau within one sweep at a partition that's roughly right but stuck. MH's stochastic acceptance trades a small uphill cost for the freedom to walk over saddle points. Graph-tool's production code (<code>multilevel_mcmc_sweep</code>) runs MH alongside agglomerative merge moves that propose joining two whole blocks at once; that's what gives the canonical sampler its fast convergence on large graphs. The walker here uses single-vertex moves only: same algorithm, less plumbing.</p>
+    <p>A pure greedy step (always take the best candidate) collapses to a local minimum quickly; \(\Sigma\) plateaus within one sweep at a partition that is roughly right but stuck. The stochastic acceptance trades a small uphill cost for the freedom to walk over saddle points. Graph-tool's <code>multilevel_mcmc_sweep</code> runs single-vertex MH alongside agglomerative merges that propose joining two whole blocks at once; the merges are what give the canonical sampler its fast convergence on large graphs. The walker on this page uses single-vertex moves only: same algorithm, less plumbing.</p>
   </div>
 </section>
 
@@ -115,25 +115,25 @@
 <section class="stage">
   <div class="stage-num">stage 3 &middot; equilibration</div>
   <h2>\(\Sigma\) drops from <span id="g-eq-S">·</span>; \(B\) shifts from <span id="g-eq-B">·</span>.</h2>
-  <p>The trace below plots \(\Sigma\) (blue, left axis) and the number of non-empty blocks \(B\) (ochre, right axis) after each sweep. The chain has equilibrated when both stop drifting. Early sweeps see big drops in \(\Sigma\) as obvious moves commit (a vertex with all its edges to one neighbour-block snaps in). Later sweeps oscillate as the chain explores partitions of similar quality near the posterior mode.</p>
+  <p>The trace plots \(\Sigma\) (blue, left axis) and the number of non-empty blocks \(B\) (ochre, right axis) after each sweep. The chain has equilibrated when both stop drifting. Early sweeps see big drops in \(\Sigma\) as the chain peels assortative blocks apart and the contrast between \(p_{\text{in}}\) and \(p_{\text{out}}\) opens up.</p>
   <div class="graph" id="g-eq">
     <div class="graph-chrome">
       <span>per-sweep &middot; \(\Sigma\) and \(B\) over the chain</span>
-      <span class="right">blue = \(\Sigma\) (bits) &middot; ochre = number of non-empty blocks</span>
+      <span class="right">blue = \(\Sigma\) (nats) &middot; ochre = number of non-empty blocks</span>
     </div>
     <div class="graph-canvas" id="g-eq-cy" style="height: 240px"></div>
   </div>
-  <p>If the trace is still trending down at the right edge, the chain hasn't equilibrated and you'd want more sweeps. On this fixture 20 sweeps usually settle the chain; rerolling the seed shows that across runs the equilibrium \(\Sigma\) is roughly stable but the equilibrium \(B\) wobbles by 1–2 (the model is uncertain about whether to merge or split a marginal block).</p>
+  <p>A still-falling trace at the right edge means the chain has not equilibrated and the sweep count is too low. On this fixture 20 sweeps usually settle the chain; rerolling the seed shows the equilibrium \(\Sigma\) is roughly stable but the equilibrium \(B\) wobbles by 1–2.</p>
 </section>
 
 <!-- ─────────── Stage 4 · Final ─────────── -->
 <section class="stage">
   <div class="stage-num">stage 4 &middot; final</div>
-  <h2>The MCMC partition, side by side with planted ground-truth.</h2>
-  <p>Below: the mode the chain settled on (left) next to the planted ground-truth (right). \(\Sigma\) at the final partition is shown above the SBM panel; per-block stats are below. Note that the SBM has no concept of "outlier"; nodes 30 and 31 will be assigned to whichever block compresses the description length best, often becoming a small two-node block of their own at this fixture's scale.</p>
+  <h2>Mode partition vs. planted ground-truth.</h2>
+  <p>The mode the chain settled on (left) next to the planted ground-truth (right). \(\Sigma\) at the final partition is shown above the SBM panel; per-block stats are below. The SBM has no notion of "outlier"; nodes 30 and 31 are assigned to whichever block compresses the data best.</p>
   <div class="gt-compare">
     <div class="panel-mini">
-      <div class="cap">SBM-flat-pp &middot; \(\Sigma = \) <span id="g-final-S">·</span> bits</div>
+      <div class="cap">SBM-flat-pp &middot; \(\Sigma = \) <span id="g-final-S">·</span> nats</div>
       <div class="graph-canvas" id="g-final-sbm" style="height: 280px"></div>
     </div>
     <div class="panel-mini">
@@ -147,11 +147,11 @@
   </table>
   <div class="callout">
     <div class="tag">on this fixture, by region</div>
-    <p>A's K_5 + periphery is the cleanest assortative region: high \(p_{\text{in}}\), close to zero \(p_{\text{out}}\) once isolated. B's two K_4s split readily on the PP variant since the single bridge edge contributes one edge to \(E_{\text{out}}\) and zero to internal density. C's two 3-cycles split into two blocks since cross-block density is exactly zero. D is seed-dependent and the most ambiguous case under PP, since the cross-edges to A and B push \(p_{\text{out}}\) up.</p>
+    <p>A's \(K_5\) + periphery is the cleanest assortative region: high \(p_{\text{in}}\), close to zero \(p_{\text{out}}\) once isolated. B's two \(K_4\)s split readily under PP because the single bridge edge contributes one edge to \(E_{\text{out}}\) and zero to internal density. C's two 3-cycles split into two blocks since cross-block density is exactly zero. D is the most ambiguous case under PP and the most seed-dependent: cross-edges to A and B push \(p_{\text{out}}\) up.</p>
   </div>
   <div class="callout warn">
-    <div class="tag">caveat &middot; this kernel is a draft port</div>
-    <p>The JS kernel here implements graph-tool's <code>PPBlockState</code>: Bernoulli-entropy form (Zhang + Peixoto 2020), uniform-prior on \(E_{\text{in}}\), partition-DL prior, and uniform-random target proposal (\(c \to \infty\)). Bit-equivalence with canonical graph-tool output has not been verified yet. Phase 4c verification matrix targets ARI ≥ 0.85 + relative entropy gap ≤ 5% over an ensemble of 10 seeds; that pass is pending.</p>
+    <div class="tag">caveat &middot; canonical cross-check pending</div>
+    <p>The JS kernel implements the Zhang + Peixoto 2020 microcanonical PP form, with a uniform prior on \(E_{\text{in}}\), partition-DL, and uniform-random target proposal. The kernel diverges from graph-tool's <code>PPBlockState</code> (the Peixoto 2018 degree-corrected PP variant). Byte-equality vs. the cpp tracer holds across the 17-fixture 3-tier stress panel under MT19937. Cross-check vs. graph-tool's PP output is on the follow-up; treat the partitions shown here as the JS-leg mode under the simpler two-rate Bernoulli form.</p>
   </div>
 </section>
 
