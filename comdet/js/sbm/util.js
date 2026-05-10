@@ -50,10 +50,25 @@
 
   function range(n) { const a = new Array(n); for (let i = 0; i < n; i++) a[i] = i; return a; }
 
+  // Build a random K-block init membership over [0, N) by shuffling
+  // identity then assigning b[order[i]] = i % B0. Page-glue helper
+  // shared between walker_page.js + compare_page.js; both pages used
+  // to inline this verbatim. Pure RNG draw order (shuffle only); does
+  // not touch the kernel path, so does not perturb the L4 bit-equal
+  // chain rooted in mcmcSweep.
+  function makeBlockInit(rng, N, B0) {
+    const init = new Int32Array(N);
+    const order = range(N);
+    shuffle(order, rng);
+    for (let i = 0; i < N; i++) init[order[i]] = i % B0;
+    return init;
+  }
+
   NS.SBM = NS.SBM || {};
   NS.SBM.UTIL = {
     lgamma: lgamma, lbinom: lbinom, logChooseRep: logChooseRep,
     xlogx: xlogx, safelog: safelog,
     shuffle: shuffle, range: range,
+    makeBlockInit: makeBlockInit,
   };
 })();

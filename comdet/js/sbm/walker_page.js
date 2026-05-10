@@ -30,10 +30,7 @@
     function buildRun(s) {
       const rng = SBM.MT19937(s >>> 0);
       const N = F.nodes.length;
-      const init = new Int32Array(N);
-      const order = U.range(N);
-      U.shuffle(order, rng);
-      for (let i = 0; i < N; i++) init[order[i]] = i % INIT_B;
+      const init = U.makeBlockInit(rng, N, INIT_B);
       const state = SBM.BlockState(G, Object.assign({ init: init }, blockOpts));
       const initialMembership = state.blockMembership();
       const S0 = state.entropy();

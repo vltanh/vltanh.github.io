@@ -37,13 +37,8 @@
     let runs = null;
 
     function buildSharedInit(s) {
-      const N = F.nodes.length;
       const rng = SBM.MT19937(s >>> 0);
-      const order = U.range(N);
-      U.shuffle(order, rng);
-      const init = new Int32Array(N);
-      for (let i = 0; i < N; i++) init[order[i]] = i % INIT_B;
-      return init;
+      return U.makeBlockInit(rng, F.nodes.length, INIT_B);
     }
     function runOne(v, sharedInit) {
       const rng = SBM.MT19937(seed >>> 0);
