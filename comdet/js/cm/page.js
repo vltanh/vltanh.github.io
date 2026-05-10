@@ -1,15 +1,15 @@
 /* CM page glue: drives the cut + recluster walker over the kernel trace.
  *
  * Layout:
- *   stage 0 — input fixture
- *   stage 1 — round walker (live state panels: round + queues + survivors)
+ *   stage 0: input fixture
+ *   stage 1: round walker (live state panels: round + queues + survivors)
  *             + per-event scrubber + play/pause + per-pop OR per-round
  *               granularity toggle
  *             + base / resolution / criterion / seed pickers (rerun on change)
- *   stage 2 — lineage tree (parent_to_child_map as a d3 hierarchy that
+ *   stage 2: lineage tree (parent_to_child_map as a d3 hierarchy that
  *             grows alongside the walker)
- *   stage 3 — edge case callouts (static)
- *   stage 4 — final output vs ground truth + history listing
+ *   stage 3: edge case callouts (static)
+ *   stage 4: final output vs ground truth + history listing
  *
  * State simulator: the kernel emits init + mincut + recluster + round-end
  * events. The page replays them sequentially to derive per-step
@@ -138,7 +138,7 @@
           toBeMincut.push({ id: q.id, nodes: q.nodes.slice() });
           ensureNode(q.id, 0, null, "internal");
         });
-        // No state push — init is silent.
+        // No state push; init is silent.
       } else if (ev.kind === "mincut") {
         // Find + remove the popped cluster from toBeMincut.
         const popIdx = toBeMincut.findIndex(function (q) { return q.id === ev.id; });
@@ -158,8 +158,8 @@
         ev.children.forEach(function (childNodes) {
           toBeClustered.push({ id: null, parent: ev.parentId, nodes: childNodes.slice() });
         });
-        // Lineage: do NOT add edges yet — child ids are pending fresh-id
-        // assignment at round-end. The round-end drain will create edges
+        // Lineage: do NOT add edges yet. Child ids are pending fresh-id
+        // assignment at round-end; the round-end drain creates edges
         // in the same order as toBeClustered append.
         walkerIdx++;
         pushState();
@@ -201,7 +201,7 @@
         });
         toBeClustered = [];
         round++;
-        // Don't pushState — the immediately-prior state covers post-recluster
+        // Don't pushState; the immediately-prior state covers post-recluster
         // pre-round-drain. The first mincut of the new round will reflect the
         // drain. But we need the "round" counter visible to UIs immediately,
         // so we update the LAST state in place.
@@ -271,7 +271,7 @@
   }
 
   // ── Status + prose ───────────────────────────────────────────────
-  const TIP_MINCUT_KEEP = "VieCut cactus mincut returned cut. Threshold passed (cut > pre_log * log(n)) — cluster joins survivors. <code>cm.h:77-81</code>, <code>constrained.h:431-433</code>.";
+  const TIP_MINCUT_KEEP = "VieCut cactus mincut returned cut. Threshold passed (cut &gt; pre_log * log(n)): cluster joins survivors. <code>cm.h:77-81</code>, <code>constrained.h:431-433</code>.";
   const TIP_MINCUT_FAIL = "VieCut cactus mincut returned cut below threshold. Cluster fails the well-connected check; both cut sides head to the base algorithm next. <code>cm.h:77-81</code>, <code>constrained.h:431-433</code>.";
   const TIP_RECLUSTER   = "Each side &gt; 1 re-clustered via the base algorithm. Returned communities pushed into <code>to_be_clustered</code> with the original cluster's id as parent; fresh ids assigned at round-end drain. <code>cm.h:137 &rarr; constrained.h:301-323</code>, <code>cm.cpp:90-92</code>.";
 
@@ -371,7 +371,7 @@
     // Root virtual node.
     const all = Array.from(finalState.nodes.values());
     if (all.length === 0) {
-      host.innerHTML = '<div style="color: var(--paper-3); font-style: italic; padding: .4rem;">no clusters yet &mdash; run the walker.</div>';
+      host.innerHTML = '<div style="color: var(--paper-3); font-style: italic; padding: .4rem;">no clusters yet; run the walker.</div>';
       lineageBuilt = null;
       return;
     }
@@ -570,11 +570,7 @@
     };
     if (next.seed === u.seed && next.base === u.base && next.res === u.res && next.crit === u.crit) return;
     writeURL(next);
-    // Tear down + rebuild walker. mountStepWalker creates new
-    // controller — buttons still bound to old listeners. To avoid
-    // double-binding, mountStepWalker's handlers stay live; the controller
-    // rerenders via reconfigureKeep when total changes.
-    // Simpler approach: reload the page so DOM event handlers reset.
+    // Reload so DOM event handlers reset cleanly under the new URL params.
     window.location.search = "?" + new URLSearchParams(next).toString();
   }
   if (elBase) elBase.addEventListener("change", pickerChange);

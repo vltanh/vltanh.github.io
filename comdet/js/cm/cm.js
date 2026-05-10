@@ -145,8 +145,6 @@
     // { cutValue, inPartition, outPartition }. Used by tools/viz_check/cm
     // to feed canonical mincut bipartitions deterministically.
     const cutOracle = opts.cutOracle || null;
-    const trace = opts.trace ? [] : null;
-    function tlog(s) { if (trace) trace.push(s); }
 
     const events = [];
     const nodeIdToIdx = new Map();
@@ -250,12 +248,10 @@
           const partition = baseAlgoFn
             ? baseAlgoFn(side, sideEdges, { round: round, parentId: cur.id, parentNodes: ns.slice(), algorithm: algorithm, resolution: resolution, seed: seed })
             : runBaseAlgo(side, sideEdges, algorithm, resolution, seed);
-          tlog("    RECLUSTER parent=" + cur.id + " side_size=" + side.length + " -> " + partition.length + " comm(s)");
           // RemoveInterClusterEdges + connected components per partition.
-          // [UPSTREAM cm.h:138-148] canonical pushes EVERY translated
+          // [UPSTREAM cm.h:138-148] canonical pushes every translated
           // component into to_be_clustered regardless of size; no size>1
-          // filter at this site (the prior filter here caused JS over-split
-          // on dnc per cm_audit.md row I open question). JS now mirrors.
+          // filter at this site.
           partition.forEach(function (clust) {
             const clustEdges = inducedEdges(clust, sideEdges);
             const comps = bfsComponents(clust, clustEdges);
@@ -293,7 +289,6 @@
       s.nodes.forEach(function (id) { finalAssign[nodeIdToIdx.get(id)] = outId; });
     });
 
-    tlog("STAGE_DONE survivors=" + survivors.length + " rounds=" + round);
     return {
       criterion: criterion,
       parsed: parsed,
@@ -304,7 +299,6 @@
       finalAssign: finalAssign,
       numClusters: survivors.length,
       parentToChild: parentToChild,
-      trace: trace,
     };
   }
 

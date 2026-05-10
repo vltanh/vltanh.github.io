@@ -147,15 +147,16 @@
 <section class="hook">
   <p>CM does what <a href="./wcc.html">WCC</a> does (cut a cluster whose mincut falls below the threshold), then re-runs the base community-detection algorithm (Leiden CPM, Leiden Mod, Louvain, Infomap) on the induced subgraph of each cut half. The output of that re-run replaces the cut halves; every produced sub-cluster goes back through the threshold check. The loop repeats until no cluster fails.</p>
   <p>This buys two things WCC does not. First, the post-cut halves are not stuck with the input partition's labels: if WCC cut a 200-node cluster into halves of 70 and 130, CM lets the base algorithm find smaller real communities inside each. Second, an output cluster is locally optimal under both the connectivity threshold <em>and</em> the base algorithm's quality function, not one or the other.</p>
-  <p>The threshold uses the same parser as WCC: \( f(n) = C \log_x(n) \) or \( f(n) = C\,n^x \). Park 2024 (<a href="https://doi.org/10.1371/journal.pcsy.0000009">PLOS Complex Systems 1(3):e0000009</a>) recommends \( f(n) = \log_{10}(n) \). Our pipeline ships <code>0.2n^0.5</code> instead, a sqrt criterion that diverges from the paper's default.</p>
+  <p>The threshold uses the same parser as <a href="./wcc.html">WCC</a>: \( f(n) = C \log_x(n) \) or \( f(n) = C\,n^x \). Park 2024 (<a href="https://doi.org/10.1371/journal.pcsy.0000009">PLOS Complex Systems 1(3):e0000009</a>) recommends \( f(n) = \log_{10}(n) \). The pipeline wrapper ships <code>0.2n^0.5</code> instead, a sqrt criterion that diverges from the paper's default.</p>
   <div class="defs">
-    <div><span class="term">cluster fate</span> Park 2024 §4.2 classifies every input cluster as one of four fates: <em>extant</em> (unchanged), <em>reduced</em> (smaller but still one cluster), <em>split</em> (two or more sub-clusters), <em>degraded</em> (every leaf descendant ended up below the size filter <code>B</code>, default 11). The binary writes a <code>history.log</code> tree of parent → children so the fate is reconstructable per input cluster.</div>
-    <div><span class="term">re-cluster step</span> CM does <em>not</em> re-run the base algorithm globally. It runs the base algorithm on the induced subgraph of one cut half, then again on the other half. Each call gets a fresh `seed = 0` (the base algo's RNG is re-seeded per call); only VieCut's mincut RNG carries state across rounds.</div>
-    <div><span class="term">pre-prune</span> Park 2024's Stage 3 specifies an iterative pre-prune that strips low-degree nodes (degree ≤ <code>f(n)</code> in the cluster's induced subgraph) before the cut. The binary exposes this via <code>--prune</code>; the <code>src/cm/pipeline.sh</code> wrapper does not pass the flag, so today's CM runs without pre-prune.</div>
+    <div><span class="term">pipeline shape</span> Park 2024 splits the procedure into four stages: (1) initial base clustering produces the input partition; (2) a size filter drops clusters below <code>B</code> (default 11) plus tree-shaped clusters; (3) the CM loop runs per cluster, with each round doing mincut, threshold check, and base-method recluster of any side &gt; 1; (4) a final size filter drops sub-clusters that ended up below <code>B</code>. The walker below covers stage 3; stages 2 and 4 live in <code>cm_pipeline</code> around the binary.</div>
+    <div><span class="term">cluster fate</span> Park 2024 §4.2 classifies every input cluster as one of four fates: <em>extant</em> (unchanged), <em>reduced</em> (smaller but still one cluster), <em>split</em> (two or more sub-clusters), <em>degraded</em> (every leaf descendant ended up below the size filter <code>B</code>). The binary writes a <code>history.log</code> tree of parent &rarr; children so the fate is reconstructable per input cluster.</div>
+    <div><span class="term">re-cluster step</span> CM does <em>not</em> re-run the base algorithm globally. It runs the base algorithm on the induced subgraph of one cut half, then again on the other half. Each call gets a fresh <code>seed = 0</code> (the base algo's RNG is re-seeded per call); only VieCut's mincut RNG carries state across rounds.</div>
+    <div><span class="term">pre-prune</span> Park 2024's Stage 3 specifies an iterative pre-prune that strips low-degree nodes (degree &le; <code>f(n)</code> in the cluster's induced subgraph) before the cut. The binary exposes this via <code>--prune</code>; the <code>src/cm/pipeline.sh</code> wrapper does not pass the flag, so today's CM runs without pre-prune.</div>
   </div>
   <div class="callout">
     <div class="tag">when CM moves the needle &middot; Park 2024 §4.4</div>
-    <p>Heaviest gain comes on Leiden-CPM at small resolution (\( r \in [0.0001, 0.001] \)) where the base algorithm over-merges; CM peels apart real sub-communities that CPM left bundled. Lightest gain (or even slight loss) on already-conservative algorithms like IKC at <code>k=10</code>, where most clusters come through unchanged. Leiden-Mod sits in between, with a meaningful fraction of its clusters split. The paper's empirical verdict: CM is most useful as a sharpener for over-merging base algorithms, less so as a corrector for over-splitting ones.</p>
+    <p>Heaviest gain comes on Leiden-CPM at small resolution (\( r \in [0.0001, 0.001] \)) where the base algorithm over-merges; CM peels apart real sub-communities that CPM left bundled. Lightest gain (or even slight loss) on already-conservative algorithms like IKC at <code>k=10</code>, where most clusters come through unchanged. Leiden-Mod sits in between, with a meaningful fraction of its clusters split. The paper's empirical reading: CM acts as a sharpener for over-merging base algorithms; less so as a corrector for over-splitting ones.</p>
   </div>
 </section>
 
@@ -165,9 +166,9 @@
     <span><span class="ref-label">code</span><a href="https://github.com/MinhyukPark/constrained-clustering" target="_blank" rel="noopener">constrained-clustering CM</a></span>
     <span><span class="ref-label">pipeline</span><a href="https://github.com/illinois-or-research-analytics/cm_pipeline" target="_blank" rel="noopener">cm_pipeline (orchestration)</a></span>
     <span><span class="ref-label">mincut</span><a href="https://github.com/VieCut/VieCut" target="_blank" rel="noopener">VieCut</a></span>
-    <span><span class="ref-label">docs</span><a href="https://github.com/vlttnh/community-detection/blob/main/docs/algorithms/cm.md" target="_blank" rel="noopener">technical companion</a></span>
+    <span><span class="ref-label">docs</span><a href="https://github.com/vltanh/community-detection/blob/main/docs/algorithms/cm.md" target="_blank" rel="noopener">technical companion</a></span>
   </div>
-  <p class="algo-prov">Byte-equal vs constrained-clustering CM (54 cells, 4,421 records, 0 mismatches).</p>
+  <p class="algo-prov">Byte-equal vs <code>constrained-clustering CM</code> across 360 stress cells (legacy 6-fixture L4 + 3-tier 17-fixture under both Leiden-CPM and Leiden-Mod base), 0 mismatches.</p>
 </section>
 
 <!-- ─────────── Stage 0 · input fixture ─────────── -->
@@ -184,7 +185,7 @@
 <section class="stage cm-walker">
   <div class="stage-num">stage 1 &middot; cut + recluster rounds</div>
   <h2>Mincut, threshold check, base-algo recluster on each cut half.</h2>
-  <p>Each step is one queue pop: pull a cluster, run mincut, check <code>cut &gt; f(n)</code>. Pass &rarr; survives. Fail &rarr; run the base algorithm on each cut half (size &gt; 1), push the resulting communities into the next round.</p>
+  <p>This is Park 2024's stage 3, the CM loop. Each step is one queue pop: pull a cluster, run VieCut cactus mincut, check <code>cut &gt; f(n)</code>. Pass &rarr; the cluster joins the survivor set. Fail &rarr; the base algorithm re-clusters each cut half of size &gt; 1, and the resulting communities push into the next round's mincut queue.</p>
 
   <div class="cm-controls-row">
     <label>base algorithm:
@@ -263,7 +264,7 @@
 <section class="stage cm-walker">
   <div class="stage-num">stage 2 &middot; lineage tree</div>
   <h2>Cluster history: parent &rarr; children across rounds.</h2>
-  <p>Each input cluster traces a tree as CM splits and re-clusters it. Root nodes are the initial connected components (after <code>RemoveInterClusterEdges</code>). Each internal edge is one recluster step. Leaves are clusters that ended the walk &mdash; green for survivors (well-connected), grey for clusters still in flight at the current step.</p>
+  <p>Each input cluster traces a tree as CM splits and re-clusters it. Root nodes are the initial connected components (after <code>RemoveInterClusterEdges</code>). Each internal edge is one recluster step. Leaves are clusters that ended the walk: green for survivors (well-connected), grey for clusters still in flight at the current step.</p>
   <div class="cm-lineage" id="cm-lineage">
     <div class="ln-legend">
       <span><span class="swatch" style="background:#6dab7d"></span> survivor</span>
@@ -286,7 +287,7 @@
     </div>
     <div class="callout">
       <div class="tag">cluster disintegrates into singletons</div>
-      <p>A re-cluster on an n-node side can return n singleton communities. Singletons of size 1 still get pushed into <code>to_be_clustered</code>, then the next-round mincut on a size-1 cluster is trivial (cut = 0, threshold &gt; 0, well-connected = false), so they re-enter forever. The pipeline avoids this by using a post-filter step (size &gt; B = 11 by default) at the end &mdash; not in the kernel itself.</p>
+      <p>A re-cluster on an n-node side can return n singleton communities. Singletons of size 1 still get pushed into <code>to_be_clustered</code>, then the next-round mincut on a size-1 cluster is trivial (cut = 0, threshold &gt; 0, well-connected = false), so they re-enter forever. The pipeline avoids this by using a post-filter step (size &gt; <code>B</code> = 11 by default) at the end, not in the kernel itself. That filter is Park 2024's stage 4.</p>
     </div>
     <div class="callout">
       <div class="tag">threshold equals cut exactly</div>
