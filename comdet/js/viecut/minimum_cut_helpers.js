@@ -87,8 +87,37 @@
     }
   }
 
+  // [UPSTREAM minimum_cut_helpers.h:118-148] remap_cluster.
+  // Compactify cluster_id labels into [0..k) by encounter order:
+  //   for n in G.nodes(): if part[cluster_id[n]] is UNDEFINED then assign
+  //   the next compact id; mapping[n] = part[cluster_id[n]];
+  //   reverse_mapping[mapping[n]].push(n).
+  // Mirrors cpp's std::unordered_map<PartitionID,PartitionID> remap with
+  // a flat `part` vector keyed by raw cluster id (size = n, because
+  // cluster_ids are in [0, n)). Encounter-order is node-id ASC since
+  // upstream iterates `G->nodes()`; JS mirrors via `for n in [0..n)`.
+  function remap_cluster(G, cluster_id) {
+    const n = G.number_of_nodes();
+    const mapping = new Array(n);
+    const reverse_mapping = [];
+    const UNDEFINED_NODE = 0xffffffff;
+    const part = new Array(n).fill(UNDEFINED_NODE);
+    let cur_no_clusters = 0;
+    for (let node = 0; node < n; node++) {
+      const cur_cluster = cluster_id[node];
+      if (part[cur_cluster] === UNDEFINED_NODE) {
+        part[cur_cluster] = cur_no_clusters++;
+        reverse_mapping.push([]);
+      }
+      mapping[node] = part[cur_cluster];
+      G.setPartitionIndex(node, part[cur_cluster]);
+      reverse_mapping[part[cur_cluster]].push(node);
+    }
+    return { mapping, reverse_mapping };
+  }
+
   NS.minimum_cut_helpers = {
     setInitialCutValues, updateCut, retrieveMinimumCut, setVertexLocations,
-    minimumIndex,
+    minimumIndex, remap_cluster,
   };
 })();

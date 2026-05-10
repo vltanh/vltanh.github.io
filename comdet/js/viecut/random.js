@@ -204,11 +204,97 @@
     return val;
   }
 
+  // ---- libstdc++ std::shuffle (optimized Fisher-Yates branch) -----------
+  //
+  // [UPSTREAM gcc/libstdc++ bits/stl_algo.h:3719-3792]
+  //   if (urngrange / urange >= urange) { optimized branch }
+  //   else                              { generic uniform_int_distribution }
+  // For our caller (permutate_vector_local on chunks of size <= 128, with
+  // m_mt's urngrange = 2^32) the optimized branch is always taken
+  // (2^32/128 = 2^25 >= 128 >= chunk_size).
+  //
+  //   __i = first + 1
+  //   if (urange % 2 == 0) { iter_swap(i++, first + uniform_int(0,1)) }
+  //   while (i != last) {
+  //     swap_range = (i - first) + 1
+  //     (p, q) = __gen_two_uniform_ints(swap_range, swap_range+1)
+  //            = uniform_int(0, swap_range*(swap_range+1) - 1)
+  //              -> (x / (swap_range+1), x % (swap_range+1))
+  //     iter_swap(i++, first + p)
+  //     iter_swap(i++, first + q)
+  //   }
+  //
+  // `__gen_two_uniform_ints` is library-internal but documented at
+  // bits/stl_algo.h:3704-3712: composes both ranges into one
+  // uniform_int_distribution call and splits via div/mod.
+  //
+  // Note: cpp's std::shuffle calls m_mt() directly (NOT through
+  // random_functions::next()), so the cpp `[TRACE-RNG] kind:next` lines
+  // emitted from the LP path come from the instrumented sibling
+  // `permutate_vector_local_traced` in viz_check/viecut/instrumented/include/coarsening/label_propagation.h
+  // which routes the draws through `random_functions::next()` to make
+  // them visible in the trace. JS mirrors by routing through the
+  // module-level `next()` (observer fires per draw, lockstep with cpp).
+  //
+  // uniformIntViaNext: same algorithm as uniformInt() but uses our
+  // module-level `next()` (which fires observer + consults oracle) so
+  // every shuffle draw is visible to diff_harness lockstep.
+  function uniformIntViaNext(lo, hi) {
+    const r = (hi - lo + 1) >>> 0;
+    if (r === 0) return ((next() + lo) >>> 0);
+    if (r === 1) return lo;
+    const rB = BigInt(r);
+    const URB = BigInt(MT_RANGE);
+    const scaling = URB / rB;
+    const past = scaling * rB;
+    while (true) {
+      const ret = BigInt(next());
+      if (ret < past) return lo + Number(ret / scaling);
+    }
+  }
+
+  function shuffleRange(vec, lo, hi) {
+    if (hi - lo < 2) return;
+    const urange = hi - lo;
+    let i = lo + 1;
+    if ((urange & 1) === 0) {
+      const pos = uniformIntViaNext(0, 1);
+      const tmp = vec[i]; vec[i] = vec[lo + pos]; vec[lo + pos] = tmp;
+      i++;
+    }
+    while (i < hi) {
+      const swap_range = (i - lo) + 1;
+      const hi2 = swap_range * (swap_range + 1) - 1;
+      const x = uniformIntViaNext(0, hi2);
+      const pp_first = Math.floor(x / (swap_range + 1));
+      const pp_second = x % (swap_range + 1);
+      let tmp = vec[i]; vec[i] = vec[lo + pp_first]; vec[lo + pp_first] = tmp;
+      i++;
+      tmp = vec[i]; vec[i] = vec[lo + pp_second]; vec[lo + pp_second] = tmp;
+      i++;
+    }
+  }
+
+  // [UPSTREAM tools/random_functions.h:86]
+  // permutate_vector_local(&vec, init): if init then identity-fill; then
+  // std::shuffle each contiguous chunk of 128.
+  function permutate_vector_local(vec, init) {
+    if (init) {
+      for (let i = 0; i < vec.length; i++) vec[i] = i;
+    }
+    const localsize = 128;
+    for (let i = 0; i < vec.length; i += localsize) {
+      const end = Math.min(vec.length, i + localsize);
+      shuffleRange(vec, i, end);
+    }
+  }
+
   NS.MT19937 = MT19937;
   NS.uniformInt = uniformInt;
   NS.random_functions = {
     setSeed, getSeed, setOracle, clearOracle, setObserver, clearObserver,
     next, nextInt, nextBool, nextDouble,
+    permutate_vector_local,
     getMT: () => m_mt,
   };
 })();

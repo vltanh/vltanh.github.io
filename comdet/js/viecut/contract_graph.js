@@ -134,8 +134,76 @@
     return H;
   }
 
+  // [UPSTREAM contract_graph.h:75-131] findTrivialCuts.
+  //
+  // For each block p with size < log2(n), iterate vertices in `reverse_mapping[p]`
+  // (encounter order from remap_cluster) and compute per-vertex `node_degree`
+  // delta + `block_degree`. If the cumulative `block_degree + improve` falls
+  // below `target_mindeg` AND |block| > 1, peel `bestNode` out of block p
+  // into a fresh singleton block, decrement p (so the modified block is
+  // reconsidered at next iter), and tighten target_mindeg.
+  //
+  // The function mutates `mapping` + `reverse_mapping` IN PLACE; it does
+  // NOT return target_mindeg (caller's `cut` is unchanged here; LP loop
+  // re-derives `cut` via `updateCut` after fromUnionFind).
+  //
+  // Subtleties:
+  //   - `improve` is signed (int64). `node_degree` flips sign per
+  //     edge: += weight if intra-block, -= weight if inter-block.
+  //   - Tie-break: strict `<` on `improve > node_degree` -> first vertex
+  //     where node_degree drops below the running improve wins.
+  //   - `std::log2(n)` -> Math.log2(n); both promote n to double; V8 and
+  //     libstdc++ agree bit-for-bit for n in normal range (verified via
+  //     spot-check on n in {1083, 10000, 11204, 21363, 22963}).
+  //   - Comparison is `block_size < log2(n)`: integer < double, cpp and
+  //     JS both promote LHS to double; for sizes well under 2^53 (any
+  //     graph we care about) this is bit-equal.
+  function findTrivialCuts(G, mapping, reverse_mapping, target_mindeg) {
+    const log2n = Math.log2(G.number_of_nodes());
+    for (let p = 0; p < reverse_mapping.length; ++p) {
+      let bestNode = 0;
+      let improve = 0;
+      let node_degree = 0;
+      let block_degree = 0;
+      if (reverse_mapping[p].length < log2n) {
+        let improve_idx = -1;
+        for (let node = 0; node < reverse_mapping[p].length; ++node) {
+          const vtx = reverse_mapping[p][node];
+          const ne = G.get_first_invalid_edge(vtx);
+          for (let e = 0; e < ne; e++) {
+            const w = G.getEdgeWeight(vtx, e);
+            const contracted_target = mapping[G.getEdgeTarget(vtx, e)];
+            if (contracted_target === p) {
+              node_degree += w;
+              continue;
+            }
+            node_degree -= w;
+            block_degree += w;
+          }
+          if (improve > node_degree) {
+            improve = node_degree;
+            bestNode = vtx;
+            improve_idx = node;
+          }
+          node_degree = 0;
+        }
+        if (improve < 0 &&
+            (block_degree + improve) < target_mindeg &&
+            reverse_mapping[p].length > 1) {
+          target_mindeg = block_degree + improve;
+          // erase reverse_mapping[p][improve_idx]
+          reverse_mapping[p].splice(improve_idx, 1);
+          // push fresh singleton block { bestNode }
+          reverse_mapping.push([bestNode]);
+          mapping[bestNode] = reverse_mapping.length - 1;
+          p--;
+        }
+      }
+    }
+  }
+
   NS.contraction = {
     fromUnionFind, contractGraph, contractGraphSparse, contractGraphVertexset,
-    cloneGraph,
+    cloneGraph, findTrivialCuts,
   };
 })();
