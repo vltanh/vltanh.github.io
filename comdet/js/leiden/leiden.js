@@ -13,18 +13,20 @@
  *      by its pre-refinement community while collapsing on the
  *      refined sub-partition.
  *
- * Primitives (Graph, Partition, Modularity, MT19937, shuffle, range)
- * live in COMDET.LOUVAIN; this file re-exports them onto COMDET.LEIDEN
- * so existing callers (page_helpers.js, leiden-cpm page glue) work
- * unchanged.
+ * Graph + MT19937 primitives come from COMDET.COMMON (js/common/common.js,
+ * 2026-05-10 cross-algo isolation refactor). Before the refactor these
+ * lived under COMDET.LOUVAIN and Leiden re-exported them onto
+ * COMDET.LEIDEN; the re-export bridge is gone. Pages + harnesses that
+ * previously read C.LEIDEN.Graph or C.LEIDEN.MT19937 now read
+ * C.COMMON.Graph / C.COMMON.MT19937.
  */
 (function () {
   "use strict";
-  if (!window.COMDET || !window.COMDET.LOUVAIN) {
-    console.warn("[leiden] COMDET.LOUVAIN missing; load louvain.js first");
+  if (!window.COMDET || !window.COMDET.COMMON) {
+    console.warn("[leiden] COMDET.COMMON missing; load common/common.js first");
     return;
   }
-  const LV = window.COMDET.LOUVAIN;
+  const CC = window.COMDET.COMMON;
 
   // Leiden-local Fisher-Yates shuffle that uses rng.intLemire (igraph's
   // Lemire-debiased bounded-int) so the JS production walker's RNG draw
@@ -724,7 +726,7 @@
     // byte-equal cross-check vs cpp. Inert when unset.
     const onLevelEntry = typeof opts.onLevelEntry === "function"
                        ? opts.onLevelEntry : null;
-    const rng = LV.MT19937(seed >>> 0);
+    const rng = CC.MT19937(seed >>> 0);
     let P = LeidenPartition(graph, initialMembership, qualityFn);
     const levels = [];
     let level = 0;
@@ -846,19 +848,17 @@
     return { partition: P, levels: levels, quality: P.quality() };
   }
 
-  // ── Public API: re-export Louvain primitives + add Leiden bits ──
+  // ── Public API: Leiden-specific algebra only ────────────────────
   // NOTE: COMDET.LEIDEN.Partition = LeidenPartition (libleidenalg-shape
-  // admin), NOT LV.Partition (Louvain-Modularity-shape admin). Browser
-  // pages + tracer harnesses calling COMDET.LEIDEN.Partition get the
-  // libleidenalg-faithful algebra.
+  // admin), NOT the louvain-shape Partition (Louvain-Modularity-shape
+  // admin). Browser pages + tracer harnesses calling
+  // COMDET.LEIDEN.Partition get the libleidenalg-faithful algebra.
+  //
+  // Shared primitives (MT19937, shuffle, range, Graph) used to be
+  // re-exported here from LOUVAIN. After the 2026-05-10 cross-algo
+  // isolation refactor they live under COMDET.COMMON; callers read
+  // them from there directly (no Leiden re-export bridge).
   window.COMDET.LEIDEN = {
-    // Re-exports from Louvain (so existing callers work unchanged).
-    MT19937: LV.MT19937,
-    shuffle: LV.shuffle,
-    range: LV.range,
-    Graph: LV.Graph,
-    Modularity: LV.Modularity,
-    // Leiden-specific (LeidenPartition replaces LV.Partition).
     Partition: LeidenPartition,
     CPM: CPM,
     LeidenMod: LeidenMod,

@@ -446,7 +446,10 @@
 
   function buildLeidenGraph(fixture) {
     fixture = fixture || C.FIXTURE;
-    return C.LEIDEN.Graph(fixture.nodes.length, fixture.edges,
+    // Reads from COMDET.COMMON since 2026-05-10 cross-algo isolation
+    // refactor; before that the same Graph was reached via C.LEIDEN.Graph
+    // (which was a re-export of LV.Graph).
+    return C.COMMON.Graph(fixture.nodes.length, fixture.edges,
       { correctSelfLoops: false });
   }
 

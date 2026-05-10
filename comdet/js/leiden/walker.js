@@ -16,7 +16,8 @@
   if (!window.COMDET) return;
   const C = window.COMDET;
   const L = C.LEIDEN;
-  if (!L) return;
+  const CC = C.COMMON;
+  if (!L || !CC) return;
 
   // Timeline event = one node-visit (move or refine phase).
   function buildTimeline(result) {
@@ -103,7 +104,7 @@
     // Replay run, build timeline + snapshots.
     let result, timeline, snapshots;
     function rebuild() {
-      const G = L.Graph(NODES.length, F.edges, { correctSelfLoops: false });
+      const G = CC.Graph(NODES.length, F.edges, { correctSelfLoops: false });
       result = L.optimisePartition(G, qualityFn, seed, { recordTrace: true });
       timeline = buildTimeline(result);
       snapshots = buildSnapshots(result);

@@ -56,7 +56,7 @@
   "use strict";
   if (!window.COMDET) return;
   const C = window.COMDET;
-  if (!C.WCC || !C.MINCUT || !C.LEIDEN) return;
+  if (!C.WCC || !C.MINCUT || !C.LEIDEN || !C.COMMON || !C.LOUVAIN) return;
 
   function bfsComponents(nodeIds, edges) {
     return C.WCC.bfsComponents(nodeIds, edges);
@@ -97,7 +97,7 @@
     // sortAdj:true mirrors libleidenalg's igraph_lazy_adjlist iteration
     // order (chain Leiden audit row H closure). Required for byte-equal
     // greedy pick under matching seed across nested optimise_partition.
-    const G = C.LEIDEN.Graph(n, compEdges, { correctSelfLoops: false, sortAdj: true });
+    const G = C.COMMON.Graph(n, compEdges, { correctSelfLoops: false, sortAdj: true });
     // [UPSTREAM constrained.h:335-391] GetCommunities branches on algorithm:
     //   "leiden-cpm"  -> CPMVertexPartition(resolution)
     //   "leiden-mod"  -> ModularityVertexPartition (libleidenalg shape)
@@ -106,7 +106,10 @@
     let qfn;
     if (algorithm === "leiden-cpm") qfn = C.LEIDEN.CPM(resolution);
     else if (algorithm === "leiden-mod") qfn = C.LEIDEN.LeidenMod();
-    else if (algorithm === "louvain") qfn = C.LEIDEN.Modularity();
+    // LEIDEN.Modularity used to re-export LV.Modularity; after the
+    // 2026-05-10 cross-algo isolation refactor it's reached via
+    // C.LOUVAIN.Modularity (Louvain-shape) directly.
+    else if (algorithm === "louvain") qfn = C.LOUVAIN.Modularity();
     else throw new Error("CM: unsupported algorithm '" + algorithm + "'");
     // iter 1.
     let result = C.LEIDEN.optimisePartition(G, qfn, seed >>> 0);
