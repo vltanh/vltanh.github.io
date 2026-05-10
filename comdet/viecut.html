@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>VieCut &middot; cactus mincut | Community Detection Algorithms</title>
 <link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐖</text></svg>">
-<meta name="description" content="VieCut cactus mincut explainer + walker. The mincut backend WCC + CM use under the hood.">
+<meta name="description" content="VieCut cactus mincut explainer + step walker. The global-minimum-cut engine WCC and CM use under the hood.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
@@ -67,65 +67,67 @@
 <header class="hdr">
   <div class="kicker">community detection &middot; primitive &middot; global minimum cut</div>
   <h1><em>VieCut</em></h1>
-  <p class="fullname">cactus mincut + balanced-cut tie-break &middot; Henzinger-Noe-Schulz-Strash 2018</p>
-  <p class="sub">The minimum-cut engine under <a href="./wcc.html">WCC</a> + <a href="./cm.html">CM</a>. Computes the global minimum edge cut of a graph in (near-)linear time using the cactus representation, then picks the most balanced cut among ties.</p>
+  <p class="fullname">cactus mincut with most-balanced tie-break &middot; Henzinger, Noe, Schulz, Strash 2018</p>
+  <p class="sub">The global-minimum-cut engine sitting under <a href="./wcc.html">WCC</a> and <a href="./cm.html">CM</a>. Builds the cactus tree that encodes every minimum cut, then picks the cut that splits the graph most evenly.</p>
 </header>
 
+<div class="uc-banner">
+  <strong>Draft.</strong> First-pass walker over a JavaScript port of VieCut (Henzinger et al. 2018, ALENEX). The kernel under this page owns the seven phases of <code>cactus_mincut</code> and is shared with the <a href="./wcc.html">WCC</a> and <a href="./cm.html">CM</a> pages as their mincut backend. Implementation detail and source-code pointers live in the <a href="../../docs/algorithms/viecut.md">technical reference</a>.
+</div>
+
 <section class="hook">
-  <p>Take a connected graph. The <em>minimum cut</em> is the smallest set of edges you can remove to disconnect it. The cardinality of that set (<code>k</code>) is the graph's edge connectivity. Any algorithm that asks "is this cluster well-connected?" reduces to: how big is its mincut?</p>
-  <p>The naive way is Stoer-Wagner: iteratively pick a node, contract a phase, record the cut, repeat. \(O(V \cdot E)\) for a single cut. Fine for small graphs; slow on real networks where you need the cut for every cluster as part of an iterative recursion (which is exactly what <a href="./wcc.html">WCC</a> and <a href="./cm.html">CM</a> do).</p>
-  <p><em>VieCut</em> (Henzinger, Noe, Schulz, Strash, ALENEX 2018) does it differently. The cactus algorithm builds a <em>cactus representation</em> of the graph: a tree-of-cycles where every minimum cut in the original graph corresponds to either an edge-cut in the tree or a 2-edge cut crossing one of the cycles. Computing the cactus is near-linear in <code>V + E</code>, after which every minimum cut is a tree path or cycle pair away. Practical speedup over Stoer-Wagner: 10-100x on million-node networks.</p>
-  <div class="callout">
-    <div class="tag">why this matters for WCC + CM</div>
-    <p>WCC and CM call mincut on every cluster, recursively. On a network with <em>k</em> clusters of average size <em>n/k</em>, that's <em>k</em> mincut calls per round, times the recursion depth. Stoer-Wagner makes the post-proc pipeline scale as \(O(V \cdot E^2)\) on bad inputs; VieCut's cactus drops it to \(O(V \cdot E \log V)\) typical.</p>
-    <p>The other VieCut win is <em>most-balanced-cut tie-break</em>. When multiple cuts have the same minimum cardinality (which happens often: any pendant or whisker creates a cut of size 1, but so does the genuine community boundary), VieCut picks the cut that splits the graph most evenly. Stoer-Wagner picks whichever cut its phase happens to land on first. The split selection determines what gets pushed back into WCC's recursion, which determines whether the recursion converges quickly or peels nodes one at a time.</p>
-  </div>
+  <p>Take a connected graph. The <em>minimum cut</em> is the smallest set of edges you can remove to disconnect it. Write \(\delta(S)\) for the set of edges with exactly one endpoint in \(S \subset V\). The minimum cut value is</p>
+  <p style="text-align:center">\(\lambda(G) = \min_{\varnothing \neq S \subsetneq V}\; \sum_{e \in \delta(S)} w_e\).</p>
+  <p>The cardinality of any minimising \(\delta(S)\) (when edge weights are unit) is the graph's edge connectivity. Any question of the form "is this cluster well-connected enough to keep as one piece" reduces to a minimum-cut query, which is why <a href="./wcc.html">WCC</a> and <a href="./cm.html">CM</a> call mincut on every cluster they inspect.</p>
+  <p>Two things make the global-mincut problem harder than it looks. First, \(2^{|V|-1}\) subsets to consider in the naive picture. Second, the minimum cut is often not unique: any pendant node sits behind a cut of size 1, but so does a genuine community boundary, and choosing among them changes what the surrounding algorithm sees next.</p>
+  <p>VieCut handles both. It builds the <em>cactus tree</em> (Karzanov 1973), a compact data structure whose tree edges and tree cycles enumerate every minimum cut of the original graph, then runs a DFS over the cactus to pick the cut whose two sides come closest to equal in node count.</p>
 </section>
 
 <section class="hook">
-  <h2>Why most-balanced-cut?</h2>
-  <p>Imagine a cluster with two dense halves joined by a single bridge edge. The mincut is 1 (cut the bridge). Two valid bipartitions exist:</p>
+  <h2>Why the cactus.</h2>
+  <p>Karzanov's 1973 result: in any undirected graph \(G\) with global minimum cut value \(\lambda\), all minimum cuts can be encoded by a cactus tree-with-cycles \(T\) such that</p>
   <ul>
-    <li><strong>Balanced</strong>: split into the two halves directly.</li>
-    <li><strong>Pendant</strong>: peel off one isolated node + leave the rest connected. Also a cut of 1, but useless.</li>
+    <li>each node of \(T\) holds a contracted set of original-graph vertices;</li>
+    <li>each tree edge of \(T\) corresponds to a cut of weight exactly \(\lambda\); cutting that edge splits \(T\) into two pieces, and the union of original vertices on each side gives a minimum cut of \(G\);</li>
+    <li>each cycle of \(T\) holds a family of cuts of weight \(\lambda\) obtained by cutting any two cycle edges; the original-vertex sides are read off the two cycle pieces.</li>
   </ul>
-  <p>If the cluster has additional pendants or whiskers (rare in dense parts of social networks; common in sparse parts), the mincut between any pendant and the bulk is also 1. VieCut's tie-break picks the balanced cut so WCC's recursion makes structural progress instead of stripping a node per round.</p>
+  <p>So instead of enumerating exponentially many subsets of \(V\), VieCut builds one cactus and reads every minimum cut off it. The cactus has at most \(O(|V|)\) nodes, and any minimum cut on \(G\) corresponds to either one tree-edge cut or one two-cycle-edge cut on the cactus.</p>
 </section>
 
 <section class="hook">
-  <h2>The cactus, conceptually</h2>
-  <p>Karzanov's 1973 result: in any graph G, all minimum cuts can be encoded by a cactus tree T where:</p>
+  <h2>Why most-balanced tie-break.</h2>
+  <p>Picture a cluster shaped like two dense halves joined by a single bridge edge, plus one pendant node hanging off the side. The minimum cut value is 1, and at least two distinct cuts achieve it:</p>
   <ul>
-    <li>Each <em>node</em> in T represents a contracted set of original-graph nodes.</li>
-    <li>Each <em>edge</em> in T represents a cut of cardinality <code>k</code> (= the global mincut).</li>
-    <li>Each <em>cycle</em> in T represents a family of cuts of cardinality <code>k</code> that share two edges of the cycle.</li>
+    <li><strong>balanced</strong>: cut the bridge; the two halves end up on opposite sides.</li>
+    <li><strong>pendant</strong>: cut the pendant edge; one node ends up isolated, the rest stays together.</li>
   </ul>
-  <p>So if you find any minimum cut by classical Stoer-Wagner-like contraction, you've found one edge of the cactus. To find them all (so you can pick the most balanced one), you contract the discovered min-cut sides + recurse. VieCut's <code>cactus_mincut</code> is a careful implementation of this recursive cactus build, with engineering for cache locality, edge contraction efficiency, and parallelism.</p>
+  <p>Both are minimum cuts. The pendant choice peels one node and leaves the structural problem untouched; the balanced choice exposes the actual structure. Algorithms like WCC and CM recurse on the resulting halves, so the choice of which minimum cut to return shapes the entire downstream recursion.</p>
+  <p>VieCut walks the cactus and picks the cut whose lighter side has the most nodes. If two cuts tie on balance, the first one encountered in DFS order wins. This is the <em>most-balanced minimum cut</em>; it gives WCC and CM a partition that exposes the structural boundary instead of stripping one node per round.</p>
 </section>
 
 <section class="algo-meta">
   <div class="algo-refs">
-    <span><span class="ref-label">paper</span><a href="https://doi.org/10.1137/1.9781611975055.6" target="_blank" rel="noopener">Henzinger 2018 (ALENEX)</a></span>
-    <span><span class="ref-label">paper</span><a href="https://doi.org/10.1145/3210377.3210393" target="_blank" rel="noopener">Henzinger 2018 (SPAA)</a></span>
+    <span><span class="ref-label">paper</span><a href="https://doi.org/10.1137/1.9781611975055.6" target="_blank" rel="noopener">Henzinger et al. 2018 (ALENEX)</a></span>
+    <span><span class="ref-label">paper</span><a href="https://doi.org/10.1145/3210377.3210393" target="_blank" rel="noopener">Henzinger et al. 2018 (SPAA)</a></span>
     <span><span class="ref-label">code</span><a href="https://github.com/VieCut/VieCut" target="_blank" rel="noopener">VieCut</a></span>
     <span><span class="ref-label">used by</span><a href="./wcc.html">WCC</a></span>
     <span><span class="ref-label">used by</span><a href="./cm.html">CM</a></span>
   </div>
-  <p class="algo-prov">Byte-equal vs VieCut/build/mincut (1700 cells, 1,033,212 records, 0 mismatches).</p>
+  <p class="algo-prov">Byte-equal vs the canonical VieCut tracer build across 2,309 cells / 19.3M per-step records / 0 mismatches (legacy whole-graph, 3-tier per-cluster under three input partitions, and n &gt; 10000 LP-LCC panels combined).</p>
 </section>
 
-<!-- ─────────── Walker stage 0 · fixture ─────────── -->
+<!-- ─────────── Stage 0 · fixture ─────────── -->
 <section class="stage">
   <div class="stage-num">stage 0 &middot; the example fixture</div>
   <h2>An 8-node graph designed to exercise every phase.</h2>
-  <p>The cactus pipeline has seven phases. To see them all on one canvas, the walker uses a small hand-tuned graph: two K3 triangles {0,1,2} and {3,4,5} plus a bridge edge (2,3), plus pendant nodes 6 (attached to 2) and 7 (attached to 3), plus two cross-edges (0,4) and (1,5) so the push-relabel max-flow has interesting work to do. Twelve edges total. The global minimum cut is 1 (cut the pendant edge or the bridge).</p>
+  <p>The cactus pipeline runs seven distinct phases on a single mincut call. To see them all on one canvas, the walker uses a small hand-tuned graph: two triangles \(\{0,1,2\}\) and \(\{3,4,5\}\) joined by a bridge \((2,3)\), plus pendants \(6\) attached to \(2\) and \(7\) attached to \(3\), plus two extra cross-edges \((0,4)\) and \((1,5)\) so the push-relabel max-flow inside the cactus build has non-trivial work to do. Twelve edges, all of unit weight. The global minimum cut value is \(\lambda = 1\) (the bridge edge or either pendant edge each split the graph into two pieces).</p>
 </section>
 
-<!-- ─────────── Walker stage 1 · phase walker ─────────── -->
+<!-- ─────────── Stage 1 · phase walker ─────────── -->
 <section class="stage">
   <div class="stage-num">stage 1 &middot; phase walker</div>
   <h2>Step through the cactus pipeline.</h2>
-  <p>Each event below corresponds to one logged step inside the canonical implementation. Click a phase chip to jump; advance with the controls.</p>
+  <p>Each event below corresponds to one logged step inside the canonical implementation, emitted via the same hook stream the verification harness reads. Click a phase chip to jump; advance with the controls.</p>
 
   <div id="g-chips" class="vc-chips"></div>
   <div id="g-phase-label" class="vc-phase-label">Setup</div>
@@ -161,37 +163,118 @@
   </div>
 </section>
 
+<!-- ─────────── Stage 2 · the outer loop ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 2 &middot; the outer loop</div>
+  <h2>Contract until the graph stops shrinking.</h2>
+  <p>The top-level driver runs an outer while-loop. Each pass through the body applies four contraction phases (NOI capforest, degree-1 cleanup, Padberg-Rinaldi tests 1+2, Padberg-Rinaldi tests 3+4) in sequence. After each phase, edges identified as definitely-kept (their endpoints are guaranteed to share the cut side) get merged via union-find, and the graph is rebuilt at the new coarser granularity.</p>
+  <p>The loop guard is a 1% shrinkage test: keep going while <code>n_after &lt; 0.99 &cdot; n_before</code>. Once the four phases together fail to shrink the graph by at least 1%, the outer loop exits and control passes to Phase E (recursive cactus build).</p>
+  <p>This is a fixed-point pattern. Every phase either tightens the running mincut estimate or guarantees an edge contraction; nothing is ever undone. The running estimate starts at the minimum node degree of the graph (a trivial upper bound on \(\lambda\)) and tightens as contractions surface lower-degree super-nodes.</p>
+  <div class="callout">
+    <div class="tag">why four contraction phases</div>
+    <p>Phase A (NOI capforest, Nagamochi-Ono-Ibaraki 1992) is a priority-queue traversal that accumulates a per-vertex residual mass and unions endpoints when the running residual hits the mincut estimate. Phase B is a one-liner: any node with degree exactly \(\lambda\) and one incident edge of weight \(\lambda\) is the endpoint of a trivial cut, so the edge is merged. Phases C1+C2 (Padberg-Rinaldi tests, Padberg + Rinaldi 1990) are local edge criteria of the form "this edge is on some minimum cut" or "this edge is heavier than \(\lambda\) so it cannot be on any minimum cut"; both directions lead to contractions. Each phase has different strengths on different graph shapes, which is why they run in sequence rather than picking one.</p>
+  </div>
+</section>
+
+<!-- ─────────── Stage 3 · capforest contraction ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 3 &middot; capforest contraction</div>
+  <h2>One pop per step, accumulate per-vertex residual mass.</h2>
+  <p>Phase A is the workhorse. Pick a random starting vertex (one RNG draw, <code>next() % n</code>), insert it into a bucket-bounded max priority queue with key zero, then loop:</p>
+  <ul>
+    <li>pop the highest-key vertex \(u\); mark it visited;</li>
+    <li>for each unvisited neighbour \(t\) of \(u\): if the running residual \(r_v[t]\) is still below the current mincut estimate, check whether adding the incident edge weight \(w\) would push it to or above \(\lambda\); if so, union \(u\) and \(t\) (they are now guaranteed to share a side in some minimum cut);</li>
+    <li>update \(r_v[t] \mathrel{+}= w\) and either insert \(t\) into the queue or raise its key to \(\min(r_v[t], \lambda)\).</li>
+  </ul>
+  <p>The accumulator \(r_v\) is integer everywhere (edge weights are integer in VieCut), so there is no floating-point drift to worry about. Tie-break is by adjacency-iteration order, which is stable because the underlying mutable graph stores neighbours in insertion order.</p>
+  <p>Why this works: the union-find at the end of the pass partitions \(V\) into super-nodes such that all edges within a super-node are guaranteed to be on the same side of <em>some</em> minimum cut. Contracting those super-nodes shrinks the graph without losing any minimum cut.</p>
+</section>
+
+<!-- ─────────── Stage 4 · the recursive cactus build ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 4 &middot; the recursive cactus build</div>
+  <h2>Pick a vertex pair, run max-flow, branch on whether the flow exceeds \(\lambda\).</h2>
+  <p>Once the outer loop has contracted as much as it can, Phase E builds the cactus itself. The driver picks two vertices \(s, t\) using the <em>heaviest-weighted-flow-edge</em> selector (no RNG draw; deterministic over the contracted graph), runs Goldberg-Tarjan push-relabel max-flow between them, and branches on the resulting flow value:</p>
+  <ul>
+    <li>if <code>max_flow &gt; \(\lambda\)</code>: the \((s, t)\) edge is on no minimum cut, so contract it and recurse on the smaller graph;</li>
+    <li>if <code>max_flow = \(\lambda\)</code>: the cut exists in the current residual graph, so run strongly-connected-components on the residual; the SCC quotient gives the cactus structure;</li>
+    <li>if \(n = 2\): single-edge base case; return the two-node cactus.</li>
+  </ul>
+  <p>The SCC-and-merge step is where the cactus takes its actual shape. Each SCC becomes one cactus node holding the originally-contracted vertices; an inner routine called <code>findSTCactus</code> walks a priority-queue ordering of the SCC quotient and segments it into A-cycles (corresponding to families of equivalent minimum cuts crossing a cycle pair) and B-tree-segments (single-edge minimum cuts).</p>
+  <div class="callout">
+    <div class="tag">a small subtlety: the singleton-cut variant</div>
+    <p>Three conditions can co-occur after a max-flow call: max_flow equals \(\lambda\), the SCC decomposition yields exactly two components, and at least one of \(s, t\) already has weighted degree exactly \(\lambda\). When all three hold, one endpoint is already a "minimum-degree witness" for its own cut, and the cactus build takes a special branch that contracts \((s, t)\), recurses, and then attaches a fresh cactus node holding the contracted-side originals with a tree edge of weight \(\lambda\). This preserves the singleton cut as an explicit tree edge in the output instead of folding it into the recursion.</p>
+  </div>
+</section>
+
+<!-- ─────────── Stage 5 · most-balanced bipartition ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 5 &middot; most-balanced bipartition</div>
+  <h2>DFS the cactus to pick the most-even cut.</h2>
+  <p>Once the cactus is built, every tree edge and every cycle-pair represents a minimum cut. The most-balanced selector enumerates those by depth-first search:</p>
+  <ul>
+    <li>start at a random cactus node (one RNG draw, <code>nextInt(0, |T| - 1)</code>);</li>
+    <li>for each tree edge \(e\) of weight \(\lambda\): compute the lighter side's node count after removing \(e\) from the tree; this gives a candidate balance score;</li>
+    <li>for each cycle: slide a window over the cycle vertex sequence; at each window position the two endpoints define a candidate two-edge cut; compute the lighter side's node count;</li>
+    <li>keep the running maximum lighter-side node count.</li>
+  </ul>
+  <p>The tie-break inside the cycle walk is non-strict (<code>&gt;=</code> instead of <code>&gt;</code>): when two window positions tie on balance, the later one wins. The tree-edge tie-break is strict (<code>&gt;</code>): the first encountered wins. These are read directly off the canonical source and matter for byte-equal verification, but on most fixtures the result is the same partition either way.</p>
+  <p>The chosen cut translates back into the original graph by reading the <code>containedVertices</code> tables on each cactus node: the lighter-side cactus nodes hold one set of original vertices, the heavier-side cactus nodes hold the other.</p>
+</section>
+
+<!-- ─────────── Stage 6 · the LP-loop heuristic ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 6 &middot; the LP-loop heuristic for \(n &gt; 10000\)</div>
+  <h2>On large graphs, a label-propagation pass tightens the mincut estimate first.</h2>
+  <p>For graphs with more than \(10000\) nodes, the cactus pipeline above is too slow to apply directly. VieCut adds a fast outer heuristic that runs <em>before</em> the cactus build: a label-propagation pass that clusters the graph, contracts the clusters into super-nodes, and reads the contracted graph's minimum degree as an upper bound on \(\lambda\). The cactus pipeline then runs against that tighter bound, which lets the contraction phases prune more aggressively.</p>
+  <p>The LP body is the standard semi-synchronous label-propagation step. Initialise every node with its own label; for two iterations, walk the nodes in a chunk-shuffled order; for each node, sum incoming edge weight per neighbour-label, pick the heaviest. Tie-break is one fair coin per equal-weight pair (one <code>next() % 2</code> draw on each tie).</p>
+  <p>The shuffle is local. Rather than a single global Fisher-Yates over all \(n\) positions, VieCut shuffles each contiguous chunk of 128 positions in place. This calls <code>std::shuffle</code>'s optimised branch, which pulls roughly one RNG draw per swap; on \(n = 22963\) the LP path alone consumes around \(99{\small,}000\) draws per iteration. The byte-equal port hand-replicates the libstdc++ pairwise-swap order, so the JS walker consumes RNG in the same order as the C++ tracer.</p>
+  <p>After two LP iterations the graph is re-indexed by encounter order, then a <code>findTrivialCuts</code> sweep peels small blocks whose contracted node degree falls below the current mincut estimate, then the result is contracted into a super-graph. PR12 and PR34 fire on the super-graph for one more pass each. The loop continues while the super-graph still has more than 10000 nodes <em>and</em> the previous iteration actually shrank it.</p>
+  <div class="callout">
+    <div class="tag">a small head-scratcher</div>
+    <p>The LP body does <em>not</em> draw RNG when one block strictly beats the rest; the draw only fires on equal-weight ties. This is a deliberate short-circuit in the canonical source and was the trickiest part of getting the byte-equal port to match: on a graph with many strict winners the RNG stream stays untouched for long stretches, while on a graph with many ties (e.g. binary edge weights and roughly balanced communities) the stream advances rapidly. The walker on this page runs at \(n = 8\) and never enters the LP-loop path, but the kernel exposes it for the \(n &gt; 10000\) fixtures the verification harness runs against.</p>
+  </div>
+</section>
+
+<!-- ─────────── edge cases ─────────── -->
 <section class="stage">
   <div class="stage-num">edge cases</div>
   <h2>Branches the walker may not show.</h2>
   <details>
-    <summary><strong>What if mincut = 0?</strong></summary>
-    <p>The graph is already disconnected. <code>cactus_mincut</code> short-circuits before Phase E and returns the existing components as the partition. The cactus build never runs.</p>
+    <summary><strong>What if \(\lambda = 0\)?</strong></summary>
+    <p>The graph is already disconnected. The driver short-circuits before Phase E and returns the existing components as the partition; the cactus build never runs. WCC and CM treat this case as the trivial-skip path; the SBM-Flat-PP per-cluster stress panel exercises it 10285 times across 153 cells.</p>
   </details>
   <details>
-    <summary><strong>What if n = 2?</strong></summary>
-    <p>Recursion base case in <code>internalRecursiveCactus</code>. A 2-node graph has exactly one cut, so the cactus is just two nodes joined by a single edge of weight = mincut.</p>
-  </details>
-  <details>
-    <summary><strong>What if the singleton-cut variant fires?</strong></summary>
-    <p>When push-relabel finds <code>max_flow = mincut</code>, the SCC decomposition produces 2 components, AND one of <code>deg(s) = mincut</code> or <code>deg(t) = mincut</code> holds, the cactus build takes a special branch. The full algorithm contracts (s,t), recursively builds the cactus on the contracted graph, then attaches a fresh node holding the contracted-side originals. This preserves the singleton's cut as a tree edge.</p>
+    <summary><strong>What if \(n = 2\)?</strong></summary>
+    <p>Recursion base case inside the cactus build. A two-node graph has exactly one minimum cut, so the cactus is just two cactus nodes joined by a single tree edge of weight \(\lambda\).</p>
   </details>
   <details>
     <summary><strong>What if shrinkage is below 1%?</strong></summary>
-    <p>The outer-while loop in <code>findAllMincuts</code> exits. The contraction phases (A through D) stop reducing the graph, so the algorithm hands off to Phase E (recursive cactus) to finish.</p>
+    <p>The outer-while loop exits. The four contraction phases stop reducing the graph, so control passes to the recursive cactus build with whatever super-graph the loop left behind.</p>
+  </details>
+  <details>
+    <summary><strong>What if the singleton-cut variant fires?</strong></summary>
+    <p>When push-relabel finds <code>max_flow = \(\lambda\)</code>, the SCC decomposition produces two components, and one of \(\deg(s), \deg(t)\) equals \(\lambda\), the cactus build takes a special branch (stage 4 callout above). The contracted side becomes one cactus node and is reattached as a singleton after the recursion returns.</p>
   </details>
 </section>
 
+<!-- ─────────── used by ─────────── -->
 <section class="stage">
   <div class="stage-num">used by</div>
   <h2>VieCut's place in the gallery.</h2>
-  <p>VieCut is a primitive: not a clustering algorithm itself, but the engine other post-processors call when they need exact minimum cuts. In this gallery:</p>
+  <p>VieCut is a primitive, not a clustering algorithm itself. It is the mincut backend other post-processors call when they need an exact global minimum cut on a cluster:</p>
   <ul>
-    <li><a href="./wcc.html">WCC</a> calls VieCut on every cluster to check its well-connectedness threshold + recursively split clusters that fail.</li>
-    <li><a href="./cm.html">CM</a> does the same and also re-clusters each half with the base algorithm (Leiden / Louvain).</li>
+    <li><a href="./wcc.html">WCC</a> calls VieCut on every cluster to check whether the cluster's intra-edge mincut clears a connectivity threshold; clusters that fail get split along the most-balanced cut and re-checked recursively.</li>
+    <li><a href="./cm.html">CM</a> does the same well-connectedness check, and additionally re-clusters each half with the base algorithm (Leiden or Louvain) before re-checking, which lets a deeper recursion expose smaller well-connected pieces.</li>
   </ul>
-  <p>Both pipelines are byte-equal verified against the canonical <code>constrained-clustering</code> binary because VieCut is byte-equal verified against <code>VieCut/build/mincut</code>.</p>
+  <p>Both pipelines are byte-equal verified against the canonical <code>constrained-clustering</code> binary because the VieCut kernel under them is byte-equal verified against the canonical <code>VieCut/build/mincut</code> tracer.</p>
 </section>
+
+<div id="kin"></div>
+
+<aside class="tech-companion">
+  <a href="https://github.com/vltanh/community-detection/blob/main/docs/algorithms/viecut.md" target="_blank" rel="noopener">technical companion: docs/algorithms/viecut.md</a>
+</aside>
 
 <footer class="ack">
   <p class="tools">drawn with <a href="https://d3js.org" target="_blank" rel="noopener">d3</a></p>
