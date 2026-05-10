@@ -21,11 +21,11 @@
  */
 (function () {
   "use strict";
-  if (!window.COMDET || !COMDET.PAGE || !COMDET.LOUVAIN || !COMDET.FIXTURE) {
+  if (!window.COMDET || !COMDET.PAGE || !COMDET.LOUVAIN || !COMDET.COMMON || !COMDET.FIXTURE) {
     console.warn("[louvain page] missing prerequisites");
     return;
   }
-  const C = COMDET, P = C.PAGE, LV = C.LOUVAIN, F = C.FIXTURE;
+  const C = COMDET, P = C.PAGE, LV = C.LOUVAIN, CC = C.COMMON, F = C.FIXTURE;
 
   if (C.linksRow && document.getElementById("links")) {
     document.getElementById("links").innerHTML = C.linksRow({ gen: "louvain" });
@@ -50,7 +50,7 @@
   let walker = null;        // { viz, controller, render }
 
   function runKernel(s) {
-    const G = LV.Graph(F.nodes.length, F.edges, { correctSelfLoops: false });
+    const G = CC.Graph(F.nodes.length, F.edges, { correctSelfLoops: false });
     return LV.run(G, LV.Modularity(), s, { recordTrace: true });
   }
 
@@ -65,7 +65,7 @@
   // shipped under the page so future fixture changes update the
   // caption automatically.
   (function () {
-    const Gloc = LV.Graph(F.nodes.length, F.edges, { correctSelfLoops: false });
+    const Gloc = CC.Graph(F.nodes.length, F.edges, { correctSelfLoops: false });
     const Pl = LV.Partition(Gloc, null, LV.Modularity());
     const Q0 = LV.Modularity().quality(Pl);
     const out = document.getElementById("g-q0");
@@ -95,7 +95,7 @@
       cumDeltaQ += sw.totalImprov;
     });
     // Snapshots: replay phase-1 sweeps to capture per-visit membership.
-    const Gloc = LV.Graph(F.nodes.length, F.edges, { correctSelfLoops: false });
+    const Gloc = CC.Graph(F.nodes.length, F.edges, { correctSelfLoops: false });
     const Pl = LV.Partition(Gloc, null, LV.Modularity());
     lv0.sweeps.forEach(function (sw) {
       sw.traces.forEach(function (t) {
@@ -175,7 +175,7 @@
     // both ΔQ for the level and Q_after, so the resolution-limit story
     // (Q monotonically rises while planted-recovery quality drops) is
     // visible in numbers, not just inferred from prose.
-    const G0 = LV.Graph(F.nodes.length, F.edges, { correctSelfLoops: false });
+    const G0 = CC.Graph(F.nodes.length, F.edges, { correctSelfLoops: false });
     const Q = LV.Modularity();
     let cumQ = Q.quality(LV.Partition(G0, null, Q));  // Q_0
     res.levels.forEach(function (lv, i) {
