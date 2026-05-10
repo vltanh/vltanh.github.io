@@ -54,7 +54,7 @@
     // determines adj iteration. To mirror cpp's ASC adj, sort wgtMap
     // entries by (lo, hi) ASC before adding. Without this, JS adj lists
     // follow input edge order, producing different capforest / pr12 / pr34
-    // contractions on the same input — root cause of WCC pseed=1
+    // contractions on the same input. Root cause of WCC pseed=1
     // FAIL_HARD on whole-graph clusters.
     const sortedKeys = [];
     for (const key of wgtMap.keys()) sortedKeys.push(key);

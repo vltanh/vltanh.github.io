@@ -37,7 +37,7 @@
     }
 
     // [UPSTREAM label_propagation.h:52]
-    // permutate_vector_local(&permutation, true) — init perm to identity
+    // permutate_vector_local(&permutation, true): init perm to identity
     // then std::shuffle each chunk of 128.
     NS.random_functions.permutate_vector_local(permutation, true);
 

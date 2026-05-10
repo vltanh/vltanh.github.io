@@ -3,7 +3,18 @@
  *
  * Holds at most num_nodes elements. gain in [-gain_span, +gain_span].
  * deleteMax / increaseKey / decreaseKey / contains all O(1) amortised.
- * Used by recursive_cactus::findSTCactus for residual-DT max-key sweep.
+ * Bucket pop is LIFO (back-of-vector).
+ *
+ * Used at two sites:
+ *   - recursive_cactus.js findSTCactus: residual-DT max-key sweep.
+ *   - push_relabel.js m_Q: discharge queue keyed by distance label.
+ *     Upstream uses maxNodeHeap there; NodeBucketPQ matches at our size
+ *     budget (distance bounded by 2*n) and is already loaded.
+ *
+ * The NOI bstack pq variant ("bstack" config string) maps to this class
+ * in cpp but is never triggered by constrained-clustering's call shape
+ * (pq config default = "default", which auto-picks fifo_node_bucket_pq
+ * for mincut < 10000); see community-detection/viecut/pq_variants.md.
  */
 (function () {
   "use strict";

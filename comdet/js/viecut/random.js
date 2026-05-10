@@ -10,7 +10,7 @@
  *
  * uniform_int_distribution(lo, hi) returns lo + scale-and-reject from
  * the underlying generator's [0, 2^32) output. libstdc++ implementation
- * (bits/uniform_int_dist.h) — see comments at the function below.
+ * (bits/uniform_int_dist.h); see comments at the function below.
  */
 (function () {
   "use strict";
@@ -79,7 +79,7 @@
   // _S_nd helper. For range r = hi - lo + 1, urange = 2^32 - 1, and
   // urngrange = urange + 1 = 2^32 (the generator's range size):
   //
-  //   if (r > urngrange) — does not apply for r <= 2^32.
+  //   if (r > urngrange): does not apply for r <= 2^32.
   //   else if (r == urngrange) return urng() + lo.
   //   else if (r == 1) return lo (single value).
   //   else:
