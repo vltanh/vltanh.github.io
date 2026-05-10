@@ -98,14 +98,11 @@
     compsAnimated.push({ root: root, levels: levels, members: members.slice().sort(function (a,b){return a-b;}) });
   }
 
-  // Derive output-cluster assignments: id-walk per kernel order.
-  // out_cid[node_id] = -1 if dropped, else 0..K-1.
-  const outCid = {};
-  F.nodes.forEach(function (id) { outCid[id] = -1; });
+  // Derive output-cluster assignments: id-walk per kernel order. Tag each
+  // kept comp with its assignedOutId (size<=1 comps stay untagged).
   let nextOutId = 0;
   compsAnimated.forEach(function (c) {
     if (c.members.length <= 1) return;
-    c.members.forEach(function (id) { outCid[id] = nextOutId; });
     c.assignedOutId = nextOutId;
     nextOutId += 1;
   });
@@ -123,6 +120,28 @@
 
   function pushFrame(f) { frames.push(f); }
 
+  // Input membership snapshot, reused for the early phases.
+  const inputMembership = F.nodes.map(function (id, i) { return F.gt[i]; });
+
+  // Per-frame counter helper for phases 1-3. `kept` / `dropped` count
+  // completed comps split by size (>1 vs <=1). Phases 4-5 switch to node
+  // counts after the singleton filter, so they build their own counters
+  // object directly.
+  function compCounters(completed) {
+    completed = completed || [];
+    let kept = 0, dropped = 0;
+    for (let i = 0; i < completed.length; i++) {
+      if (completed[i].members.length > 1) kept += 1; else dropped += 1;
+    }
+    return {
+      crossEdges: crossEdgeIdx.length,
+      intraEdges: intraEdgeIdx.length,
+      comps: completed.length,
+      dropped: dropped,
+      kept: kept,
+    };
+  }
+
   // Phase 1: cross-edges highlighted, intra-edges normal.
   pushFrame({
     phase: 1,
@@ -132,9 +151,9 @@
     queue: [],
     crossActive: true,
     crossDimmed: false,
-    membership: F.nodes.map(function (id, i) { return F.gt[i]; }),
+    membership: inputMembership,
     completedComps: [],
-    counters: { crossEdges: crossEdgeIdx.length, intraEdges: intraEdgeIdx.length, comps: 0, dropped: 0, kept: 0 },
+    counters: compCounters([]),
   });
 
   // Phase 2: cross-edges fade.
@@ -146,9 +165,9 @@
     queue: [],
     crossActive: false,
     crossDimmed: true,
-    membership: F.nodes.map(function (id, i) { return F.gt[i]; }),
+    membership: inputMembership,
     completedComps: [],
-    counters: { crossEdges: crossEdgeIdx.length, intraEdges: intraEdgeIdx.length, comps: 0, dropped: 0, kept: 0 },
+    counters: compCounters([]),
   });
 
   // Phase 3: BFS components. Per component:
@@ -199,7 +218,7 @@
       crossDimmed: true,
       membership: nodeMembership(comp),
       completedComps: completedSoFar.slice(),
-      counters: { crossEdges: crossEdgeIdx.length, intraEdges: intraEdgeIdx.length, comps: completedSoFar.length, dropped: completedSoFar.filter(function (c) { return c.members.length <= 1; }).length, kept: completedSoFar.filter(function (c) { return c.members.length > 1; }).length },
+      counters: compCounters(completedSoFar),
     });
 
     // Per-level expand frames (skip level 0; root already shown).
@@ -220,7 +239,7 @@
         crossDimmed: true,
         membership: nodeMembership(comp),
         completedComps: completedSoFar.slice(),
-        counters: { crossEdges: crossEdgeIdx.length, intraEdges: intraEdgeIdx.length, comps: completedSoFar.length, dropped: completedSoFar.filter(function (c) { return c.members.length <= 1; }).length, kept: completedSoFar.filter(function (c) { return c.members.length > 1; }).length },
+        counters: compCounters(completedSoFar),
       });
     }
 
@@ -240,7 +259,7 @@
       crossDimmed: true,
       membership: nodeMembership(null),
       completedComps: completedSoFar.slice(),
-      counters: { crossEdges: crossEdgeIdx.length, intraEdges: intraEdgeIdx.length, comps: completedSoFar.length, dropped: completedSoFar.filter(function (c) { return c.members.length <= 1; }).length, kept: completedSoFar.filter(function (c) { return c.members.length > 1; }).length },
+      counters: compCounters(completedSoFar),
     });
   });
 

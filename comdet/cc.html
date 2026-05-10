@@ -222,14 +222,19 @@
 </header>
 
 <section class="hook">
-  <p>Some clustering algorithms emit a label per node and call it a day. They do not check whether the nodes carrying that label are actually reachable from each other. SBM is the usual offender: stochastic block models care about edge density between blocks, not about whether each block is internally connected. So a cluster can have, say, two disconnected halves with the same label, and the output looks like one community when it is really two.</p>
-  <p><em>CC</em> is the patch. For each cluster <code>C</code> in the input partition, take the subgraph induced by <code>C</code>'s nodes (drop every edge crossing out to a different cluster), run a BFS, and replace <code>C</code> with one new cluster per connected piece. If <code>C</code> was already connected, nothing changes.</p>
-  <p>The cost is one BFS per cluster: \(O(|V| + |E|)\) over the whole graph. There are no parameters and no model.</p>
+  <p>Some clustering algorithms emit a label per node and call it a day. They do not check whether the nodes carrying that label are actually reachable from each other. Stochastic block models are the usual offender: they care about edge density between blocks, not about whether each block is internally connected. A cluster can end up as two disconnected halves under the same label, and the output looks like one community when it is really two.</p>
+  <p><em>CC</em> is the patch. For each cluster in the input partition, take the subgraph induced by that cluster's nodes (drop every edge crossing out to a different cluster), run a breadth-first search, and replace the cluster with one new cluster per connected piece. If the cluster was already connected, nothing changes.</p>
+  <p>The cost is one breadth-first search per cluster, \(O(|V| + |E|)\) over the whole graph. In plain terms: every node and every intra-cluster edge gets touched once, no more. Two interesting properties: cost is independent of the number of input clusters (the BFS sweeps the residual graph in one pass over the whole node set); and there is no parameter to tune, no threshold to set, no model to fit.</p>
+  <div class="defs">
+    <div><span class="term">cross-cluster edge</span> an edge whose endpoints carry different input cluster labels. CC drops every such edge before the breadth-first search.</div>
+    <div><span class="term">residual graph</span> the subgraph that survives after the cross-cluster edges are dropped. Same node set as the input; only intra-cluster edges remain.</div>
+    <div><span class="term">singleton component</span> a connected component of size one in the residual. CC drops these from the output; nodes that fall into a singleton end up unlabelled.</div>
+  </div>
   <div class="callout">
     <div class="tag">why this matters &middot; Park 2025 / Vu-Le 2026</div>
-    <p>On graph-tool's flat and nested SBMs (every variant tested: degree-corrected, non-degree-corrected, planted-partition, plus PySBM), internally disconnected clusters show up across both real and synthetic benchmarks. Splitting them with CC <em>improves</em> accuracy on most of those benchmarks. WCC adds a threshold on top and gains more; CM adds a re-clustering pass on top of that and gains the most. CC is the cheapest correction of the three.</p>
+    <p>On graph-tool's flat and nested stochastic block models (every variant tested: degree-corrected, non-degree-corrected, planted-partition, plus PySBM), internally disconnected clusters show up across both real and synthetic benchmarks. Splitting them with CC <em>improves</em> accuracy on most of those benchmarks. <a href="./wcc.html">WCC</a> adds a connectedness threshold on top and gains more; <a href="./cm.html">CM</a> adds a re-clustering pass on top of that and gains the most. CC is the cheapest correction of the three.</p>
   </div>
-  <p>The shipped binary is <code>constrained_clustering MincutOnly --connectedness-criterion 0</code>. The <code>0</code> selects the <em>Simple</em> branch in <a href="https://github.com/MinhyukPark/constrained-clustering/blob/main/src/mincut_only.cpp">mincut_only.cpp</a>: short-circuit the recursive cut + threshold loop and emit each component directly. Same code path as WCC, just with the cut step disabled.</p>
+  <p>CC ships as the same binary that hosts WCC and CM, invoked with the threshold disabled. The threshold path collapses to a short-circuit: emit every connected component of the residual graph directly, skip the recursive cut + threshold loop that the other two run. The technical companion below maps the source-code path.</p>
 </section>
 
 <section class="algo-meta">
@@ -237,9 +242,9 @@
     <span><span class="ref-label">paper</span><a href="https://doi.org/10.1007/978-3-031-82435-7_9" target="_blank" rel="noopener">Park 2025</a></span>
     <span><span class="ref-label">paper</span><a href="https://doi.org/10.1007/s41109-025-00747-2" target="_blank" rel="noopener">Vu-Le 2026</a></span>
     <span><span class="ref-label">code</span><a href="https://github.com/MinhyukPark/constrained-clustering" target="_blank" rel="noopener">constrained-clustering MincutOnly</a></span>
-    <span><span class="ref-label">docs</span><a href="https://github.com/vlttnh/community-detection/blob/main/docs/algorithms/cc.md" target="_blank" rel="noopener">technical companion</a></span>
+    <span><span class="ref-label">docs</span><a href="https://github.com/vltanh/community-detection/blob/main/docs/algorithms/cc.md" target="_blank" rel="noopener">technical companion</a></span>
   </div>
-  <p class="algo-prov">Byte-equal vs constrained-clustering MincutOnly (153 cells, 355,350 records, 0 mismatches).</p>
+  <p class="algo-prov">Byte-equal vs the shipped binary (306 cells across partition-synth + SBM-Flat-PP panels, 429,192 records, 0 mismatches).</p>
 </section>
 
 <!-- ─────────── Stage 0 · input fixture ─────────── -->
@@ -304,15 +309,15 @@
   <div class="case-grid">
     <div class="case-card">
       <div class="case-q">A cluster with no internal edges.</div>
-      <div class="case-a">After <code>RemoveInterClusterEdges</code> the induced subgraph has no edges. BFS from each node reaches only itself. Every node becomes a singleton component. The <code>csize &gt; 1</code> filter then drops all of them. The cluster vanishes from the output.</div>
+      <div class="case-a">Every cross-cluster edge gets dropped, so the cluster's residual subgraph has no edges left. Each node sits on its own. The breadth-first search reaches nothing past its starting node. Every node becomes a singleton, the singleton filter drops them all, and the cluster vanishes from the output.</div>
     </div>
     <div class="case-card">
       <div class="case-q">A single-node cluster.</div>
-      <div class="case-a">One BFS root, one component of size 1, dropped at the filter. CC treats outliers and singletons identically: gone from the output. The fixture's nodes 30 and 31 sit in cluster <code>-1</code> and follow this path.</div>
+      <div class="case-a">One root, one component of size one, dropped at the filter. CC treats outliers and singletons identically: gone from the output. The fixture's nodes 30 and 31 sit in cluster &minus;1 and follow this path.</div>
     </div>
     <div class="case-card">
       <div class="case-q">A cluster already connected.</div>
-      <div class="case-a">BFS from the lowest-id node reaches every other node in one component. No splits, no drops. The cluster passes through unchanged with a fresh output id assigned by FIFO position. Cluster <b>A</b> in the fixture is this case.</div>
+      <div class="case-a">The breadth-first search from the lowest-id node reaches every other node in one sweep. No splits, no drops. The cluster passes through unchanged, picking up a fresh output id assigned in the order the components are discovered. Cluster <b>A</b> in the fixture is this case.</div>
     </div>
   </div>
   <div class="why-link">
