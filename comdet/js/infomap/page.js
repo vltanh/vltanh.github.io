@@ -193,7 +193,7 @@
     html += '<table class="cand-table"><thead><tr><th>cand module</th><th>ΔL</th><th>verdict</th></tr></thead><tbody>';
     ev.candidates.forEach(function (c) {
       const cls = (c.comm === ev.toComm && ev.moved) ? 'cand-pick'
-                : (c.comm === ev.fromComm ? 'cand-from' : (c.dL >= 0 ? '' : ''));
+                : (c.comm === ev.fromComm ? 'cand-from' : '');
       const verdict = (c.comm === ev.toComm && ev.moved) ? 'pick'
                     : (c.comm === ev.fromComm ? 'current' : (c.dL >= 0 ? 'no gain' : ''));
       html += '<tr class="' + cls + '"><td>' + c.comm + '</td><td>'

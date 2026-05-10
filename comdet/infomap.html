@@ -83,18 +83,19 @@
   <div class="kicker">community detection &middot; map equation on random walks</div>
   <h1><em>Infomap</em></h1>
   <p class="fullname">Maps of random walks reveal community structure</p>
-  <p class="sub">Walk through Rosvall + Bergstrom's two-level codebook approach to community detection on the 32-node comdet fixture, one merge + one move at a time.</p>
+  <p class="sub">Walk through Rosvall and Bergstrom's two-level codebook idea on the 32-node comdet fixture, one merge and one move at a time. The page kernel is a pedagogical port of the 2008 PNAS algorithm; the modern canonical implementation is sketched in the final callout and verified separately.</p>
 </header>
 
 <div class="uc-banner">
-  <strong>Draft.</strong> JS port of the PNAS 2008 algorithm. Undirected unweighted, deterministic greedy joining + greedy node-move tuning + sub-level recursion. The paper's heat-bath simulated-annealing refinement (paper SI) is replaced by greedy node-moves. ARI vs the canonical <a href="https://github.com/mapequation/infomap" target="_blank" rel="noopener">infomap</a> binary is pending.
+  Two algorithms travel under the name "Infomap". The 2008 PNAS paper describes a greedy pair-join phase followed by a heat-bath simulated-annealing refinement. The maintained <a href="https://github.com/mapequation/infomap" target="_blank" rel="noopener">mapequation/infomap</a> code base replaces both with a multi-level <a href="./louvain.html">Louvain</a> pass on the map equation, wrapped in an outer loop that alternates two refinement phases (a fine-tune that re-sweeps the leaves and a coarse-tune that splits each top-module with a fresh sub-Infomap). This page walks the 2008 paper version. The trajectory of the modern multi-level implementation is the subject of the final-stage callout and a separate bit-identical port; see the technical companion for details.
 </div>
 
 <section class="hook">
-  <p>Modularity asks whether there are more edges inside groups than chance would predict. The map equation asks: drop a random walker on the graph, what's the cheapest two-level codebook for describing where it goes? The codelength stays short when the walker spends long stretches inside one cluster before jumping to another, because the within-cluster code can reuse short codewords across clusters (Rosvall + Bergstrom 2008, paper §"Highlighting Important Objects").</p>
+  <p>Modularity asks whether there are more edges inside groups than chance would predict. The map equation asks: drop a random walker on the graph, what's the cheapest two-level codebook for describing where it goes? The codelength stays short when the walker spends long stretches inside one cluster before jumping to another, because the within-cluster code can reuse short codewords across clusters (Rosvall and Bergstrom 2008, paper §"Highlighting Important Objects").</p>
   <p>Modularity counts edges; the map equation counts <em>flow</em>. They disagree on directed networks: Fig. 2 of the paper builds two graphs where modularity and the map equation pick opposite partitions. On undirected graphs the disagreement narrows; on the 32-node fixture they roughly agree on A's K_5, B's K_4 split, and C's two halves, and disagree on what to do with A's periphery and the outliers.</p>
-  <p>This page steps through the algorithm: stationary distribution, singleton init, greedy pair-joining, single-node tuning, sub-level hierarchical recursion. Map equation in flat form (Eq. 1 of the paper):</p>
+  <p>This page steps through the 2008 paper algorithm: stationary distribution, singleton init, greedy pair-joining, single-node tuning, sub-level hierarchical recursion. Map equation in flat form (Eq. 1 of the paper):</p>
   <p style="text-align:center">\(L(M) = q_{\curvearrowright} \cdot H(\mathcal{Q}) + \sum_{i=1}^m p_{\circlearrowright}^i \cdot H(\mathcal{P}^i)\)</p>
+  <p>In words: the codelength is a weighted sum of two entropies. The first term is how often the walker crosses between modules (\(q_\curvearrowright\)) times the entropy of which module it jumps into (\(H(\mathcal{Q})\)). The second term sums, over modules, how often the walker is "inside" the module (\(p_\circlearrowright^i\)) times the entropy of which node it visits inside (\(H(\mathcal{P}^i)\)). Two properties worth holding: the bound is tight when each codebook is a Huffman code, so optimising \(L\) really is optimising an information-theoretic description of the walk; and the same formula handles flat and hierarchical partitions, so adding a layer of sub-modules is a recursive application of the same scoring.</p>
   <div class="defs">
     <div><span class="term">stationary distribution</span> \(p_\alpha\) = long-run probability the walker is at node \(\alpha\). For undirected unweighted graphs this collapses to \(p_\alpha = d_\alpha / (2m)\). The paper uses smart-teleportation PageRank for directed graphs.</div>
     <div><span class="term">exit probability</span> \(q_i^{\curvearrowright}\) = probability the walker is at some node in module \(i\) and the next step leaves the module: \(\sum_{\alpha \in i} p_\alpha \cdot (\text{out}_\alpha / d_\alpha)\). The total \(q_\curvearrowright = \sum_i q_i^{\curvearrowright}\) is the bandwidth of the index codebook.</div>
@@ -192,8 +193,8 @@
   </div>
   <div id="g-tune-panel"></div>
   <div class="callout">
-    <div class="tag">tuning vs Leiden's refinement</div>
-    <p>Leiden's refinement is a structural fix: every output community is guaranteed internally connected, which Louvain cannot promise. Infomap's tuning is a numerical fix: greedy joining is myopic about merge order, and a few node moves at the end can exit local minima. On the 32-node fixture this stage shifts \(L\) by a fraction of a bit; on larger benchmarks it picks up 1-2% of the SA optimum.</p>
+    <div class="tag">why tuning matters</div>
+    <p>Greedy pair-joining is myopic about merge order: the locally cheapest merge at step \(k\) can lock the partition into a basin that a later move would have escaped. A few single-node moves at the end exit some of those basins. On the 32-node fixture this stage shifts \(L\) by a fraction of a bit; on larger benchmarks the gap to the simulated-annealing optimum is around 1 to 2 percent. The modern <a href="https://github.com/mapequation/infomap" target="_blank" rel="noopener">mapequation/infomap</a> code base takes this observation further and replaces the pair-join phase entirely with a <a href="./louvain.html">Louvain</a>-style per-vertex sweep over the map equation; the final callout sketches that trajectory.</p>
   </div>
 </section>
 
@@ -201,9 +202,9 @@
 <section class="stage">
   <div class="stage-num">stage 5 &middot; sub-level recursion</div>
   <h2>Recurse inside each module to surface fine-grained structure.</h2>
-  <p>Up to here, Infomap returns a flat partition. Hierarchy comes from running the same procedure inside each module's induced subgraph. If recursion finds a multi-module split that beats the flat single-module \(L\), the module gets a sub-partition; otherwise it stays atomic. Recursion stops at depth \(\le 3\) by default; beyond that, the resolution-limit of the map equation absorbs whatever is left.</p>
+  <p>Up to here the algorithm returns a flat partition. Hierarchy comes from running the same procedure inside each module's induced subgraph. If recursion finds a multi-module split that beats the flat single-module \(L\), the module gets a sub-partition; otherwise it stays atomic. Recursion stops at depth at most 3 by default; beyond that, the resolution limit of the map equation absorbs whatever is left.</p>
   <div class="hier-tree" id="g-hier-tree" aria-label="Infomap hierarchical partition"></div>
-  <p>On the 32-node fixture the flat partition is already fine-grained (the greedy + tune pass split A's periphery + the outliers into their own modules), so recursion finds little extra. On the paper's social-sciences map (Fig. 4: 1,431 journals, 217k citations) recursion picks up two clean levels of nesting and a third level for the densest sub-fields.</p>
+  <p>On the 32-node fixture the flat partition is already fine-grained (the greedy and tune pass split A's periphery and the outliers into their own modules), so recursion finds little extra. On the paper's social-sciences map (Fig. 4 of the 2008 paper: 1,431 journals, 217k citations) recursion picks up two clean levels of nesting and a third level for the densest sub-fields.</p>
 </section>
 
 <!-- ─────────── Stage 6 · final ─────────── -->
@@ -235,9 +236,11 @@
     <div class="tag">on this fixture, by region</div>
     <p>Infomap pulls A's K_5 and most of A's periphery into one big module (the K_5's flow is dense enough that a random walker spends most of its time inside, even when it occasionally hops out to a periphery neighbour). It splits B at the bridge: each \(K_4\) is a flow trap with one cross-bridge edge, and the bridge edge's contribution to inter-module flow is barely worth paying for. C's two disconnected 3-cycles are necessarily separate modules (no flow between them, no merge possible). D and the periphery nodes that bridge to outliers come out as small mixed modules; Infomap's flow-based view does not recover D's planted-cluster structure because D's intra-edges are too few to trap flow.</p>
   </div>
-  <div class="callout warn">
-    <div class="tag">caveat &middot; greedy tuning is not paper-canonical</div>
-    <p>The paper's refinement is a heat-bath simulated-annealing schedule (paper SI). The page kernel ships a greedy single-node-move pass instead: deterministic, cheaper, within ~1-2% of the SA optimum on most graphs. ARI vs the canonical <a href="https://github.com/mapequation/infomap" target="_blank" rel="noopener">infomap</a> binary at this same fixture has not been verified yet; the partition shown here is illustrative of the algorithm's behaviour rather than a guaranteed match for any specific canonical run.</p>
+  <div class="callout">
+    <div class="tag">what the modern Infomap binary actually does</div>
+    <p>The walker above mirrors the 2008 PNAS paper. The current <a href="https://github.com/mapequation/infomap" target="_blank" rel="noopener">mapequation/infomap</a> binary takes a different route to optimising the same map equation. The greedy pair-join phase is gone. In its place is a multi-level <a href="./louvain.html">Louvain</a>-style optimiser: one full per-vertex sweep over the leaves, consolidate the resulting modules into super-vertices, sweep at the super-vertex level, consolidate again, repeat until a sweep no longer reduces \(L\). The per-vertex visit order is randomised by a Mersenne Twister; ties are broken by preferring the strongest-connected module; nodes that found no improving move on the previous pass are skipped via a dirty bit.</p>
+    <p>An outer loop wraps the multi-level pass with two refinement phases that alternate. The first, called <em>fine-tune</em>, projects every leaf back to its current top-module label and re-runs the per-vertex sweep on the leaf graph; this lets nodes that got carried along by an early consolidation reconsider their assignment. The second, called <em>coarse-tune</em>, runs a fresh sub-Infomap inside each top-module to discover sub-modules, then re-runs the multi-level pass seeded by the sub-module labels; this lets a coarse module split into a finer grouping when the sub-Infomap finds one. The outer loop continues until neither pass strictly improves \(L\) under a compound absolute-and-relative gate. The two-level mode used in the comdet pipeline returns the leaf-to-top-module map at that point.</p>
+    <p>That trajectory is also implemented in JavaScript as a sibling file to the walker on this page, and verified bit-identical to the maintained binary on a 17-fixture by 9-seed panel covering 23.7 million per-visit decisions. See <a href="https://github.com/vltanh/community-detection/blob/main/docs/algorithms/infomap.md" target="_blank" rel="noopener">the technical companion</a> for the closed-form \(\Delta L\), the libstdc++ uniform-integer sampler, and the per-row audit grid.</p>
   </div>
 </section>
 
