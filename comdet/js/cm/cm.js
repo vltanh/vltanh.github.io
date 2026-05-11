@@ -62,6 +62,22 @@
     return C.WCC.bfsComponents(nodeIds, edges);
   }
 
+  // [P0-Gap6] parent_to_child deep clone for snapshot hook. Mirrors cpp
+  // emit_ptc_snapshot's parent-id ASC iteration order so JS hook payload
+  // can be bit-compared by self_rng_check.
+  function cloneParentToChild(ptc) {
+    // parentToChild uses numeric keys (incl. -1) coerced to strings via
+    // object indexing. Sort numerically to mirror std::map<int,...> ASC.
+    const keys = Object.keys(ptc).map(Number).sort(function (a, b) { return a - b; });
+    const rows = [];
+    keys.forEach(function (k) { rows.push({ parent: k, children: (ptc[k] || []).slice() }); });
+    return rows;
+  }
+
+  // [P0-Gap2] cumulative RNG draw counters. Updated from upstream hooks
+  // (__CM_HOOK_LD_BEGIN/END count callbacks set by self_rng_check). The
+  // counters live on globalThis so the harness controls reset.
+
   function inducedEdges(nodes, edgesAll) {
     const set = new Set(nodes);
     const out = [];
@@ -86,7 +102,7 @@
   // optimisePartition call (new MT19937 from seed). This is a SANCTIONED
   // RNG-stream divergence; the canonical-tracer must mirror by re-seeding
   // before iter 2 to keep both sides aligned (see kernel_check.cpp).
-  function runBaseAlgo(nodes, edges, algorithm, resolution, seed) {
+  function runBaseAlgo(nodes, edges, algorithm, resolution, seed, hookCtx) {
     const n = nodes.length;
     if (n <= 1) return [nodes.slice()];
     const idx = new Map();
@@ -111,15 +127,53 @@
     // C.LOUVAIN.Modularity (Louvain-shape) directly.
     else if (algorithm === "louvain") qfn = C.LOUVAIN.Modularity();
     else throw new Error("CM: unsupported algorithm '" + algorithm + "'");
+    // [P0-Gap2 / P0-Gap9] LD_RESEED + LD_BEGIN/END hook (mirrors
+    // [TRACE-CM] LD_RESEED probe in kernel_check.cpp). JS re-seeds the
+    // MT19937 on every optimisePartition call; canonical-tracer does
+    // the same (sanctioned divergence from unmodified canonical that
+    // continues RNG state across iter1->iter2).
+    if (typeof globalThis.__CM_HOOK_LD_RESEED === "function") {
+      globalThis.__CM_HOOK_LD_RESEED({ ctx: hookCtx, iter: 1, seed: seed >>> 0 });
+    }
+    if (typeof globalThis.__CM_HOOK_LD_BEGIN === "function") {
+      globalThis.__CM_HOOK_LD_BEGIN({ ctx: hookCtx, iter: 1, n: n });
+    }
     // iter 1.
     let result = C.LEIDEN.optimisePartition(G, qfn, seed >>> 0);
+    // [P0-Gap1] iter-1 membership snapshot.
+    const iter1Mem = result.partition.membership();
+    if (typeof globalThis.__CM_HOOK_LD_ITER_END === "function") {
+      globalThis.__CM_HOOK_LD_ITER_END({
+        ctx: hookCtx, iter: 1, mem: Array.from(iter1Mem),
+        n_comm: result.partition.nCommunities ? result.partition.nCommunities() :
+                (new Set(Array.from(iter1Mem))).size,
+      });
+    }
+    if (typeof globalThis.__CM_HOOK_LD_END === "function") {
+      globalThis.__CM_HOOK_LD_END({ ctx: hookCtx, iter: 1 });
+    }
     // iter 2: same seed (RNG re-seeded), but starting partition =
     // iter 1's result. Mirrors canonical's `for i in [0,2)` chain.
-    const iter1Mem = result.partition.membership();
+    if (typeof globalThis.__CM_HOOK_LD_RESEED === "function") {
+      globalThis.__CM_HOOK_LD_RESEED({ ctx: hookCtx, iter: 2, seed: seed >>> 0 });
+    }
+    if (typeof globalThis.__CM_HOOK_LD_BEGIN === "function") {
+      globalThis.__CM_HOOK_LD_BEGIN({ ctx: hookCtx, iter: 2, n: n });
+    }
     result = C.LEIDEN.optimisePartition(G, qfn, seed >>> 0, {
       initialMembership: iter1Mem,
     });
     const mem = result.partition.membership();
+    if (typeof globalThis.__CM_HOOK_LD_ITER_END === "function") {
+      globalThis.__CM_HOOK_LD_ITER_END({
+        ctx: hookCtx, iter: 2, mem: Array.from(mem),
+        n_comm: result.partition.nCommunities ? result.partition.nCommunities() :
+                (new Set(Array.from(mem))).size,
+      });
+    }
+    if (typeof globalThis.__CM_HOOK_LD_END === "function") {
+      globalThis.__CM_HOOK_LD_END({ ctx: hookCtx, iter: 2 });
+    }
     const buckets = new Map();
     for (let i = 0; i < n; i++) {
       const c = mem[i];
@@ -127,7 +181,26 @@
       if (!arr) { arr = []; buckets.set(c, arr); }
       arr.push(nodes[i]);
     }
-    return Array.from(buckets.values());
+    return {
+      clusters: Array.from(buckets.values()),
+      // [P0-Gap1] iter1 membership returned for tracer-side mirror; the
+      // pre-existing caller signature was `Array<Array<id>>` so legacy
+      // callers fall back to `.clusters` via the wrapper below.
+      iter1Membership: Array.from(iter1Mem),
+      finalMembership: Array.from(mem),
+    };
+  }
+
+  // Legacy-shape adapter that preserves the pre-P0 cluster-array signature
+  // for callers that don't read iter1Membership (e.g. injected baseAlgoFn).
+  function runBaseAlgoClusters(nodes, edges, algorithm, resolution, seed, hookCtx) {
+    const r = runBaseAlgo(nodes, edges, algorithm, resolution, seed, hookCtx);
+    // Preserve the old return shape (Array<Array<id>>) but attach the iter1
+    // membership as a side property so __CM_HOOK_RECLUSTER can pick it up.
+    const arr = r.clusters;
+    arr.iter1Membership = r.iter1Membership;
+    arr.finalMembership = r.finalMembership;
+    return arr;
   }
 
   function runCM(membership, opts) {
@@ -187,25 +260,56 @@
     // the entire original cluster, keep cid; else assign a fresh id +
     // record (parent=-1, child=orig_cid) once + (parent=orig_cid,
     // child=fresh_id).
-    allComps.forEach(function (comp) {
-      const firstNodeIdx = nodeIdToIdx.get(comp[0]);
+    //
+    // [P0-Gap3] INIT_LINEAGE per-component 8-tuple hook
+    // (__CM_HOOK_INIT_LINEAGE). Mirrors [TRACE-CM] INIT_LINEAGE probe in
+    // kernel_check.cpp. Surfaces (comp_idx, first_node, orig_cid,
+    // orig_size, sub_size, branch, parent_cid, current_cid, ptc snapshots)
+    // for cross-side bit-equality.
+    allComps.forEach(function (comp, compIdx) {
+      const firstNode = comp[0];
+      const firstNodeIdx = nodeIdToIdx.get(firstNode);
       const origCid = membership[firstNodeIdx];
       const origSize = clusterIdToNodes.get(origCid).length;
       const subSize = comp.length;
       let parentClusterId = -1;
       let currentClusterId;
+      let branch;
       if (origSize === subSize) {
         currentClusterId = origCid;
+        branch = "keep";
       } else {
         if (!parentToChild[-1]) parentToChild[-1] = [];
         if (parentToChild[-1].indexOf(origCid) < 0) parentToChild[-1].push(origCid);
         parentClusterId = origCid;
         currentClusterId = nextId++;
+        branch = "fresh";
       }
       if (!parentToChild[parentClusterId]) parentToChild[parentClusterId] = [];
       parentToChild[parentClusterId].push(currentClusterId);
+      if (typeof globalThis.__CM_HOOK_INIT_LINEAGE === "function") {
+        globalThis.__CM_HOOK_INIT_LINEAGE({
+          comp_idx: compIdx,
+          first_node: firstNode,
+          orig_cid: origCid,
+          orig_size: origSize,
+          sub_size: subSize,
+          branch: branch,
+          parent_cid: parentClusterId,
+          current_cid: currentClusterId,
+          ptc_neg1_after: (parentToChild[-1] || []).slice(),
+          ptc_parent_after: parentToChild[parentClusterId].slice(),
+        });
+      }
       toBeMincut.push({ nodes: comp.slice(), id: currentClusterId });
     });
+    // [P0-Gap6] post-init parent_to_child snapshot hook.
+    if (typeof globalThis.__CM_HOOK_PTC_SNAPSHOT === "function") {
+      globalThis.__CM_HOOK_PTC_SNAPSHOT({
+        phase: "after_init",
+        ptc: cloneParentToChild(parentToChild),
+      });
+    }
 
     events.push({ kind: "init", initialQueue: toBeMincut.map(function (q) {
       return { nodes: q.nodes.slice(), id: q.id };
@@ -218,39 +322,96 @@
       if (safety++ > 5000) throw new Error("CM: round cap exceeded");
       const toBeClustered = [];
 
+      let popIdx = 0;
       while (toBeMincut.length > 0) {
         const cur = toBeMincut.shift();
         const ns = cur.nodes;
         const sub = inducedEdges(ns, F.edges);
+        // [P0-Gap2] VC_BEGIN/END hooks. Mirrors [TRACE-CM] VC_BEGIN/END
+        // canonical probes; downstream filter counts upstream [TRACE-VC]
+        // events between BEGIN and END to get per-pop k_mincut draws.
+        if (typeof globalThis.__CM_HOOK_VC_BEGIN === "function") {
+          globalThis.__CM_HOOK_VC_BEGIN({
+            round: round, pop_idx: popIdx, cid: cur.id, n: ns.length,
+          });
+        }
         const cutResult = cutOracle
           ? cutOracle(ns, sub)
           : mincutFn(ns.slice(), sub.map(function (e) { return [e[0], e[1]]; }));
+        if (typeof globalThis.__CM_HOOK_VC_END === "function") {
+          globalThis.__CM_HOOK_VC_END({
+            round: round, pop_idx: popIdx, cut: cutResult.cutValue,
+            in_size: cutResult.inPartition.length,
+            out_size: cutResult.outPartition.length,
+          });
+        }
         const wc = C.WCC.isWellConnected(parsed, ns.length, cutResult.cutValue);
+        // [P0-Gap7] threshold decomposition surfaced for the pop record.
+        // pre_log is precomputed by parseCriterion; log_n is the FP
+        // primitive output (Math.log or jsLog via WCC.threshold internals).
+        const log_n = parsed && parsed.preLog != null && typeof Math.log === "function"
+          ? Math.log(ns.length) : null;
+        const threshold = C.WCC.threshold(parsed, ns.length);
+        if (typeof globalThis.__CM_HOOK_THR_DECOMP === "function") {
+          globalThis.__CM_HOOK_THR_DECOMP({
+            round: round, pop_idx: popIdx, n: ns.length,
+            pre_log: parsed && parsed.preLog,
+            log_n: log_n,
+            threshold: threshold,
+          });
+        }
         const ev = {
           kind: "mincut",
           round: round,
           id: cur.id,
+          pop_idx: popIdx,
           nodes: ns.slice(),
           clusterSize: ns.length,
           cut: cutResult.cutValue,
-          threshold: C.WCC.threshold(parsed, ns.length),
+          threshold: threshold,
+          log_n: log_n,
           wellConnected: wc,
           inPartition: cutResult.inPartition.slice(),
           outPartition: cutResult.outPartition.slice(),
         };
         events.push(ev);
+        if (typeof globalThis.__CM_HOOK_POP === "function") {
+          globalThis.__CM_HOOK_POP({ ...ev });
+        }
         if (wc) {
           survivors.push({ nodes: ns.slice(), id: cur.id });
+          // [P0-Gap5] cpp always emits POP_SINGLETON_COUNT; mirror that for
+          // wc=true pops with count=0 (no recluster -> no pushes).
+          if (typeof globalThis.__CM_HOOK_POP_SINGLETON_COUNT === "function") {
+            globalThis.__CM_HOOK_POP_SINGLETON_COUNT({
+              round: round, pop_idx: popIdx, count: 0,
+            });
+          }
+          popIdx++;
           continue;
         }
         // Re-cluster each side > 1 with the base algo.
         const sides = [cutResult.inPartition, cutResult.outPartition];
-        sides.forEach(function (side) {
+        let popSingletonCount = 0;
+        const reclusterIter1 = { in: null, out: null };
+        sides.forEach(function (side, sideIdx) {
+          const sideName = sideIdx === 0 ? "in" : "out";
           if (side.length <= 1) return;
           const sideEdges = inducedEdges(side, F.edges);
+          const hookCtx = {
+            round: round, pop_idx: popIdx, cid: cur.id, side: sideName,
+            parentNodes: ns.slice(),
+            algorithm: algorithm, resolution: resolution, seed: seed,
+          };
           const partition = baseAlgoFn
-            ? baseAlgoFn(side, sideEdges, { round: round, parentId: cur.id, parentNodes: ns.slice(), algorithm: algorithm, resolution: resolution, seed: seed })
-            : runBaseAlgo(side, sideEdges, algorithm, resolution, seed);
+            ? baseAlgoFn(side, sideEdges, hookCtx)
+            : runBaseAlgoClusters(side, sideEdges, algorithm, resolution, seed, hookCtx);
+          // [P0-Gap1] iter-1 membership captured on the legacy-shape
+          // return adapter; surfaced via __CM_HOOK_RECLUSTER for cross-side
+          // bit-equality (mirrors cpp PopRecord.in_leiden_membership_iter1).
+          if (partition && partition.iter1Membership) {
+            reclusterIter1[sideName] = partition.iter1Membership.slice();
+          }
           // RemoveInterClusterEdges + connected components per partition.
           // [UPSTREAM cm.h:138-148] canonical pushes every translated
           // component into to_be_clustered regardless of size; no size>1
@@ -259,28 +420,96 @@
             const clustEdges = inducedEdges(clust, sideEdges);
             const comps = bfsComponents(clust, clustEdges);
             comps.forEach(function (comp) {
+              // [P0-Gap5] singleton-incidence probe. Per-push is_singleton
+              // flag surfaced via __CM_HOOK_PUSH so self_rng_check can
+              // assert per-pop singleton counts independently of cell
+              // pass/fail.
+              const isSingleton = comp.length === 1;
+              if (isSingleton) popSingletonCount++;
+              if (typeof globalThis.__CM_HOOK_PUSH === "function") {
+                globalThis.__CM_HOOK_PUSH({
+                  round: round, pop_idx: popIdx, side: sideName,
+                  size: comp.length, is_singleton: isSingleton,
+                  nodes: comp.slice(),
+                });
+              }
               toBeClustered.push({ nodes: comp.slice(), parent: cur.id });
             });
           });
         });
+        if (typeof globalThis.__CM_HOOK_POP_SINGLETON_COUNT === "function") {
+          globalThis.__CM_HOOK_POP_SINGLETON_COUNT({
+            round: round, pop_idx: popIdx, count: popSingletonCount,
+          });
+        }
         events.push({
           kind: "recluster",
           round: round,
           parentId: cur.id,
+          pop_idx: popIdx,
           baseAlgo: algorithm,
           baseResolution: resolution,
+          inLeidenIter1: reclusterIter1.in,
+          outLeidenIter1: reclusterIter1.out,
           children: toBeClustered.slice().filter(function (q) { return q.parent === cur.id; })
             .map(function (q) { return q.nodes.slice(); }),
         });
+        popIdx++;
       }
 
-      // Move to-be-clustered into next round's mincut queue with fresh ids.
-      toBeClustered.forEach(function (q) {
+      // [UPSTREAM cm.cpp:83-95] cpp emits `terminal` snapshot + breaks
+      // when to_be_clustered.empty() AFTER the drain phase; otherwise
+      // emits per-assignment END_ROUND_DRAIN + after_round_N snapshot
+      // then continues. Mirror that semantic exactly so PTC_SNAPSHOT
+      // count matches.
+      if (toBeClustered.length === 0) {
+        events.push({ kind: "round-end", round: round, queueSize: 0 });
+        // [P0-Gap6] terminal parent_to_child snapshot.
+        if (typeof globalThis.__CM_HOOK_PTC_SNAPSHOT === "function") {
+          globalThis.__CM_HOOK_PTC_SNAPSHOT({
+            phase: "terminal",
+            ptc: cloneParentToChild(parentToChild),
+          });
+        }
+        break;
+      }
+      // [P0-Gap4] END_ROUND_DRAIN per-assignment hook. Mirrors [TRACE-CM]
+      // END_ROUND_DRAIN canonical probe (per-fresh_id record + ptc state).
+      if (typeof globalThis.__CM_HOOK_END_ROUND_DRAIN_BEGIN === "function") {
+        globalThis.__CM_HOOK_END_ROUND_DRAIN_BEGIN({
+          round: round, drain_size: toBeClustered.length,
+        });
+      }
+      const freshIdsAssigned = [];
+      toBeClustered.forEach(function (q, drainIdx) {
         const newId = nextId++;
         if (!parentToChild[q.parent]) parentToChild[q.parent] = [];
         parentToChild[q.parent].push(newId);
         toBeMincut.push({ nodes: q.nodes, id: newId });
+        freshIdsAssigned.push(newId);
+        if (typeof globalThis.__CM_HOOK_END_ROUND_DRAIN === "function") {
+          globalThis.__CM_HOOK_END_ROUND_DRAIN({
+            round: round, drain_idx: drainIdx,
+            parent_cid: q.parent, fresh_id: newId,
+            ptc_size_after: Object.keys(parentToChild).length,
+            ptc_parent_after: parentToChild[q.parent].slice(),
+          });
+        }
       });
+      if (typeof globalThis.__CM_HOOK_END_ROUND_DRAIN_END === "function") {
+        globalThis.__CM_HOOK_END_ROUND_DRAIN_END({
+          round: round, fresh_ids: freshIdsAssigned,
+        });
+      }
+      // [P0-Gap6] per-round parent_to_child snapshot. cpp emits
+      // `after_round_<round>` BEFORE `round++`, so use the pre-increment
+      // value to match.
+      if (typeof globalThis.__CM_HOOK_PTC_SNAPSHOT === "function") {
+        globalThis.__CM_HOOK_PTC_SNAPSHOT({
+          phase: "after_round_" + round,
+          ptc: cloneParentToChild(parentToChild),
+        });
+      }
       events.push({ kind: "round-end", round: round, queueSize: toBeMincut.length });
       round += 1;
     }
