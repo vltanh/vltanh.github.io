@@ -17,6 +17,16 @@
   const UNDEFINED_NODE = 0xffffffff;
   const UNDEFINED_EDGE = 0xffffffff;
 
+  // Per byte-equal-tracer playbook discipline "Tracer prints stay": optional
+  // bisection probes around recursive_cactus build chain. Guarded by global
+  // __VIECUT_TRACE__ so production walker is unaffected when not set.
+  function _trace() {
+    if (typeof globalThis !== "undefined" && globalThis.__VIECUT_TRACE__) {
+      const line = Array.prototype.join.call(arguments, "");
+      process.stderr.write(line + "\n");
+    }
+  }
+
   function RecursiveCactus(mincut) {
     // [UPSTREAM recursive_cactus.h:52] Default ctor leaves problem_id
     // unset; flowMincut() initialises it from random_functions::next().
@@ -50,6 +60,9 @@
   };
 
   RecursiveCactus.prototype._internalRecursiveCactus = function (G, depth) {
+    _trace("[TRACE-RC] internalRecursiveCactus depth:", depth,
+           " n:", G.n(), " m:", G.number_of_edges(),
+           " problem_id:", this.problem_id);
     if (depth % 10 === 0) {
       let previous = UNDEFINED_NODE;
       while (previous > G.n()) {
@@ -65,10 +78,14 @@
     if (G.number_of_nodes() === 1 || G.number_of_edges() === 0) return G;
 
     const [s, e, tgt] = this._maximumWeightedFlowEdge(G);
+    _trace("[TRACE-RC] flow_edge depth:", depth, " s:", s, " e:", e,
+           " tgt:", tgt);
     const pr = new NS.PushRelabel();
     this.problem_id++;
     const [max_flow] = pr.solve_max_flow_min_cut(G, [s, tgt], 0, false, 0,
                                                  this.problem_id);
+    _trace("[TRACE-RC] max_flow depth:", depth, " val:", max_flow,
+           " mincut:", this.mincut);
     if (max_flow > this.mincut) {
       G.contractEdge(s, e);
       return this._recursiveCactus(G, depth + 1);
@@ -225,16 +242,31 @@
         if (n < m) contract.new_edge(n, m, 0);
       }
     }
+    // [TRACE-STC-Q] quotient-edge accumulator (recursive_cactus.h:392-403).
+    // Mirror canonical composite-arithmetic chain: e_ctr index + wgt_ctr
+    // accumulator. Emit BEFORE+AFTER per byte-equal-tracer "Extensive
+    // printout" discipline.
     for (let n = 0; n < G.number_of_nodes(); n++) {
       const ne = G.get_first_invalid_edge(n);
       for (let e = 0; e < ne; e++) {
         const t = G.getEdgeTarget(n, e);
         const wgt = G.getEdgeWeight(n, e);
         const ctr = v[t];
-        if (v[n] > ctr) {
-          const e_ctr = ctr - (ctr > v[n] ? 1 : 0);
-          const wgt_ctr = wgt + contract.getEdgeWeight(v[n], e_ctr);
-          contract.setEdgeWeight(v[n], e_ctr, wgt_ctr);
+        const v_n = v[n];
+        const gate = v_n > ctr;
+        if (gate) {
+          const ctr_gt_vn = ctr > v_n ? 1 : 0;
+          const e_ctr = ctr - ctr_gt_vn;
+          const wgt_ctr_before = contract.getEdgeWeight(v_n, e_ctr);
+          const wgt_ctr = wgt + wgt_ctr_before;
+          contract.setEdgeWeight(v_n, e_ctr, wgt_ctr);
+          _trace(`[TRACE-STC-Q] n:${n} e:${e} t:${t} wgt:${wgt} `
+                 + `v_n:${v_n} ctr:${ctr} gate:1 ctr_gt_vn:${ctr_gt_vn} `
+                 + `e_ctr:${e_ctr} wgt_ctr_before:${wgt_ctr_before} `
+                 + `wgt_ctr_after:${wgt_ctr}`);
+        } else {
+          _trace(`[TRACE-STC-Q] n:${n} e:${e} t:${t} wgt:${wgt} `
+                 + `v_n:${v_n} ctr:${ctr} gate:0`);
         }
       }
     }
@@ -286,28 +318,46 @@
     let i = 1;
     B.push(0);
     order.push(false);
+    // [TRACE-STC-SEG] cycle segmentation loop (recursive_cactus.h:455-477).
     while (i < contract.number_of_nodes() - 1) {
       let cycle_degree = 0;
       const curr_cycle = new Set();
       let nLocal = rev_node_mapping[i];
+      let outer_step = 0;
       while ((cycle_degree === 0 || cycle_degree === this.mincut)
              && (i + 1 < contract.number_of_nodes())) {
         nLocal = rev_node_mapping[i];
+        _trace(`[TRACE-STC-SEG] outer_i:${i} outer_step:${outer_step} `
+               + `n:${nLocal} cycle_degree_before:${cycle_degree} `
+               + `curr_cycle_size:${curr_cycle.size}`);
         const ne_n = contract.get_first_invalid_edge(nLocal);
         for (let e = 0; e < ne_n; e++) {
           const tgt = contract.getEdgeTarget(nLocal, e);
           const wgt = contract.getEdgeWeight(nLocal, e);
-          if (curr_cycle.has(tgt)) cycle_degree -= wgt;
+          const in_cycle = curr_cycle.has(tgt) ? 1 : 0;
+          const cd_before = cycle_degree;
+          if (in_cycle) cycle_degree -= wgt;
           else cycle_degree += wgt;
+          _trace(`[TRACE-STC-SEG-E] outer_i:${i} n:${nLocal} e:${e} `
+                 + `tgt:${tgt} wgt:${wgt} in_cycle:${in_cycle} `
+                 + `cd_before:${cd_before} cd_after:${cycle_degree}`);
         }
-        if (cycle_degree === this.mincut) {
+        const eq_mc = cycle_degree === this.mincut ? 1 : 0;
+        if (eq_mc) {
           i++;
           curr_cycle.add(nLocal);
         }
+        _trace(`[TRACE-STC-SEG] outer_step:${outer_step} n:${nLocal} `
+               + `cd_after_loop:${cycle_degree} eq_mc:${eq_mc} `
+               + `i_after:${i} curr_cycle_size_after:${curr_cycle.size}`);
+        outer_step++;
       }
       if (curr_cycle.size > 0) {
         A.push([]);
         order.push(true);
+        _trace(`[TRACE-STC-SEG] commit_cycle A_idx:${A.length - 1} `
+               + `B_idx:${B.length} size:${curr_cycle.size} `
+               + `vstart:${i - curr_cycle.size} vend:${i}`);
         for (let vIdx = i - curr_cycle.size; vIdx < i; vIdx++) {
           A[A.length - 1].push(vIdx);
         }
@@ -315,37 +365,70 @@
         i++;
         B.push(node_mapping[nLocal]);
         order.push(false);
+        _trace(`[TRACE-STC-SEG] commit_tree A_idx:${A.length} `
+               + `B_idx:${B.length - 1} node_mapping:${node_mapping[nLocal]} `
+               + `i_after:${i}`);
       }
     }
     order.push(false);
     B.push(num_vertices - 1);
     let previous = 0;
     let a_index = 0, b_index = 0;
+    // [TRACE-STC-OUT] output cactus edge emission (recursive_cactus.h:495-530).
     for (let idx = 0; idx < (A.length + B.length - 1); idx++) {
-      if (order[idx]) {
-        for (let j = 0; j < A[a_index].length; j++) {
+      const order_i = order[idx];
+      const order_next = (idx + 1 < order.length)
+        ? (order[idx + 1] ? 1 : 0) : 0;
+      _trace(`[TRACE-STC-OUT] i:${idx} order_i:${order_i ? 1 : 0} `
+             + `order_next:${order_next} previous:${previous} `
+             + `a_index:${a_index} b_index:${b_index} `
+             + `A_size:${A.length} B_size:${B.length}`);
+      if (order_i) {
+        const A_n = A[a_index].length;
+        for (let j = 0; j < A_n; j++) {
           if (j > 0) {
+            _trace(`[TRACE-STC-OUT-E] i:${idx} j:${j} kind:within `
+                   + `u:${A[a_index][j - 1]} v:${A[a_index][j]} `
+                   + `w:${Math.floor(this.mincut / 2)}`);
             stcactus.new_edge_order(A[a_index][j - 1], A[a_index][j],
                                     this.mincut / 2);
           } else {
+            _trace(`[TRACE-STC-OUT-E] i:${idx} j:${j} kind:from_prev `
+                   + `u:${previous} v:${A[a_index][0]} `
+                   + `w:${Math.floor(this.mincut / 2)}`);
             stcactus.new_edge_order(previous, A[a_index][0], this.mincut / 2);
           }
-          if (j === A[a_index].length - 1) {
+          if (j === A_n - 1) {
             let next;
-            if (order[idx + 1] === true) next = stcactus.new_empty_node();
+            const next_is_cycle = (order[idx + 1] === true) ? 1 : 0;
+            if (next_is_cycle) next = stcactus.new_empty_node();
             else next = B[b_index];
+            _trace(`[TRACE-STC-OUT-E] i:${idx} j:${j} kind:to_next `
+                   + `u:${A[a_index][j]} v:${next} `
+                   + `w:${Math.floor(this.mincut / 2)} `
+                   + `next_is_cycle:${next_is_cycle} `
+                   + `previous_before:${previous}`);
             stcactus.new_edge_order(A[a_index][j], next, this.mincut / 2);
+            _trace(`[TRACE-STC-OUT-E] i:${idx} j:${j} kind:prev_to_next `
+                   + `u:${previous} v:${next} `
+                   + `w:${Math.floor(this.mincut / 2)}`);
             stcactus.new_edge_order(previous, next, this.mincut / 2);
             previous = next;
           }
         }
         a_index++;
+        _trace(`[TRACE-STC-OUT] i:${idx} kind:cycle_done `
+               + `a_index_after:${a_index} previous_after:${previous}`);
       } else {
         if (!order[idx + 1]) {
+          _trace(`[TRACE-STC-OUT-E] i:${idx} kind:tree `
+                 + `u:${B[b_index]} v:${B[b_index + 1]} w:${this.mincut}`);
           stcactus.new_edge_order(B[b_index], B[b_index + 1], this.mincut);
         }
         previous = B[b_index];
         b_index++;
+        _trace(`[TRACE-STC-OUT] i:${idx} kind:tree_done `
+               + `b_index_after:${b_index} previous_after:${previous}`);
       }
     }
     stcactus.finish_construction();

@@ -19,8 +19,21 @@
     if (typeof h === "function") h(event, payload);
   }
 
+  // Per byte-equal-tracer playbook discipline "Tracer prints stay": stderr
+  // probes for capforest pop loop. Mirror canonical [TRACE-CAP] / [TRACE-CAP-EDGE]
+  // from instrumented/include/algorithms/global_mincut/noi_minimum_cut.h.
+  // Guarded by globalThis.__VIECUT_TRACE__ so production walker is unaffected.
+  function _trace(line) {
+    if (typeof globalThis !== "undefined" && globalThis.__VIECUT_TRACE__) {
+      if (typeof process !== "undefined" && process.stderr) {
+        process.stderr.write(line + "\n");
+      }
+    }
+  }
+
   function modified_capforest(G, mincut) {
     const n = G.number_of_nodes();
+    _trace(`[TRACE-CAP] entry n:${n} mincut:${mincut}`);
     const uf = new NS.UnionFind(n);
     const span = Math.max(1, mincut + 1);
     const pq = new NS.FifoNodeBucketPQ(n, span);
@@ -29,13 +42,18 @@
     const r_v = new Array(n).fill(0);
 
     const starting_node = NS.random_functions.next() % n;
+    _trace(`[TRACE-CAP] start mod_n:${n} start:${starting_node}`);
     let current_node = starting_node;
     pq.insert(current_node, 0);
     emit("noi_init", { n, mincut, starting_node });
 
+    let pop_slot = 0;
     while (!pq.empty()) {
       current_node = pq.deleteMax();
       visited[current_node] = 1;
+      _trace(`[TRACE-CAP] pop slot:${pop_slot} node:${current_node} `
+             + `r_v:${r_v[current_node]} seen:${seen[current_node]}`);
+      pop_slot++;
       const popped_unions = [];
       const popped_updates = [];
       const ne = G.get_first_invalid_edge(current_node);
@@ -43,29 +61,49 @@
         const tgt = G.getEdgeTarget(current_node, e);
         if (visited[tgt]) continue;
         const w = G.getEdgeWeight(current_node, e);
+        const rv_before = r_v[tgt];
+        const t1_lt = rv_before < mincut ? 1 : 0;
+        const t1_mc0 = mincut === 0 ? 1 : 0;
         let increase = false;
         let unioned = false;
-        if (r_v[tgt] < mincut || mincut === 0) {
+        const rv_plus_w = rv_before + w;
+        const t2_ge = rv_plus_w >= mincut ? 1 : 0;
+        if (rv_before < mincut || mincut === 0) {
           increase = true;
-          if ((r_v[tgt] + w) >= mincut) {
+          if ((rv_before + w) >= mincut) {
             uf.Union(current_node, tgt);
             unioned = true;
             popped_unions.push([current_node, tgt]);
           }
         }
         r_v[tgt] += w;
+        const rv_after = r_v[tgt];
         const new_rv = Math.min(r_v[tgt], mincut);
         popped_updates.push({ tgt, w, new_rv, unioned });
+        const seen_before = seen[tgt] ? 1 : 0;
+        let pq_op = "none";
         if (seen[tgt]) {
-          if (increase && !visited[tgt]) pq.increaseKey(tgt, new_rv);
+          if (increase && !visited[tgt]) {
+            pq.increaseKey(tgt, new_rv);
+            pq_op = "increaseKey";
+          }
         } else {
           seen[tgt] = 1;
           pq.insert(tgt, new_rv);
+          pq_op = "insert";
         }
+        _trace(`[TRACE-CAP-EDGE] node:${current_node} e:${e} tgt:${tgt} `
+               + `w:${w} rv_before:${rv_before} t1_lt:${t1_lt} `
+               + `t1_mc0:${t1_mc0} increase:${increase ? 1 : 0} `
+               + `rv_plus_w:${rv_plus_w} t2_ge:${t2_ge} `
+               + `union:${unioned ? 1 : 0} rv_after:${rv_after} `
+               + `new_rv:${new_rv} seen_before:${seen_before} `
+               + `pq_op:${pq_op}`);
       }
       emit("noi_pop", { current_node, updates: popped_updates, unions: popped_unions,
         r_v: r_v.slice(), uf_n: uf.n() });
     }
+    _trace(`[TRACE-CAP] exit uf_n:${uf.n()}`);
     return uf;
   }
 
