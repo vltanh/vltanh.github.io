@@ -247,6 +247,14 @@
     const fullEV = top.eV;
     const fullL = top.m;
 
+    // G8 prep: directional out-degree per global compact id, mirroring
+    // canonical's `orig_graph.degree(u)` (NetworKit directed-graph degree
+    // is out-degree). Canonical's bail-iter modularity at run_ikc.py:118-120
+    // uses this. Source of edge directionality = CSV row order preserved
+    // in top.eU (source) / top.eV (target).
+    const fullOutDeg = new Int32Array(globalN);
+    for (let i = 0; i < fullEU.length; i++) fullOutDeg[fullEU[i]] += 1;
+
     // Tracer init event: fixture name + post-self-loop n/m + node id map.
     __ikc_hook("init", {
       fixture: fixture,
@@ -340,6 +348,38 @@
           kcore_compact_ids_sorted: [],
           core_numbers_sorted: coreNumbersSortedBail,
         });
+        // G8: bail-iter (d/(2L))^2 FP primitive (run_ikc.py:118-120).
+        // Mirror canonical's per-node modularity computation exactly:
+        //   d = orig_graph.degree(u) — NetworKit directed out-degree.
+        //   ratio = d / (2 * L) — IEEE-754 double division (Python `/`).
+        //   ratio**2 in Python with exponent==2 byte-equals plain ratio*ratio
+        //   (verified on CPython 3.11; both go through fp_mul, not libm pow).
+        //   We use ratio*ratio here for the same reason — avoids Math.pow's
+        //   libm path drift; verified V8 byte-equal to Python on the same
+        //   inputs. See audit row D + tracer_coverage_gaps.md G8.
+        const bailPerNodeModularity = [];
+        const twoL = 2 * fullL;
+        for (let i = 0; i < remCount; i++) {
+          const gi = globalOfLocal[i];
+          const d = fullOutDeg[gi];
+          const ratio = twoL !== 0 ? d / twoL : 0.0;
+          const ratioSq = ratio * ratio;
+          const negSq = -1 * ratioSq;
+          bailPerNodeModularity.push({
+            compact_id: i,
+            orig_compact_id: gi,
+            d: d,
+            two_L: twoL,
+            ratio: ratio,
+            ratio_squared: ratioSq,
+            neg_ratio_squared: negSq,
+          });
+        }
+        __ikc_hook("bail_per_node_modularity", {
+          iter: it,
+          bail_L: fullL,
+          bail_per_node_modularity: bailPerNodeModularity,
+        });
         for (let i = 0; i < remCount; i++) {
           dropped.push(residualOrigIds[i]);
           remaining[globalOfLocal[i]] = 0;
@@ -369,11 +409,21 @@
       }
       let kcoreM = 0;
       const kcoreEdgesOrig = [];
+      // G2: directional in/out degree per kcore-subgraph node, mirroring
+      // canonical's subgraph.degreeIn / subgraph.degreeOut. Computed from
+      // remEU/remEV (CSV-direction preserved by compactSubgraph) restricted
+      // to edges both of whose endpoints are kcore members. Indexed by
+      // residual-compact-id (= subgraph-local id since subgraphFromNodes
+      // preserves ids).
+      const kcoreDegIn = new Int32Array(remCount);
+      const kcoreDegOut = new Int32Array(remCount);
       for (let i = 0; i < remEU.length; i++) {
         const lu = localOfGlobal[remEU[i]], lv = localOfGlobal[remEV[i]];
         if (kcoreMask[lu] && kcoreMask[lv]) {
           kcoreEdgesOrig.push([nodeIds[remEU[i]], nodeIds[remEV[i]]]);
           kcoreM += 1;
+          kcoreDegOut[lu] += 1;
+          kcoreDegIn[lv] += 1;
         }
       }
       itRec.kcoreNodes = kcoreNodesOrig;
@@ -402,6 +452,13 @@
       const mods = batchModularitiesCompact(compsLocal, memberOf, fullEU, fullEV, fullL);
 
       const nodesToRemoveThisIter = [];
+      // G9: per-component accumulator mirror of canonical's nodes_to_remove
+      // set. Canonical does `nodes_to_remove.update(component)` after each
+      // branch decision (run_ikc.py:151, 160, 165). JS pushes to
+      // nodesToRemoveThisIter inside each branch below; we snapshot a
+      // sorted view after each component closes so the per-component
+      // accumulator growth is visible in the trace.
+      const nodesToRemoveSetGlobal = new Uint8Array(globalN);
       let keptClustersThisIter = 0;
 
       compsLocal.forEach(function (compLocal, cIdx) {
@@ -410,6 +467,50 @@
         const mod = mods[cIdx];
         const okMod = canonicalGate ? true : (mod > 0);
         const compOrig = compLocal.map(function (li) { return residualOrigIds[li]; });
+
+        // G2: build k_valid_loop_scope mirroring canonical's
+        // subgraph.iterNodes() loop. Iteration scope = every residual-compact
+        // node id 0..remCount-1 where kcoreMask is set (since subgraph
+        // = kcore-subgraph; subgraphFromNodes preserves ids). For each
+        // such node, in_component = (memberOf[globalOfLocal[i]] == cIdx),
+        // degIn/degOut from the per-iter kcoreDegIn/kcoreDegOut arrays,
+        // sum from their addition, and check_result = "skipped" (not in
+        // component) | "ok" | "fail" (first failing) | "post_break_unvisited"
+        // (after the canonical break short-circuits — JS records the
+        // subgraph node anyway for trace-scope visibility, matching the
+        // canonical-tracer's full-scope emission).
+        const kValidLoopScope = [];
+        let scopeOk = true;
+        let scopeFailing = null;
+        for (let scopeIdx = 0; scopeIdx < remCount; scopeIdx++) {
+          if (!kcoreMask[scopeIdx]) continue;
+          const inComp = (memberOf[globalOfLocal[scopeIdx]] === cIdx);
+          const din = kcoreDegIn[scopeIdx];
+          const dout = kcoreDegOut[scopeIdx];
+          const s = din + dout;
+          let check;
+          if (!inComp) {
+            check = "skipped";
+          } else if (scopeOk) {
+            if (s < kFloor) {
+              check = "fail";
+              scopeOk = false;
+              scopeFailing = scopeIdx;
+            } else {
+              check = "ok";
+            }
+          } else {
+            check = "post_break_unvisited";
+          }
+          kValidLoopScope.push({
+            subgraph_id: scopeIdx,
+            in_component: inComp,
+            degIn: din,
+            degOut: dout,
+            sum: s,
+            check_result: check,
+          });
+        }
         const cRec = {
           nodes: compOrig,
           kValid: okK,
@@ -440,6 +541,7 @@
           compLocal.forEach(function (li) {
             remaining[globalOfLocal[li]] = 0;
             nodesToRemoveThisIter.push(li);
+            nodesToRemoveSetGlobal[globalOfLocal[li]] = 1;
           });
           keptClustersThisIter += 1;
         } else if (!okK) {
@@ -449,6 +551,7 @@
             dropped.push(residualOrigIds[li]);
             remaining[globalOfLocal[li]] = 0;
             nodesToRemoveThisIter.push(li);
+            nodesToRemoveSetGlobal[globalOfLocal[li]] = 1;
           });
         } else {
           cRec.fateReason = "failed modularity";
@@ -457,9 +560,23 @@
             dropped.push(residualOrigIds[li]);
             remaining[globalOfLocal[li]] = 0;
             nodesToRemoveThisIter.push(li);
+            nodesToRemoveSetGlobal[globalOfLocal[li]] = 1;
           });
         }
         itRec.components.push(cRec);
+        // G9: snapshot the nodes_to_remove accumulator after this
+        // component's update branch closes (mirror of run_ikc.py:151/160/165
+        // `nodes_to_remove.update(component)`). Sorted view = same field
+        // as canonical's nodes_to_remove_after_update_sorted; the mutation
+        // sequence across components is exposed by the iteration of
+        // comp_idx 0,1,2,... in the trace.
+        const nodesToRemoveAfterUpdateSorted = [];
+        for (let gi = 0; gi < globalN; gi++) {
+          if (nodesToRemoveSetGlobal[gi]) {
+            nodesToRemoveAfterUpdateSorted.push(localOfGlobal[gi]);
+          }
+        }
+        nodesToRemoveAfterUpdateSorted.sort(function (a, b) { return a - b; });
         __ikc_hook("component", {
           iter: it,
           comp_idx: cIdx,
@@ -468,10 +585,12 @@
           members_sorted: membersSorted,
           k_valid: okK,
           k_valid_failing_compact_id: kvRes.failingId,
+          k_valid_loop_scope: kValidLoopScope,
           modular_value: modularValue,
           modular_pos: okMod,
           kept: cRec.accepted,
           fate_reason: fateReason,
+          nodes_to_remove_after_update_sorted: nodesToRemoveAfterUpdateSorted,
         });
       });
       // iter_end
