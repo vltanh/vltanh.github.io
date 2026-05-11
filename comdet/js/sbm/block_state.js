@@ -347,6 +347,51 @@
       return after - before;
     }
 
+    // [TRACE-SBM-SUBSETSE] Probe-aware virtualMove. Mirrors
+    // virtualMove(v, s) step-for-step but returns before/after subsetSE
+    // scalars in addition to dS. Used by tools/viz_check/sbm self-RNG
+    // harness to bisect dS bit-divergences into the four subsetSE
+    // summands. No effect on production walker semantics; behavior is
+    // byte-identical to virtualMove(v, s) when only dS is consumed.
+    // Sites: skill byte-equal-tracer gap-audit item 2 (row M).
+    function virtualMoveTraced(v, s) {
+      if (s === b[v]) return { dS: 0, before: 0, after: 0 };
+      const fromR = b[v];
+      const before = subsetSE(fromR, s);
+      moveVertex(v, s);
+      const after = subsetSE(fromR, s);
+      moveVertex(v, fromR);
+      return { dS: after - before, before: before, after: after };
+    }
+
+    // [TRACE-SBM-BRK] Per-component entropy breakdown for the
+    // self-RNG tracer. When S diverges between cpp + JS, harness can
+    // bisect into the divergent summand (exact / edges_dl / dc_deg_const
+    // / partition_dl / degree_dl / pp_lik / pp_edges) without rerunning.
+    // Mirrors cpp flat_traced.cpp's `entropyBreakdown`; skill
+    // byte-equal-tracer gap-audit item 1 (rows D, E, M).
+    function entropyBreakdown() {
+      const out = {
+        exact: 0, edges_dl: 0, dc_deg_const: 0,
+        partition_dl: 0, degree_dl: 0, pp_lik: 0, pp_edges: 0, total: 0,
+      };
+      if (mode === MODES.PP) {
+        out.pp_lik = ppLikelihood();
+        out.pp_edges = ppEdgesDl();
+        out.partition_dl = usePartitionDl ? partitionDl() : 0;
+        out.total = out.pp_lik + out.pp_edges + out.partition_dl;
+      } else {
+        out.exact = exactEntropy();
+        out.edges_dl = useEdgesDl ? edgesDl() : 0;
+        out.dc_deg_const = degCorr ? dcDegreeConst : 0;
+        out.partition_dl = usePartitionDl ? partitionDl() : 0;
+        out.degree_dl = useDegreeDl ? degreeDlUniform() : 0;
+        out.total = out.exact + out.edges_dl - out.dc_deg_const
+                  + out.partition_dl + out.degree_dl;
+      }
+      return out;
+    }
+
     return {
       get N() { return N; },
       blockOf: function (v) { return b[v]; },
@@ -358,7 +403,9 @@
         return neList.slice(0, Bne);
       },
       entropy: entropy,
+      entropyBreakdown: entropyBreakdown,
       virtualMove: virtualMove,
+      virtualMoveTraced: virtualMoveTraced,
       moveVertex: moveVertex,
     };
   }

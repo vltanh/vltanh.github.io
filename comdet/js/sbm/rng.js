@@ -22,6 +22,12 @@
     const N = 624;
     const mt = new Uint32Array(N);
     let mti = N + 1;
+    // [TRACE-SBM-DRAWS] gap-audit item 4 (row B). Per-call raw()
+    // draw counter exposed via `drawCount`. Mirrors cpp tracer's
+    // JSRng::drawCount; used by tools/viz_check/sbm/self_rng_check.mjs
+    // to bit-compare per-visit raw() consumption. Production walker
+    // ignores this field (no behavior change).
+    let drawCount = 0;
     function init(s) {
       mt[0] = s >>> 0;
       for (let i = 1; i < N; i++) {
@@ -47,19 +53,24 @@
       y = (y ^ ((y << 7) & 0x9d2c5680)) >>> 0;
       y = (y ^ ((y << 15) & 0xefc60000)) >>> 0;
       y = (y ^ (y >>> 18)) >>> 0;
+      drawCount++;
       return y;
     }
     init(seed >>> 0);
     return {
       // Snapshot mt + mti, draw k raw uint32 outputs, restore. Mirrors
       // the cpp tracer's std::mt19937 peek used at boundary diagnostics.
+      // peek() does NOT count toward drawCount (state restored), so
+      // probe callers see the true consumed-by-walker count.
       peek: function (k) {
         const mtSave = new Uint32Array(mt);
         const mtiSave = mti;
+        const dcSave = drawCount;
         const out = new Array(k);
         for (let i = 0; i < k; i++) out[i] = next() >>> 0;
         for (let i = 0; i < N; i++) mt[i] = mtSave[i];
         mti = mtiSave;
+        drawCount = dcSave;
         return out;
       },
       int: function (lo, hi) {
@@ -70,8 +81,10 @@
         do { r = next(); } while (r >= limit);
         return lo + (r % range);
       },
-      seed: function (s) { init(s >>> 0); },
+      seed: function (s) { init(s >>> 0); drawCount = 0; },
       raw: next,
+      // [TRACE-SBM-DRAWS] expose counter for the self-RNG probe path.
+      drawCount: function () { return drawCount; },
     };
   }
 
