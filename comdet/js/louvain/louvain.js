@@ -450,6 +450,13 @@
       const v = order[i];
       const vComm = P.memberOf(v);
       const wDeg = P.graph.weightedDegree(v);
+      // [TRACE-LV-VISIT-PRE] kv + nb_selfloops + pre-remove in_/tot_.
+      // P0 probes (audit row M / F / J inputs). Read BEFORE neighComm +
+      // modRemove so the snapshot reflects the partition state going
+      // into the move decision.
+      const selfLoop = P.graph.nbSelfLoops(v);
+      const inCfromPre  = recordTrace ? P.totalWeightInComm(vComm) : 0;
+      const totCfromPre = recordTrace ? P.totalWeightToComm(vComm) : 0;
       // neigh_comm sets neigh_pos[0]=vComm, weight 0; rest = first-seen
       // distinct neighbour comms.
       P.neighComm(v);
@@ -473,7 +480,11 @@
         const c = P.neighPos(j);
         const dnc = P.neighWeight(c);
         const inc = P.modGain(v, c, dnc, wDeg);
-        if (recordTrace) deltas.push({ comm: c, delta: inc });
+        // [TRACE-LV-CANDS] per-candidate (comm, dnc, gain) in neigh_pos
+        // iteration order = vComm at slot 0 + first-seen distinct
+        // neighbour comms. P0 probe — winner-matching is insufficient
+        // when loser-set differs (audit row J site-1 + row H).
+        if (recordTrace) deltas.push({ comm: c, dnc: dnc, gain: inc, delta: inc });
         if (inc > bestIncrease) {
           bestIncrease = inc;
           bestComm = c;
@@ -505,6 +516,17 @@
           inCto: P.totalWeightInComm(bestComm),
           totCfrom: P.totalWeightToComm(vComm),
           totCto: P.totalWeightToComm(bestComm),
+          // P0 probes (audit row F + J + M). kv = weighted_degree(v)
+          // direct operand of modGain; selfLoop folded into modRemove /
+          // modInsert; dncBest is the neigh_weight[bestComm] value
+          // passed into modInsert (distinct from bestIncrease — drove
+          // c4c63ef9 closure on gnm_5000_p002); inCfromPre / totCfromPre
+          // = source-comm admin BEFORE modRemove (the remove input).
+          kv: wDeg,
+          selfLoop: selfLoop,
+          dncBest: bestNblinks,
+          inCfromPre: inCfromPre,
+          totCfromPre: totCfromPre,
         });
       }
     }
@@ -515,6 +537,24 @@
     opts = opts || {};
     const recordTrace = !!opts.recordTrace;
     const P = Partition(graph, null, qualityFn);
+    // [TRACE-LV-LEVEL-ADMIN-ENTRY] P0 probe #8 — full in_/tot_ vectors
+    // at level entry. P.Partition has just been singleton-initialised
+    // (membership[i] = i; inC[i] = nb_selfloops(i); totC[i] =
+    // weighted_degree(i) per rebuildAdmin). Length = ncomm = n. Audit
+    // rows K + M. Captured before any sweep so the canonical singleton
+    // init is observable and bit-comparable against cpp tracer's
+    // Modularity::in/tot at the same boundary.
+    let inBitsEntry = null;
+    let totBitsEntry = null;
+    if (recordTrace) {
+      const nc = P.ncomm();
+      inBitsEntry = new Float64Array(nc);
+      totBitsEntry = new Float64Array(nc);
+      for (let ci = 0; ci < nc; ci++) {
+        inBitsEntry[ci]  = P.totalWeightInComm(ci);
+        totBitsEntry[ci] = P.totalWeightToComm(ci);
+      }
+    }
     const sweeps = [];
     // Canonical louvain.cpp:221-229: random_order is computed ONCE per
     // level, shuffled in place, then reused for every pass in the
@@ -541,11 +581,40 @@
       const out = sweep(P, rng, { recordTrace: recordTrace, visitOrder: visitOrder });
       const after = qualityFn.quality(P);
       out.qualityAfter = after;
+      // [TRACE-LV-PASS] curQual snapshot at pass entry — operand B of
+      // the do/while gate (`new_qual - cur_qual > eps_impr`). Audit row
+      // F + tie-break site-2. `before` is exactly cur_qual in canonical
+      // (cpp louvain.cpp:236: `cur_qual = new_qual;` at top of do-body
+      // mirrors JS `before = curQ` at top of while-body).
+      out.curQual = before;
       sweeps.push(out);
       if (out.nbMoves === 0 || (after - before) <= 1e-6) break;
       curQ = after;
     }
-    return { partition: P, sweeps: sweeps };
+    // [TRACE-LV-LEVEL-ADMIN-EXIT] P0 probe #8 — full in_/tot_ vectors
+    // at level exit, AFTER the level converges + BEFORE renumber +
+    // collapse. Indices still in pre-renumber comm-id space (matches
+    // cpp tracer's snapshot taken before partition2graph_binary).
+    // Length = ncomm. Audit rows K + M + L.
+    let inBitsExit = null;
+    let totBitsExit = null;
+    if (recordTrace) {
+      const nc = P.ncomm();
+      inBitsExit = new Float64Array(nc);
+      totBitsExit = new Float64Array(nc);
+      for (let ci = 0; ci < nc; ci++) {
+        inBitsExit[ci]  = P.totalWeightInComm(ci);
+        totBitsExit[ci] = P.totalWeightToComm(ci);
+      }
+    }
+    return {
+      partition: P,
+      sweeps: sweeps,
+      inBitsEntry: inBitsEntry,
+      totBitsEntry: totBitsEntry,
+      inBitsExit: inBitsExit,
+      totBitsExit: totBitsExit,
+    };
   }
 
   // run: outer level loop. partition2graph_binary already happens inside
@@ -592,6 +661,13 @@
         totalWeightPre: totalWeightPre,
         totalWeightPost: totalWeightPost,
         nAfterCollapse: newCollapsed.vcount(),
+        // P0 #8 probes (audit row K / L / M). Per-level full in_/tot_
+        // vectors at entry + exit, captured inside phase1 before the
+        // renumber + collapse step. Length = n_before for this level.
+        inBitsEntry: p1.inBitsEntry,
+        totBitsEntry: p1.totBitsEntry,
+        inBitsExit: p1.inBitsExit,
+        totBitsExit: p1.totBitsExit,
       });
       if (newCollapsed.vcount() >= prevVcount || newCollapsed.vcount() <= 1) break;
       collapsedG = newCollapsed;
