@@ -432,6 +432,36 @@
         + plogp(xfOld + fOld - vex - vfl + deltaEEOld)
         + plogp(xfNew + fNew + vex + vfl - deltaEENew);
 
+      // [TRACE-IM P0-1] term-breakdown probe mirroring
+      // traceDeltaTerms in map_equation_traced.h. Fires per candidate
+      // (matches cpp's call-per-candidate semantics). Plogp arg order
+      // matches cpp's _dl_args[0..15] in source order; spare slots
+      // (14, 15) zero-filled. Zero-cost when hook not installed.
+      if (typeof globalThis.__INFOMAP_DL_TERMS === "function") {
+        const _dl_args = [
+          enterFlow + deltaEEOld - deltaEENew,         // 0
+          efOld,                                        // 1
+          efNew,                                        // 2
+          efOld - ven + deltaEEOld,                     // 3
+          efNew + ven - deltaEENew,                     // 4
+          xfOld,                                        // 5
+          xfNew,                                        // 6
+          xfOld - vex + deltaEEOld,                     // 7
+          xfNew + vex - deltaEENew,                     // 8
+          xfOld + fOld,                                 // 9
+          xfNew + fNew,                                 // 10
+          xfOld + fOld - vex - vfl + deltaEEOld,        // 11
+          xfNew + fNew + vex + vfl - deltaEENew,        // 12
+          enterFlow_log_enterFlow,                      // 13 pre-call snapshot
+          0.0,                                          // 14 spare
+          0.0,                                          // 15 spare
+        ];
+        globalThis.__INFOMAP_DL_TERMS(
+          delta_enter, delta_enter_log_enter,
+          delta_exit_log_exit, delta_flow_log_flow,
+          _dl_args);
+      }
+
       return delta_enter - delta_enter_log_enter
              - delta_exit_log_exit + delta_flow_log_flow;
     }
@@ -453,6 +483,30 @@
       const _nMep = _probe ? moduleEnterFlow[newM] : 0;
       const _nMxp = _probe ? moduleExitFlow[newM]  : 0;
       const _nMfp = _probe ? moduleFlow[newM]      : 0;
+
+      // [TRACE-IM P0-2] capture pre-update running scalars + 8 pre
+      // plogp args (mirrors traceUpdateTerms in map_equation_traced.h).
+      // Gated by __INFOMAP_UPDATE_TERMS hook installation; zero-cost
+      // when uninstalled.
+      const _utProbe = (typeof globalThis.__INFOMAP_UPDATE_TERMS === "function");
+      let _ut_pre = null, _ut_ele_pre = 0, _ut_xle_pre = 0,
+          _ut_fle_pre = 0, _ut_ef_pre = 0;
+      if (_utProbe) {
+        _ut_ele_pre = enter_log_enter;
+        _ut_xle_pre = exit_log_exit;
+        _ut_fle_pre = flow_log_flow;
+        _ut_ef_pre  = enterFlow;
+        _ut_pre = [
+          moduleEnterFlow[oldM],                             // 0
+          moduleEnterFlow[newM],                             // 1
+          moduleExitFlow[oldM],                              // 2
+          moduleExitFlow[newM],                              // 3
+          moduleExitFlow[oldM] + moduleFlow[oldM],           // 4
+          moduleExitFlow[newM] + moduleFlow[newM],           // 5
+          enterFlow,                                          // 6
+          0.0,                                                // 7 spare
+        ];
+      }
 
       enterFlow -= moduleEnterFlow[oldM] + moduleEnterFlow[newM];
       enter_log_enter -= plogp(moduleEnterFlow[oldM]) + plogp(moduleEnterFlow[newM]);
@@ -489,6 +543,24 @@
           deltaEEOld, deltaEENew,
           oldDeltaEnter, oldDeltaExit, newDeltaEnter, newDeltaExit,
           g.nodeEnter[v], g.nodeExit[v], g.nodeFlow[v]);
+      }
+
+      // [TRACE-IM P0-2] capture post-update plogp args + emit probe.
+      // Mirrors traceUpdateTerms in map_equation_traced.h.
+      if (_utProbe) {
+        const _ut_post = [
+          moduleEnterFlow[oldM],                             // 0
+          moduleEnterFlow[newM],                             // 1
+          moduleExitFlow[oldM],                              // 2
+          moduleExitFlow[newM],                              // 3
+          moduleExitFlow[oldM] + moduleFlow[oldM],           // 4
+          moduleExitFlow[newM] + moduleFlow[newM],           // 5
+          enterFlow,                                          // 6
+          0.0,                                                // 7 spare
+        ];
+        globalThis.__INFOMAP_UPDATE_TERMS(
+          _ut_ele_pre, _ut_xle_pre, _ut_fle_pre, _ut_ef_pre,
+          _ut_pre, _ut_post);
       }
 
       moduleMembers[oldM] -= 1;
@@ -1167,6 +1239,14 @@
     // accumulate in a different order, drifting by 1 ulp on networks
     // where multiple source nodes contribute edges to the same (m1, m2)
     // bucket. polbooks s1 lvl=2 hit this drift.
+    // [TRACE-IM P0-3] consolidate-EdgeMap probe. Mirrors cpp's
+    // traceConsolidate{Begin,PreTriple,AggOp,Sorted} in
+    // infomap_optimizer_traced.h. Gated by __INFOMAP_CONSOL_BEGIN hook
+    // installation; zero-cost when uninstalled.
+    const _consolProbe = (typeof globalThis.__INFOMAP_CONSOL_BEGIN === "function");
+    if (_consolProbe) {
+      globalThis.__INFOMAP_CONSOL_BEGIN(g.n, /*is_undirected*/true);
+    }
     const linkMap = new Map();
     for (let u = 0; u < g.n; u++) {
       const oe = g.outEdges[u];
@@ -1175,18 +1255,46 @@
         let cu = membership[lk.u];
         let cv = membership[lk.v];
         if (cu === cv) continue;
+        // [TRACE-IM P0-3] pre-aggregation triple BEFORE swap.
+        // Emit ORIGINAL module IDs (origOf[cu], origOf[cv]) so the
+        // sequence matches cpp's `(module1, module2, flow)` raw triple.
+        if (_consolProbe) {
+          globalThis.__INFOMAP_CONSOL_PRE(u, origOf[cu], origOf[cv], lk.flow);
+        }
         // Swap so cu's ORIGINAL id < cv's. Mirrors cpp's moduleLinks insert
         // with (m1, m2) sorted by orig.
         if (origOf[cu] > origOf[cv]) { const t = cu; cu = cv; cv = t; }
         const key = cu + "|" + cv;
         const w = lk.weight;
         const f = lk.flow;
+        const _ku = origOf[cu], _kv = origOf[cv];
+        let _pre = 0.0, _wasInsert = true;
         if (linkMap.has(key)) {
           const r = linkMap.get(key);
+          _pre = r.flow; _wasInsert = false;
           r.weight += w; r.flow += f;
+          if (_consolProbe) {
+            globalThis.__INFOMAP_CONSOL_OP(_ku, _kv, _pre, f, r.flow, false);
+          }
         } else {
           linkMap.set(key, { u: cu, v: cv, weight: w, flow: f });
+          if (_consolProbe) {
+            globalThis.__INFOMAP_CONSOL_OP(_ku, _kv, 0.0, f, f, true);
+          }
         }
+      }
+    }
+    if (_consolProbe) {
+      // Final std::map iteration order = ASC by (origOf[cu], origOf[cv]).
+      // Build the same view by extracting + sorting.
+      const _entries = Array.from(linkMap.values());
+      _entries.sort(function (a, b) {
+        const ao = origOf[a.u], bo = origOf[b.u];
+        if (ao !== bo) return ao - bo;
+        return origOf[a.v] - origOf[b.v];
+      });
+      for (const _e of _entries) {
+        globalThis.__INFOMAP_CONSOL_SORTED(origOf[_e.u], origOf[_e.v], _e.flow);
       }
     }
     // cpp's InfomapOptimizer::consolidateModules creates
