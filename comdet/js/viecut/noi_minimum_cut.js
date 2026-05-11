@@ -41,8 +41,13 @@
     const seen = new Uint8Array(n);
     const r_v = new Array(n).fill(0);
 
-    const starting_node = NS.random_functions.next() % n;
+    const starting_raw = NS.random_functions.next();
+    const starting_node = starting_raw % n;
     _trace(`[TRACE-CAP] start mod_n:${n} start:${starting_node}`);
+    // raw next() hex for cross-side check of post-modulus shape
+    const raw_hex = ("00000000" + (starting_raw >>> 0).toString(16)).slice(-8);
+    _trace(`[TRACE-CAP] start_raw raw:0x${raw_hex} mod_n:${n} `
+           + `start:${starting_node}`);
     let current_node = starting_node;
     pq.insert(current_node, 0);
     emit("noi_init", { n, mincut, starting_node });
@@ -112,11 +117,27 @@
     const graphs = [G];
     let mincut = G.getMinDegree();
     NS.minimum_cut_helpers.setInitialCutValues(graphs);
+    // [TRACE-NOI] outer perform_minimum_cut entry + per-iter
+    // (noi_minimum_cut.h:61-83).
+    _trace(`[TRACE-NOI] outer_entry G_n:${G.number_of_nodes()} `
+           + `indirect:${indirect ? 1 : 0} initial_mincut:${mincut}`);
+    let noi_iter = 0;
     while (graphs[graphs.length - 1].number_of_nodes() > 2 && mincut > 0) {
+      _trace(`[TRACE-NOI] outer_iter:${noi_iter} `
+             + `n_before:${graphs[graphs.length - 1].number_of_nodes()} `
+             + `mincut_before:${mincut}`);
       const uf = modified_capforest(graphs[graphs.length - 1], mincut);
       graphs.push(NS.contraction.fromUnionFind(graphs[graphs.length - 1], uf, true));
+      const mc_pre = mincut;
       mincut = NS.minimum_cut_helpers.updateCut(graphs, mincut);
+      _trace(`[TRACE-NOI] outer_iter:${noi_iter} `
+             + `n_after:${graphs[graphs.length - 1].n()} `
+             + `uf_n:${uf.n()} mincut:${mincut} mincut_before:${mc_pre}`);
+      noi_iter++;
     }
+    _trace(`[TRACE-NOI] outer_exit `
+           + `n_final:${graphs[graphs.length - 1].number_of_nodes()} `
+           + `mincut:${mincut} iters:${noi_iter}`);
     if (!indirect) NS.minimum_cut_helpers.retrieveMinimumCut(graphs);
     return mincut;
   }

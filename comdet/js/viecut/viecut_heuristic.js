@@ -41,12 +41,24 @@
     if (typeof h === "function") h(event, payload);
   }
 
+  // [TRACE-VC] probes mirror canonical sibling viecut.h. Guarded by
+  // globalThis.__VIECUT_TRACE__.
+  function _trace(line) {
+    if (typeof globalThis !== "undefined" && globalThis.__VIECUT_TRACE__) {
+      if (typeof process !== "undefined" && process.stderr) {
+        process.stderr.write(line + "\n");
+      }
+    }
+  }
+
   function perform_minimum_cut_vc(G, indirect) {
     if (!G) return -1;
     let cut = G.getMinDegree();
     const graphs = [G];
     NS.minimum_cut_helpers.setInitialCutValues(graphs);
 
+    _trace(`[TRACE-VC] lp_loop_enter n:${graphs[graphs.length - 1].number_of_nodes()} `
+           + `min_deg:${cut}`);
     emit("vc_lp_loop_enter", { n: graphs[graphs.length - 1].number_of_nodes(),
                                min_deg: cut });
 
@@ -56,50 +68,60 @@
             (graphs[graphs.length - 1].number_of_nodes() <
              graphs[graphs.length - 2].number_of_nodes()))) {
       let GcurH = graphs[graphs.length - 1];
+      _trace(`[TRACE-VC] lp_iter_start iter:${lp_iter} `
+             + `n:${GcurH.number_of_nodes()} m:${GcurH.number_of_edges()} `
+             + `cut:${cut}`);
       emit("vc_lp_iter_start", { iter: lp_iter,
                                  n: GcurH.number_of_nodes(),
                                  m: GcurH.number_of_edges(),
                                  cut });
 
-      // [UPSTREAM viecut.h:76] label_propagation lp; lp.propagate_labels(G)
       const cluster_mapping =
         NS.label_propagation.propagate_labels(GcurH);
+      _trace(`[TRACE-VC] lp_after_propagate iter:${lp_iter} `
+             + `cluster_map_n:${cluster_mapping.length}`);
 
-      // [UPSTREAM viecut.h:78] remap_cluster
       const { mapping, reverse_mapping } =
         NS.minimum_cut_helpers.remap_cluster(GcurH, cluster_mapping);
+      _trace(`[TRACE-VC] lp_remap iter:${lp_iter} `
+             + `mapping_n:${mapping.length} rev_n:${reverse_mapping.length}`);
 
-      // [UPSTREAM viecut.h:83] findTrivialCuts (mutates mapping +
-      // reverse_mapping in place; cut value passed by-value, so cpp's
-      // local target_mindeg shadowing does not propagate back to caller).
+      const cut_before_tc = cut;
       NS.contraction.findTrivialCuts(GcurH, mapping, reverse_mapping, cut);
+      _trace(`[TRACE-VC] lp_trivial iter:${lp_iter} `
+             + `cut_before:${cut_before_tc} cut_after:${cut}`);
 
-      // [UPSTREAM viecut.h:86] contractGraph(G, mapping, reverse_mapping)
-      // copy=true default. Density branch selects sparse vs vertexset.
       const H = NS.contraction.contractGraph(GcurH, mapping, reverse_mapping, true);
       graphs.push(H);
+      const cut_before_uc = cut;
       cut = NS.minimum_cut_helpers.updateCut(graphs, cut);
+      _trace(`[TRACE-VC] lp_contracted iter:${lp_iter} `
+             + `n_after:${graphs[graphs.length - 1].number_of_nodes()} `
+             + `cut_before:${cut_before_uc} cut:${cut}`);
       emit("vc_lp_contracted", { iter: lp_iter,
                                  n_after: graphs[graphs.length - 1].number_of_nodes(),
                                  cut });
 
-      // [UPSTREAM viecut.h:93] tests::prTests12(graphs.back(), cut)
-      // (no third arg -> find_all_cuts default false)
       const uf12 = NS.tests.prTests12(graphs[graphs.length - 1], cut, false);
+      _trace(`[TRACE-VC] lp_pr12 iter:${lp_iter} uf_n:${uf12.n()}`);
       graphs.push(NS.contraction.fromUnionFind(graphs[graphs.length - 1], uf12, true));
       cut = NS.minimum_cut_helpers.updateCut(graphs, cut);
 
-      // [UPSTREAM viecut.h:97] tests::prTests34
       const uf34 = NS.tests.prTests34(graphs[graphs.length - 1], cut, false);
+      _trace(`[TRACE-VC] lp_pr34 iter:${lp_iter} uf_n:${uf34.n()}`);
       graphs.push(NS.contraction.fromUnionFind(graphs[graphs.length - 1], uf34, true));
       cut = NS.minimum_cut_helpers.updateCut(graphs, cut);
 
+      _trace(`[TRACE-VC] lp_iter_end iter:${lp_iter} `
+             + `n_after:${graphs[graphs.length - 1].number_of_nodes()} cut:${cut}`);
       emit("vc_lp_iter_end", { iter: lp_iter,
                                n_after: graphs[graphs.length - 1].number_of_nodes(),
                                cut });
       ++lp_iter;
     }
 
+    _trace(`[TRACE-VC] lp_loop_exit iters:${lp_iter} `
+           + `n_final:${graphs[graphs.length - 1].number_of_nodes()} cut:${cut}`);
     emit("vc_lp_loop_exit", { iters: lp_iter,
                               n_final: graphs[graphs.length - 1].number_of_nodes(),
                               cut });
@@ -107,6 +129,7 @@
     if (graphs[graphs.length - 1].number_of_nodes() > 1) {
       cut = Math.min(
         cut, NS.noi_minimum_cut.perform_minimum_cut(graphs[graphs.length - 1], true));
+      _trace(`[TRACE-VC] noi_final cut:${cut}`);
     }
     if (!indirect) NS.minimum_cut_helpers.retrieveMinimumCut(graphs);
     return cut;

@@ -17,6 +17,14 @@
     if (typeof h === "function") h(event, payload);
   }
 
+  function _trace(line) {
+    if (typeof globalThis !== "undefined" && globalThis.__VIECUT_TRACE__) {
+      if (typeof process !== "undefined" && process.stderr) {
+        process.stderr.write(line + "\n");
+      }
+    }
+  }
+
   function findBipartitionFromCactus(cactus, n_orig, dfsOut) {
     const { best_n, best_e, best_n2, best_e2 } = dfsOut;
     const n1 = best_n;
@@ -45,6 +53,9 @@
       const ne = cactus.get_first_invalid_edge(top);
       for (let e = 0; e < ne; e++) {
         const t = cactus.getEdgeTarget(top, e);
+        const ck = checked[t] ? 1 : 0;
+        _trace(`[TRACE-MB-BFE] top:${top} e:${e} t:${t} `
+               + `checked_before:${ck} push:${1 - ck}`);
         if (!checked[t]) {
           q.push(t);
           checked[t] = 1;

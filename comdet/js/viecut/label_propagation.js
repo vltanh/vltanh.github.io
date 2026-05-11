@@ -23,27 +23,32 @@
   const C = window.COMDET;
   const NS = (C.VIECUT = C.VIECUT || {});
 
+  function _trace(line) {
+    if (typeof globalThis !== "undefined" && globalThis.__VIECUT_TRACE__) {
+      if (typeof process !== "undefined" && process.stderr) {
+        process.stderr.write(line + "\n");
+      }
+    }
+  }
+
   function propagate_labels(G) {
     const n = G.number_of_nodes();
+    _trace(`[TRACE-LP] entry n:${n}`);
     const cluster_id = new Array(n);
     const permutation = new Array(n);
-    // hash_vec[block] = { first: EdgeWeight, second: NodeID }; "second"
-    // is the vertex that last wrote into the slot, used to lazy-reset
-    // first to 0 without scanning the whole array.
     const hash_vec = new Array(n);
     for (let i = 0; i < n; i++) {
       cluster_id[i] = i;
       hash_vec[i] = { first: 0, second: 0 };
     }
 
-    // [UPSTREAM label_propagation.h:52]
-    // permutate_vector_local(&permutation, true): init perm to identity
-    // then std::shuffle each chunk of 128.
     NS.random_functions.permutate_vector_local(permutation, true);
+    _trace(`[TRACE-LP] perm_done size:${permutation.length} `
+           + `first:${permutation[0]} last:${permutation[permutation.length - 1]}`);
 
     const iterations = 2;
     for (let j = 0; j < iterations; j++) {
-      // [UPSTREAM label_propagation.h:60] for (NodeID node : G->nodes())
+      _trace(`[TRACE-LP] iter_start j:${j}`);
       for (let node = 0; node < n; node++) {
         const nn = permutation[node];
         let max_block = cluster_id[nn];
@@ -52,24 +57,54 @@
         for (let e = 0; e < ne; e++) {
           const target = G.getEdgeTarget(nn, e);
           const block = cluster_id[target];
-          // [UPSTREAM label_propagation.h:69] lazy-reset hash_vec[block].
-          if (hash_vec[block].second !== nn) {
+          const stale = hash_vec[block].second !== nn ? 1 : 0;
+          const before = hash_vec[block].first;
+          if (stale) {
             hash_vec[block].first = 0;
             hash_vec[block].second = nn;
           }
-          hash_vec[block].first += G.getEdgeWeight(nn, e);
-          // [UPSTREAM label_propagation.h:76-81]
-          // strictly heavier OR (equal AND next() % 2 == 1)
-          if (hash_vec[block].first > max_value ||
-              (hash_vec[block].first === max_value &&
-               (NS.random_functions.next() % 2))) {
+          const before_add = hash_vec[block].first;
+          const w = G.getEdgeWeight(nn, e);
+          hash_vec[block].first += w;
+          const after_add = hash_vec[block].first;
+          const mv_before = max_value;
+          const mb_before = max_block;
+          const strict_gt = hash_vec[block].first > max_value ? 1 : 0;
+          const eq = hash_vec[block].first === max_value ? 1 : 0;
+          let tie_take = 0;
+          let consumed_next = 0;
+          if (strict_gt) {
             max_value = hash_vec[block].first;
             max_block = block;
+          } else if (eq) {
+            const r = NS.random_functions.next();
+            consumed_next = 1;
+            tie_take = (r % 2) !== 0 ? 1 : 0;
+            if (tie_take) {
+              max_value = hash_vec[block].first;
+              max_block = block;
+            }
+            const r_hex = ("00000000" + (r >>> 0).toString(16)).slice(-8);
+            _trace(`[TRACE-LP-TIE] j:${j} node:${node} n:${nn} e:${e} `
+                   + `tgt:${target} block:${block} rng:0x${r_hex} `
+                   + `mod2:${r % 2} take:${tie_take}`);
           }
+          _trace(`[TRACE-LP-E] j:${j} node:${node} n:${nn} e:${e} `
+                 + `tgt:${target} block:${block} stale:${stale} `
+                 + `hv_before_reset:${before} hv_before_add:${before_add} `
+                 + `w:${w} hv_after:${after_add} `
+                 + `mv_before:${mv_before} mb_before:${mb_before} `
+                 + `strict_gt:${strict_gt} `
+                 + `eq:${eq} consumed_next:${consumed_next} `
+                 + `tie_take:${tie_take} mv_after:${max_value} `
+                 + `mb_after:${max_block}`);
         }
         cluster_id[nn] = max_block;
+        _trace(`[TRACE-LP-N] j:${j} node:${node} n:${nn} `
+               + `cluster_id_after:${cluster_id[nn]}`);
       }
     }
+    _trace(`[TRACE-LP] exit n:${n}`);
     return cluster_id;
   }
 

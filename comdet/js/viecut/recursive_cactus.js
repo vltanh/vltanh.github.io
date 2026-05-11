@@ -50,12 +50,37 @@
   };
 
   RecursiveCactus.prototype._recursiveCactus = function (G, depth) {
+    // [TRACE-RC-W] wrapper probes mirror canonical recursive_cactus.h:102-111.
+    _trace(`[TRACE-RC-W] enter depth:${depth} n_in:${G.n()} `
+           + `m_in:${G.number_of_edges()} mincut:${this.mincut}`);
     const he = new NS.HeavyEdges(this.mincut);
     const cactusEdges = he.removeHeavyEdges(G);
+    _trace(`[TRACE-RC-W] after_removeHeavy depth:${depth} n:${G.n()} `
+           + `m:${G.number_of_edges()} cactusEdges_n:${cactusEdges.length}`);
     const cycleEdges = he.contractCycleEdges(G);
+    _trace(`[TRACE-RC-W] after_contractCycle depth:${depth} n:${G.n()} `
+           + `m:${G.number_of_edges()} cycleEdges_n:${cycleEdges.length}`);
     G = this._internalRecursiveCactus(G, depth);
+    _trace(`[TRACE-RC-W] after_internal depth:${depth} n:${G.n()} `
+           + `m:${G.number_of_edges()}`);
     he.reInsertCycles(G, cycleEdges);
+    _trace(`[TRACE-RC-W] after_reInsertCycles depth:${depth} n:${G.n()} `
+           + `m:${G.number_of_edges()}`);
+    for (let gn = 0; gn < G.number_of_nodes(); gn++) {
+      let line = `[TRACE-RC-W]  reInsCyc_contained[${gn}]:`;
+      for (const cv of G.containedVertices(gn)) line += `${cv},`;
+      _trace(line);
+    }
     he.reInsertVertices(G, cactusEdges);
+    _trace(`[TRACE-RC-W] after_reInsertVerts depth:${depth} n:${G.n()} `
+           + `m:${G.number_of_edges()}`);
+    for (let gn = 0; gn < G.number_of_nodes(); gn++) {
+      let line = `[TRACE-RC-W]  reInsVtx_contained[${gn}]:`;
+      for (const cv of G.containedVertices(gn)) line += `${cv},`;
+      _trace(line);
+    }
+    _trace(`[TRACE-RC-W] exit depth:${depth} n_out:${G.n()} `
+           + `m_out:${G.number_of_edges()}`);
     return G;
   };
 
@@ -77,56 +102,111 @@
     }
     if (G.number_of_nodes() === 1 || G.number_of_edges() === 0) return G;
 
+    // [TRACE-RC] edge_selection — cpp picks per cfg->edge_selection; JS
+    // hard-defaults to maximumWeightedFlowEdge (heavy_vertex semantics).
+    _trace(`[TRACE-RC] edge_selection depth:${depth} es:heavy_vertex`);
     const [s, e, tgt] = this._maximumWeightedFlowEdge(G);
     _trace("[TRACE-RC] flow_edge depth:", depth, " s:", s, " e:", e,
            " tgt:", tgt);
     const pr = new NS.PushRelabel();
+    const pid_before = this.problem_id;
     this.problem_id++;
+    _trace(`[TRACE-RC] problem_id depth:${depth} pid_before:${pid_before} `
+           + `pid_after:${this.problem_id}`);
     const [max_flow] = pr.solve_max_flow_min_cut(G, [s, tgt], 0, false, 0,
                                                  this.problem_id);
     _trace("[TRACE-RC] max_flow depth:", depth, " val:", max_flow,
            " mincut:", this.mincut);
-    if (max_flow > this.mincut) {
+    const mf_gt_mc = max_flow > this.mincut ? 1 : 0;
+    _trace(`[TRACE-RC] mf_branch depth:${depth} mf:${max_flow} `
+           + `mincut:${this.mincut} gt:${mf_gt_mc}`);
+    if (mf_gt_mc) {
       G.contractEdge(s, e);
+      _trace(`[TRACE-RC] contractEdge depth:${depth} n_after:${G.n()} `
+             + `m_after:${G.number_of_edges()}`);
       return this._recursiveCactus(G, depth + 1);
     }
-    if (G.number_of_nodes() === 2) return G;
+    const eq_2 = G.number_of_nodes() === 2 ? 1 : 0;
+    _trace(`[TRACE-RC] n2_branch depth:${depth} n:${G.n()} eq2:${eq_2}`);
+    if (eq_2) return G;
 
     const sccRes = NS.strong_components(G, this.problem_id);
     let v = sccRes.comp_num;
     const num_comp = sccRes.comp_count;
     const blocksizes = sccRes.blocksizes;
+    const deg_s = G.getWeightedNodeDegree(s);
+    const deg_t = G.getWeightedNodeDegree(tgt);
+    const nc_eq_2 = num_comp === 2 ? 1 : 0;
+    const deg_s_eq_mc = deg_s === this.mincut ? 1 : 0;
+    const deg_t_eq_mc = deg_t === this.mincut ? 1 : 0;
+    const sc_branch = nc_eq_2 && (deg_s_eq_mc || deg_t_eq_mc) ? 1 : 0;
+    _trace(`[TRACE-RC] singleton_branch depth:${depth} num_comp:${num_comp} `
+           + `nc_eq_2:${nc_eq_2} deg_s:${deg_s} deg_t:${deg_t} `
+           + `mc:${this.mincut} deg_s_eq_mc:${deg_s_eq_mc} `
+           + `deg_t_eq_mc:${deg_t_eq_mc} take:${sc_branch}`);
 
-    if (num_comp === 2
-        && (G.getWeightedNodeDegree(s) === this.mincut
-            || G.getWeightedNodeDegree(tgt) === this.mincut)) {
-      const ctr = G.getWeightedNodeDegree(s) === this.mincut ? s : tgt;
+    if (sc_branch) {
+      const ctr = deg_s_eq_mc ? s : tgt;
       const other = ctr === s ? tgt : s;
       const elementsInCtr = G.containedVertices(ctr).slice();
       const elementsInOther = G.containedVertices(other).slice();
+      _trace(`[TRACE-RC] singleton ctr:${ctr} other:${other} `
+             + `elemCtr_n:${elementsInCtr.length} `
+             + `elemOther_n:${elementsInOther.length} `
+             + `elemCtr:[${elementsInCtr.join(",")}] `
+             + `elemOther:[${elementsInOther.join(",")}]`);
       G.contractEdge(s, e);
+      _trace(`[TRACE-RC] singleton after_contract n:${G.n()} `
+             + `m:${G.number_of_edges()}`);
       const contracted_v = G.getCurrentPosition(elementsInCtr[0]);
       G.setContainedVertices(contracted_v, elementsInOther);
-      for (const n of elementsInOther) G.setCurrentPosition(n, contracted_v);
+      _trace(`[TRACE-RC] singleton contracted_v:${contracted_v} `
+             + `setContained_n:${elementsInOther.length}`);
+      let set_pos_idx = 0;
+      for (const n of elementsInOther) {
+        G.setCurrentPosition(n, contracted_v);
+        _trace(`[TRACE-RC] singleton setCurrPos idx:${set_pos_idx++} `
+               + `n:${n} pos:${contracted_v}`);
+      }
       const ret = this._recursiveCactus(G, depth + 1);
       const other_now = ret.getCurrentPosition(elementsInOther[0]);
       const new_node = ret.new_empty_node();
+      _trace(`[TRACE-RC] singleton other_now:${other_now} `
+             + `new_node:${new_node} ret_n:${ret.n()} `
+             + `ret_m:${ret.number_of_edges()}`);
       ret.new_edge(other_now, new_node, this.mincut);
       ret.setContainedVertices(new_node, elementsInCtr);
-      for (const n of elementsInCtr) ret.setCurrentPosition(n, new_node);
+      let set_pos2_idx = 0;
+      for (const n of elementsInCtr) {
+        ret.setCurrentPosition(n, new_node);
+        _trace(`[TRACE-RC] singleton ctr_setCurrPos idx:${set_pos2_idx++} `
+               + `n:${n} pos:${new_node}`);
+      }
       return ret;
     }
 
     let STCactus = this._findSTCactus(v, G, s, num_comp);
     const g_n = G.n();
+    _trace(`[TRACE-RC] block_iter_init depth:${depth} num_comp:${num_comp} `
+           + `g_n:${g_n.toFixed(6)} g_n_half:${(g_n / 2).toFixed(6)}`);
     for (let c = 0; c < num_comp; c++) {
-      if (blocksizes[c] <= g_n / 2) {
+      const bs_d = blocksizes[c];
+      const small = bs_d <= g_n / 2 ? 1 : 0;
+      _trace(`[TRACE-RC] block_iter_small depth:${depth} c:${c} `
+             + `blocksize:${blocksizes[c]} bs_d:${bs_d.toFixed(6)} `
+             + `le_half:${small}`);
+      if (small) {
         STCactus = this._mergeCactusWithComponent(STCactus, G, depth, c, v,
                                                   blocksizes[c]);
       }
     }
     for (let c = 0; c < num_comp; c++) {
-      if (blocksizes[c] > g_n / 2) {
+      const bs_d = blocksizes[c];
+      const big = bs_d > g_n / 2 ? 1 : 0;
+      _trace(`[TRACE-RC] block_iter_big depth:${depth} c:${c} `
+             + `blocksize:${blocksizes[c]} bs_d:${bs_d.toFixed(6)} `
+             + `gt_half:${big}`);
+      if (big) {
         STCactus = this._mergeCactusWithComponent(STCactus, G, depth, c, v,
                                                   blocksizes[c]);
       }
@@ -136,10 +216,19 @@
 
   RecursiveCactus.prototype._mergeCactusWithComponent = function (
     STCactus, G, depth, component, scc_result, blocksize) {
+    // [TRACE-RC-MC] mirror canonical recursive_cactus.h:228-356.
+    const g_n_half = G.n() / 2;
+    const bs_le_half = blocksize <= g_n_half ? 1 : 0;
+    _trace(`[TRACE-RC-MC] enter depth:${depth} component:${component} `
+           + `blocksize:${blocksize} STCactus_n:${STCactus.n()} `
+           + `G_n:${G.n()} g_n_half:${g_n_half.toFixed(6)} `
+           + `bs_le_half:${bs_le_half}`);
     let uncontracted_base_vertex = UNDEFINED_NODE;
     let contracted_base_vertex = UNDEFINED_NODE;
     let graph;
-    if (blocksize <= G.n() / 2) {
+    if (bs_le_half) {
+      _trace(`[TRACE-RC-MC] arm:small depth:${depth} blocksize:${blocksize} `
+             + `G_n:${G.n()}`);
       graph = new NS.MutableGraph();
       graph.start_construction(blocksize + 1);
       graph.last_node = 0;
@@ -154,20 +243,27 @@
         if (scc_result[n] === component) {
           graph.new_empty_node();
           contained.push(vtx++);
-          if (uncontracted_base_vertex === UNDEFINED_NODE
-              && G.containedVertices(n).length > 0) {
+          const first_un = (uncontracted_base_vertex === UNDEFINED_NODE
+                            && G.containedVertices(n).length > 0) ? 1 : 0;
+          if (first_un) {
             uncontracted_base_vertex = G.containedVertices(n)[0];
           }
+          _trace(`[TRACE-RC-MC-N] n:${n} arm:eq_comp `
+                 + `slot:${contained[contained.length - 1]} `
+                 + `first_un:${first_un} ubv:${uncontracted_base_vertex}`);
           for (const con of G.containedVertices(n)) {
             graph.addContainedVertex(contained[contained.length - 1], con);
             graph.setCurrentPosition(con, contained[contained.length - 1]);
           }
         } else {
           contained.push(blocksize);
-          if (contracted_base_vertex === UNDEFINED_NODE
-              && G.containedVertices(n).length > 0) {
+          const first_ct = (contracted_base_vertex === UNDEFINED_NODE
+                            && G.containedVertices(n).length > 0) ? 1 : 0;
+          if (first_ct) {
             contracted_base_vertex = G.containedVertices(n)[0];
           }
+          _trace(`[TRACE-RC-MC-N] n:${n} arm:neq_comp slot:${blocksize} `
+                 + `first_ct:${first_ct} cbv:${contracted_base_vertex}`);
           for (const con of G.containedVertices(n)) {
             graph.addContainedVertex(blocksize, con);
             graph.setCurrentPosition(con, blocksize);
@@ -181,41 +277,86 @@
           for (let e = 0; e < ne; e++) {
             const t = G.getEdgeTarget(n, e);
             const wgt = G.getEdgeWeight(n, e);
-            if (contained[t] === blocksize) to_contracted += wgt;
-            else if (contained[n] < contained[t]) {
+            const tc_before = to_contracted;
+            const t_is_blk = contained[t] === blocksize ? 1 : 0;
+            const n_lt_t = contained[n] < contained[t] ? 1 : 0;
+            if (t_is_blk) {
+              to_contracted += wgt;
+              _trace(`[TRACE-RC-MC-E] n:${n} e:${e} t:${t} wgt:${wgt} `
+                     + `branch:to_contracted cn:${contained[n]} `
+                     + `ct:${contained[t]} tc_before:${tc_before} `
+                     + `tc_after:${to_contracted}`);
+            } else if (n_lt_t) {
               graph.new_edge(contained[n], contained[t], wgt);
+              _trace(`[TRACE-RC-MC-E] n:${n} e:${e} t:${t} wgt:${wgt} `
+                     + `branch:new_edge cn:${contained[n]} `
+                     + `ct:${contained[t]} tc:${to_contracted}`);
+            } else {
+              _trace(`[TRACE-RC-MC-E] n:${n} e:${e} t:${t} wgt:${wgt} `
+                     + `branch:skip cn:${contained[n]} ct:${contained[t]}`);
             }
           }
-          if (to_contracted > 0) {
+          const tc_gt_0 = to_contracted > 0 ? 1 : 0;
+          if (tc_gt_0) {
             graph.new_edge(contained[n], blocksize, to_contracted);
           }
+          _trace(`[TRACE-RC-MC-N-DONE] n:${n} tc:${to_contracted} `
+                 + `emit_to_blk:${tc_gt_0}`);
         }
       }
       graph.finish_construction();
+      _trace(`[TRACE-RC-MC] small_after_build n:${graph.n()} `
+             + `m:${graph.number_of_edges()}`);
     } else {
+      _trace(`[TRACE-RC-MC] arm:big depth:${depth} blocksize:${blocksize} `
+             + `G_n:${G.n()}`);
       const all_ctr = new Set();
       for (let i = 0; i < scc_result.length; i++) {
         if (scc_result[i] !== component) {
           all_ctr.add(i);
-          if (contracted_base_vertex === UNDEFINED_NODE
-              && G.containedVertices(i).length > 0) {
+          const first_ct = (contracted_base_vertex === UNDEFINED_NODE
+                            && G.containedVertices(i).length > 0) ? 1 : 0;
+          if (first_ct) {
             contracted_base_vertex = G.containedVertices(i)[0];
           }
+          _trace(`[TRACE-RC-MC-I] i:${i} arm:neq_comp insert `
+                 + `all_ctr_size:${all_ctr.size} `
+                 + `first_ct:${first_ct} cbv:${contracted_base_vertex}`);
         } else {
-          if (uncontracted_base_vertex === UNDEFINED_NODE
-              && G.containedVertices(i).length > 0) {
+          const first_un = (uncontracted_base_vertex === UNDEFINED_NODE
+                            && G.containedVertices(i).length > 0) ? 1 : 0;
+          if (first_un) {
             uncontracted_base_vertex = G.containedVertices(i)[0];
           }
+          _trace(`[TRACE-RC-MC-I] i:${i} arm:eq_comp skip `
+                 + `first_un:${first_un} ubv:${uncontracted_base_vertex}`);
         }
       }
+      // [TRACE-RC-MC] all_ctr dump — JS port iterates the Set in id-ASC
+      // sorted order to mirror canonical TracerSet std::set iteration
+      // under TRACER_MODE.
+      const all_ctr_sorted = Array.from(all_ctr).sort((a, b) => a - b);
+      _trace(`[TRACE-RC-MC] all_ctr_dump size:${all_ctr.size} `
+             + `members:[${all_ctr_sorted.join(",")}] `
+             + `G_n_before:${G.n()} G_m_before:${G.number_of_edges()}`);
       graph = G;
       graph.contractVertexSet(all_ctr);
+      _trace(`[TRACE-RC-MC] after_contractVertexSet n:${graph.n()} `
+             + `m:${graph.number_of_edges()}`);
     }
+    _trace(`[TRACE-RC-MC] before_recurse depth:${depth} graph_n:${graph.n()} `
+           + `m:${graph.number_of_edges()} ubv:${uncontracted_base_vertex} `
+           + `cbv:${contracted_base_vertex}`);
     const n_i = this._recursiveCactus(graph, depth + 1);
     const merge_vtx_in_cactus = STCactus.getCurrentPosition(uncontracted_base_vertex);
     const nibar = n_i.getCurrentPosition(contracted_base_vertex);
+    _trace(`[TRACE-RC-MC] merge_args depth:${depth} STCactus_n:${STCactus.n()} `
+           + `n_i_n:${n_i.n()} merge_vtx:${merge_vtx_in_cactus} `
+           + `nibar:${nibar} mincut:${this.mincut}`);
     STCactus = NS.graph_modification.mergeGraphs(STCactus, merge_vtx_in_cactus,
                                                  n_i, nibar, this.mincut);
+    _trace(`[TRACE-RC-MC] after_merge STCactus_n:${STCactus.n()} `
+           + `STCactus_m:${STCactus.number_of_edges()}`);
     return STCactus;
   };
 
@@ -436,22 +577,27 @@
   };
 
   RecursiveCactus.prototype._maximumWeightedFlowEdge = function (G) {
+    // [TRACE-RC-WFE] mirror canonical recursive_cactus.h:547-579.
     let max_degree = 0, s = UNDEFINED_NODE;
     for (let n = 0; n < G.number_of_nodes(); n++) {
-      if (G.getWeightedNodeDegree(n) > max_degree && !G.isEmpty(n)) {
-        max_degree = G.getWeightedNodeDegree(n);
-        s = n;
-      }
+      const d = G.getWeightedNodeDegree(n);
+      const empty = G.isEmpty(n) ? 1 : 0;
+      const gt = (d > max_degree && !empty) ? 1 : 0;
+      if (gt) { max_degree = d; s = n; }
+      _trace(`[TRACE-RC-WFE] maxWFE n:${n} wdeg:${d} `
+             + `max_before:${max_degree} empty:${empty} gt:${gt} s:${s}`);
     }
     let t = UNDEFINED_NODE, e = UNDEFINED_EDGE, max_ngbr = 0;
     const ne = G.get_first_invalid_edge(s);
     for (let edge = 0; edge < ne; edge++) {
       const ngbr = G.getEdgeTarget(s, edge);
-      if (G.getWeightedNodeDegree(ngbr) > max_ngbr && !G.isEmpty(ngbr)) {
-        max_ngbr = G.getWeightedNodeDegree(ngbr);
-        t = ngbr;
-        e = edge;
-      }
+      const d = G.getWeightedNodeDegree(ngbr);
+      const empty = G.isEmpty(ngbr) ? 1 : 0;
+      const gt = (d > max_ngbr && !empty) ? 1 : 0;
+      if (gt) { max_ngbr = d; t = ngbr; e = edge; }
+      _trace(`[TRACE-RC-WFE] maxWFE_ngbr s:${s} edge:${edge} ngbr:${ngbr} `
+             + `wdeg:${d} max_before:${max_ngbr} empty:${empty} `
+             + `gt:${gt} t:${t} e:${e}`);
     }
     if (t === UNDEFINED_NODE) return this._findFlowEdge(G);
     return [s, e, t];
@@ -465,18 +611,27 @@
     // parity per audit row B. Mirror the discard.
     const max_edge = G.get_first_invalid_edge(s) - 1;
     let e = NS.random_functions.nextInt(0, max_edge);
+    _trace(`[TRACE-RC-FFE] entry s:${s} max_edge:${max_edge} e:${e} `
+           + `G_n:${G.n()}`);
     let edge_found = false;
+    let step = 0;
     while (!edge_found) {
       while (G.isEmpty(s)) {
+        _trace(`[TRACE-RC-FFE] step:${step} skip_empty_s s:${s}`);
         s = (s + 1) % G.n();
       }
       e = 0;
       while (e < G.get_first_invalid_edge(s)
              && G.isEmpty(G.getEdgeTarget(s, e))) e++;
-      if (e < G.get_first_invalid_edge(s)) edge_found = true;
+      const fie_ok = e < G.get_first_invalid_edge(s) ? 1 : 0;
+      _trace(`[TRACE-RC-FFE] step:${step} s:${s} e:${e} `
+             + `fie:${G.get_first_invalid_edge(s)} found:${fie_ok}`);
+      if (fie_ok) edge_found = true;
       else s = (s + 1) % G.n();
+      step++;
     }
     const tgt = G.getEdgeTarget(s, e);
+    _trace(`[TRACE-RC-FFE] exit s:${s} e:${e} tgt:${tgt}`);
     return [s, e, tgt];
   };
 

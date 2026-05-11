@@ -29,6 +29,17 @@
     if (typeof h === "function") h(event, payload);
   }
 
+  // Per byte-equal-tracer "Tracer prints stay" discipline: optional probes
+  // mirroring canonical [TRACE-CM-*] tags. Guarded by globalThis.__VIECUT_TRACE__
+  // so production walker is unaffected.
+  function _trace(line) {
+    if (typeof globalThis !== "undefined" && globalThis.__VIECUT_TRACE__) {
+      if (typeof process !== "undefined" && process.stderr) {
+        process.stderr.write(line + "\n");
+      }
+    }
+  }
+
   const UNDEFINED_NODE = 0xffffffff;
 
   function findAllMincuts(graphs, known_mincut) {
@@ -50,7 +61,16 @@
     const ge_ids = [];
     let previous_size = UNDEFINED_NODE;
     let outer_iter = 0;
-    while (graphs[graphs.length - 1].number_of_nodes() * 1.01 < previous_size) {
+    while (true) {
+      // [TRACE-CM] outer-while FP product n*1.01 BEFORE+AFTER mult.
+      const nn = graphs[graphs.length - 1].number_of_nodes();
+      const nn_d = nn;
+      const nn_x_101 = nn_d * 1.01;
+      const cont = nn_x_101 < previous_size ? 1 : 0;
+      _trace(`[TRACE-CM] outer_guard loop_iter:${outer_iter} n:${nn} `
+             + `nn_d:${nn_d.toFixed(6)} nn_x_101:${nn_x_101.toFixed(6)} `
+             + `prev:${previous_size} cont:${cont}`);
+      if (!cont) break;
       previous_size = graphs[graphs.length - 1].number_of_nodes();
       const current_graph = graphs[graphs.length - 1];
       const current_mincut = mincut;
@@ -63,16 +83,25 @@
       emit("phase_A_end", { iter: outer_iter, uf_n: uf.n() });
       emit("phase_B_start", { iter: outer_iter });
       const ge_collected = [];
+      // [TRACE-CM-D1] degree-1 cleanup per-node (T4).
       for (let n = 0; n < current_graph.number_of_nodes(); n++) {
-        const e0 = 0;
-        if (current_graph.get_first_invalid_edge(n) - e0 === 1) {
-          if (current_graph.getEdgeWeight(n, e0) === mincut && uf.n() > 1) {
-            const t = current_graph.getEdgeTarget(n, e0);
-            uf.Union(n, t);
-            guaranteed_edges[guaranteed_edges.length - 1].push([n, t]);
-            ge_collected.push([n, t]);
-          }
+        const fie = current_graph.get_first_invalid_edge(n);
+        const deg_diff = fie;  // e0 = 0
+        const deg1 = deg_diff === 1 ? 1 : 0;
+        const w = deg1 ? current_graph.getEdgeWeight(n, 0) : 0;
+        const wgt_eq_mc = deg1 && w === mincut ? 1 : 0;
+        const ufn_gt1 = uf.n() > 1 ? 1 : 0;
+        const take = deg1 && wgt_eq_mc && ufn_gt1 ? 1 : 0;
+        const t = take ? current_graph.getEdgeTarget(n, 0) : 0;
+        if (take) {
+          uf.Union(n, t);
+          guaranteed_edges[guaranteed_edges.length - 1].push([n, t]);
+          ge_collected.push([n, t]);
         }
+        _trace(`[TRACE-CM-D1] iter:${outer_iter} n:${n} fie:${fie} `
+               + `deg:${deg_diff} wgt:${w} mc:${mincut} deg1:${deg1} `
+               + `wgt_eq_mc:${wgt_eq_mc} ufn_gt1:${ufn_gt1} `
+               + `take:${take} t:${t}`);
       }
       emit("phase_B_end", { iter: outer_iter, unions: ge_collected });
       emit("phase_D_start", { iter: outer_iter, kind: "post_NOI", uf_n: uf.n(), n_before: current_graph.number_of_nodes() });
@@ -85,6 +114,12 @@
       emit("phase_C_start", { iter: outer_iter, sub: "PR12" });
       const uf12 = NS.tests.prTests12(graphs[graphs.length - 1], mincut + 1, true);
       emit("phase_C_end", { iter: outer_iter, sub: "PR12", uf_n: uf12.n(), n_before: graphs[graphs.length - 1].number_of_nodes() });
+      {
+        let line = `[TRACE-CM] pr12_uf iter:${outer_iter} members`;
+        const nn = graphs[graphs.length - 1].n();
+        for (let v = 0; v < nn; v++) line += ` ${v}->${uf12.Find(v)}`;
+        _trace(line);
+      }
       if (uf12.n() < graphs[graphs.length - 1].number_of_nodes()) {
         const g12 = NS.contraction.fromUnionFind(graphs[graphs.length - 1], uf12, true);
         graphs.push(g12);
@@ -106,10 +141,14 @@
       outer_iter++;
     }
 
-    if (graphs[graphs.length - 1].number_of_nodes() > 1) {
+    const noi_branch = graphs[graphs.length - 1].number_of_nodes() > 1 ? 1 : 0;
+    _trace(`[TRACE-CM] noi_branch n_after_outer:${graphs[graphs.length - 1].number_of_nodes()} `
+           + `take:${noi_branch}`);
+    if (noi_branch) {
       mincut = Math.min(
         mincut,
         NS.noi_minimum_cut.perform_minimum_cut(graphs[graphs.length - 1], true));
+      _trace(`[TRACE-CM] noi_result mincut:${mincut}`);
     }
 
     emit("phase_E_start", { mincut, n_in: graphs[graphs.length - 1].number_of_nodes() });
@@ -119,6 +158,18 @@
       cactus_edges: out_graph ? out_graph.number_of_edges() : 0 });
     NS.minimum_cut_helpers.setVertexLocations(
       out_graph, graphs, ge_ids, guaranteed_edges, mincut);
+
+    // [TRACE-CM-SVL] per-vertex partition assignment AFTER setVertexLocations
+    // (cactus_mincut.h:173).
+    if (out_graph) {
+      _trace(`[TRACE-CM-SVL] out_graph_n:${out_graph.n()} `
+             + `graphs_n:${graphs.length}`);
+      for (let v = 0; v < out_graph.n(); v++) {
+        let line = `[TRACE-CM-SVL] node:${v} contained:`;
+        for (const cv of out_graph.containedVertices(v)) line += `${cv},`;
+        _trace(line);
+      }
+    }
 
     return { mincut, out_graph };
   }
@@ -136,6 +187,9 @@
     }
     const graphs = [G];
     const result = findAllMincuts(graphs, opts.known_mincut);
+    const mc_eq_0 = result.mincut === 0 ? 1 : 0;
+    _trace(`[TRACE-MB] mincut_zero_check mincut:${result.mincut} `
+           + `eq0:${mc_eq_0}`);
     if (result.mincut <= 0 || !result.out_graph) {
       return { cutValue: result.mincut,
                inPartition: graphs[0].containedVertices(0).slice(),
@@ -151,6 +205,21 @@
     const inCut = NS.findBipartitionFromCactus(cactus, n_orig, dfs);
     const inP = [], outP = [];
     for (let i = 0; i < n_orig; i++) (inCut[i] ? inP : outP).push(i);
+    // [TRACE-MB-FE] T29 final edge collection — iterate the original graph
+    // to mirror canonical most_balanced_minimum_cut.h:90-98.
+    const origG = graphs[0];
+    for (let on = 0; on < origG.number_of_nodes(); on++) {
+      const ne = origG.get_first_invalid_edge(on);
+      for (let oe = 0; oe < ne; oe++) {
+        const ot = origG.getEdgeTarget(on, oe);
+        const in_on = inCut[on] ? 1 : 0;
+        const in_ot = inCut[ot] ? 1 : 0;
+        const diff = in_on !== in_ot ? 1 : 0;
+        _trace(`[TRACE-MB-FE] on:${on} oe:${oe} ot:${ot} `
+               + `in_on:${in_on} in_ot:${in_ot} diff:${diff} `
+               + `emit:${diff}`);
+      }
+    }
     emit("phase_G_end", { inP: inP.slice(), outP: outP.slice(), cutValue: result.mincut });
     return { cutValue: result.mincut, inPartition: inP, outPartition: outP,
              cactus: result.out_graph };

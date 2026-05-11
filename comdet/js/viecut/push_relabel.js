@@ -20,6 +20,16 @@
   const GLOBAL_UPDATE_FRQ = 0.51;
   const WORK_NODE_TO_EDGES = 4;
 
+  // [TRACE-PR-*] probes mirror canonical push_relabel.h (sibling fork).
+  // Guarded by globalThis.__VIECUT_TRACE__.
+  function _trace(line) {
+    if (typeof globalThis !== "undefined" && globalThis.__VIECUT_TRACE__) {
+      if (typeof process !== "undefined" && process.stderr) {
+        process.stderr.write(line + "\n");
+      }
+    }
+  }
+
   function PushRelabel() { this.m_current_iteration = 0; }
 
   PushRelabel.prototype._addEdgeFlow = function (n, e, f) {
@@ -110,16 +120,24 @@
 
   PushRelabel.prototype._push = function (source, e, sourceDistance) {
     const target = this.m_G.getEdgeTarget(source, e);
-    if (sourceDistance <= this.m_distance[target]) return;
+    // T16 (push_relabel.h:148): non-strict <=.
+    const t16 = sourceDistance <= this.m_distance[target] ? 1 : 0;
+    _trace(`[TRACE-PR-PUSH] src:${source} e:${e} tgt:${target} `
+           + `sdist:${sourceDistance} dist_tgt:${this.m_distance[target]} `
+           + `t16_block:${t16}`);
+    if (t16) return;
     const capacity = this.m_G.getEdgeWeight(source, e);
     const flow = this._getEdgeFlow(source, e);
     const amount = Math.min(capacity - flow, this.m_excess[source]);
+    _trace(`[TRACE-PR-PUSH] src:${source} tgt:${target} cap:${capacity} `
+           + `flow:${flow} excess:${this.m_excess[source]} amount:${amount}`);
     if (amount === 0) return;
     const rev_e = this.m_G.getReverseEdge(source, e);
     this._addEdgeFlow(source, e, amount);
     this._addEdgeFlow(target, rev_e, -amount);
     this.m_excess[source] -= amount;
     this.m_excess[target] += amount;
+    // limited=false in our instantiation, so T18 not exercised; emit no-op.
     this._enqueue(target);
   };
 
@@ -143,8 +161,15 @@
       this._push(node, e, nodeDist);
     }
     if (this.m_excess[node] > 0) {
-      if (this.m_count[this.m_distance[node]] === 1
-          && this.m_distance[node] < this.m_G.number_of_nodes()) {
+      // T17 (push_relabel.h:202): m_count[d]==1 && d<n.
+      const count_eq_1 = this.m_count[this.m_distance[node]] === 1 ? 1 : 0;
+      const dist_lt_n = this.m_distance[node] < this.m_G.number_of_nodes() ? 1 : 0;
+      const t17 = (count_eq_1 && dist_lt_n) ? 1 : 0;
+      _trace(`[TRACE-PR-DC] node:${node} dist:${this.m_distance[node]} `
+             + `count:${this.m_count[this.m_distance[node]]} `
+             + `n:${this.m_G.number_of_nodes()} count_eq_1:${count_eq_1} `
+             + `dist_lt_n:${dist_lt_n} t17_gap:${t17}`);
+      if (t17) {
         this._gap_heuristic(this.m_distance[node]);
       } else {
         this._relabel(node);
@@ -232,8 +257,15 @@
     if (problem_id === undefined) {
       problem_id = NS.random_functions.nextInt(0, 0xfffffffe);
     }
+    _trace(`[TRACE-PR] solve_entry G_n:${G.n()} curr_source:${curr_source} `
+           + `sources_n:${sources.length} limit:${limit} `
+           + `problem_id:${problem_id}`);
     this.m_G = G;
     this.m_work = 0;
+    this.m_num_relabels = 0;
+    this.m_gaps = 0;
+    this.m_pushes = 0;
+    this.m_global_updates = 1;
     this.m_problemid = problem_id;
     this.m_limit = limit;
     this.m_limitreached = false;
@@ -243,14 +275,19 @@
     this._global_relabeling(sources, curr_source, true);
     const work_todo = WORK_NODE_TO_EDGES * G.number_of_nodes() + G.number_of_edges();
 
+    let pr_iter = 0;
     while (!this.m_Q.empty()) {
       const v = this._popMax();
       this.m_active[v] = false;
+      _trace(`[TRACE-PR] main_pop iter:${pr_iter} v:${v} `
+             + `dist:${this.m_distance[v]} excess:${this.m_excess[v]}`);
       this._discharge(v);
       if (this.m_work > GLOBAL_UPDATE_FRQ * work_todo) {
         this._global_relabeling(sources, curr_source, false);
         this.m_work = 0;
+        this.m_global_updates = (this.m_global_updates || 1) + 1;
       }
+      pr_iter++;
     }
 
     let total_flow = 0;
@@ -259,6 +296,7 @@
     let source_set = [];
     if (compute_source_set) source_set = this._computeSourceSet(sources, curr_source);
 
+    _trace(`[TRACE-PR] solve_exit total_flow:${total_flow}`);
     return [total_flow, source_set];
   };
 
