@@ -28,17 +28,92 @@
   }
   const CC = window.COMDET.COMMON;
 
+  // [TRACE-LD-MV] / [TRACE-LD-CAND] / [TRACE-LD-CACHE] probe gate.
+  // Off in browser (window.LEIDEN_DUMP_PROBES undefined) so the production
+  // walker emits nothing. Tracer harnesses set globalThis.LEIDEN_DUMP_PROBES
+  // = true before importing leiden.js to enable per-cand + per-move admin +
+  // per-cache-edge emissions that mirror the cpp instrumented fork
+  // (community-detection/tools/viz_check/leiden/instrumented/
+  // mutable_vertex_partition_traced.cpp + optimiser_traced.cpp).
+  // Bit-exact hex emission via Float64 view so probes diff byte-for-byte
+  // vs cpp's `_ld_mv_emit_hex` / `_ld_emit_hex`.
+  const _ldProbeBuf = new Float64Array(1);
+  const _ldProbeView = new BigUint64Array(_ldProbeBuf.buffer);
+  function _ldHex(x) {
+    _ldProbeBuf[0] = x;
+    return _ldProbeView[0].toString(16).padStart(16, "0");
+  }
+  function _ldProbesEnabled() {
+    return (typeof globalThis !== "undefined")
+        && globalThis.LEIDEN_DUMP_PROBES === true;
+  }
+  // Tracer-visible pass counter. Mirrors cpp's `gTrace.passes.size() - 1`
+  // which grows monotonically across move + refine passes at every level.
+  // optimisePartition resets to 0; moveNodes/mergeNodesConstrained increment
+  // on entry and stamp every per-candidate emission.
+  let _ldPassIdx = 0;
+
   // Leiden-local Fisher-Yates shuffle that uses rng.intLemire (igraph's
   // Lemire-debiased bounded-int) so the JS production walker's RNG draw
   // sequence bit-equals libleidenalg under matching seed. LV.shuffle
   // uses rng.int (textbook rejection) which does NOT match igraph's
   // get_random_int; Louvain externals's tracer relies on the textbook
   // path so that side stays unchanged.
-  function leidenShuffle(arr, rng) {
+  function leidenShuffle(arr, rng, siteTag) {
+    const _probe = _ldProbesEnabled();
     for (let idx = arr.length - 1; idx >= 1; idx--) {
       const j = rng.intLemire(0, idx);
+      // [TRACE-LD-SHUFFLE] Mirrors cpp `_ld_traced_shuffle` in
+      // optimiser_traced.cpp. Per-step `(idx, range, rand_idx)` tuple
+      // closes P0 #10 (GraphHelper.cpp:37 get_random_int return) and
+      // gives a per-call cross-check anchor for the Lemire mapping
+      // (P0 #11; inner igraph_i_rng_get_uint32_bounded scalars unclosed
+      // because libigraph is vendored upstream).
+      if (_probe) {
+        console.error(
+          `[TRACE-LD-SHUFFLE] site=${siteTag || "?"} idx=${idx} range=${idx + 1} rand_idx=${j}`);
+      }
       const t = arr[idx]; arr[idx] = arr[j]; arr[j] = t;
     }
+  }
+  // [TRACE-LD-LEMIRE] Per-Lemire-call probe wrapper. Closes P0 #11
+  // (random.c:428-439 Lemire mapping). Walks the same algorithm as
+  // common.js `intLemire` but emits every `(range, x, m, lo, threshold,
+  // accept)` tuple per draw. NOT used by the production walker (it would
+  // perturb the RNG stream); enabled only by tracer harnesses that set
+  // LEIDEN_DUMP_LEMIRE=true and replace the rng.intLemire on a clone.
+  // Off by default. Kept here for closure-completeness; cpp side cannot
+  // mirror without editing vendored igraph, so cpp emits (range, return)
+  // at the call-site via [TRACE-LD-SHUFFLE].
+  function _ldLemireTrace(next, lo, hi) {
+    if (hi === lo) {
+      if (_ldProbesEnabled()) {
+        console.error(`[TRACE-LD-LEMIRE] range=1 accept=1 result=${lo}`);
+      }
+      return lo;
+    }
+    const range = hi - lo + 1;
+    if (range <= 0) return lo;
+    const r64 = BigInt(range);
+    const t = (1n << 32n) % r64;
+    let m, l, x;
+    let _attempt = 0;
+    do {
+      x = BigInt(next());
+      m = x * r64;
+      l = m & 0xffffffffn;
+      if (_ldProbesEnabled()) {
+        const accept = (l >= t) ? 1 : 0;
+        console.error(
+          `[TRACE-LD-LEMIRE] range=${range} attempt=${_attempt} x=${x.toString(16).padStart(8, "0")}`
+          + ` m_hi=${(m >> 32n).toString(16).padStart(8, "0")}`
+          + ` lo=${l.toString(16).padStart(8, "0")}`
+          + ` threshold=${t.toString(16).padStart(8, "0")}`
+          + ` accept=${accept}`);
+      }
+      _attempt++;
+    } while (l < t);
+    return lo + Number(m >> 32n);
   }
 
   // ── LeidenPartition: libleidenalg-shape Partition admin ──────────
@@ -154,6 +229,11 @@
         if (empties[i] === c) { empties.splice(i, 1); return; }
       }
     }
+    // [TRACE-LD-EMPTY] cpp empties-list probes are inlined at the call
+    // sites in moveNode (ADD before push_back, ERASE_PRE before erase,
+    // ERASE_POST after erase). Closes P0 #8 — LIFO order critical for
+    // byte-equality. Mirrors cpp mutable_vertex_partition_traced.cpp
+    // move_node empty-add + empty-erase sites.
 
     function rebuildAdmin() {
       ncomm = 0;
@@ -221,15 +301,38 @@
       neighLast = 1;
       const adjN = graph.neighbours(v);
       const adjW = graph.neighbourWeights(v);
+      // [TRACE-LD-CACHE] Mirrors cpp cache_neigh_communities (Mutable
+      // VertexPartition.cpp:799-867). cpp uses mode=IGRAPH_ALL on
+      // undirected graphs (line 988-990 short-circuit); JS port walks
+      // adj once with full self-loop weight so encoded `mode=3` (ALL).
+      // Probe emission walks the same iteration order as cpp.
+      const _probe = _ldProbesEnabled();
+      if (_probe) {
+        console.error(`[TRACE-LD-CACHE] BEGIN v=${v} mode=3 degree=${adjN.length}`);
+      }
       for (let i = 0; i < adjN.length; i++) {
         const u = adjN[i];
         const w = adjW[i];
         const c = membership[u];
+        if (_probe) {
+          // cpp halves self-loop under IGRAPH_ALL/LOOPS_TWICE (cpp:851-852);
+          // JS adj has self-loop once with full weight, NO halving — net
+          // contribution matches cpp. Probe self_halved=0 always (JS-side
+          // convention) but emit pre/post bracketed exactly the same.
+          const pre = cachedWeight[c] === -1 ? 0 : cachedWeight[c];
+          const post = pre + w;
+          console.error(
+            `[TRACE-LD-CACHE] EDGE v=${v} idx=${i} u=${u} e=- comm=${c}`
+            + ` w=${_ldHex(w)} self_halved=0 pre=${_ldHex(pre)} post=${_ldHex(post)}`);
+        }
         if (cachedWeight[c] === -1) {
           cachedWeight[c] = 0;
           neighPos[neighLast++] = c;
         }
         cachedWeight[c] += w;
+      }
+      if (_probe) {
+        console.error(`[TRACE-LD-CACHE] END v=${v} mode=3 ncached=${neighLast}`);
       }
     }
 
@@ -259,9 +362,18 @@
 
     function getEmptyCommunity() {
       if (empties.length > 0) return empties[empties.length - 1];
+      // [TRACE-LD-ADDEMPTY] Mirrors cpp add_empty_community probe at
+      // mutable_vertex_partition_traced.cpp:540. Emits (n_before, new_comm,
+      // n_after, empties_size) so cpp ↔ JS branch parity is byte-exact.
+      const _nb = ncomm;
       const newId = ncomm;
       growAdmin(newId + 1);
       emptiesAdd(newId);
+      if (_ldProbesEnabled()) {
+        console.error(
+          `[TRACE-LD-ADDEMPTY] n_before=${_nb} new_comm=${newId}`
+          + ` n_after=${ncomm} empties_size=${empties.length}`);
+      }
       return newId;
     }
 
@@ -277,16 +389,60 @@
         }
       }
       const node_size = graph.nodeSize(v);
+      const _probe = _ldProbesEnabled();
+      // [TRACE-LD-MV] ENTRY: mirrors cpp's pre-update admin snapshot
+      // (MutableVertexPartition.cpp:584-600). Field shape + order mirrors
+      // the cpp `_ld_mv_emit_hex` block in
+      // mutable_vertex_partition_traced.cpp move_node ENTRY probe.
+      if (_probe) {
+        console.error(
+          `[TRACE-LD-MV] ENTRY v=${v} old=${oldComm} new=${newComm}`
+          + ` nsize=${_ldHex(node_size)}`
+          + ` csize_old=${_ldHex(csize[oldComm])}`
+          + ` csize_new=${_ldHex(csize[newComm])}`
+          + ` cnodes_old=${cnodes[oldComm]} cnodes_new=${cnodes[newComm]}`
+          + ` tw_in_old=${_ldHex(inC[oldComm])}`
+          + ` tw_in_new=${_ldHex(inC[newComm])}`
+          + ` tw_from_old=${_ldHex(totFromC[oldComm])}`
+          + ` tw_from_new=${_ldHex(totFromC[newComm])}`
+          + ` tw_to_old=${_ldHex(totToC[oldComm])}`
+          + ` tw_to_new=${_ldHex(totToC[newComm])}`
+          + ` tw_all=${_ldHex(totalWeightInAllComms)}`
+          + ` tpe_all=${_ldHex(totalPossibleEdgesInAllComms)}`
+          + ` directed=${directed ? 1 : 0}`);
+      }
       // Possible-edges delta (line 572). Pre-csize-update.
       const dirFactor = directed ? 1 : 2;
       const delta_pe = 2.0 * node_size * (csize[newComm] - csize[oldComm] + node_size) / dirFactor;
+      // [TRACE-LD-MV] DELTA_PE: mirror cpp:572 analytic formula. Probe
+      // emits BEFORE the += to keep symmetry with cpp probe order.
+      if (_probe) {
+        console.error(`[TRACE-LD-MV] DELTA_PE v=${v} delta_pe=${_ldHex(delta_pe)}`);
+      }
       totalPossibleEdgesInAllComms += delta_pe;
       // Remove from old + maybe push to empties (lines 583-601).
       cnodes[oldComm] -= 1;
       csize[oldComm]  -= node_size;
-      if (cnodes[oldComm] === 0) emptiesAdd(oldComm);
+      if (cnodes[oldComm] === 0) {
+        // cpp probe emits "ADD" with pre_size/pre_list BEFORE push_back.
+        if (_ldProbesEnabled()) {
+          console.error(
+            `[TRACE-LD-EMPTY] ADD v=${v} c=${oldComm} pre_size=${empties.length} pre_list=${empties.join(",")}`);
+        }
+        emptiesAdd(oldComm);
+      }
       // Add to new (if was empty, remove from empties via reverse-iter).
-      if (cnodes[newComm] === 0) emptiesRemove(newComm);
+      if (cnodes[newComm] === 0) {
+        if (_ldProbesEnabled()) {
+          console.error(
+            `[TRACE-LD-EMPTY] ERASE_PRE v=${v} c=${newComm} pre_size=${empties.length} pre_list=${empties.join(",")}`);
+        }
+        emptiesRemove(newComm);
+        if (_ldProbesEnabled()) {
+          console.error(
+            `[TRACE-LD-EMPTY] ERASE_POST v=${v} c=${newComm} post_size=${empties.length} post_list=${empties.join(",")}`);
+        }
+      }
       cnodes[newComm] += 1;
       csize[newComm]  += node_size;
       // Per cpp move_node mode loop (lines 638-722): runs IGRAPH_OUT +
@@ -315,6 +471,15 @@
           // cpp by applying the per-edge contribution twice when u===v.
           const reps = (!directed && u === v) ? 2 : 1;
           for (let r = 0; r < reps; r++) {
+            // [TRACE-LD-MV] EDGE: mirror cpp's per-edge probe. cpp encodes
+            // mode as igraph_neimode_t (IGRAPH_OUT=1, IGRAPH_IN=2,
+            // IGRAPH_ALL=3); pass=0 ↔ OUT, pass=1 ↔ IN. Probe fires
+            // AFTER from/to update (matching cpp's probe point) and
+            // BEFORE in-comm update.
+            const int_weight = w / (directed ? 1 : 2) / (u === v ? 2 : 1);
+            const intra_old = (oldComm === u_comm);
+            const intra_new = ((newComm === u_comm) || (u === v));
+            // Apply from/to update first (matches cpp).
             if (pass === 0) {
               totFromC[oldComm] -= w;
               totFromC[newComm] += w;
@@ -322,17 +487,50 @@
               totToC[oldComm] -= w;
               totToC[newComm] += w;
             }
-            const int_weight = w / (directed ? 1 : 2) / (u === v ? 2 : 1);
-            if (oldComm === u_comm) {
+            if (_probe) {
+              const modeTag = (pass === 0) ? 1 : 2;  // OUT=1, IN=2
+              console.error(
+                `[TRACE-LD-MV] EDGE v=${v} u=${u} e=- mode=${modeTag}`
+                + ` u_comm=${u_comm}`
+                + ` w=${_ldHex(w)}`
+                + ` int_weight=${_ldHex(int_weight)}`
+                + ` intra_old=${intra_old ? 1 : 0}`
+                + ` intra_new=${intra_new ? 1 : 0}`
+                + ` tw_from_old=${_ldHex(totFromC[oldComm])}`
+                + ` tw_from_new=${_ldHex(totFromC[newComm])}`
+                + ` tw_to_old=${_ldHex(totToC[oldComm])}`
+                + ` tw_to_new=${_ldHex(totToC[newComm])}`
+                + ` tw_in_old=${_ldHex(inC[oldComm])}`
+                + ` tw_in_new=${_ldHex(inC[newComm])}`
+                + ` tw_all=${_ldHex(totalWeightInAllComms)}`);
+            }
+            if (intra_old) {
               inC[oldComm] -= int_weight;
               totalWeightInAllComms -= int_weight;
             }
-            if ((newComm === u_comm) || (u === v)) {
+            if (intra_new) {
               inC[newComm] += int_weight;
               totalWeightInAllComms += int_weight;
             }
           }
         }
+      }
+      // [TRACE-LD-MV] EXIT: post-update admin tuple. Bookends ENTRY.
+      if (_probe) {
+        console.error(
+          `[TRACE-LD-MV] EXIT v=${v} old=${oldComm} new=${newComm}`
+          + ` csize_old=${_ldHex(csize[oldComm])}`
+          + ` csize_new=${_ldHex(csize[newComm])}`
+          + ` cnodes_old=${cnodes[oldComm]} cnodes_new=${cnodes[newComm]}`
+          + ` tw_in_old=${_ldHex(inC[oldComm])}`
+          + ` tw_in_new=${_ldHex(inC[newComm])}`
+          + ` tw_from_old=${_ldHex(totFromC[oldComm])}`
+          + ` tw_from_new=${_ldHex(totFromC[newComm])}`
+          + ` tw_to_old=${_ldHex(totToC[oldComm])}`
+          + ` tw_to_new=${_ldHex(totToC[newComm])}`
+          + ` tw_all=${_ldHex(totalWeightInAllComms)}`
+          + ` tpe_all=${_ldHex(totalPossibleEdgesInAllComms)}`
+          + ` n_empty=${empties.length}`);
       }
       membership[v] = newComm;
     }
@@ -377,6 +575,19 @@
       for (let c = 0; c < ncomm; c++) {
         if (cnodes[c] > 0) surv.push(c);
       }
+      // [TRACE-LD-RANK] PRE: dump per-community (id, csize, cnodes) in
+      // input order. Mirrors cpp mutable_vertex_partition_traced.cpp
+      // rank_order_communities probe. Closes P0 #14. JS uses csize-DESC
+      // + cnodes-DESC + id-ASC tiebreak (matches cpp `orderCSize`).
+      // PRE emits ALL communities (including zero-cnodes) so the cpp
+      // input row set matches; cpp emits all nb_comms rows, JS does same.
+      if (_ldProbesEnabled()) {
+        let pre = "";
+        for (let c = 0; c < ncomm; c++) {
+          pre += (c ? "," : "") + `(${c},${csize[c]},${cnodes[c]})`;
+        }
+        console.error(`[TRACE-LD-RANK] PRE nb_comms=${ncomm} rows=${pre}`);
+      }
       surv.sort(function (A, B) {
         if (csize[A] !== csize[B]) return csize[B] - csize[A];
         if (cnodes[A] !== cnodes[B]) return cnodes[B] - cnodes[A];
@@ -385,6 +596,19 @@
       const remap = new Int32Array(ncomm);
       for (let c = 0; c < ncomm; c++) remap[c] = -1;
       for (let i = 0; i < surv.length; i++) remap[surv[i]] = i;
+      // [TRACE-LD-RANK] POST: dump new_comm_id mapping. cpp emits all
+      // nb_comms entries; for zero-cnode comms the cpp value is 0 (the
+      // vector is default-init to 0 and never assigned). JS leaves
+      // remap[c] = -1 for zero-cnode; emit cpp-shape (0 for dead) so
+      // the diff is byte-equal under the cpp invariant.
+      if (_ldProbesEnabled()) {
+        let post = "";
+        for (let c = 0; c < ncomm; c++) {
+          const v = remap[c] === -1 ? 0 : remap[c];
+          post += (c ? "," : "") + v;
+        }
+        console.error(`[TRACE-LD-RANK] POST nb_comms=${ncomm} remap=${post}`);
+      }
       for (let v = 0; v < n; v++) membership[v] = remap[membership[v]];
       const newN = surv.length;
       const newIn   = new Float64Array(newN);
@@ -479,7 +703,46 @@
         // n=8 in-side merging {6,7} into {0..5} loses sign without it).
         const diff = (newEdges + sw) - (oldEdges - sw)
                    - this.resolution * (possNew - possOldDelta);
-        return directed ? diff : diff / 2.0;
+        const result = directed ? diff : diff / 2.0;
+        // [TRACE-LD-CPM] Per-call term-by-term breakdown. Closes P0 #12.
+        // Field order + naming mirrors cpp_cpm_vertex_partition_traced.cpp
+        // probe so a single grep diff localises the divergent term. cpp
+        // shapes its diff as `(diff_new - diff_old)` with explicit
+        // `possible_edge_difference_{old,new}`; JS folded form
+        // `(possNew - possOldDelta)` carries the same algebra. Recompute
+        // the cpp-shape pe_old/pe_new + diff_old/diff_new from the same
+        // inputs so cross-side diff is byte-exact under matching seed.
+        if (_ldProbesEnabled()) {
+          const pe_old_cpp = correctSelfLoops
+            ? nv * (2.0 * csizeOld - nv)
+            : nv * (2.0 * csizeOld - nv - 1.0);
+          const pe_new_cpp = correctSelfLoops
+            ? nv * (2.0 * csizeNew + nv)
+            : nv * (2.0 * csizeNew + nv - 1.0);
+          const diff_old_cpp = wToOld + wFromOld - sw
+                             - this.resolution * pe_old_cpp;
+          const diff_new_cpp = wToNew + wFromNew + sw
+                             - this.resolution * pe_new_cpp;
+          const diff_cpp = diff_new_cpp - diff_old_cpp;
+          console.error(
+            `[TRACE-LD-CPM] v=${v} old=${oldComm} new=${newComm}`
+            + ` res=${_ldHex(this.resolution)}`
+            + ` w_to_old=${_ldHex(wToOld)}`
+            + ` w_to_new=${_ldHex(wToNew)}`
+            + ` w_from_old=${_ldHex(wFromOld)}`
+            + ` w_from_new=${_ldHex(wFromNew)}`
+            + ` nsize=${_ldHex(nv)}`
+            + ` csize_old=${_ldHex(csizeOld)}`
+            + ` csize_new=${_ldHex(csizeNew)}`
+            + ` self_weight=${_ldHex(sw)}`
+            + ` ped_old=${_ldHex(pe_old_cpp)}`
+            + ` ped_new=${_ldHex(pe_new_cpp)}`
+            + ` diff_old=${_ldHex(diff_old_cpp)}`
+            + ` diff_new=${_ldHex(diff_new_cpp)}`
+            + ` diff=${_ldHex(diff_cpp)}`
+            + ` csl=${correctSelfLoops ? 1 : 0}`);
+        }
+        return result;
       },
       quality: function (P) {
         let q = 0;
@@ -540,7 +803,32 @@
                        + (w_from_new + sw - k_in * K_out_new / total_weight);
         const diff = diff_new - diff_old;
         const m = directed ? m_orig : 2.0 * m_orig;
-        return diff / m;
+        const result = diff / m;
+        // [TRACE-LD-MOD] Per-call term-by-term breakdown. Closes P0 #13.
+        // Field order mirrors modularity_vertex_partition_traced.cpp probe
+        // (cpp lines 42-119). 15 terms + result; one fprintf per call.
+        if (_ldProbesEnabled()) {
+          console.error(
+            `[TRACE-LD-MOD] v=${v} old=${oldComm} new=${newComm}`
+            + ` total_weight=${_ldHex(total_weight)}`
+            + ` w_to_old=${_ldHex(w_to_old)}`
+            + ` w_from_old=${_ldHex(w_from_old)}`
+            + ` w_to_new=${_ldHex(w_to_new)}`
+            + ` w_from_new=${_ldHex(w_from_new)}`
+            + ` k_out=${_ldHex(k_out)}`
+            + ` k_in=${_ldHex(k_in)}`
+            + ` self_weight=${_ldHex(sw)}`
+            + ` K_out_old=${_ldHex(K_out_old)}`
+            + ` K_in_old=${_ldHex(K_in_old)}`
+            + ` K_out_new=${_ldHex(K_out_new)}`
+            + ` K_in_new=${_ldHex(K_in_new)}`
+            + ` diff_old=${_ldHex(diff_old)}`
+            + ` diff_new=${_ldHex(diff_new)}`
+            + ` diff=${_ldHex(diff)}`
+            + ` m=${_ldHex(m)}`
+            + ` result=${_ldHex(result)}`);
+        }
+        return result;
       },
       quality: function (P) {
         const Gp = P.graph;
@@ -581,7 +869,7 @@
       const vo = opts.visitOrder;
       for (let v = 0; v < n && v < vo.length; v++) order[v] = vo[v];
     } else {
-      leidenShuffle(order, rng);
+      leidenShuffle(order, rng, "move");
     }
     const queue = order.slice();
     const isStable = new Uint8Array(n);
@@ -589,6 +877,10 @@
     let nbMoves = 0;
     const traces = [];
     let _moveCap = 0;
+    // [TRACE-LD-CAND] pass_idx stamp mirrors cpp's gTrace.passes counter.
+    const _probe = _ldProbesEnabled();
+    const _passIdx = _ldPassIdx++;
+    let _visitIdx = 0;
     while (queue.length > 0) {
       if (++_moveCap > n * 1000) {
         console.warn("[leiden] moveNodes visit-cap exceeded n*1000=" + (n*1000) + " visits; bailing");
@@ -598,23 +890,82 @@
       const vComm = P.memberOf(v);
       const cands = P.getNeighComms(v);
       if (cands.indexOf(vComm) < 0) cands.push(vComm);
-      if (considerEmpty && P.cnodes(vComm) > 1) {
+      // [TRACE-LD-BRANCH] Closes P0 #20: JS always walks ALL_NEIGH_COMMS
+      // path (default Leiden consider_comms). Probe records the branch
+      // name + post-cc candidate count + cnodes(vComm) so the empty-comm
+      // gate flip is unambiguous downstream.
+      const _cnodes_vcomm = P.cnodes(vComm);
+      if (_probe) {
+        console.error(
+          `[TRACE-LD-BRANCH] pass=${_passIdx} visit=${_visitIdx}`
+          + ` v=${v} vcomm=${vComm} consider_comms=ALL_NEIGH_COMMS`
+          + ` n_after_cc=${cands.length} cnodes_vcomm=${_cnodes_vcomm}`);
+      }
+      if (considerEmpty && _cnodes_vcomm > 1) {
+        // [TRACE-LD-EMPTYGATE] Closes P0 #17 (add_empty_community branch
+        // result at the use site) + part of #20 (empty-comm gate).
+        // Pre-call snapshot of ncomm; getEmptyCommunity may grow.
+        const _ncomm_pre = P.ncomm();
         const ec = P.getEmptyCommunity();
         if (cands.indexOf(ec) < 0) cands.push(ec);
+        if (_probe) {
+          const _ncomm_post = P.ncomm();
+          console.error(
+            `[TRACE-LD-EMPTYGATE] site=move pass=${_passIdx} visit=${_visitIdx}`
+            + ` v=${v} vcomm=${vComm} cnodes_vcomm=${_cnodes_vcomm}`
+            + ` n_comms_pre=${_ncomm_pre} empty_id=${ec} n_comms_post=${_ncomm_post}`
+            + ` grew=${_ncomm_post > _ncomm_pre ? 1 : 0}`);
+        }
+      } else if (_probe && considerEmpty) {
+        console.error(
+          `[TRACE-LD-EMPTYGATE] site=move pass=${_passIdx} visit=${_visitIdx}`
+          + ` v=${v} vcomm=${vComm} cnodes_vcomm=${_cnodes_vcomm} skipped=1`);
       }
       let maxComm = vComm;
-      let maxImprov = 10 * Number.EPSILON;
+      const _maxCommSizeGuard = false;  // JS Leiden default: max_comm_size=0
+      let maxImprov = _maxCommSizeGuard ? -Infinity : 10 * Number.EPSILON;
+      // [TRACE-LD-CAND] CANDS: full candidate list + initial max_improv.
+      // Mirrors cpp probe site at Optimiser.cpp:701-789. Use the canonical
+      // ALL_NEIGH_COMMS enumeration order (P.getNeighComms output, plus
+      // vComm + empty appended). max_improv_branch echoes the cpp tag
+      // (NEG_INF vs 10EPS, P0 #15).
+      if (_probe) {
+        const mi_branch = _maxCommSizeGuard ? "NEG_INF" : "10EPS";
+        console.error(
+          `[TRACE-LD-CAND] CANDS pass=${_passIdx} visit=${_visitIdx}`
+          + ` v=${v} vcomm=${vComm} ncands=${cands.length}`
+          + ` max_improv_branch=${mi_branch}`
+          + ` max_improv_init=${_ldHex(maxImprov)}`
+          + ` cands=${cands.join(",")}`);
+      }
       const deltas = [];
       for (let i = 0; i < cands.length; i++) {
         const c = cands[i];
-        if (c === vComm) {
-          deltas.push({ comm: c, delta: 0 });
-          continue;
+        // Default Leiden path has no max_comm_size; no SKIP probe needed
+        // here. cpp emits SKIP when 0 < max_comm_size && csize+nv > max
+        // (Optimiser.cpp:807-809) — silent in this build.
+        const d = (c === vComm) ? 0 : P.diffMove(v, c);
+        // [TRACE-LD-CAND] DIFF: per-layer diff_move. Single-layer path
+        // (default Leiden), so layer=0 + lw=1.0 always.
+        if (_probe) {
+          console.error(
+            `[TRACE-LD-CAND] DIFF pass=${_passIdx} visit=${_visitIdx}`
+            + ` v=${v} comm=${c} layer=0 lw=${_ldHex(1.0)}`
+            + ` diff_move=${_ldHex(d)}`);
         }
-        const d = P.diffMove(v, c);
+        const possible_improv = d;  // single-layer: layer_weights[0] * d
+        // [TRACE-LD-CAND] COMP: move_nodes uses `>` (cpp:820).
+        const accepts = (possible_improv > maxImprov);
+        if (_probe) {
+          console.error(
+            `[TRACE-LD-CAND] COMP pass=${_passIdx} visit=${_visitIdx}`
+            + ` v=${v} comm=${c} pimprov=${_ldHex(possible_improv)}`
+            + ` max_improv=${_ldHex(maxImprov)}`
+            + ` accepts=${accepts ? 1 : 0}`);
+        }
         deltas.push({ comm: c, delta: d });
-        if (d > maxImprov) {
-          maxImprov = d;
+        if (accepts) {
+          maxImprov = possible_improv;
           maxComm = c;
         }
       }
@@ -628,6 +979,22 @@
         const adjN = P.graph.neighbours(v);
         for (let j = 0; j < adjN.length; j++) {
           const u = adjN[j];
+          // [TRACE-LD-RESTAB] Closes P0 #16: per-neighbour restabilisation
+          // decision tuple. Mirrors cpp probe at Optimiser.cpp:889-903
+          // (the `(u, is_node_stable[u], membership[u], pushed)` tuple).
+          // JS short-circuit on `u === v` precedes the cpp `is_node_stable
+          // && != maxComm && !fixed` test; emit the cpp-shape tuple. JS
+          // has no is_membership_fixed surface for u, so fixed=0 always.
+          const _was_stable = isStable[u] ? 1 : 0;
+          const _in_new = (P.memberOf(u) === maxComm) ? 1 : 0;
+          const _push = (u !== v) && _was_stable && !_in_new;
+          if (_probe) {
+            console.error(
+              `[TRACE-LD-RESTAB] pass=${_passIdx} visit=${_visitIdx}`
+              + ` v=${v} u=${u} was_stable=${_was_stable}`
+              + ` in_new=${_in_new} fixed=0`
+              + ` pushed=${_push ? 1 : 0} u_comm=${P.memberOf(u)}`);
+          }
           if (u === v) continue;
           if (isStable[u] && P.memberOf(u) !== maxComm) {
             queue.push(u);
@@ -641,6 +1008,7 @@
         if (opts.recordCandidates) rec.candidates = deltas;
         traces.push(rec);
       }
+      _visitIdx++;
     }
     return { totalImprov: totalImprov, nbMoves: nbMoves, traces: traces };
   }
@@ -655,17 +1023,42 @@
     const n = P.n();
     const order = new Array(n);
     for (let v = 0; v < n; v++) order[v] = v;
-    leidenShuffle(order, rng);
+    leidenShuffle(order, rng, "merge_constrained");
     let totalImprov = 0;
     let nbMoves = 0;
     const traces = [];
+    const _probe = _ldProbesEnabled();
+    const _passIdx = _ldPassIdx++;
+    let _visitIdx = 0;
     for (let i = 0; i < n; i++) {
       const v = order[i];
       const vComm = P.memberOf(v);
       if (P.cnodes(vComm) !== 1) continue;
       const cands = P.getNeighCommsConstrained(v, constrained);
+      // [TRACE-LD-BRANCH] Refine path also walks ALL_NEIGH_COMMS (refine
+      // _consider_comms default). Closes P0 #20 on the refine side.
+      if (_probe) {
+        console.error(
+          `[TRACE-LD-BRANCH] pass=${_passIdx} visit=${_visitIdx}`
+          + ` v=${v} vcomm=${vComm} consider_comms=ALL_NEIGH_COMMS_REFINE`
+          + ` n_after_cc=${cands.length} cnodes_vcomm=${P.cnodes(vComm)}`);
+      }
       let maxComm = vComm;
-      let maxImprov = 0;
+      const _maxCommSizeGuard_r = false;  // JS Leiden refine default
+      let maxImprov = _maxCommSizeGuard_r ? -Infinity : 0;
+      // [TRACE-LD-CAND] CANDS: refine candidate list + initial max_improv.
+      // Mirrors cpp probe at Optimiser.cpp:1342-1378 (merge_nodes_constrained
+      // ALL_NEIGH_COMMS path). max_improv_branch=ZERO mirrors cpp's refine
+      // initial threshold (P0 #15).
+      if (_probe) {
+        const mi_branch_r = _maxCommSizeGuard_r ? "NEG_INF" : "ZERO";
+        console.error(
+          `[TRACE-LD-CAND] CANDS pass=${_passIdx} visit=${_visitIdx}`
+          + ` v=${v} vcomm=${vComm} ncands=${cands.length}`
+          + ` max_improv_branch=${mi_branch_r}`
+          + ` max_improv_init=${_ldHex(maxImprov)}`
+          + ` cands=${cands.join(",")}`);
+      }
       const deltas = [];
       for (let j = 0; j < cands.length; j++) {
         const c = cands[j];
@@ -676,9 +1069,25 @@
         // JS canonCPM/canonMod return 0 the same way. Don't skip the
         // self case — order matters under `>=` tie-break.
         const d = P.diffMove(v, c);
+        if (_probe) {
+          console.error(
+            `[TRACE-LD-CAND] DIFF pass=${_passIdx} visit=${_visitIdx}`
+            + ` v=${v} comm=${c} layer=0 lw=${_ldHex(1.0)}`
+            + ` diff_move=${_ldHex(d)}`);
+        }
+        const possible_improv = d;  // single-layer
+        // refine uses `>=` (cpp:1374).
+        const accepts = (possible_improv >= maxImprov);
+        if (_probe) {
+          console.error(
+            `[TRACE-LD-CAND] COMP pass=${_passIdx} visit=${_visitIdx}`
+            + ` v=${v} comm=${c} pimprov=${_ldHex(possible_improv)}`
+            + ` max_improv=${_ldHex(maxImprov)}`
+            + ` accepts=${accepts ? 1 : 0}`);
+        }
         deltas.push({ comm: c, delta: d });
-        if (d >= maxImprov) {
-          maxImprov = d;
+        if (accepts) {
+          maxImprov = possible_improv;
           maxComm = c;
         }
       }
@@ -695,6 +1104,7 @@
         if (opts.recordCandidates) rec.candidates = deltas;
         traces.push(rec);
       }
+      _visitIdx++;
     }
     return { totalImprov: totalImprov, nbMoves: nbMoves, traces: traces };
   }
@@ -708,6 +1118,10 @@
     opts = opts || {};
     const recordTrace = !!opts.recordTrace;
     const refinePartition = opts.refinePartition !== false;
+    // Reset the tracer-visible pass counter so every optimisePartition
+    // call starts at pass=0 (matches cpp `gTrace.passes` reset per
+    // pipeline run via main_traced.cpp `leiden_trace_reset()`).
+    _ldPassIdx = 0;
     // initialMembership: optional Int32Array | Array | null. When set,
     // LeidenPartition starts with the given membership (mirroring
     // canonical's chained `for i in [0, num_iter): optimise_partition(p)`
@@ -834,8 +1248,27 @@
         finePostRefine: finePostRefine,
         newCollapsedVcount: newCollapsed.vcount(),
       });
+      // [TRACE-LD-AGG] Closes P0 #18. Decomposed short-circuit: cpp emits
+      // `(any_unfixed, new_vcount, old_vcount, n_comms, new_lt_old, old_gt_ncomm)`
+      // before the `&&` chain + final value after. JS Leiden has no
+      // fixed-membership surface, so any_unfixed=1 always (mirrors cpp's
+      // default-fixed-empty path). Field order matches cpp probe.
+      const _ld_new_lt_old = newCollapsed.vcount() < prevVcount;
+      const _ld_old_gt_ncomm = prevVcount > collapsedP.ncomm();
+      if (_ldProbesEnabled()) {
+        console.error(
+          `[TRACE-LD-AGG] level=${level} any_unfixed=1`
+          + ` new_vcount=${newCollapsed.vcount()} old_vcount=${prevVcount}`
+          + ` n_comms=${collapsedP.ncomm()}`
+          + ` new_lt_old=${_ld_new_lt_old ? 1 : 0}`
+          + ` old_gt_ncomm=${_ld_old_gt_ncomm ? 1 : 0}`);
+      }
       aggregateFurther = (newCollapsed.vcount() < prevVcount)
                       && (prevVcount > collapsedP.ncomm());
+      if (_ldProbesEnabled()) {
+        console.error(
+          `[TRACE-LD-AGG] level=${level} final=${aggregateFurther ? 1 : 0}`);
+      }
       collapsedGraph = newCollapsed;
       collapsedP = newCollapsedP;
       level += 1;
