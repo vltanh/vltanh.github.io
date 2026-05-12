@@ -2186,6 +2186,7 @@
       // after that many iterations.
       if (tuneIterationLimit !== 0 && tuneIdx === tuneIterationLimit) break;
       let res;
+      let fineTuneConsolidated = false;
       // tuneIdx > 0 -> isFirstLoopOuter=false for all calls inside.
       if (doFineTune) {
         if (log) log("partition.fineTune.iter", { tuneIdx });
@@ -2195,6 +2196,16 @@
           isFirstLoop: false,
           boundaryLog: log,
         });
+        // cpp InfomapBase::fineTune (InfomapBase.cpp:1418-1421):
+        //   if (numEffectiveLoops > 0) {
+        //     root().replaceChildrenWithGrandChildren();
+        //     consolidateModules(false);
+        //   }
+        // When numEff > 0, cpp mutates m_root to the post-fineTune-consolidate
+        // tree. JS must update leafToTop + lastLeafTreeOrder accordingly,
+        // regardless of the partition()-outer isImprovement gate (which
+        // governs ONLY the outer loop break, NOT m_root mutation).
+        fineTuneConsolidated = ft.numEffectiveLoops > 0;
         if (ft.numEffectiveLoops > 0) {
           if (log) log("partition.findTopAfterFine", { tuneIdx });
           // Pass fineTune's leaf-level Partition as seedPrevP so
@@ -2279,10 +2290,27 @@
         if (res.partition != null) lastPartition = res.partition;
         if (res.topModuleOrigOf != null) lastTopModuleOrigOf = res.topModuleOrigOf;
         if (res.leafTreeOrder != null) lastLeafTreeOrder = res.leafTreeOrder;
-      } else if (isImprovement) {
+      } else if (fineTuneConsolidated) {
+        // cpp fineTune numEff > 0 unconditionally consolidates m_root
+        // (InfomapBase.cpp:1418-1421 replaceChildrenWithGrandChildren +
+        // consolidateModules(false)). The subsequent findTopModulesRepeatedly
+        // (InfomapBase.cpp:1070) may further consolidate iff it improves;
+        // when it gate-fails it calls restoreConsolidatedOptimizationPoint
+        // IfNoImprovement which restores ONLY m_objective (Infomap
+        // Optimizer.h:752-754), leaving m_root at the post-fineTune-
+        // consolidate state. Either way res.membership + res.leafTreeOrder
+        // (computed inside findTopModulesRepeatedlyFromPartition over the
+        // current leafToTop = ft.membership) reflect cpp's m_root state,
+        // so JS must update lastLeafTreeOrder + leafToTop regardless of
+        // the partition()-outer isImprovement gate. Without this, the next
+        // coarseTune call reads a stale oracle (pre-fineTune leaf groups)
+        // and dispatches the wrong leaves to sub-Infomaps, producing
+        // off-by-one top-mod sizes downstream. Verified via copenhagen_bt
+        // s=3 fineTune iter 1 (numEff=1, no outer improvement): pre-fix
+        // groups=[688,2,2] vs cpp [687,3,2]; post-fix groups=[687,3,2].
         leafToTop = res.membership;
-        lastPartition = res.partition;
-        lastTopModuleOrigOf = res.topModuleOrigOf;
+        if (res.partition != null) lastPartition = res.partition;
+        if (res.topModuleOrigOf != null) lastTopModuleOrigOf = res.topModuleOrigOf;
         if (res.leafTreeOrder != null) lastLeafTreeOrder = res.leafTreeOrder;
       }
       if (isImprovement) {
