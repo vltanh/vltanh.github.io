@@ -209,30 +209,6 @@
 }
 .cm-worked-cell.pass { border-left: 3px solid #6dab7d; }
 .cm-worked-cell.fail { border-left: 3px solid var(--amber); }
-
-/* Chain inputs strip on the empirical reading stage. */
-.cm-chain-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
-  gap: .55rem; margin: .5rem 0 .2rem;
-}
-.cm-chain-cell {
-  background: var(--ink); border: 1px dashed var(--paper-3);
-  border-radius: 3px;
-  padding: .55rem .65rem;
-}
-.cm-chain-cell h5 {
-  margin: 0 0 .25rem;
-  font-family: 'Special Elite', 'Courier New', monospace;
-  font-size: .72rem; letter-spacing: .1em;
-  text-transform: uppercase;
-  color: var(--cobalt);
-}
-.cm-chain-cell p {
-  margin: 0;
-  font-family: 'IBM Plex Sans', sans-serif;
-  font-size: .82rem; color: var(--paper-2); line-height: 1.45;
-}
 </style>
 </head>
 <body>
@@ -246,95 +222,30 @@
   <div class="kicker">community detection &middot; post-proc &middot; connectivity modifier</div>
   <h1><em>CM</em></h1>
   <p class="fullname">connectivity modifier &middot; Park 2024</p>
-  <p class="sub">The heaviest of the three connectivity post-procs. <a href="./wcc.html">WCC</a>'s cut, plus a re-run of the base community-detection algorithm on each cut half before the recursion advances. Iterates to a fixed point where every output cluster is both well-connected and locally optimal under the base objective.</p>
+  <p class="sub">The heaviest of three connectivity post-procs. <a href="./wcc.html">WCC</a>'s cut, plus a re-run of the base community-detection algorithm on each cut half before the recursion advances.</p>
 </header>
 
 <section class="hook">
-  <p>Three sibling post-procs sit between a clustering algorithm and the final output. <a href="./cc.html">CC</a> drops every cross-cluster edge and replaces each cluster with its connected pieces, a structural sanity pass that catches partitions whose clusters are not even connected. <a href="./wcc.html">WCC</a> adds a threshold: a cluster has to clear a sliding mincut bound or it gets cut and recursed. CM is the heaviest of the three. It does what WCC does, then runs the base community-detection algorithm again on each cut half before the recursion continues.</p>
+  <p><a href="./cc.html">CC</a> drops cross-cluster edges and splits each cluster into its connected pieces. <a href="./wcc.html">WCC</a> adds a threshold: a cluster has to clear a mincut bound or it gets cut and recursed. CM is the heaviest: WCC plus a Leiden recluster on each cut half before the recursion advances.</p>
 
-  <p>The word in "connectivity <em>modifier</em>" carries weight. CC and WCC are filters: they keep what passes and split what does not, but the output labels are descendants of the input labels. CM <em>modifies</em>: the post-cut halves are not stuck with the input partition's idea of who-belongs-where. If the base algorithm sees an 80-node induced subgraph and decides it is really four communities, CM accepts that and feeds the four communities back into the next round. The output cluster set is a function of the base algorithm plus the threshold, not just the input partition.</p>
-
-  <p>Reading the steps another way: CM is a fixed-point iteration. Starting from the input partition, repeat {check connectivity threshold; on failure, cut + re-cluster; on success, accept the cluster as a survivor}. The iteration terminates when every remaining cluster is a fixed point of both the threshold check (its mincut exceeds the bar) and the base algorithm's local view (the base algorithm on the cluster's induced subgraph returns the cluster itself, not a different partition). The output is a partition where both properties hold cluster by cluster.</p>
+  <p>The word in "connectivity <em>modifier</em>" carries weight. CC and WCC are filters: the output labels are descendants of the input labels. CM <em>modifies</em>: post-cut halves are not stuck with the input partition. If the base algorithm sees an 80-node induced subgraph and decides it is really four communities, CM accepts that and feeds the four into the next round.</p>
 
   <p>The threshold uses the same parser as <a href="./wcc.html">WCC</a>:</p>
   <p style="text-align:center">\( f(n) = C \log_x(n) \quad \text{or} \quad f(n) = C\,n^x \)</p>
-  <p>In plain English: a cluster of \(n\) nodes passes iff its minimum edge cut is strictly larger than \(f(n)\). The threshold grows with cluster size, so small clusters can clear a low bar but large ones have to be more internally robust. Two interesting properties: the threshold is monotone in \(n\), so as a cluster shrinks under repeated cuts, the bar it has to clear shrinks too, which is why the recursion terminates; and the threshold is independent of how dense the cluster is overall, only of its size, so a sparse 20-node cluster and a dense 20-node cluster face the same bar.</p>
+  <p>In plain English: a cluster of \(n\) nodes passes iff its minimum edge cut is strictly larger than \(f(n)\). Two interesting properties: the threshold is monotone in \(n\), so as a cluster shrinks under repeated cuts the bar drops with it, which is why the recursion terminates; and the threshold is independent of cluster density, only of size.</p>
 
-  <p>Park 2024 (<a href="https://doi.org/10.1371/journal.pcsy.0000009">PLOS Complex Systems 1(3):e0000009</a>) gives \( f(n) = \log_{10}(n) \) as the paper's primary criterion. The pipeline wrapper ships \(0.2 \cdot n^{0.5}\) instead, a sqrt criterion that diverges from the paper's default. The two cross at \(n = 100\); below that, the log criterion is stricter.</p>
-
-  <p>The threshold shape is one of the most-discussed choices in the paper. Four candidates appear in Park 2024's analysis. \(\log_{10}(n)\) is the slowest-growing and most lenient: even at \(n = 2000\), the bar is around 3.3 edges, which most non-trivial clusters clear. \(\log_2(n)\) is roughly 3.3 times faster-growing and corresponds to a stricter version. \(\sqrt{n}/5\) is somewhere between the two for moderate \(n\), and dominates the log functions for \(n &gt; 1000\). \(0.01 \cdot (n - 1)\) is the Traag-CPM lower bound: extremely strict, treating clusters as Potts-model-faithful only when their connectivity is linear in size. The paper picks \(\log_{10}\) as the primary default on the empirical observation that it catches the worst pathologies without forcing every cluster to be densely connected throughout.</p>
+  <p>Park 2024 (<a href="https://doi.org/10.1371/journal.pcsy.0000009">PLOS Complex Systems 1(3):e0000009</a>) gives \( f(n) = \log_{10}(n) \) as the primary criterion. The pipeline wrapper ships \(0.2 \cdot n^{0.5}\) instead. The two cross at \(n = 100\); below that, the log criterion is stricter.</p>
 
   <div class="defs">
-    <div><span class="term">pipeline shape</span> Park 2024 splits the procedure into four stages: (1) initial base clustering produces the input partition; (2) a size filter drops clusters below \(B\) (default 11) plus tree-shaped clusters; (3) the CM loop runs per cluster, with each round doing mincut, threshold check, and base-method recluster of any side larger than one node; (4) a final size filter drops sub-clusters that ended up below \(B\). The walker below covers stage 3. Stages 2 and 4 live in the Python orchestration around the binary, not in the binary itself.</div>
-    <div><span class="term">re-cluster step</span> CM does <em>not</em> re-run the base algorithm globally. It runs the base algorithm on the induced subgraph of one cut half, then again on the other half. Each call gets a fresh seed; only VieCut's mincut RNG state drifts across rounds within a single binary run.</div>
-    <div><span class="term">cluster fate</span> Park 2024 §4.2 classifies every input cluster as one of four fates: <em>extant</em> (unchanged), <em>reduced</em> (smaller but still one cluster), <em>split</em> (two or more sub-clusters), <em>degraded</em> (every leaf descendant ended up below the size filter \(B\)). The binary writes a tree of parent &rarr; children so each input cluster's fate is reconstructable downstream.</div>
-    <div><span class="term">pre-prune</span> Park 2024's Stage 3 specifies an iterative pre-prune that strips low-degree nodes (degree below \(f(n)\) in the cluster's induced subgraph) before the cut. The binary exposes a partial version via the prune flag; the wrapper does not pass it. Today's CM runs without pre-prune by default; the full degree-band prune lives in the Python wrapper.</div>
-  </div>
-
-  <div class="callout">
-    <div class="tag">why "modifier" and not "filter"</div>
-    <p><a href="./cc.html">CC</a> and <a href="./wcc.html">WCC</a> are filters in the strict sense: every output cluster is a subset of nodes that all carried the same input label. CM does not keep that property. When CM splits a 50-node cluster and asks the base algorithm to re-cluster each side, the two sides can produce communities whose membership is whatever the base algorithm decides. The CM output partition's individual clusters are still subsets of input clusters (CM never crosses cluster boundaries in stage 3), but the per-cluster labels are not inherited from the input, they are minted by the base algorithm in the inner loop. That is the "modify" part.</p>
+    <div><span class="term">pipeline shape</span> Park 2024 splits the procedure into four stages: initial base clustering, a size filter, the CM loop (this page's walker), and a final size filter. The walker covers stage 3. Stages 2 and 4 live in the Python orchestration around the binary.</div>
+    <div><span class="term">re-cluster step</span> CM runs the base algorithm on the induced subgraph of one cut half, then again on the other half. Each call gets a fresh seed.</div>
+    <div><span class="term">cluster fate</span> Park 2024 §4.2 classifies every input cluster as <em>extant</em>, <em>reduced</em>, <em>split</em>, or <em>degraded</em>. The binary writes a tree of parent &rarr; children; the four labels are computed downstream from that tree.</div>
   </div>
 
   <div class="callout">
     <div class="tag">why Leiden as inner re-clusterer, not Louvain</div>
-    <p>The base algorithm choice matters in the re-cluster step. Leiden's refinement phase guarantees every output community is internally connected, which means the subsequent connectivity sweep on the re-cluster output usually splits nothing further. Louvain has no such guarantee, so the connected-components sweep after Louvain's re-cluster can fragment communities further and pad the work queue. Both are supported in the binary; the deployed CM pipeline defaults to Leiden-CPM. Infomap is in the binary too but the wrapper does not accept it.</p>
+    <p>Leiden's refinement phase guarantees every output community is internally connected, so the subsequent connectivity sweep on the re-cluster output usually splits nothing further. Louvain has no such guarantee, so the connected-components sweep after a Louvain re-cluster can fragment communities further and pad the work queue. Both are supported in the binary; the pipeline defaults to Leiden CPM.</p>
   </div>
-
-  <div class="callout">
-    <div class="tag">when CM moves the needle &middot; Park 2024 §4.4</div>
-    <p>Heaviest gain comes on Leiden-CPM at small resolution (\( r \in [0.0001, 0.001] \)) where the base algorithm over-merges; CM peels apart real sub-communities that CPM left bundled. Lightest gain (or even slight loss) on already-conservative algorithms like IKC at k=10, where most clusters come through unchanged. Leiden-Mod sits in between, with a meaningful fraction of its clusters split. The paper's empirical reading: CM acts as a sharpener for over-merging base algorithms; less so as a corrector for over-splitting ones.</p>
-  </div>
-
-  <div class="callout warn">
-    <div class="tag">edge weights and termination</div>
-    <p>The binary builds VieCut's input graph with edge weight 1 on every edge regardless of any weight attribute on the input. Mincut therefore counts edges, not weights. Termination of the CM loop is not a formal theorem: each round either shrinks the largest pending cluster (via a cut) or replaces it with multiple smaller communities (via re-cluster), but a base algorithm that returns the same single community on a side that just failed the threshold can in principle cycle. In practice Leiden CPM at low resolution converges, and a sufficiently small residual eventually clears the threshold once \(n\) drops below the relevant cross-over point.</p>
-  </div>
-
-  <h2 style="margin-top:1.5rem">CM in the family of connectivity post-procs</h2>
-  <p>CM is one of three post-procs in the same binary, and they sit on a spectrum of intervention strength.</p>
-
-  <table class="profile-table dnc-stats" style="margin:.5rem 0 .8rem">
-    <thead>
-      <tr><th>post-proc</th><th>cost per cluster</th><th>catches</th><th>misses</th></tr>
-    </thead>
-    <tbody>
-      <tr><td><a href="./cc.html">CC</a></td><td>one BFS, \(O(m)\)</td><td>disconnected clusters (mincut = 0)</td><td>thin-bridge clusters (mincut = 1 but connected)</td></tr>
-      <tr><td><a href="./wcc.html">WCC</a></td><td>cactus mincut + recursive split, \(\tilde{O}(m \log n)\)</td><td>thin-bridge clusters under the threshold</td><td>internally-mis-clustered clusters that pass the threshold</td></tr>
-      <tr><td>CM</td><td>WCC plus Leiden per cut half, \(\tilde{O}(m \log n)\) plus base-algo cost</td><td>both above; also internal mis-clusters when the base algorithm catches them</td><td>cases the base algorithm itself misses</td></tr>
-    </tbody>
-  </table>
-
-  <p>Reading down the table: cost grows from CC to CM by an order of magnitude per step, and the catch set grows correspondingly. CC catches the cheapest pathology (disconnected clusters); WCC adds the thin-bridge pathology; CM adds whatever else the base algorithm is good at catching after seeing one cluster at a time. CC is the floor; CM is the ceiling. WCC sits between them as a middle option for users who want a connectivity check without paying for the re-cluster step.</p>
-
-  <p>What CM does NOT do, as a class of corrections. CM only modifies clusters by splitting them; it never merges two input clusters into one. So if the base algorithm over-splits (produces two clusters where one was the right answer), CM has no mechanism to combine them. CM is a one-way operator: input cluster &rarr; subset of input cluster, or input cluster &rarr; multiple subsets, never input clusters &rarr; merged superset. The post-proc family's other operations (CC, WCC) are similarly one-way. The merging side is the domain of the base community-detection algorithm itself; CM trusts the base algorithm on merge decisions and re-examines only the split decisions.</p>
-
-  <h3 style="margin-top:1.2rem">A second tier of cross-links: the gallery's connectivity-aware family</h3>
-  <p>Beyond the three post-procs, the gallery includes <a href="./ikc.html">IKC</a> (Iterative K-Core Clustering), which produces well-connected clusters by construction rather than as a post-proc. IKC at k=10 returns clusters that are 10-edge-connected, so every IKC output passes CM's threshold trivially. The structural guarantee is moved from post-processing to clustering; CM's role on an IKC input is mostly a sanity check.</p>
-
-  <p>The relationship is dual: CM as a post-proc adds connectivity guarantees to any base algorithm's output. IKC as a base algorithm builds connectivity guarantees into the clustering directly. Both produce well-connected partitions; the difference is where in the pipeline the guarantee gets enforced. CM works with any base algorithm; IKC is one specific base algorithm. The gallery covers both.</p>
-
-  <p>The gallery's <a href="./viecut.html">VieCut</a> page documents the mincut backend that CM and WCC both consume. The cactus algorithm is described in detail there; CM treats it as a black box, but understanding cactus's output (especially the "most balanced cut" criterion) clarifies why CM produces the bipartitions it does. Anyone tracing a specific cut decision in the walker should cross-reference the VieCut page.</p>
-
-  <p>The gallery's <a href="./leiden-cpm.html">Leiden CPM</a> page documents the inner re-clusterer. Leiden's iter1-iter2 structure, the refinement phase, the resolution \(r\) parameter all live there. CM's behaviour on each cut half is governed by what Leiden does on the side's induced subgraph; reading the Leiden page clarifies the re-cluster step.</p>
-
-  <h2 style="margin-top:1.5rem">Where CM differs from a hypothetical alternative</h2>
-  <p>A few alternative designs to CM would catch different things. Listing them clarifies what CM is and is not.</p>
-
-  <p><strong>An iterative-refinement alternative.</strong> Instead of CM's "mincut, then base-algo recluster", a refinement-style post-proc could iteratively move nodes one at a time, accepting moves that improve internal connectivity. This is closer to what Leiden's refinement phase already does inside the base algorithm; running it as a post-proc would amount to re-running Leiden's refinement on each input cluster's induced subgraph. The cost would be similar to CM's; the catch set would be similar too, because Leiden's refinement is the dominant force shaping CM's re-cluster output. CM is a less compute-heavy alternative that uses mincut as a faster diagnostic.</p>
-
-  <p><strong>A modularity-or-CPM-recheck alternative.</strong> Re-evaluate the base algorithm's quality function on each cluster's induced subgraph; if the cluster is not a local optimum of the quality function on its own subgraph (e.g. removing one node would increase the score), modify the cluster. This catches different pathologies than CM: a cluster can have a fine mincut and still be sub-optimal under modularity (e.g. one peripheral node fits better as a singleton). CM does not catch this case. The trade-off: modularity-recheck is base-algorithm-specific (a different base means a different recheck), CM is base-algorithm-agnostic.</p>
-
-  <p><strong>A global re-run alternative.</strong> Instead of re-clustering each cut half, run the base algorithm again on the whole graph after every cut. This is more expensive (one global re-run per cut) and less informative (the global run mostly returns the same partition because the global structure has not changed). CM's local re-cluster on the cut half only is a deliberate scoping choice.</p>
-
-  <p>None of these alternatives is universally better. They differ in cost, in catch set, and in what they trust about the base algorithm. CM's design splits the labour: trust the base algorithm on merge decisions, re-examine split decisions via a connectivity-only diagnostic, fix split decisions via a local re-run of the base algorithm. The three steps are independent in the sense that changing any one of them gives a different post-proc, but together they form the algorithm Park 2024 specifies.</p>
-
-  <h2 style="margin-top:1.5rem">A digression on edge weights</h2>
-  <p>The binary builds VieCut's input graph with edge weight 1 on every edge, regardless of any weight attribute on the input edgelist. Mincut therefore counts edges, not weights. This is a design choice with consequences: a cluster joined by one high-weight edge (intuitively, a strong link) has the same mincut as a cluster joined by one low-weight edge, because both are mincut = 1 under the unweighted interpretation.</p>
-
-  <p>For unweighted graphs this is the right choice. For weighted graphs it is a simplification. Park 2024 frames CM as operating on a binary connectivity model: an edge exists or does not. The threshold function takes cluster size as input, not cluster weight, so the binary model is internally consistent. Users wanting weighted CM behaviour can pre-process the input by replacing weighted edges with multi-edges (a weight-2 edge becomes two edges in parallel), which makes mincut count weights. The wrapper does not do this; it leaves the input as-is.</p>
-
-  <p>The Leiden base algorithm reads edge weights when they are present (CPM and Modularity both use weighted formulations), so the re-cluster step is sensitive to weights even though the mincut step is not. This is one of the small inconsistencies of the CM design that the gallery surfaces. On the 32-node fixture every edge is unweighted, so the issue does not arise; on weighted inputs, the threshold check and the re-cluster step disagree on what "edge importance" means.</p>
 </section>
 
 <section class="algo-meta">
@@ -346,161 +257,122 @@
     <span><span class="ref-label">base</span><a href="./leiden-cpm.html">Leiden CPM (inner loop)</a></span>
     <span><span class="ref-label">docs</span><a href="https://github.com/vltanh/community-detection/blob/main/docs/algorithms/cm.md" target="_blank" rel="noopener">technical companion</a></span>
   </div>
-  <p class="algo-prov">Byte-equal vs <code>constrained-clustering CM</code> across the stress matrix (legacy 6-fixture L4 + three 17-fixture 3-tier panels under Leiden-CPM and Leiden-Mod bases, ~694K cumulative records on the non-delegated CM path), 0 mismatches.</p>
+  <p class="algo-prov">Byte-equal vs the canonical CM binary across the stress matrix (legacy 6-fixture L4 + three 17-fixture 3-tier panels under Leiden-CPM and Leiden-Mod bases, ~694K cumulative records, 0 mismatches).</p>
 </section>
 
 <!-- ─────────── Stage 0 · input fixture ─────────── -->
 <section class="stage">
   <div class="stage-num">stage 0 &middot; input</div>
   <h2>The planted partition.</h2>
-  <p>32 nodes, 52 edges, four planted communities plus two outliers. Cluster A is a 12-node core (K<sub>5</sub> plus a 7-node periphery hanging off it by single edges); cluster B is two K<sub>4</sub>'s joined by a single bridge edge; cluster C is two disjoint 3-cycles sharing one label; cluster D is two 2-cliques. Nodes 30 and 31 sit unclustered. The same fixture is used on the <a href="./cc.html">CC</a> and <a href="./wcc.html">WCC</a> pages, so the three post-procs can be compared directly.</p>
-
-  <p>Each cluster is designed to exercise a different post-proc pathology. A has a dense core plus single-edge attachments to seven peripheral nodes: a "good cluster wearing a costume of bad cluster", since the K<sub>5</sub> at its heart is well-connected but the periphery pendants drag the mincut down to 1. B has two well-connected halves joined by a single bridge edge: the classical thin-bridge case that a human reader would call two communities. C has two disjoint 3-cycles sharing one input label: the disconnected-input case. D has two 2-cliques: a small dense cluster that passes every threshold trivially. The outliers 30 and 31 sit unclustered (input label \(-1\)) and exercise the singleton-filter logic.</p>
-
-  <p>The four clusters span the small-cluster regime where the log threshold sits below 1 for all of them except A. Under the wrapper's sqrt default, the threshold sits below 1 for all four clusters, so the wrapper's CM produces no modifications on this fixture. Under the paper's log default, only A fails; CM's behaviour on A is the substantive trace below.</p>
-
-  <p>The walker below runs CM with the threshold and the base algorithm both exposed as dropdowns. Default is criterion \(1 \cdot \log_{10}(n)\) and base algorithm Leiden CPM at resolution 0.0001, matching the regime studied in Park 2024. Two more dropdowns expose resolution (0.0001 to 1.0) and seed. Changing the seed re-runs the walker with a different mincut RNG state; the threshold check is deterministic, but tied mincuts can resolve differently and produce different bipartitions, which propagates to the re-cluster step.</p>
+  <p>32 nodes, 52 edges, four planted communities plus two outliers. Cluster A is a K<sub>5</sub> core with seven periphery nodes hanging off it by single edges. Cluster B is two K<sub>4</sub>'s joined by one bridge edge. Cluster C is two disjoint 3-cycles sharing one label. Cluster D is two 2-cliques. Nodes 30 and 31 sit unclustered. The same fixture is used on the <a href="./cc.html">CC</a> and <a href="./wcc.html">WCC</a> pages.</p>
 
   <div class="graph">
     <div class="graph-canvas" id="g-input-cy"></div>
   </div>
-
-  <div class="callout">
-    <div class="tag">why this fixture, why this size</div>
-    <p>32 nodes is small enough to walk frame by frame and large enough to exercise every post-proc pathology. The same fixture appears on the <a href="./cc.html">CC</a> page (where the seed step does all the work on cluster C), the <a href="./wcc.html">WCC</a> page (where the threshold and the recursive cut handle cluster A), and here (where the base-algo recluster adds its own behaviour). Reading the three pages in sequence shows what each post-proc adds to the one before it. The gallery picks the smallest fixture that catches every behaviour worth showing.</p>
-  </div>
 </section>
 
-<!-- ─────────── Stage 1 · the threshold + lineage seed ─────────── -->
+<!-- ─────────── Stage 1 · drop inter-cluster edges + connected components ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 1 &middot; the threshold and the seed step</div>
-  <h2>What the threshold says and how the work queue gets seeded.</h2>
-
-  <p>CM's first action is the same as <a href="./wcc.html">WCC</a>'s: drop every cross-cluster edge, take connected components of the residual, push each non-trivial component onto the work queue. The seed step splits cluster C (its two disjoint 3-cycles share one label) into two components before the mincut loop sees them. The other planted clusters arrive at the queue as single components.</p>
-
-  <p>The seed step adds one wrinkle CC and WCC do not have: <em>lineage id assignment</em>. CM tracks which output cluster descended from which input cluster, because the cluster-fate classification depends on the tree of parent &rarr; child relationships. The rule:</p>
-
-  <p style="text-align:center">\( \text{if } |\text{component}| = |\text{original cluster}| \text{ then keep the original id, else mint a fresh id and record (parent } = \text{original, child} = \text{fresh)} \)</p>
-
-  <p>In plain English: if a component covers its entire input cluster, CM keeps the original cluster id (no fragmentation, no fresh allocation). If the component is a strict subset, CM mints a fresh id and adds a row to the lineage tree saying "this fresh id has the original id as its parent". The first fragment of each input cluster also adds a row "(parent = root, child = original id)" exactly once. Two interesting properties: the root row records every input cluster that ever fragmented, so the cluster-fate analyzer can find the split inputs by scanning a single row; and the lineage tree never re-uses an id, so the tree is always acyclic with depth equal to the number of cut rounds a cluster survived.</p>
-
-  <p>The "first fragment" rule deserves a closer look. When an input cluster fragments into two or more components, all of them are strict subsets, so all of them get fresh ids. But the row "(parent = root, child = original id)" is added exactly once, on the first encounter of the original id during the seed-step iteration. Subsequent encounters of the same original id during the same fragmentation skip the root-row insertion (the linear-scan dedupe at the binary level). The result: the root row's length equals the number of distinct fragmented input clusters, regardless of how many fragments each produced. This is what makes the root row a compact index of "every input cluster CM touched at the seed step".</p>
-
-  <p>One subtlety in the seed step iteration order: components are visited in component-id ASC order, which corresponds to the order BFS discovered them (the BFS starts from node-id 0 and walks the residual graph). Within each component, the first node is the lowest-id node in the component. The "(component is the entire input cluster)" check compares sizes, not node sets, so two different fragmentations that happen to produce the same number of nodes would both pass the check (and skip fresh-id allocation). In practice this case requires a coincidence: an input cluster whose first BFS-visited component happens to equal its full size. For most clusters this is impossible (the full size is the cluster's size, which by definition matches one component when the cluster is internally connected).</p>
-
-  <p>Why the seed step uses BFS instead of, say, depth-first search or some union-find-based component algorithm: BFS produces components in a stable order across runs (the BFS root is the lowest unvisited node id), and the components themselves are produced in node-id sorted order within each component. Both properties matter for byte-equal verification. A union-find based component algorithm would produce the same set of components but in a different iteration order; a DFS would produce the same components but with different within-component ordering. The BFS choice locks both orders in, so the byte-equal verification's per-component traversal order matches across the JS port and the canonical binary.</p>
-
-  <p>The threshold itself sits at the same place WCC reads it: \( f(n) = \text{pre\_log} \cdot \log(n) \), where \( \text{pre\_log} = C / \log(x) \) is precomputed once at startup. Per cluster the cost is one log of the cluster size plus one multiply by the precomputed constant. For the default \(1 \cdot \log_{10}(n)\), evaluate \(\log_{10}(12) \approx 1.079\), \(\log_{10}(8) \approx 0.903\), \(\log_{10}(4) \approx 0.602\), \(\log_{10}(3) \approx 0.477\). The strict comparison is \( \text{cut} > f(n) \), with a 1e-9 epsilon guard that treats borderline cases as fail.</p>
-
-  <p>Reading the formula another way: the threshold function decomposes into a constant (\(\text{pre\_log}\), set once at startup) and a per-cluster log evaluation. The constant captures the user's choice of \(C\) and \(x\) in \(C \log_x(n)\). The log evaluation is a natural log of the cluster size, scaled by the constant to give the user's intended logarithm. The trick is mathematical: \(C \log_x(n) = C \cdot \log(n) / \log(x) = (C / \log(x)) \cdot \log(n) = \text{pre\_log} \cdot \log(n)\). One log call per cluster, one multiply, done. The precomputation saves a per-cluster division.</p>
-
-  <p>Cluster A (12 nodes, 4 periphery pendants attached by single edges) has minimum cut 1, threshold 1.079: 1 is not strictly greater than 1.079, so A fails the first check. Cluster B (8 nodes, two K<sub>4</sub>'s joined by one bridge edge) has mincut 1 and threshold 0.903: 1 > 0.903, so B passes. Clusters C<sub>1</sub>, C<sub>2</sub> (3-cycles, 2-edge-connected), and D (4 nodes, mincut 1) all pass at their respective thresholds. Only A enters the second round.</p>
-
-  <h3 style="margin-top:1.4rem">The threshold function under different defaults</h3>
-  <p>The criterion string is parsed at startup into a function of \(n\), then evaluated per cluster. Different choices of \(C\) and \(x\) move the bar up or down. The table below evaluates four common choices at three cluster sizes drawn from the fixture, plus three sizes representative of medium and large empirical networks.</p>
-
-  <table class="profile-table dnc-stats" style="margin:.5rem 0 .8rem">
-    <thead>
-      <tr><th>n</th><th>\(1\cdot\log_{10}(n)\) <span style="color:var(--paper-3)">(paper default)</span></th><th>\(0.2 \cdot n^{0.5}\) <span style="color:var(--paper-3)">(wrapper default)</span></th><th>\(2\cdot\log_{10}(n)\)</th><th>\(1\cdot\log_2(n)\)</th></tr>
-    </thead>
-    <tbody>
-      <tr><td>3 (cluster C<sub>1</sub>)</td><td>0.477</td><td>0.346</td><td>0.954</td><td>1.585</td></tr>
-      <tr><td>4 (cluster D)</td><td>0.602</td><td>0.400</td><td>1.204</td><td>2.000</td></tr>
-      <tr><td>8 (cluster B)</td><td>0.903</td><td>0.566</td><td>1.806</td><td>3.000</td></tr>
-      <tr><td>12 (cluster A)</td><td>1.079</td><td>0.693</td><td>2.158</td><td>3.585</td></tr>
-      <tr><td>100</td><td>2.000</td><td>2.000</td><td>4.000</td><td>6.644</td></tr>
-      <tr><td>2000</td><td>3.301</td><td>8.944</td><td>6.602</td><td>10.966</td></tr>
-    </tbody>
-  </table>
-
-  <p>Two interesting properties to read off the table. First, log and sqrt cross at \(n = 100\): below that, the paper default is the stricter bar; above that, the wrapper default is. The wrapper's choice (\(0.2 \cdot n^{0.5}\)) bites harder on large clusters and almost not at all on small ones, which suits a pipeline run on networks with thousands of large clusters where the log default would let too many of them pass. Second, \(1 \cdot \log_2(n)\) is the strictest of these four for every cluster size shown. The base of the log is set by the user; \(\log_2\) grows roughly 3.3x faster than \(\log_{10}\) per node added, so \(\log_2\) requires correspondingly more internal connectivity to pass.</p>
-
-  <h3 style="margin-top:1.2rem">What "well-connected" means as a constraint</h3>
-  <p>Stripped to its core, the threshold check asks: <em>after cutting the cluster's weakest link, do the two halves still hang together by more than a logarithmic factor of edges?</em> A cluster of \(n\) nodes with \(\log_{10}(n)\) as the bar needs at least \(\lceil \log_{10}(n) + \varepsilon \rceil\) edges between any two halves. For \(n=12\), that is at least 2 edges. For \(n=100\), at least 3. For \(n=10000\), at least 5. The bound is mild on purpose; Park 2024 sets it that way to catch the worst pathologies (tree-like clusters with mincut 1, dumbbell clusters with a thin bridge) without forcing every cluster to be densely connected throughout.</p>
-
-  <p>Compare against alternatives. A constant threshold (cut > 1 always) catches only mincut-1 cases and lets everything else through. A linear threshold (cut > \(0.01 \cdot n\)) corresponds to a Traag CPM lower bound at \(r = 0.01\) and is sharply more aggressive for \(n &gt; 1000\). The log threshold sits in between, asymptotically lenient but strict enough on small and medium clusters to flag the obvious thin-bridge cases.</p>
-
-  <div class="callout">
-    <div class="tag">why the strict <em>greater than</em> and not <em>greater than or equal</em></div>
-    <p>The comparison at the threshold equality boundary is asymmetric on purpose. A cluster sitting exactly at its threshold (cut = \( f(n) \) to within 1e-9) gets treated as not well-connected and re-enters the queue. The next round's mincut may produce the same threshold, but by then the cluster is smaller, the threshold has shrunk, and the strict comparison favours the cluster again. The asymmetry biases toward more cuts, which is the safer call for a connectivity post-proc whose job is to find under-cohesive clusters; the cost is that a barely-passing cluster gets a needless extra split. Park 2024 picks this side of the boundary on the same logic.</p>
-  </div>
-
-  <div class="callout">
-    <div class="tag">the 1e-9 epsilon: why and when it matters</div>
-    <p>The threshold is a double-precision float; the cut is an integer. Equality in floating point is fragile. For criterion \(1 \cdot \log_{10}(100) = 2.0\), the computed double is not exactly 2.0 because \(\log(100) / \log(10)\) accumulates rounding. The 1e-9 tolerance treats anything within a billionth of the integer as a tie, and the strict comparison sends ties to the "fail" side. For criterion functions that hit integer values cleanly (like the piecewise variant), the tolerance is a no-op. For log and sqrt criteria, it catches the boundary cases at the integer-power-of-base sizes (\(n = 10, 100, 1000\) under \(\log_{10}\)).</p>
-  </div>
+  <div class="stage-num">stage 1 &middot; strip + connected components</div>
+  <h2>The seed step, same as <a href="./cc.html">CC</a>.</h2>
+  <p>CM's first action drops every cross-cluster edge from the residual graph, then runs breadth-first search on each cluster's surviving subgraph in node-id order. Disconnected input clusters fragment here, before any mincut runs. The fixture's cluster C is the case: its two 3-cycles share one label but live in separate components, so the seed step splits them into C<sub>1</sub> and C<sub>2</sub>.</p>
+  <p>Why split first, then run mincut? Mincut is undefined on a disconnected graph (the cut value is trivially 0). BFS once per cluster, hand the cut loop only connected pieces.</p>
 </section>
 
-<!-- ─────────── Stage 1b · the IsWellConnected internals ─────────── -->
+<!-- ─────────── Stage 2 · lineage id assignment ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 1b &middot; reading the threshold check</div>
-  <h2>The well-connectedness test, line by line.</h2>
-  <p>The threshold check is a four-line routine, but every line carries a decision worth a sentence. Reading it forward: compute the threshold value as a product of a precomputed constant and a log of the cluster size; check whether the threshold and the cut differ by less than a billionth (the \(\varepsilon\) guard); then check whether the threshold is strictly less than the cut, with the tolerance check overriding equality.</p>
+  <div class="stage-num">stage 2 &middot; lineage id assignment</div>
+  <h2>Keep the original id, or mint a fresh one?</h2>
+  <p>CM tracks which output cluster descended from which input cluster, because the cluster-fate classification reads the parent &rarr; child tree. The rule is one comparison per component:</p>
 
+  <p style="text-align:center">\( \text{if } |\text{component}| = |\text{original cluster}| \text{ then keep the original id, else mint a fresh id with parent } = \text{original} \)</p>
+
+  <p>In plain English: if a component covers its entire input cluster, the original id stands. If the component is a strict subset, CM mints a fresh id and records the parent link. The first fragment of each input cluster also records the row "(parent = root, child = original id)" exactly once. Two interesting properties: the root row records every input cluster that ever fragmented, so the cluster-fate analyzer finds the split inputs by scanning a single row; and ids are never re-used, so the tree is always acyclic.</p>
+</section>
+
+<!-- ─────────── Stage 3 · the threshold function ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 3 &middot; the threshold function</div>
+  <h2>What \(f(n)\) says and why.</h2>
+  <p>The well-connectedness test is:</p>
   <p style="text-align:center">
     \( \text{threshold} = \text{pre\_log} \cdot \log(n) \)<br>
     \( \text{is\_close} = | \text{threshold} - \text{cut} | \leq 10^{-9} \)<br>
     \( \text{well\_connected} = (\text{not is\_close}) \wedge (\text{threshold} &lt; \text{cut}) \)
   </p>
-
-  <p>In plain English: a cluster is well-connected if its cut is strictly above the threshold AND the cut is not numerically tied with the threshold. The "not is_close" guard handles the floating-point equality case; the strict inequality handles everything else. Two interesting properties: the order of operations matters here, because <code>pre_log * log(n)</code> is one FMA-fusable site in C++ and the binary compiles with <code>-ffp-contract=off</code> to keep the computation byte-equal between machines; and a smaller cluster always has a smaller threshold (since log is monotone increasing for \(n \geq 1\)), so a cluster that fails the threshold once cannot recover by surviving a cut that just shrunk it further. The threshold-vs-cut relationship is monotone in cluster size.</p>
-
-  <p>The cluster-side cost per check is fixed: one log primitive, one multiply, one absolute value, one subtraction, one comparison, one AND. Compared to the cactus mincut on the same cluster (which is near-linear in cluster edges), the threshold check is negligible. The CM cost per round is dominated by the mincut plus the re-cluster, not by the threshold check itself.</p>
-</section>
-
-<!-- ─────────── Stage 1c · mincut as a primitive ─────────── -->
-<section class="stage">
-  <div class="stage-num">stage 1c &middot; mincut as a primitive</div>
-  <h2>What CM asks VieCut to compute on each pop.</h2>
-  <p>VieCut returns three things per call: the minimum cut size (an integer count of edges), the in-side node list (the smaller of the two halves the cut produces), and the out-side node list. The "minimum" qualifier is over all possible bipartitions of the cluster's nodes: the smallest edge count whose removal disconnects the cluster. The "most balanced" qualifier breaks ties: among all bipartitions achieving the minimum, VieCut picks the one whose two sides are closest in size.</p>
-
-  <p>Why minimum and not "weakest link" or "most central edge"? The minimum cut is the bottleneck of the cluster: removing fewer edges than the mincut leaves the cluster connected; removing the mincut edges disconnects it. The threshold check asks whether this bottleneck is wide enough. A yes verdict means the cluster is well-connected. A no verdict means the bottleneck IS where the cluster should be split. The CM design uses mincut both as the diagnostic (is the cluster well-connected?) and as the corrective (where exactly to cut?).</p>
-
-  <p>Two interesting properties of the mincut + balance criterion. The balance step is what keeps recursion depth low; without it, a "trivial cut" (one node on one side, n-1 on the other) would peel one node at a time and produce a recursion depth of \(n\) instead of \(\log n\). And the mincut bipartition is unique up to ties: if the cluster has exactly one minimum cut, both the cut size and the partition are unique. If multiple bipartitions tie, balance picks one, and the choice is deterministic given VieCut's internal state.</p>
-
-  <p>The "most balanced" criterion bears extra reading. Among all bipartitions achieving the minimum cut, the most balanced one is the partition whose two side sizes are closest. For a cluster of n nodes, the ideally balanced partition has sides of size \(\lfloor n/2 \rfloor\) and \(\lceil n/2 \rceil\). VieCut's balanced-cut-DFS algorithm searches the space of minimum-cut bipartitions and picks the one closest to this ideal. The search is exact (no heuristic approximation), so the choice is deterministic given the input and the RNG state.</p>
-
-  <p>Why balance matters operationally. On a cluster with a single bottleneck (one minimum cut), balance picks that cut and the two sides are however the bottleneck splits them. On a cluster with multiple minimum cuts (e.g. multiple edge-pendant attachments to a dense core, each a size-1 cut), balance picks the most balanced of those, which is the periphery pendant whose removal would leave the largest connected piece behind. On a cluster with no clear bottleneck (e.g. a dense graph with mincut equal to the minimum degree), balance picks among many ties.</p>
-
-  <div class="callout">
-    <div class="tag">cactus mincut, briefly</div>
-    <p>VieCut's cactus algorithm (Karger, Stein 1996; refined in Henzinger et al. 2018) builds a "cactus" auxiliary graph that compactly represents every minimum cut of the input. The CM kernel reads off one of those minimum cuts plus the cluster's bipartition. Cost is \(\tilde{O}(m \log^3 n)\) for the cactus construction plus \(O(m)\) for the balanced-cut readout. On the 32-node fixture, the mincut step is microseconds per pop. On networks with thousands of large clusters, mincut is the dominant cost of the CM stage.</p>
-  </div>
-
-  <h3 style="margin-top:1.2rem">What mincut looks like on each fixture cluster</h3>
-  <p>The mincut values for the four planted clusters are worth enumerating because they determine which pass the threshold.</p>
+  <p>In plain English: a cluster is well-connected if its cut is strictly above the threshold AND the cut is not numerically tied with the threshold. The constant \(\text{pre\_log} = C / \log(x)\) is computed once at startup, so per-cluster work is one log call and one multiply. Two interesting properties: a smaller cluster always faces a smaller threshold (log is monotone), so a cluster that fails the bar once cannot recover by surviving a cut that just shrunk it; and the comparison sits strictly above the threshold, so a cluster sitting exactly at \(f(n)\) within tolerance fails, not passes.</p>
 
   <table class="profile-table dnc-stats" style="margin:.5rem 0 .8rem">
     <thead>
-      <tr><th>cluster</th><th>n</th><th>m intra</th><th>mincut</th><th>bipartition produced by VieCut</th></tr>
+      <tr><th>n</th><th>\(1\cdot\log_{10}(n)\) (paper)</th><th>\(0.2 \cdot n^{0.5}\) (wrapper)</th><th>\(1\cdot\log_2(n)\)</th></tr>
     </thead>
     <tbody>
-      <tr><td>A</td><td>12</td><td>20</td><td>1</td><td>{any one periphery node, e.g. 5} vs {rest}</td></tr>
-      <tr><td>B</td><td>8</td><td>13</td><td>1</td><td>{12, 13, 14, 15} vs {16, 17, 18, 19} (split along the bridge)</td></tr>
-      <tr><td>C<sub>1</sub></td><td>3</td><td>3</td><td>2</td><td>{20} vs {21, 22} (or rotations; balance picks smaller-id side)</td></tr>
-      <tr><td>C<sub>2</sub></td><td>3</td><td>3</td><td>2</td><td>similar to C<sub>1</sub></td></tr>
-      <tr><td>D</td><td>4</td><td>5</td><td>1</td><td>{26, 27} vs {28, 29} (split along the inter-clique edge)</td></tr>
+      <tr><td>3 (C<sub>1</sub>)</td><td>0.477</td><td>0.346</td><td>1.585</td></tr>
+      <tr><td>4 (D)</td><td>0.602</td><td>0.400</td><td>2.000</td></tr>
+      <tr><td>8 (B)</td><td>0.903</td><td>0.566</td><td>3.000</td></tr>
+      <tr><td>12 (A)</td><td>1.079</td><td>0.693</td><td>3.585</td></tr>
+      <tr><td>100</td><td>2.000</td><td>2.000</td><td>6.644</td></tr>
+      <tr><td>2000</td><td>3.301</td><td>8.944</td><td>10.966</td></tr>
     </tbody>
   </table>
 
-  <p>Reading the table: A's mincut of 1 is the lowest possible for a connected cluster, so A is the most vulnerable to any threshold above 1. B's mincut is also 1 (the bridge), but the bipartition is more balanced (4 vs 4) than A's (1 vs 11). C<sub>1</sub> and C<sub>2</sub> each have mincut 2 (a 3-cycle requires removing 2 edges to disconnect), the highest among the clusters here. D's mincut is 1 (the inter-clique edge), with a balanced 2 vs 2 bipartition.</p>
-
-  <p>VieCut's balance criterion is visible in B's bipartition: among all cuts of size 1 in B, the bridge edge is the only one that produces a balanced split (4 vs 4); other size-1 cuts would peel one node off, giving 1 vs 7. The balance step picks the balanced cut. Same for D: the inter-clique edge gives a balanced 2 vs 2, preferred over peeling one node off either clique.</p>
-
-  <p>On A, the balance criterion does not get much to work with: every size-1 cut peels one periphery node off the rest. The balanced choice is among the four periphery pendants (5, 6, 7, 11); VieCut picks one deterministically based on its internal traversal order, and the choice can vary across seeds (the tied cuts resolve differently when the RNG state differs).</p>
+  <p>Under the paper's log default only A fails. Under the wrapper's sqrt default every cluster passes; CM is a no-op on this fixture. The log and sqrt families cross at \(n = 100\); above that, sqrt is the stricter bar.</p>
 </section>
 
-<!-- ─────────── Stage 2 · round walker ─────────── -->
+<!-- ─────────── Stage 4 · mincut on the popped cluster ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 4 &middot; mincut as a primitive</div>
+  <h2>What <a href="./viecut.html">VieCut</a> returns per pop.</h2>
+  <p>VieCut returns the minimum cut size (an edge count) plus the bipartition of the cluster into two sides. Among all bipartitions achieving the minimum, VieCut picks the most balanced one. Balance keeps recursion depth bounded: without it, a "trivial cut" peeling one node at a time would produce recursion depth \(n\) instead of \(\log n\).</p>
+
+  <table class="profile-table dnc-stats" style="margin:.5rem 0 .8rem">
+    <thead>
+      <tr><th>cluster</th><th>n</th><th>mincut</th><th>bipartition</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>A</td><td>12</td><td>1</td><td>one periphery node vs rest</td></tr>
+      <tr><td>B</td><td>8</td><td>1</td><td>{12, 13, 14, 15} vs {16, 17, 18, 19} (along the bridge)</td></tr>
+      <tr><td>C<sub>1</sub>, C<sub>2</sub></td><td>3</td><td>2</td><td>{20} vs {21, 22} (rotations possible)</td></tr>
+      <tr><td>D</td><td>4</td><td>1</td><td>{26, 27} vs {28, 29} (inter-clique edge)</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ─────────── Stage 5 · verdict + cut + side filter ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 5 &middot; verdict and side filter</div>
+  <h2>Pass means survivor; fail means re-cluster each side.</h2>
+  <p>The verdict reads the threshold check. Pass: the cluster is well-connected, push it to the survivor list, no further work. Fail: the bipartition is the place to cut, and CM hands each side of size \(&gt;1\) to the base algorithm. Sides of size 1 are filtered by the strict-greater-than-one gate and vanish; this is what makes singletons die after one extra round rather than loop forever.</p>
+  <p>On cluster A under \(\log_{10}\): cut 1, threshold \(\log_{10}(12) \approx 1.079\), so \(1 &gt; 1.079\) is false, fail. VieCut returns a balanced cut peeling one periphery node. The 1-node side is filtered. The 11-node side goes through the re-cluster step.</p>
+</section>
+
+<!-- ─────────── Stage 6 · Leiden replay on each failing side ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 6 &middot; Leiden replay on the failing side</div>
+  <h2>What makes CM different from <a href="./wcc.html">WCC</a>.</h2>
+  <p>This is the step that lifts CM above WCC. After a failing cut, CM does not push the two cut halves directly back. Instead, for each side of size larger than one, CM builds the induced subgraph of that side alone and runs <a href="./leiden-cpm.html">Leiden CPM</a> on it for two iterations. Whatever communities Leiden returns become the new clusters; each one gets pushed back with the failing cluster's id as parent.</p>
+  <p>The implication: a single failing cluster can spawn many children, not just two. If Leiden finds three sub-communities in the 11-node side, all three get pushed back. The lineage tree branches accordingly. On the 32-node fixture under \(r = 0.0001\), Leiden returns one community on every side it sees, so the chain is linear; on \(r = 0.5\), Leiden returns multiple communities and the chain branches.</p>
+  <p>Two interesting properties: the re-cluster step is run on the induced subgraph of the side alone, not the full cluster, so Leiden's view is local; and Leiden's RNG is re-seeded to 0 at every call, so two re-cluster runs on the same induced subgraph produce the same partition regardless of where they sit in the pop sequence.</p>
+
+  <div class="callout">
+    <div class="tag">why this step is the heaviest in the CM family</div>
+    <p>CC does the seed step only. WCC adds the threshold check and the recursive cut. CM adds the Leiden replay. The cost of one re-cluster call is \(O(n + m)\) per Leiden iteration with two iterations per call. On large clusters this dominates the per-pop cost.</p>
+  </div>
+</section>
+
+<!-- ─────────── Stage 7 · round drain + fresh ids ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 7 &middot; round drain</div>
+  <h2>End of round: every pending entry gets a fresh id.</h2>
+  <p>CM runs in rounds. One round drains the mincut queue entirely, producing either survivors or re-cluster outputs. The re-cluster outputs land in a pending queue for the next round. When the round ends, every pending entry gets a fresh id from a counter, records its parent link in the lineage tree, and migrates back to the mincut queue. The round counter ticks.</p>
+  <p>Termination: a round produces no work for the next round. Equivalent statement: every cluster in the most recent round either survived or got cut into singletons that the size-greater-than-one gate filtered.</p>
+</section>
+
+<!-- ─────────── Stage 8 · the walker (cut + recluster scrubable) ─────────── -->
 <section class="stage cm-walker">
-  <div class="stage-num">stage 2 &middot; cut + recluster rounds</div>
-  <h2>Mincut, threshold check, base-algo recluster on each cut half.</h2>
-  <p>This is Park 2024's stage 3, the CM loop. Each step is one queue pop: pull a cluster, run <a href="./viecut.html">VieCut cactus mincut</a>, check whether the cut clears the threshold for the cluster's size. Pass: the cluster joins the survivor set. Fail: the base algorithm re-clusters each cut half of size larger than one node, and the resulting communities push into the next round's mincut queue.</p>
-
-  <p>The walker below scrubs through every pop in order. Each pop has a size (the cluster's node count), a cut (the edge count of the minimum cut, returned by VieCut), a threshold, and a verdict. The lineage tree to the right of the round panel updates with each pop. Edge-of-round events (drains and id assignments) are visible in the per-round granularity toggle.</p>
-
-  <p>What to look for as the walker advances. The round counter increments at the end of each drain; each round is one full pass through <code>to_be_mincut</code>. Within a round, the cluster being processed turns highlighted in the graph view; the survivor list grows green; the next-round queue grows amber. The base-algorithm output for failing clusters appears as an inset, showing which communities the re-clusterer returned. After the round ends, fresh ids get assigned to drained clusters and the cycle repeats.</p>
-
-  <p>Three properties of the walker are worth flagging. The mincut and base-algo recluster are deterministic given seed and input, so scrubbing back and forth produces the same state. The lineage tree is built incrementally and never re-allocates nodes, so the tree's shape can only grow, never shrink. And the final partition is the survivor list at the moment the loop terminates, which is when <code>to_be_clustered</code> is empty after a round.</p>
+  <div class="stage-num">stage 8 &middot; the walker</div>
+  <h2>Cut, threshold check, Leiden replay, round by round.</h2>
+  <p>The walker scrubs through every pop in order. Each pop has a size, a cut, a threshold, a verdict. Edge-of-round events (drains and id assignments) surface under the per-round granularity toggle. Changing the base algorithm, resolution, criterion, or seed re-runs the kernel live.</p>
 
   <div class="cm-controls-row">
     <label>base algorithm:
@@ -573,49 +445,14 @@
   </div>
 
   <div id="g-walk-panel"></div>
-
-  <div class="callout">
-    <div class="tag">what a round does</div>
-    <p>A round drains <code>to_be_mincut</code> entirely. Each pop produces either a survivor (push to the survivor list, no further work) or a failed cut (run the base algorithm on each side of size larger than one, push each resulting community to <code>to_be_clustered</code>). After the drain, every entry in <code>to_be_clustered</code> gets a fresh id from a counter and migrates to <code>to_be_mincut</code> for the next round. The round counter ticks. Termination: a round produces no work for the next round.</p>
-  </div>
-
-  <div class="callout">
-    <div class="tag">the FIFO discipline</div>
-    <p>Both queues are first-in first-out. The order clusters enter <code>to_be_mincut</code> matches the order their connected components appeared in the seed step, and the order base-algo outputs land in <code>to_be_clustered</code> follows the order the base algorithm returned them. FIFO preserves the property that an output partition is fully determined by the inputs and the seed: rerun with the same inputs and you get the same partition, in the same order.</p>
-  </div>
-
-  <div class="callout">
-    <div class="tag">cost per pop, in three primitives</div>
-    <p>Three computations dominate the per-pop work. First, cactus mincut on the induced subgraph: VieCut's cactus algorithm runs in near-linear time over the cluster's edges, so on a cluster with \(m\) intra-cluster edges, the per-pop cost is \(\tilde{O}(m)\). Second, the threshold check: constant time per pop. Third, the re-cluster step on each failing side: Leiden CPM runs in time \(O(\text{vertices} + \text{edges})\) per iteration with two iterations per call, so for a side of \(m'\) edges the re-cluster cost is \(O(m')\). The whole CM stage cost is roughly \(O(M \cdot R)\), where \(M\) is the total number of intra-cluster edges across all rounds and \(R\) is the depth of the recursion tree. On well-behaved inputs \(R\) is small (a handful of rounds at most); on pathological inputs (every recluster returns the same single community) \(R\) can grow linearly with cluster size.</p>
-  </div>
-
-  <h3 style="margin-top:1.4rem">What the walker shows that the source code does not</h3>
-  <p>The walker exposes three properties of CM that the source code does not make obvious. First, the lineage tree's shape is a function of base-algo behaviour, not just threshold behaviour. Source code reading suggests CM is "WCC plus a Leiden call"; the walker shows that the Leiden call is what determines whether the chain is linear or branching. Second, the round count is small even for clusters that look problematic. Cluster A's three-round chain is visible at the walker's scrub speed; the entire CM run completes in under a second of user time. Third, the singleton-filter behaviour is asymmetric: singletons die in one extra round, but the asymmetry is not obvious from the source code, which pushes singletons into <code>to_be_clustered</code> without comment.</p>
-
-  <p>What the walker omits: the source code's mutex locks (CM is multi-thread-capable; the walker pins to single-thread), the <code>--prune</code> branch (not exercised by the wrapper default), and the actual cactus algorithm's internal traversal (VieCut's mincut is shown as a black box returning cut and bipartition). Anyone wanting full source coverage should read the technical companion at the link below; the walker covers what is visible at the algorithm level.</p>
-
-  <h3 style="margin-top:1.2rem">Reading the lineage tree's geometry</h3>
-  <p>The lineage tree in stage 3 has a specific geometric shape on the 32-node fixture worth pausing on. Cluster A is the only non-extant cluster, so the tree is mostly trivial: the "-1" row has one entry (A), and below that is A's modification chain.</p>
-
-  <p>Reading the chain under \(\log_{10}\): A's lineage is the linear chain 0 → 6 → 7 → 8. Four nodes, three edges, no branching. The chain length corresponds to the number of CM rounds that touched A's lineage. The leaf node (8) is the survivor (the 9-node residual). The internal nodes (0, 6, 7) represent intermediate states: cluster 0 with 12 nodes (the input), cluster 6 with 11 nodes (after round 0), cluster 7 with 10 nodes (after round 1).</p>
-
-  <p>Reading the chain under \(0.2 \cdot n^{0.5}\): the lineage tree is empty under "-1" (no input clusters fragmented), because every cluster passed first check. The tree has zero internal edges; every input cluster is its own leaf with depth 0.</p>
-
-  <p>Reading the chain under a hypothetical that produces a branch: say \(2 \cdot \log_{10}(n)\), which makes B fail (threshold 1.806, cut 1). B would have lineage 1 → 9 → 10, where 9 is one K<sub>4</sub> and 10 is the other. The tree would have two roots under "-1" (A and B), each with its own chain. Reading the tree depth gives a per-cluster fate at a glance.</p>
 </section>
 
-<!-- ─────────── Stage 3 · lineage tree ─────────── -->
+<!-- ─────────── Stage 9 · lineage tree ─────────── -->
 <section class="stage cm-walker">
-  <div class="stage-num">stage 3 &middot; lineage tree</div>
+  <div class="stage-num">stage 9 &middot; lineage tree</div>
   <h2>Cluster history: parent &rarr; children across rounds.</h2>
-  <p>Each input cluster traces a tree as CM splits and re-clusters it. Root nodes are the initial connected components (after the cross-cluster edge strip). Each internal edge is one recluster step. Leaves are clusters that ended the walk: green for survivors (well-connected), amber for clusters still in flight at the current step, grey for clusters that vanished because their re-cluster output was a single node (size-1 sides are filtered before the next round).</p>
-  <p>Why this tree is worth reading: the cluster-fate dictionary in the next stage is derived from this tree. A leaf with the same id as its root is an extant cluster; a root with two or more leaves is a split; a root with one leaf at lower size is a reduced; a root whose every leaf falls below the size filter is degraded. The tree IS the audit trail.</p>
-
-  <p>Tree-traversal sketch: the root of every chain is "-1" (the synthetic root that the binary uses as a stand-in for "before CM ran"). Below the root sits a row per input cluster that ever fragmented. Below each of those sits the modification chain for that cluster. Leaves are clusters that made it to the survivor list or to the dropped-singletons heap.</p>
-
-  <p>The tree is sparse: an extant input cluster does not appear under "-1" at all (no fragmentation means no fresh id was minted). So scanning the "-1" row tells you exactly which input clusters CM touched. The rest of the partition is unmodified. Two interesting properties: the "-1" row's length equals the number of input clusters that ever had a fresh sub-cluster minted, which equals the number of non-extant input clusters; and the tree depth at any leaf equals the number of rounds that lineage chain survived, which equals the number of cut + recluster operations that input cluster underwent before reaching its final form.</p>
-
-  <p>Reading the on-disk format: <code>history.log</code> contains lines of the shape <code>parent_id:child_id1,child_id2,...</code>, one per parent. Parents are listed in ascending id order (std::map iteration). Within each row, children appear in insertion order (the order they were minted). The file is short for small networks (one row per modified input cluster, plus one row per intermediate cluster that itself got modified further), and grows linearly with the depth and breadth of the modification trees on larger networks.</p>
+  <p>Each input cluster traces a tree as CM splits and re-clusters it. Roots are the initial connected components. Each internal edge is one cut + Leiden replay. Leaves are survivors (green), in-flight clusters (amber), or dropped singletons (grey). The cluster-fate label is reconstructable from this tree alone, which is why the binary writes it to disk.</p>
+  <p>On the 32-node fixture under \(\log_{10}\): A's lineage is the linear chain \(0 \rightarrow 6 \rightarrow 7 \rightarrow 8\) (four ids, three rounds, leaf at the 9-node residual). Under the wrapper's sqrt default the tree is empty (no input cluster fragmented). Under \(2 \cdot \log_{10}\) B would also fail and produce a separate chain.</p>
   <div class="cm-lineage" id="cm-lineage">
     <div class="ln-legend">
       <span><span class="swatch" style="background:#6dab7d"></span> survivor</span>
@@ -627,556 +464,125 @@
   </div>
 </section>
 
-<!-- ─────────── Stage 4 · worked example on cluster A ─────────── -->
+<!-- ─────────── Stage 10 · worked example on cluster A ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 4 &middot; worked example</div>
+  <div class="stage-num">stage 10 &middot; worked example</div>
   <h2>Cluster A's three rounds, mincut by mincut.</h2>
-  <p>Cluster A on the fixture is the only cluster that fails the canonical \(\log_{10}\) threshold on this graph. Walking its trajectory exposes every moving part of the CM loop. Start: 12 nodes, four periphery pendants (5, 6, 7, 11) each attached to the K<sub>5</sub> core by a single edge. Threshold for n=12 is \(\log_{10}(12) \approx 1.079\). Mincut of A's induced subgraph is 1.</p>
+  <p>Cluster A is the only cluster that fails the \(\log_{10}\) threshold on this fixture. 12 nodes, K<sub>5</sub> core, four periphery pendants each attached by a single edge. Walking its trajectory exposes every moving part of the loop.</p>
 
   <div class="cm-worked-strip">
     <div class="cm-worked-cell fail">
       <span class="step-num">round 0 &middot; pop A</span>
       n=12, cut=1, threshold=1.079.
       <span class="step-tag">verdict: fail</span>
-      VieCut returns a balanced cut peeling one periphery node (say node 5). The 1-node side is filtered out by the size-larger-than-one gate.
+      VieCut peels one periphery node. The 1-node side is filtered.
     </div>
     <div class="cm-worked-cell fail">
-      <span class="step-num">round 0 &middot; recluster side</span>
-      Base algo (Leiden CPM r=0.0001) runs on the 11-node side.
+      <span class="step-num">round 0 &middot; Leiden replay</span>
+      Leiden CPM r=0.0001 runs on the 11-node side.
       <span class="step-tag">output: one community of 11</span>
-      Leiden CPM at low resolution prefers one community here. The 11-node community pushes to <code>to_be_clustered</code> with A as its parent.
+      At low resolution, CPM prefers one community. It pushes to the next-round queue with A as parent.
     </div>
     <div class="cm-worked-cell fail">
-      <span class="step-num">round 1 &middot; pop the 11-node child</span>
-      Fresh id 6, n=11, cut=1, threshold=\(\log_{10}(11) \approx 1.041\).
+      <span class="step-num">round 1 &middot; pop id 6</span>
+      n=11, cut=1, threshold \(\log_{10}(11) \approx 1.041\).
       <span class="step-tag">verdict: fail</span>
-      Same shape: a single periphery pendant peels off, the 1-node side filtered, the 10-node side re-clusters.
+      Same shape: peel one pendant, recluster the 10-node side.
     </div>
     <div class="cm-worked-cell fail">
-      <span class="step-num">round 2 &middot; pop the 10-node child</span>
-      Fresh id 7, n=10, cut=1, threshold=\(\log_{10}(10) = 1.000\).
-      <span class="step-tag">verdict: fail (1 not &gt; 1.000)</span>
-      The strict inequality matters here: 1.000 = 1.000 within the 1e-9 guard, so the cluster fails and gets cut.
+      <span class="step-num">round 2 &middot; pop id 7</span>
+      n=10, cut=1, threshold \(\log_{10}(10) = 1.000\).
+      <span class="step-tag">verdict: fail (tie)</span>
+      \(1.000 - 1\) is within the \(10^{-9}\) guard, so is_close is true: fail.
     </div>
     <div class="cm-worked-cell pass">
-      <span class="step-num">round 3 &middot; pop the 9-node child</span>
-      Fresh id 8, n=9, cut=1, threshold=\(\log_{10}(9) \approx 0.954\).
-      <span class="step-tag">verdict: pass (1 &gt; 0.954)</span>
-      A's residual after three peel rounds: K<sub>5</sub> plus four remaining periphery nodes. The cluster survives. Lineage: \(0 \rightarrow 6 \rightarrow 7 \rightarrow 8\).
+      <span class="step-num">round 3 &middot; pop id 8</span>
+      n=9, cut=1, threshold \(\log_{10}(9) \approx 0.954\).
+      <span class="step-tag">verdict: pass</span>
+      \(1 &gt; 0.954\). The 9-node residual survives. Lineage: \(0 \rightarrow 6 \rightarrow 7 \rightarrow 8\).
     </div>
     <div class="cm-worked-cell pass">
       <span class="step-num">final</span>
       Output: 5 survivors.
       <span class="step-tag">A residual, B, C<sub>1</sub>, C<sub>2</sub>, D</span>
-      A's three peeled periphery pendants vanish (their re-cluster on the 1-node side is filtered). B passed first round. C is split by the seed step. D passed first round.
+      Three peeled pendants vanish (size-1 sides filtered).
     </div>
   </div>
 
-  <p>Reading this trace: each row marks one pop. The chain has length 4 because A's threshold has to drop below 1.000 before the cut-of-1 stops counting as a failure. The crossover happens at n=9, where \(\log_{10}\) finally falls below 1. Two interesting properties: the chain length depends only on the threshold function and the input cluster's size, not on its structure beyond the mincut value; and the re-cluster step plays a passive role here because Leiden CPM at r=0.0001 keeps returning one community of decreasing size, so CM is effectively running WCC with a Leiden no-op in the middle. Crank up the resolution and the re-cluster starts producing multiple communities per side, and the trace branches.</p>
-
-  <p>A point worth pausing on: VieCut returns the same one-edge cut every round, just on a smaller cluster each time. Each cut peels off one periphery pendant (the only size-1 cuts of A's induced subgraph). The pendant chosen depends on VieCut's internal traversal order plus the RNG state. With a different seed, the peel order can differ, but the residual after each round has the same shape: K<sub>5</sub> plus some number of periphery nodes. The trajectory is structurally invariant under seed; only the order of peeled nodes varies.</p>
-
-  <p>Another point: the re-cluster step IS doing work even when its output is one community. The Leiden CPM on the 11-node side runs two iter calls, computes the CPM optimum, and returns the community. That call is not free, just unobservable in the lineage tree. The walker shows the Leiden output in an inset when the cluster fails; in this trajectory the inset shows "one community of 11" on round 0, "one community of 10" on round 1, "one community of 9" on round 2. The fact that the inset is monotone is a property of Leiden CPM at low resolution, not a property of CM.</p>
-
-  <p>One subtlety in round 2's verdict: \(\log_{10}(10) = 1.000\) is exactly the cut value. The 1e-9 epsilon guard kicks in here: the absolute difference between 1.0 and 1.0 is 0, which is at most 1e-9, so <code>is_close</code> evaluates to true, and the cluster gets the "not well-connected" verdict. Without the epsilon guard, the strict comparison \(1.000 &lt; 1\) would also resolve to false (treating ties as fail), so the verdict would be the same. The epsilon guard is a safety net for cases where FP rounding could make the strict comparison flip; in this case it does not.</p>
-
-  <p>One reading worth holding onto: A's residual size shrinks by 1 per round, but the threshold drops by less than 1 per round (the gap between \(\log_{10}(n+1)\) and \(\log_{10}(n)\) is less than 0.1 for \(n \geq 10\)). So the "cluster shrinks faster than threshold drops" property is what eventually makes the cluster pass, but the convergence is slow when the per-round shrinkage is only 1 node. On clusters where the re-cluster step splits the side into multiple communities, each child cluster faces a much smaller threshold immediately, and convergence is much faster. The single-chain trajectory on A is the slowest case for the recursion.</p>
+  <p>The chain has length 4 because A's threshold has to drop below 1 before the cut of 1 stops counting as a failure. The crossover is at \(n = 9\), where \(\log_{10}\) finally falls below 1. Two interesting properties: the chain length depends only on the threshold function and the starting cluster size (not on structure beyond the mincut value); and the Leiden replay plays a passive role at \(r = 0.0001\) because it keeps returning one community, so CM is effectively running WCC with a Leiden no-op in the middle.</p>
 
   <div class="callout">
     <div class="tag">CC + WCC cross-link</div>
-    <p>If A's trajectory looks familiar from the <a href="./wcc.html">WCC</a> page, that is not a coincidence. WCC and CM produce the same partition on A under \(\log_{10}\) on this fixture, because Leiden CPM at r=0.0001 returns one community on every side it sees, so the re-cluster step is a no-op. The two diverge when the base algorithm actually splits a side into multiple communities. <a href="./cc.html">CC</a> would terminate A at the seed step (A is already connected as one component) and leave it as a single 12-node cluster regardless of mincut, which is why CC is the cheapest correction of the three but also the one that catches the least.</p>
-  </div>
-
-  <h3 style="margin-top:1.5rem">Side-by-side: the same cluster under three CM configurations</h3>
-  <p>The trace above is one trajectory: criterion \(\log_{10}(n)\), Leiden CPM at r=0.0001. Changing either knob produces a different trajectory on cluster A. The table below contrasts three configurations.</p>
-
-  <table class="profile-table dnc-stats" style="margin:.5rem 0 .8rem">
-    <thead>
-      <tr><th>configuration</th><th>rounds A survives</th><th>final A size</th><th>output structure</th></tr>
-    </thead>
-    <tbody>
-      <tr><td>\(\log_{10}\), Leiden CPM r=0.0001</td><td>3 (peel chain)</td><td>9</td><td>9-node residual (\(K_5\) plus four periphery)</td></tr>
-      <tr><td>\(\log_{10}\), Leiden CPM r=0.5</td><td>1 (single round)</td><td>5 + 4 + 1 + 1 + 1</td><td>The K<sub>5</sub> peels off as one community; periphery splinters into singletons that vanish</td></tr>
-      <tr><td>\(0.2 \cdot n^{0.5}\), any base algo</td><td>0 (passes first check)</td><td>12</td><td>A passes intact; output partition equals seed partition</td></tr>
-    </tbody>
-  </table>
-
-  <p>The configuration in row two surfaces what changes when the base algorithm starts producing structure. Leiden CPM at r=0.5 prefers small dense clusters, so when it re-clusters A's 11-node side, it returns the K<sub>5</sub> core as one community and each periphery pendant as its own singleton community. The pendants then push to <code>to_be_clustered</code>, drain into <code>to_be_mincut</code>, mincut on a 1-node graph yields cut = 0 against any positive threshold, the size-larger-than-one gate filters the singleton sides, and the pendants vanish. The K<sub>5</sub> survivor passes the next round (\(\log_{10}(5) \approx 0.699\), mincut of K<sub>5</sub> is 4). Net: A produces one survivor of 5 nodes, instead of one residual of 9.</p>
-
-  <p>The configuration in row three is the wrapper default. The sqrt criterion is mild enough that A's mincut of 1 clears \(0.2 \cdot \sqrt{12} \approx 0.693\) on the first check, so CM never enters the re-cluster loop for A. The output partition equals the seed partition for every cluster. On this fixture, the sqrt criterion turns CM into a no-op; on larger empirical networks where clusters span tens of thousands of nodes, the sqrt criterion bites harder than the log because \(0.2 \cdot \sqrt{n}\) overtakes \(\log_{10}(n)\) at \(n = 100\).</p>
-
-  <h3 style="margin-top:1.2rem">A hypothetical: what a branching trace looks like</h3>
-  <p>Row two of the table above (Leiden CPM r=0.5) hints at a branching lineage. Spelling it out: input cluster A has lineage id 0. After the first round, CM cuts A and runs Leiden CPM r=0.5 on the 11-node side. Leiden returns three communities: the K<sub>5</sub> (5 nodes), one isolated periphery node (size 1), and the remaining 5 periphery nodes joined to the K<sub>5</sub> on one side (size 5).</p>
-
-  <p>The three communities push to <code>to_be_clustered</code> with A as their parent. Round 1 drain assigns fresh ids 6, 7, 8 to them, in push order. Round 1 round-end snapshot of the lineage tree:</p>
-
-  <p style="font-family:'IBM Plex Mono',monospace; font-size:.85rem; color:var(--paper); margin:.5rem 0; padding:.5rem .8rem; background:var(--ink-2); border:1px solid var(--paper-3); border-radius:3px">
-    -1: 0<br>
-    &nbsp;0: 6, 7, 8
-  </p>
-
-  <p>Round 2 pops 6, 7, 8 in order. Id 6 (the K<sub>5</sub>) has n=5, threshold \(\log_{10}(5) \approx 0.699\), mincut 4 (a K<sub>5</sub> is 4-edge-connected). 4 > 0.699 → pass. Id 7 (the size-1 singleton) has cut 0, threshold 0, falls within the epsilon → fail. The recluster on a size-1 side is filtered; id 7 vanishes. Id 8 (the 5-node periphery cluster) has mincut 1 (any node-K<sub>5</sub>-pendant connection is a single edge), threshold \(\log_{10}(5) \approx 0.699\), 1 > 0.699 → pass.</p>
-
-  <p>Final lineage tree:</p>
-
-  <p style="font-family:'IBM Plex Mono',monospace; font-size:.85rem; color:var(--paper); margin:.5rem 0; padding:.5rem .8rem; background:var(--ink-2); border:1px solid var(--paper-3); border-radius:3px">
-    -1: 0<br>
-    &nbsp;0: 6, 7, 8 &nbsp;(6 → survivor, 7 → dropped, 8 → survivor)
-  </p>
-
-  <p>Fate of A: split. CM produced three children, of which one (the singleton) vanished. The output partition contains 6 (K<sub>5</sub>) and 8 (the periphery group) instead of A intact. Reading the tree: A's row in <code>history.log</code> would be <code>0:6,7,8</code>, and the "-1" row would be <code>-1:0</code>. The fate computation script sees row 0 has three children, all distinct ids, and labels A as "split". Two children survived; one vanished as a singleton.</p>
-
-  <p>This branching trace is hypothetical because Leiden CPM at r=0.5 on the 32-node fixture does not actually produce this exact split (the resolution is high enough that the periphery-K<sub>5</sub> connection is one community, not separable in two), but the structural shape is what a branching trace looks like in general: one parent, multiple children of varying sizes, varying fates per child. The walker's lineage tree visualisation in stage 3 shows the shape for whichever configuration is currently selected.</p>
-
-  <h3 style="margin-top:1.2rem">A real-world example: what depth-20 looks like</h3>
-  <p>On the bumped 3-tier stress panel's largest network (around 600k nodes), the deepest lineage chain observed has 20 levels. A length-20 chain means one input cluster spawned a descendant chain of 20 fresh ids, each round cutting and re-clustering down through successive smaller residuals.</p>
-
-  <p>Reading what produces depth 20: the input cluster is on the order of tens of thousands of nodes; the threshold function at that size is around 4 (\(\log_{10}(10000) = 4\)); the cluster's mincut is small (1, 2, or 3) and stays small as the cluster shrinks because the cuts peel off thin appendages rather than splitting the bulk. The base algorithm returns one community most rounds (the residual is internally similar to the parent), so the cluster shrinks by a small amount per round. Depth 20 is the result of 20 small-shrinkage rounds before the threshold finally drops below the cut.</p>
-
-  <p>The same pattern at smaller scale: the 32-node fixture's cluster A under low-resolution Leiden produces a depth-4 chain. The proportional shape is similar; what changes with scale is the chain length.</p>
-
-  <p>Why the chain length grows with cluster size. The threshold function \(\log_{10}(n)\) is monotone increasing, so larger clusters face higher bars. A cluster of 10000 nodes facing a mincut of 2 has threshold 4, so it fails by 2 edges. Each peel round removes one node from the cluster (the trivial 1 vs n-1 cut); the threshold drops by \(\log_{10}((n-1)/n)\), which for large n is very close to 0. So the cluster has to shrink by many rounds before the threshold drops by an integer-sized amount. Concretely: a cluster of 10000 nodes with mincut 2 has to shrink to about 1000 nodes (threshold 3, fails by 1) and then to 100 nodes (threshold 2, ties: still fails by epsilon) and then to 99 nodes (threshold below 2, passes). The peel chain is approximately \(n / 10\) long at this regime.</p>
-
-  <p>On real empirical networks the chain length is bounded by the recluster step's ability to find sub-communities. When the base algorithm starts producing multiple communities per side (instead of one), the chain branches into multiple shorter chains, each on a smaller side. Branches stop the chain length from growing linearly in cluster size; the depth-20 maximum on the bumped 3-tier panel happens because some clusters do not branch at all and have to peel one node per round.</p>
-
-  <div class="callout">
-    <div class="tag">why the re-cluster output drives the trajectory shape</div>
-    <p>Reading the three rows side by side: CM's behaviour depends on (a) whether the threshold catches the cluster at all and (b) what the base algorithm produces on each cut half. The threshold gates the loop's entry; the base algorithm shapes the loop's branching. When both knobs say "do something", CM does the heaviest version of its job; when either says "do nothing", CM short-circuits in different ways. The threshold determines whether CM cuts; the base algorithm determines what CM does after the cut.</p>
+    <p>If A's trajectory feels familiar from <a href="./wcc.html">WCC</a>, that is not a coincidence: WCC and CM produce the same partition on A here, because Leiden CPM at r=0.0001 returns one community on every side, so the re-cluster step is a no-op. The two diverge when the base algorithm splits a side into multiple communities.</p>
   </div>
 </section>
 
-<!-- ─────────── Stage 4a · termination ─────────── -->
+<!-- ─────────── Stage 11 · cluster fate dictionary ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 4a &middot; what guarantees termination</div>
-  <h2>The CM loop is not formally proven to halt; reading why it usually does.</h2>
-  <p>The recursion in CM is not size-monotone in the strict sense. A cluster fails the threshold, the base algorithm re-clusters each side, and the re-cluster output can in principle be the same single community on a side just as large as the failing cluster. If that happened repeatedly, the loop would run forever. Three forces conspire to make termination practical.</p>
-
-  <p><strong>First, the threshold drops as the cluster shrinks.</strong> Every cut peels at least one node off (one side has size 1 or more, the size-larger-than-one gate filters singletons, so the surviving descendants are strictly smaller than the failing cluster). The threshold \(f(n)\) is monotone increasing in \(n\), so smaller residuals face a lower bar. Eventually the threshold falls below the mincut value and the cluster passes.</p>
-
-  <p><strong>Second, the base algorithm usually does shape the cut.</strong> Leiden CPM at non-trivial resolution returns multiple communities per side most of the time; each community is smaller than the failing side. The lineage tree branches and the work spreads across many smaller clusters, each of which faces a lower threshold. The "single chain, one peel per round" trajectory seen on cluster A is the exception, not the rule, on real inputs.</p>
-
-  <p><strong>Third, the singletons-die-after-one-round invariant.</strong> Even when the re-cluster step produces singletons, the binary pushes them into <code>to_be_clustered</code> without filtering. The next round's mincut on a 1-node graph returns cut=0 against any positive threshold, the cluster fails, the re-cluster on a 1-node side is filtered by the size-larger-than-one gate, and the singleton vanishes. Net: a singleton sits in the queue for at most one extra round, then is gone.</p>
-
-  <p>Together these forces bound the recursion depth for any realistic input. The pathological case (a base algorithm that always returns one community on every side, on a fixture where the threshold never falls below 1) would loop, but no such case has been observed on the stress matrix or on the empirical networks studied in Park 2024. The implementation does not include an explicit loop counter; the Python wrapper has a safety timeout, but the binary itself does not.</p>
-
-  <p>One subtle property of the termination behaviour is that it depends on the base algorithm's locality. The base algorithm sees one cut half at a time, not the whole graph. So even if the base algorithm has a global preference for one large community (low-resolution CPM, say), its decision on a 200-node side may differ from its decision on the original 1000-node cluster, because the smaller induced subgraph has a different optimum. CM exploits this locality: the base algorithm's behaviour on a smaller cluster is what makes the recursion converge, not the algorithm's behaviour on the global graph.</p>
-
-  <p>A formal termination proof would require characterising the base algorithm's behaviour on every possible induced subgraph, which is not generally tractable. The empirical termination claim is sufficient for the gallery's purposes: across 600+ networks and 50+ seeds, no CM run has failed to terminate within the wrapper's timeout. Anyone running CM on a new network will probably see termination too; the worst case is bounded by linear recursion depth in cluster size.</p>
-
-  <div class="callout">
-    <div class="tag">recursion depth in practice</div>
-    <p>On the bumped 3-tier stress panel (161 empirical networks, sizes from 34 nodes to 600k+ nodes), the deepest lineage chain observed is around 20 levels on the largest networks. Most input clusters have depth 0 (extant) or depth 1 (one round of cut + recluster). Depth grows logarithmically with cluster size when the base algorithm cooperates, linearly when it does not. The mean depth across all inputs is below 2.</p>
-  </div>
-
-  <div class="callout">
-    <div class="tag">three sufficient conditions for termination</div>
-    <p>The recursion terminates under any of three sufficient conditions, even though none is required for every run. First: the threshold function tends to 0 as \(n \rightarrow 1\), so any cluster eventually shrinks below the bar (logically: as cluster size approaches 1, the threshold approaches 0, and a cut of 1 is trivially above 0). Second: the base algorithm returns smaller communities than the input on at least one round, breaking the chain. Third: the singleton-filter property guarantees that any size-1 cluster dies after one extra round, so the queue cannot grow without bound from singletons. The first condition is the most general; the other two are stronger but rarer in practice.</p>
-  </div>
-
-  <div class="callout warn">
-    <div class="tag">what would break termination</div>
-    <p>A pathological input: a fixture where every cluster has mincut 1, every cut peels off one node only, and the base algorithm returns the same single community on every cut side. Under those conditions the loop peels one node per round forever (until the cluster reaches the threshold's zero-crossing). The recursion depth bounds at \(n - 2\) (the cluster shrinks one node per round; the last reduction brings it to size 2, after which mincut 1 vs threshold \(\log_{10}(2) \approx 0.301\) lets the cluster pass). So even the pathological case has bounded depth, just linear in cluster size. No real network is observed to hit this; the empirical worst case is around 20 levels deep.</p>
-  </div>
-
-  <h3 style="margin-top:1.2rem">Per-round work decomposition</h3>
-  <p>One way to read the cost of a CM run is to break it into per-round contributions. Each round drains a queue of clusters; per cluster, three computations run.</p>
-
-  <table class="profile-table dnc-stats" style="margin:.5rem 0 .8rem">
-    <thead>
-      <tr><th>operation</th><th>cost per cluster of size n</th><th>frequency per round</th></tr>
-    </thead>
-    <tbody>
-      <tr><td>Induced subgraph build</td><td>\(O(n + m)\) (igraph_induced_subgraph_map)</td><td>once per pop</td></tr>
-      <tr><td>Cactus mincut + balance</td><td>\(\tilde{O}(m \log^3 n) + O(m)\) (VieCut)</td><td>once per pop</td></tr>
-      <tr><td>Threshold check</td><td>\(O(1)\) (one log + arithmetic)</td><td>once per pop</td></tr>
-      <tr><td>Re-cluster per failing side (size > 1)</td><td>\(O(m \cdot \text{iter})\) where iter \(= 2\) per call</td><td>at most twice per failing pop</td></tr>
-      <tr><td>Connected-components on re-cluster output</td><td>\(O(n + m)\)</td><td>once per re-cluster call</td></tr>
-    </tbody>
-  </table>
-
-  <p>The mincut and re-cluster are the heavy operations. The induced subgraph build is \(O(n + m)\), small compared to the mincut for moderate-to-large clusters. The threshold check is constant. Total per-round cost: \(\tilde{O}(\sum_c m_c \log^3 n_c)\), where the sum is over clusters in the round. The total cost across all rounds: at most \(\tilde{O}(M \log^3 N \cdot R)\), where \(M\) is the total intra-cluster edge count, \(N\) is the largest cluster size, and \(R\) is the number of rounds.</p>
-
-  <p>On the 32-node fixture, the total CM stage time is microseconds; on the empirical networks in the 3-tier panel (up to 23k nodes per network in the medium tier, up to 600k in the large tier), CM's stage 3 takes seconds to minutes. Most of that time is in cactus mincut on the largest clusters; the re-cluster step is comparatively cheap because Leiden runs fast on the induced subgraphs.</p>
-
-  <p>The relationship between cluster size and per-pop time is non-linear. Small clusters (n &lt; 50) take microseconds. Medium clusters (50 &lt; n &lt; 1000) take milliseconds. Large clusters (n &gt; 1000) take seconds. Very large clusters (n &gt; 100000) take minutes. The non-linearity comes from cactus mincut's \(\log^3 n\) factor; on the largest empirical clusters this dominates the whole CM stage. The wrapper's pre-CM filter (drop below \(B = 11\)) keeps the work to clusters in the medium-to-large range; the very small ones never enter stage 3.</p>
-</section>
-
-<!-- ─────────── Stage 4b · queue invariants ─────────── -->
-<section class="stage">
-  <div class="stage-num">stage 4b &middot; queue invariants</div>
-  <h2>Six things that hold at every round boundary.</h2>
-  <p>The CM loop has a small set of invariants that make the trace readable. Listing them helps when the lineage tree gets deep and the per-round counts grow.</p>
-
-  <ul style="font-family:'IBM Plex Sans',sans-serif; font-size:.92rem; line-height:1.55; color:var(--paper-2); margin:.3rem 0 .6rem; padding-left:1.4rem">
-    <li><strong>Every queue entry has a unique cluster id.</strong> The id counter <code>next_cluster_id</code> only increases. No id is ever re-used, so the lineage tree has no cycles.</li>
-    <li><strong>Node sets across the three queues are disjoint at any given time.</strong> A node sits in exactly one of <code>to_be_mincut</code>, <code>to_be_clustered</code>, or the survivor list at any pop boundary. The seed step partitions all clustered nodes among queues; later pops shuffle them between queues without ever duplicating or dropping (except for singletons that are filtered).</li>
-    <li><strong>Within-cluster node ids are sorted ascending.</strong> The seed step's BFS produces node-id-ASC components; the std::set conversion at emit time preserves ASC; the recluster step's translation preserves ASC. Reading any queue entry, the node list is sorted; this matters for the byte-equal verification to canonical.</li>
-    <li><strong>parent_to_child[-1] holds every input cluster that ever fragmented.</strong> The root row of the lineage tree records the set of original cluster ids that lost an unmodified component. Scanning the root row tells you which input clusters CM touched at all.</li>
-    <li><strong>Rounds are FIFO across the boundary.</strong> Cluster X enters <code>to_be_clustered</code> at the end of round R; it appears in <code>to_be_mincut</code> at position equal to its push order at the start of round R+1. No reordering.</li>
-    <li><strong>Termination: a round whose end finds <code>to_be_clustered</code> empty stops the loop.</strong> Equivalent statement: every cluster in the most recent round either survived (added to survivor list) or got cut into singletons (filtered). No further work pending.</li>
-  </ul>
-
-  <p>These invariants make the trace deterministic given the seed: rerun on the same input with the same seed and you get the same lineage tree in the same order. Two interesting consequences. The walker's per-round state is fully determined by the events emitted so far, so scrubbing back and forth in the player is exact, not approximate. And the lineage tree's depth equals the number of rounds the cluster's lineage chain survived, which gives a direct read of how aggressively CM modified each input.</p>
-
-  <h3 style="margin-top:1.3rem">How the queue evolves across rounds, in one example</h3>
-  <p>The 32-node fixture under \(\log_{10}\) produces five rounds total. Reading the queue counts across rounds gives a compact summary of the cluster's recursion shape.</p>
-
-  <table class="profile-table dnc-stats" style="margin:.5rem 0 .8rem">
-    <thead>
-      <tr><th>round</th><th>to_be_mincut at start</th><th>survivors produced</th><th>re-cluster outputs pushed</th><th>to_be_clustered at end</th></tr>
-    </thead>
-    <tbody>
-      <tr><td>0</td><td>5 (A, B, C<sub>1</sub>, C<sub>2</sub>, D)</td><td>4 (B, C<sub>1</sub>, C<sub>2</sub>, D)</td><td>1 (A's 11-node side from base re-clusterer)</td><td>1</td></tr>
-      <tr><td>1</td><td>1 (A's 11-node descendant, fresh id 6)</td><td>0</td><td>1 (10-node side)</td><td>1</td></tr>
-      <tr><td>2</td><td>1 (10-node descendant, fresh id 7)</td><td>0</td><td>1 (9-node side)</td><td>1</td></tr>
-      <tr><td>3</td><td>1 (9-node descendant, fresh id 8)</td><td>1 (passes \(\log_{10}(9) \approx 0.954\))</td><td>0</td><td>0</td></tr>
-      <tr><td>(terminate)</td><td colspan="4">to_be_clustered empty after round 3; loop exits</td></tr>
-    </tbody>
-  </table>
-
-  <p>Reading the table: each row is one drain of the mincut queue. The drained clusters either survive (added to the survivor list) or get cut + re-clustered (pushed back into the next round). The final round produces no new work, and the loop exits. The total number of pops is the sum of "to_be_mincut at start" across rounds: 5 + 1 + 1 + 1 = 8 mincut calls. The total number of re-cluster calls is 3 (one per round 0-2). Three of those re-clusters returned a single community (size 11, 10, 9), which is why the chain peels one node per round instead of branching.</p>
-
-  <p>This is the "single-chain" case: CM peels off one node at a time until the residual passes. Other inputs branch the chain (the re-cluster step returns multiple communities, the lineage tree fans out), and the round count grows differently. The walker plays the chain frame by frame; the lineage tree visualisation in stage 3 lets you see the shape at a glance.</p>
-</section>
-
-<!-- ─────────── Stage 5 · cluster fate dictionary ─────────── -->
-<section class="stage">
-  <div class="stage-num">stage 5 &middot; cluster fate dictionary</div>
+  <div class="stage-num">stage 11 &middot; cluster fate dictionary</div>
   <h2>Four labels Park 2024 §4.2 reads from the lineage tree.</h2>
-  <p>Each input cluster ends up labelled with one of four fates. The fate is reconstructable from the lineage tree alone, which is why the binary writes the tree to disk; the fate labels themselves are computed by a separate analysis pass.</p>
-
   <div class="cm-fate-grid">
     <div class="cm-fate-card extant">
       <div class="fate-name">extant</div>
-      <p>One child, same id as parent. The cluster passed every threshold check; it shows up in the output unchanged. On the 32-node fixture under \(\log_{10}\): B, C<sub>1</sub>, C<sub>2</sub>, D. The fixture's "easy" clusters.</p>
+      <p>One child, same id as parent. The cluster passed every threshold check; it shows up in the output unchanged. On this fixture under \(\log_{10}\): B, C<sub>1</sub>, C<sub>2</sub>, D.</p>
     </div>
     <div class="cm-fate-card reduced">
       <div class="fate-name">reduced</div>
-      <p>One child, smaller node set. Either the prune branch peeled nodes off, or the post-CM size filter dropped some pieces. On the 32-node fixture under \(\log_{10}\) without prune: A's lineage \(0 \rightarrow 6 \rightarrow 7 \rightarrow 8\) ends at 9 nodes, down from 12. The output is "A's reduced form".</p>
+      <p>One child, smaller node set. A on this fixture: \(0 \rightarrow 6 \rightarrow 7 \rightarrow 8\) ends at 9 nodes, down from 12.</p>
     </div>
     <div class="cm-fate-card split">
       <div class="fate-name">split</div>
-      <p>Two or more children. The base algorithm's re-cluster returned multiple communities on at least one cut half, or the seed step started with multiple components for one input cluster id. C on this fixture is the seed-step split: input cluster id 2 fragments into the two 3-cycles before the mincut loop runs.</p>
+      <p>Two or more children. The base algorithm returned multiple communities on at least one cut half, or the seed step started with multiple components for one input id. C on this fixture is the seed-step split.</p>
     </div>
     <div class="cm-fate-card degraded">
       <div class="fate-name">degraded</div>
-      <p>Every leaf descendant ends up below the post-CM size filter \(B\) (default 11). The cluster is effectively erased; what remains is fragments small enough that the wrapper drops them. This fate only appears when the size filter is applied, which is in the Python wrapper, not the binary itself. The walker above does not apply \(B\), so this fate does not surface on the 32-node fixture.</p>
+      <p>Every leaf descendant ended up below the post-CM size filter \(B\) (default 11). The cluster is effectively erased. Lives in the Python wrapper; not surfaced by the walker.</p>
     </div>
   </div>
-
-  <p>The four labels are exhaustive and disjoint per input cluster. Park 2024 §4.4 reports fate distributions across the five base algorithms studied: under Leiden-CPM at low resolution, the share of "split" + "reduced" is large; under IKC at k=10, most clusters are "extant"; Leiden-Mod sits in between. The reader looking at a CM output partition can read the lineage tree to find out which input clusters were touched and how.</p>
-
-  <h3 style="margin-top:1.3rem">Reading a lineage tree row</h3>
-  <p>A row in <code>history.log</code> has the form <code>parent:child1,child2,...</code>. The "-1" row lists every input cluster id that was ever fragmented (one or more pieces did not equal the entire input cluster); the rest of the rows trace the modifications. Concrete examples drawn from the 32-node fixture under \(\log_{10}\):</p>
-
-  <table class="profile-table dnc-stats" style="margin:.5rem 0 .8rem">
-    <thead>
-      <tr><th>history row</th><th>read as</th><th>fate of input cluster 0</th></tr>
-    </thead>
-    <tbody>
-      <tr><td><code>-1:0</code></td><td>Input cluster 0 (A) was fragmented at some point</td><td>not yet determined; read deeper</td></tr>
-      <tr><td><code>0:6</code></td><td>Cluster id 6 is a descendant of input cluster 0</td><td>at least one round survived</td></tr>
-      <tr><td><code>6:7</code></td><td>Cluster id 7 descended from 6</td><td>second round happened</td></tr>
-      <tr><td><code>7:8</code></td><td>Cluster id 8 descended from 7</td><td>third round happened</td></tr>
-    </tbody>
-  </table>
-
-  <p>Cluster 0 has one descendant chain ending at 8 (size 9, the K<sub>5</sub>-plus-four-periphery survivor). One chain = "reduced". If the row <code>7:8,9</code> had appeared instead, the chain would have branched, and cluster 0's fate would be "split". If all leaves of the chain ended up below the post-CM size filter, the fate would be "degraded".</p>
-
-  <p>Reading the tree as a whole, the depth gives a structural summary: input clusters that ended up extant have depth 0 (their id never appears as a parent in any row), reduced clusters trace a chain (depth equals the number of single-child rounds), split clusters fan out (a node with multiple children), and degraded clusters fan out and then every leaf falls under \(B\). The lineage tree is compact enough that even on networks with thousands of input clusters, the per-fate breakdown is computable in one linear scan.</p>
-
-  <h3 style="margin-top:1.2rem">Mixed fates within one input cluster</h3>
-  <p>The four fates are per input cluster, but the per-leaf outcomes within one input cluster can be mixed. A "split" fate can mean two survivors plus one dropped singleton plus one degraded fragment. The fate label captures only the structural shape; the detailed per-leaf outcomes are read off the lineage tree by inspection.</p>
-
-  <p>A worked example. Suppose input cluster X (n=200) is split by CM into three children: X<sub>1</sub> (n=120, extant), X<sub>2</sub> (n=40, reduced further to a 25-node survivor), X<sub>3</sub> (n=40, every descendant ends up below \(B\)). The fate of X is "split" (multiple children), and within that split, one child is "extant", one is "reduced", one is "degraded". The lineage tree records the full chain; the fate analyzer reads the chain to produce summary statistics.</p>
-
-  <p>Reading per-fate counts: in Park 2024 Table 2, the column "split" counts input clusters with more than one child; "reduced" counts those with exactly one smaller child; "extant" counts those with exactly one same-sized child; "degraded" counts those whose every descendant fell below \(B\). The four columns sum to the number of input clusters, and the per-row totals are the dominant signal: a Leiden-CPM r=0.0001 input has a large "split" + "reduced" share; an IKC k=10 input has a large "extant" share.</p>
-
-  <h3 style="margin-top:1.2rem">When degraded is the dominant fate</h3>
-  <p>The "degraded" fate is interesting because it represents complete erasure of an input cluster from the output. Every descendant ends up below \(B\), so the post-CM size filter drops them all, and the cluster contributes nothing to the final partition. This happens when (a) the input cluster was a tree-like structure with low internal connectivity, (b) the threshold failed it at every recursion level, and (c) the base algorithm could not find any well-connected sub-community larger than \(B\).</p>
-
-  <p>Park 2024 reports degraded clusters concentrate on Leiden-CPM at low \(r\) inputs where the resolution is so low that even the largest cluster's internal sub-structure is below \(B\). The degraded share scales inversely with \(r\): higher resolutions produce smaller clusters that pass the threshold easily; lower resolutions produce large clusters that fragment into below-\(B\) pieces.</p>
-
-  <p>The implication for downstream analysis: a "degraded" fate is a signal that the input partition over-merged at scale. The cluster's structure was so fragmented under the threshold's gaze that nothing survived. Reading the per-fate distribution on a CM run gives a quick diagnostic for "is the base algorithm operating in a regime that suits this network's structure?". A high degraded share is a hint to try a higher resolution or a different base algorithm.</p>
-
-  <h3 style="margin-top:1.2rem">Reading the fate distribution as a partition-quality signal</h3>
-  <p>Park 2024 §4 frames the cluster fate distribution as an indirect measure of input partition quality. The reasoning: a high-quality input partition has clusters that are already well-connected, so most fates are "extant" and few are "split" or "degraded". A low-quality input partition has clusters that need correction; fates skew toward "split" and "degraded". The distribution is read together rather than per-fate.</p>
-
-  <p>Three regimes to recognise. <strong>High extant share.</strong> The input partition was already well-connected; CM did little. Likely the base algorithm was well-tuned (high resolution, structurally aware) for this network. <strong>Mixed split + reduced share.</strong> The input partition had medium-quality issues; CM peeled off bad pieces and re-clustered the rest. Likely the base algorithm was operating in a default regime. <strong>High degraded share.</strong> The input partition over-merged severely; CM modified or erased most clusters. Likely the base algorithm's resolution was too low for this network.</p>
-
-  <p>Two interesting properties of this signal. The fate distribution is base-algorithm-aware in the sense that "degraded" and "extant" mean different things across base algorithms (degraded under IKC is suspicious because IKC is conservative; degraded under Leiden-CPM at low r is expected). And the fate distribution depends on the threshold function: under a stricter threshold (\(\sqrt{n}\) above n=100), more clusters fail and more fates skew to non-extant. Reading the distribution requires holding the threshold and base algorithm fixed for comparison.</p>
+  <p>The four labels are exhaustive and disjoint per input cluster. Park 2024 §4.4 reports: under Leiden-CPM at low resolution, "split" + "reduced" dominate; under IKC at k=10, most clusters are "extant"; Leiden-Mod sits in between.</p>
 </section>
 
-<!-- ─────────── Stage 5b · contrast with CC + WCC on the same fixture ─────────── -->
-<section class="stage">
-  <div class="stage-num">stage 5b &middot; CC vs WCC vs CM on the same fixture</div>
-  <h2>The three siblings, run on the same 32 nodes.</h2>
-  <p>The three post-procs share the same seed step (drop cross-cluster edges, take connected components) and diverge in what they do next. On the 32-node fixture under \(\log_{10}(n)\) with Leiden-CPM r=0.0001 as CM's base re-clusterer, the three produce different outputs. Reading them side by side clarifies what each post-proc does and does not catch.</p>
-
-  <table class="profile-table dnc-stats" style="margin:.5rem 0 .8rem">
-    <thead>
-      <tr><th>cluster (input)</th><th>CC output</th><th>WCC output</th><th>CM output</th></tr>
-    </thead>
-    <tbody>
-      <tr><td>A (12 nodes, 4 pendants)</td><td>A intact</td><td>A's 9-node residual</td><td>A's 9-node residual (same as WCC; Leiden returns one community on each side)</td></tr>
-      <tr><td>B (8 nodes, bridge)</td><td>B intact</td><td>B intact (cut 1 > 0.903)</td><td>B intact (cut 1 > 0.903)</td></tr>
-      <tr><td>C (6 nodes, two 3-cycles, one label)</td><td>C<sub>1</sub> + C<sub>2</sub> split</td><td>C<sub>1</sub> + C<sub>2</sub> split</td><td>C<sub>1</sub> + C<sub>2</sub> split</td></tr>
-      <tr><td>D (4 nodes)</td><td>D intact</td><td>D intact</td><td>D intact</td></tr>
-      <tr><td>{30, 31} outliers</td><td>dropped (singletons)</td><td>dropped</td><td>dropped</td></tr>
-    </tbody>
-  </table>
-
-  <p>On this fixture, WCC and CM agree on every output. They have to: CM's only difference from WCC is the re-cluster step, and Leiden-CPM at r=0.0001 returns one community per cut half on every side it sees. The re-cluster step is a no-op. CC differs from both on cluster A, because CC ends at the seed step and does not run the recursive cut loop at all. Two interesting properties: on inputs where the base algorithm finds real sub-structure in cut halves, CM and WCC diverge sharply (CM produces multiple survivors per failing cluster, WCC produces at most two); and on inputs where every cluster is already well-connected under the chosen threshold, CC, WCC, and CM all produce identical outputs.</p>
-
-  <h3 style="margin-top:1.2rem">The B cluster is the case CC misses</h3>
-  <p>B is two K<sub>4</sub>'s joined by a single bridge edge (between nodes 15 and 16). The shortest description of B's structure: two dense communities of four nodes each, connected by one thin link. CC sees B as one connected component and leaves it alone. WCC and CM both check B's mincut: cut = 1 (the bridge), threshold = \(\log_{10}(8) \approx 0.903\). Strict inequality \(1 &gt; 0.903\) holds, so B passes. B is well-connected by the criterion's definition, even though intuitively it looks like two communities.</p>
-
-  <p>This is a feature of the threshold's mildness. The log default is set permissive enough that small clusters with a single internal bridge still pass, on the logic that requiring cluster cohesion at the smallest cluster sizes throws away too much information. The threshold is designed for the regime where clusters span tens to thousands of nodes; at \(n = 8\), the bar is below 1, so any cut value of 1 or higher passes. The price is that this fixture's B cluster, which a human reader would call "obviously two communities", passes the test.</p>
-
-  <p>Under the stricter \(2 \cdot \log_{10}(n)\) variant, B's threshold becomes 1.806, and the cut of 1 fails. B gets cut along its bridge, and the re-cluster step runs on each K<sub>4</sub>. Leiden-CPM on a K<sub>4</sub> at r=0.0001 returns one community (its CPM optimum is one cluster for a dense input). The two K<sub>4</sub>'s emerge as separate survivors. Reading the trace: the threshold choice is what determines whether B is one cluster or two. The algorithm itself does not have an opinion.</p>
-
-  <h3 style="margin-top:1.2rem">The C cluster shows the seed-step split</h3>
-  <p>C is two disjoint 3-cycles labelled with the same input cluster id. The two 3-cycles share no edge between them; they are two connected components under the same label. CC's seed step is what catches this: drop cross-cluster edges (none here, since both 3-cycles carry the same id), take connected components of the residual, and the two 3-cycles emerge as separate components.</p>
-
-  <p>The lineage id assignment then takes over. The first component (in component-id ASC order, which corresponds to node-id ASC within each component) keeps the original cluster id (id 2 in the fixture). The second component gets a fresh id from the counter. Both components push to <code>to_be_mincut</code>. The mincut + threshold loop sees them as two separate clusters from the start; whatever happens next is independent for each.</p>
-
-  <p>On this fixture, both 3-cycles are 2-edge-connected (cycle of length 3 has mincut 2), threshold \(\log_{10}(3) \approx 0.477\), so 2 > 0.477 holds and both pass on the first check. Output: two survivors, C<sub>1</sub> and C<sub>2</sub>. Fate of input cluster 2: "split" (two children, distinct ids). The split happened at the seed step, not during the cut-recluster loop. CM's behaviour on C is identical to WCC's and to CC's: the seed step does all the work.</p>
-
-  <p>This is one place CM's stage-1 behaviour is observable in isolation. The 32-node fixture's C cluster is the seed-step case for all three post-procs; on networks where input clusters can be internally disconnected (a common SBM output), the seed step is non-trivial and the first round of mincut sees the components, not the original clusters.</p>
-
-  <p>The seed step's contribution is sometimes the dominant change to the partition. On SBM outputs that label disconnected blocks with the same id, the seed step splits more clusters than the cut + recluster loop. The threshold check often passes for the resulting components because each is small enough that the threshold falls below the cluster's mincut. So CM's final output equals "input partition's CC-split form" on such inputs; the modify-or-recluster loop is a no-op. The walker still emits round-0 events for every queued cluster, but none of them fail the threshold.</p>
-
-  <h3 style="margin-top:1.2rem">When the three post-procs disagree</h3>
-  <p>On most empirical networks, CC and WCC and CM disagree on a small fraction of clusters. The disagreement is concentrated where each post-proc adds something the previous one does not have. CC and WCC disagree on clusters with mincut 1 (CC keeps them; WCC cuts them under \(\log_{10}\)). WCC and CM disagree on clusters that fail the threshold AND have base-algo-discoverable sub-structure (WCC produces two halves; CM produces however many communities the base algorithm finds).</p>
-
-  <p>On the bumped 3-tier stress panel under Leiden-CPM at r=0.0001, the disagreement rate between WCC and CM is on the order of 20-30% of input clusters: roughly that many clusters fail the threshold AND the base algorithm finds sub-communities the cut would not have. Under Leiden-CPM at r=0.5, the rate drops below 10%, because the base algorithm's clusters at high resolution are already internally cohesive.</p>
-
-  <p>Reading the disagreement rate as a partition signal: a high rate means the input partition over-merged at the small-cluster level (the base algorithm at low resolution did not see real sub-structure); a low rate means the input partition was already close to what the base algorithm would produce on each cut half. The rate is itself a function of the threshold function and the base algorithm choice, so comparing across runs requires holding those fixed.</p>
-
-  <h3 style="margin-top:1.2rem">Three observations about the spectrum</h3>
-  <p>Looking at CC, WCC, and CM as a spectrum of intervention strength surfaces three observations worth stating explicitly.</p>
-
-  <p><strong>Coverage grows, partition gets smaller.</strong> CC produces the largest output partition (it only splits, never drops); WCC produces a smaller one (it drops singletons that emerge from cuts); CM produces the smallest (it drops singletons plus any community the base algorithm decides to fragment). Node coverage drops correspondingly: CM has the lowest node coverage of the three.</p>
-
-  <p><strong>Cluster sizes shift down.</strong> CC keeps the input cluster sizes (it only splits into multiple smaller); WCC shrinks them further (cuts trim periphery); CM shrinks them most (cuts plus re-cluster trim further). The CM output partition's size distribution is shifted left (toward smaller clusters) relative to the input.</p>
-
-  <p><strong>Output cluster count usually grows.</strong> Each cut creates two clusters from one (modulo singletons that get filtered). So the post-CM cluster count is usually higher than the input. The exception is when many input clusters degrade entirely (every leaf below \(B\)); under that condition, the output count can be lower than the input. The cluster fate distribution describes which case applies on any given input.</p>
-</section>
-
-<!-- ─────────── Stage 6 · edge cases ─────────── -->
+<!-- ─────────── Stage 12 · edge cases ─────────── -->
 <section class="stage cm-walker">
-  <div class="stage-num">stage 6 &middot; edge cases</div>
+  <div class="stage-num">stage 12 &middot; edge cases</div>
   <h2>What CM does at the corners.</h2>
   <div class="cm-edge-cases">
     <div class="callout">
-      <div class="tag">leiden returns the same partition</div>
-      <p>The base algorithm is a fixed point on its own quality function, so a re-cluster can return one community spanning the whole input side. CM pushes that single community back into <code>to_be_clustered</code>; next round it will be mincut again. CM has no explicit guard against this, so a pathological input could loop. In practice Leiden CPM at low resolution converges, and the threshold eventually accepts a sufficiently large component as well-connected once \(n\) drops below the criterion's crossover.</p>
+      <div class="tag">Leiden returns the same partition</div>
+      <p>The base algorithm is a fixed point on its own quality function, so the re-cluster can return one community spanning the whole input side. CM pushes that single community back; next round it gets mincut again. Termination relies on the threshold dropping as the cluster shrinks.</p>
     </div>
     <div class="callout">
       <div class="tag">cluster disintegrates into singletons</div>
-      <p>A re-cluster on an n-node side can return n singleton communities. Singletons of size 1 still get pushed into <code>to_be_clustered</code> in the binary (the canonical does not filter at this site), then the next-round mincut on a size-1 cluster is trivial (cut = 0, threshold &gt; 0, well-connected = false), so they re-enter the recluster step on a size-1 side, which IS filtered by the size-larger-than-one gate, and never come back. The singletons die after one extra round, not an infinite loop. The pipeline then applies a post-filter (size &ge; \(B\) = 11 by default) at the end, which removes any small surviving fragments. That filter is Park 2024's stage 4.</p>
+      <p>A re-cluster on an n-node side can return n singletons. The binary pushes them all to the next-round queue. Next round each singleton fails the threshold; the re-cluster on a size-1 side is filtered by the size-greater-than-one gate and the singleton vanishes. One extra round, not an infinite loop.</p>
     </div>
     <div class="callout">
       <div class="tag">threshold equals cut exactly</div>
-      <p>The strict comparison with a 1e-9 tolerance resolves cluster-at-the-threshold to <em>not well-connected</em> (push back). A cluster sitting exactly at the threshold gets re-cut and re-clustered. The bias is intentional: the post-proc's job is to find under-cohesive clusters, and an equality at the boundary is closer to "fails" than "passes".</p>
-    </div>
-    <div class="callout">
-      <div class="tag">disconnected input cluster</div>
-      <p>The seed step splits any input cluster that is internally disconnected, before the mincut loop sees it. Each piece gets its own lineage id (or keeps the original id if exactly one piece equals the entire input cluster). The fate label for the original input is "split" with the pieces as children; if any piece is later modified further, the tree deepens. On the 32-node fixture, C is the disconnected input: two 3-cycles labelled with the same id. CM finds both at the seed step and never has to mincut C.</p>
+      <p>The strict comparison with a \(10^{-9}\) tolerance sends ties to fail. A cluster sitting exactly at \(f(n)\) gets re-cut. The bias is intentional: a post-proc looking for under-cohesive clusters treats equality as "fail".</p>
     </div>
     <div class="callout">
       <div class="tag">tree-shaped cluster</div>
-      <p>A tree has mincut = 1 by construction (every edge is a bridge), so every tree cluster fails the threshold at any \(n \geq 2\) under \(\log_{10}\). The recursion peels one edge at a time and the cluster effectively melts. Park 2024 §3 adds a pre-stage that filters tree clusters before stage 3 to avoid spending compute on them; that filter lives in the Python wrapper, not the binary.</p>
+      <p>A tree has mincut 1 by construction, so every tree cluster fails the threshold under \(\log_{10}\) for any \(n \geq 2\). The recursion peels one edge at a time and the cluster effectively melts. The Python wrapper filters tree clusters before stage 3 to avoid spending compute on them.</p>
     </div>
     <div class="callout">
-      <div class="tag">empty side after cut</div>
-      <p>If VieCut returns a degenerate cut where one side is empty, the size-larger-than-one gate skips it and the round proceeds with whatever it has. In practice cactus mincut on a connected graph of \(n \geq 2\) nodes always returns two non-empty sides, so this case does not arise on real input.</p>
-    </div>
-    <div class="callout">
-      <div class="tag">tied mincut, multiple balanced cuts</div>
-      <p>VieCut breaks mincut ties by picking the most balanced cut (the option that splits the cluster roughly in half rather than peeling one node off). The balance criterion matters: an unbalanced tie-break would peel one node at a time and stall the recursion, since each subsequent round would face a cluster only one node smaller. The most-balanced choice makes each round halve (roughly) the problem size, so the recursion depth stays \(O(\log n)\) in the worst case. The tie-break itself is deterministic given the same input: VieCut's DFS-based balanced-cut algorithm has a fixed traversal order, so two runs on the same induced subgraph produce the same bipartition.</p>
+      <div class="tag">multi-threading: ids vary, partition stable</div>
+      <p>Under multi-thread mode, worker threads pull from the FIFO concurrently and fresh-id assignment depends on which thread pops first. The partition itself is stable; only labels and row order vary. The verification harness pins to single-thread.</p>
     </div>
     <div class="callout">
       <div class="tag">VieCut RNG state drift across pops</div>
-      <p>VieCut is deterministic given its RNG state at the start of each mincut call. The state is seeded once at binary startup and not re-seeded per call (the intended per-call re-seed is commented out in the source). Two pops on identical induced subgraphs at different points in the binary's run can produce different mincut outputs if the random draws between them happened to land on different state values. The JS port mirrors this exactly: its MT19937 state is shared across pops within a single CM run. The byte-equal verification chain has to reproduce this drift, not just the initial seed.</p>
-    </div>
-    <div class="callout">
-      <div class="tag">multi-threading: ids stable, partition stable, order not</div>
-      <p>Under <code>--num-processors</code> greater than 1, worker threads pull from the FIFO concurrently, and the assignment of fresh ids to drained clusters depends on which thread pops first. The output <em>partition</em> (the node sets of each cluster) is stable under multi-thread; only the cluster id labels and the row order of <code>com.csv</code> vary across runs. Under <code>--num-processors 1</code>, both partition and labels are stable; two runs on the same input produce byte-identical output. The verification harness pins to single-thread for that reason.</p>
-    </div>
-    <div class="callout">
-      <div class="tag">re-cluster returns multiple disconnected sub-communities</div>
-      <p>The base algorithm can return a community whose internal subgraph is itself disconnected. Louvain has this property without refinement; Leiden's refinement phase prevents it for Leiden outputs. CM handles the case generically: after the base-algo call, run <code>RemoveInterClusterEdges + GetConnectedComponents</code> on the side's induced subgraph, which splits any disconnected returned community into its connected pieces. Each piece is pushed to <code>to_be_clustered</code> separately. Under Leiden this is a no-op; under Louvain it can add work.</p>
-    </div>
-    <div class="callout">
-      <div class="tag">very small clusters bypass the loop</div>
-      <p>A cluster of size 2 (one edge) has mincut 1 by construction. Under \(\log_{10}(2) \approx 0.301\), 1 > 0.301 holds and the cluster passes. Under \(2 \cdot \log_{10}(2) \approx 0.602\), 1 > 0.602 holds and the cluster passes. Under \(1 \cdot \log_2(2) = 1.0\), the cluster ties; with the epsilon guard it fails. So size-2 clusters under stricter thresholds get cut into singletons that vanish. This is a small but visible effect on partitions with many size-2 clusters as a base-algorithm artifact.</p>
-    </div>
-    <div class="callout">
-      <div class="tag">base-algo crashes on degenerate input</div>
-      <p>The re-cluster step calls Leiden on the induced subgraph of one cut half. If the side has zero edges (all isolated nodes), Leiden returns one community per node, all singletons. CM's connectivity-component pass then sees one component per node, each pushed to <code>to_be_clustered</code>. The next round drops all singletons via the size-larger-than-one gate. Functionally a no-op, but the round counter does tick. No crash; just one wasted round.</p>
+      <p>VieCut is seeded once at startup and not re-seeded per call (the intended per-call re-seed is commented out in the source). Two pops on identical induced subgraphs at different points in the run can produce different bipartitions when ties exist. The JS port mirrors the drift exactly.</p>
     </div>
     <div class="callout">
       <div class="tag">criterion = "0" disables CM</div>
-      <p>Setting <code>--connectedness-criterion 0</code> makes the threshold always 0; any cluster with cut > 0 (i.e. any connected cluster) passes the check. CM degenerates to the seed step plus the threshold check at the seed step (which every connected cluster passes). The output equals the input partition's CC-split form, identical to what <a href="./cc.html">CC</a> would produce on the same input. This is a documented behaviour, not a degenerate case; "criterion = 0" is the way to run the binary in CC mode.</p>
-    </div>
-    <div class="callout">
-      <div class="tag">criterion = piecewise (the binary's custom variant)</div>
-      <p>The binary supports a "piecewise" criterion that returns banded thresholds by cluster size: \(n &lt; 100\) requires cut \(\geq 1\), \(100 \leq n \leq 500\) requires \(\geq 2\), \(500 &lt; n \leq 999\) requires \(\geq 3\), \(n &gt; 999\) requires \(\geq \lceil \sqrt{n}/10 \rceil\). The piecewise variant is an integer-valued bar (no FP rounding), so the epsilon guard is a no-op for it. The walker exposes this criterion as a dropdown option on the WCC page; CM's criterion dropdown also supports it via the same parser.</p>
+      <p>Setting the criterion to a constant zero makes every connected cluster pass. CM degenerates to the seed step alone; the output equals <a href="./cc.html">CC</a>'s output.</p>
     </div>
   </div>
 </section>
 
-<!-- ─────────── Stage 7 · chain inputs ─────────── -->
+<!-- ─────────── Stage 13 · paper vs binary divergences ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 7 &middot; what feeds CM</div>
-  <h2>Base partition sources exercised in the stress matrix.</h2>
-  <p>CM is a post-processor by definition: it modifies an existing clustering. The choice of base partition matters because CM's gain (or non-gain) depends on how well-connected the base algorithm's clusters already are. The byte-equal verification chains CM against four base partition sources, plus two base re-clusterers (Leiden-CPM at two resolutions, Leiden-Mod). Together they span the regime where CM helps and the regime where CM is a no-op.</p>
-
-  <div class="cm-chain-grid">
-    <div class="cm-chain-cell">
-      <h5>Leiden-Mod</h5>
-      <p>The libleidenalg <em>ModularityVertexPartition</em>. Maximises Newton-Girvan modularity. Subject to the well-known resolution limit: small communities get merged into bigger ones. CM tends to split those merged blobs.</p>
-    </div>
-    <div class="cm-chain-cell">
-      <h5>Leiden-CPM r=0.5</h5>
-      <p>High-resolution CPM. Produces small dense clusters. CM mostly leaves these extant; the threshold is easy to clear for clusters that are already small and dense.</p>
-    </div>
-    <div class="cm-chain-cell">
-      <h5>Leiden-CPM r=0.0001</h5>
-      <p>Low-resolution CPM. Produces large clusters that bundle real sub-communities. CM aggressively peels and re-clusters. This is the regime where CM provides the most empirical lift.</p>
-    </div>
-    <div class="cm-chain-cell">
-      <h5>SBM-Flat-PP</h5>
-      <p>Planted-partition stochastic block model output. Block boundaries by construction; the input partition is internally consistent. CM's role here is mostly a sanity check that the post-proc does not over-modify a healthy input.</p>
-    </div>
-  </div>
-
-  <p>The empirical reading from Park 2024 §4.4: the more the base algorithm over-merges, the more CM splits; the more the base algorithm over-splits, the less CM has to do (and the small overhead of running mincut + re-cluster on every cluster still happens). CM is not a free correction. The Python wrapper's size filter \(B = 11\) bounds the cost downstream by dropping fragments below the threshold.</p>
-
-  <h3 style="margin-top:1.2rem">How CM's behaviour reads across base-algorithm regimes</h3>
-  <p>CM cleans up a base algorithm's output by removing clusters that look connected on paper but have weak internal structure. Three rough regimes describe CM's typical behaviour:</p>
-
-  <p><strong>The over-merge regime.</strong> Leiden modularity has the resolution limit; SBM-Flat-PP can merge blocks when the input clustering is coarser than the underlying structure; Louvain with no refinement can produce disconnected communities. In any of these cases, CM has clear work to do, and the post-CM partition is meaningfully different from the input.</p>
-
-  <p><strong>The conservative regime.</strong> IKC k=10 produces 10-edge-connected clusters by construction; Leiden CPM at high resolution produces small dense clusters; SBM-Nested-Best fits multiple resolutions and the smallest fit may already be well-connected. In these cases CM has little work to do, and running CM adds runtime overhead with no partition change.</p>
-
-  <p><strong>The diagnostic reading.</strong> The cluster-fate distribution is itself a diagnostic. A high "extant" share means the input was already well-connected; a high "split" share means CM caught something the base algorithm missed; a high "degraded" share means the input was so badly over-merged that even after splitting, nothing usable survived above \(B\).</p>
-
-  <p>The three post-procs span a spectrum. <a href="./cc.html">CC</a> is the cheapest correction; CM is the most aggressive. The cost dimension is compute (CC is one BFS per cluster; CM adds mincut + a base-algo call per failing cluster). The catch dimension is what each catches: CC catches disconnected clusters; WCC adds thin-bridge clusters; CM adds whatever else the base algorithm flags as suspect when given one cluster at a time.</p>
-
-  <h3 style="margin-top:1.2rem">What each chain partner is good at and what it misses</h3>
-  <p>The five chain partners (four base partition sources, two re-clusterer choices) cover the regimes where CM matters most. A short profile of each.</p>
-
-  <p><strong>Leiden-Mod as a base partition.</strong> Leiden optimising modularity tends to produce large clusters at the resolution limit. On networks with a wide range of community sizes, the smallest real communities get merged into bigger ones because modularity rewards merging when the merger increases the global score, regardless of whether the merged unit makes sense locally. CM finds those forced merges and splits them along the weakest internal connection.</p>
-
-  <p><strong>Leiden-CPM at low resolution as a base partition.</strong> CPM's "constant Potts model" objective is parametrised by a resolution \(r\). At low \(r\) the model rewards large clusters; at high \(r\) it rewards small ones. Park 2024 ran CM on Leiden-CPM at \(r \in [0.0001, 0.001]\) and showed CM produces large gains in that regime, because the base algorithm is blind to internal connectivity at those resolutions and CM does the corrective work.</p>
-
-  <p><strong>Leiden-CPM at high resolution as a base partition.</strong> The opposite regime. CPM at \(r = 0.5\) and above produces small dense clusters; the threshold \(\log_{10}(n)\) is low for those sizes, so most clusters pass on the first check. CM is close to a no-op here; the stress matrix's high-resolution panel is mostly extant-fate outputs.</p>
-
-  <p><strong>SBM-Flat-PP as a base partition.</strong> The planted-partition stochastic block model produces partitions where block boundaries are by construction. The input is internally consistent: blocks are well-connected within and weakly-connected across. CM's role is sanity check that the post-proc does not over-modify a healthy input. Empirically: a few clusters fail on edge cases (small blocks with unlucky sampling), most pass.</p>
-
-  <p><strong>Infomap as a base partition.</strong> Infomap's map equation rewards clusters that contain random-walk-coherent regions. The clusters tend to be structurally motivated rather than density-motivated; some pass the threshold, some do not. CM intervenes more than on Leiden-CPM at high resolution but less than on Leiden-Mod. Infomap is in the binary's algorithm choices but not in the wrapper's accepted base-algo list, so today's deployed CM does not chain through Infomap; the gallery's stress matrix still includes it as a chain partner for verification breadth.</p>
-
-  <p><strong>IKC k=10 as a base partition.</strong> IKC produces clusters of k-edge-connected nodes by construction (every cluster has mincut at least k). For k=10, the threshold function \(\log_{10}(n)\) is below 10 for any \(n \leq 10^{10}\), so every IKC cluster passes the threshold trivially. CM is a near-no-op on IKC output; Park 2024 §4.4 reports this is the case where CM provides the least lift. IKC's structural guarantee is upstream of CM's job; clusters that are already 10-edge-connected do not need CM to confirm so.</p>
-
-  <h3 style="margin-top:1.2rem">How the base re-clusterer interacts with the threshold</h3>
-  <p>CM's behaviour is a function of two knobs: the threshold function and the base re-clusterer. The matrix of plausible combinations is small enough to read explicitly. Each cell describes the dominant mode of CM activity on a typical empirical network.</p>
-
-  <table class="profile-table dnc-stats" style="margin:.5rem 0 .8rem">
-    <thead>
-      <tr><th></th><th>base = Leiden-CPM low \(r\)</th><th>base = Leiden-CPM high \(r\)</th><th>base = Leiden-Mod</th></tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td><strong>\(\log_{10}(n)\)</strong></td>
-        <td>Heavy. Many clusters split; CM produces the most lift. Park 2024's headline regime.</td>
-        <td>Moderate. Clusters already small; threshold mostly passes.</td>
-        <td>Moderate-to-heavy. Resolution-limited merges get split.</td>
-      </tr>
-      <tr>
-        <td><strong>\(0.2 \cdot n^{0.5}\)</strong></td>
-        <td>Heavy for very large clusters; mild for medium ones.</td>
-        <td>Mild. Most small clusters clear the bar.</td>
-        <td>Mostly extant on small networks; bites on large ones.</td>
-      </tr>
-      <tr>
-        <td><strong>\(0.01 \cdot (n-1)\) (Traag CPM bound)</strong></td>
-        <td>Very heavy for \(n &gt; 1000\); under-cohesive clusters at scale get cut.</td>
-        <td>Heavy on any cluster above 1000 nodes.</td>
-        <td>Heavy. Modularity's large clusters often fail this bound.</td>
-      </tr>
-    </tbody>
-  </table>
-
-  <p>Reading across the matrix: the threshold sets where CM bites, the base algorithm sets what CM does where it bites. Two interesting properties: every cell with "Heavy" in it produces a CM output that is materially different from the input partition; every cell with "Mild" or "Mostly extant" produces an output close to the input. CM's value depends on the user's prior belief about whether the base algorithm is making errors of the over-merging kind. Empirically, Leiden-CPM at low \(r\) and Leiden-Mod are the two regimes where CM's value is largest; Leiden-CPM at high \(r\) and IKC are regimes where CM mostly confirms the base output.</p>
-
-  <h3 style="margin-top:1.2rem">The cost of CM per stage</h3>
-  <p>Breaking down the CM cost into its three substages clarifies where compute time goes.</p>
-
-  <table class="profile-table dnc-stats" style="margin:.5rem 0 .8rem">
-    <thead>
-      <tr><th>substage</th><th>per-cluster cost</th><th>frequency</th><th>dominates when</th></tr>
-    </thead>
-    <tbody>
-      <tr><td>Threshold check (\(\log\) + arithmetic)</td><td>\(O(1)\)</td><td>once per pop</td><td>never; constant cost</td></tr>
-      <tr><td>Cactus mincut on induced subgraph</td><td>\(\tilde{O}(m \log^3 n)\)</td><td>once per pop</td><td>large clusters with many edges</td></tr>
-      <tr><td>Base-algo re-cluster (Leiden iter1+iter2)</td><td>\(O((n+m) \cdot \text{iter})\), iter=2</td><td>twice per failing pop (one per side > 1)</td><td>frequent failing pops, large sides</td></tr>
-      <tr><td>Connected-components on re-cluster output</td><td>\(O(n + m)\)</td><td>once per re-cluster call</td><td>negligible vs mincut + base-algo</td></tr>
-      <tr><td>Induced subgraph build (igraph)</td><td>\(O(n + m)\)</td><td>once per pop</td><td>negligible vs mincut</td></tr>
-    </tbody>
-  </table>
-
-  <p>Reading the table: mincut and re-cluster are the dominant costs; everything else is incidental. On networks where most clusters pass the first threshold check (high-resolution base partition), the per-cluster cost is just one mincut, so CM costs \(O(K \cdot m)\) where \(K\) is the number of input clusters. On networks where most clusters fail and require re-cluster (low-resolution base partition), the cost adds a Leiden call per failing side, so CM costs \(O(K \cdot (m + n))\) per round times the number of rounds.</p>
-
-  <p>The 6-fixture legacy panel takes microseconds; the 3-tier 17-fixture panel takes seconds to minutes per cell on the largest networks. The bumped 3-tier panel (601 networks up to 600k nodes) takes hours on large clusters with deep recursion chains. The cost is dominated by mincut on the largest clusters in the queue, not by the re-cluster step.</p>
-
-  <h3 style="margin-top:1.2rem">A reading of Park 2024 Table 2: cluster fate distributions</h3>
-  <p>The paper's Table 2 reports per-base-algorithm cluster fate distributions across a panel of empirical networks. The qualitative pattern from the table:</p>
-
-  <table class="profile-table dnc-stats" style="margin:.5rem 0 .8rem">
-    <thead>
-      <tr><th>base algorithm</th><th>extant</th><th>reduced</th><th>split</th><th>degraded</th></tr>
-    </thead>
-    <tbody>
-      <tr><td>Leiden-CPM r=0.0001</td><td>low</td><td>moderate</td><td>high</td><td>moderate</td></tr>
-      <tr><td>Leiden-CPM r=0.5</td><td>high</td><td>low</td><td>low</td><td>low</td></tr>
-      <tr><td>Leiden-Mod</td><td>moderate</td><td>moderate</td><td>moderate</td><td>moderate</td></tr>
-      <tr><td>Infomap</td><td>moderate</td><td>low</td><td>moderate</td><td>low</td></tr>
-      <tr><td>MCL</td><td>moderate</td><td>low</td><td>moderate</td><td>moderate</td></tr>
-      <tr><td>IKC k=10</td><td>very high</td><td>very low</td><td>very low</td><td>very low</td></tr>
-    </tbody>
-  </table>
-
-  <p>Three readings emerge. The "very high extant" cell for IKC k=10 reflects the structural guarantee: IKC clusters are 10-edge-connected by construction, so they pass any threshold below 10. The "high split" cell for Leiden-CPM at low resolution reflects the over-merging at low \(r\): CM finds real sub-communities the CPM optimum bundled together. Leiden-Mod produces the most evenly distributed fates: enough over-merging from the resolution limit to feed CM work, enough internally-coherent clusters to leave many extant.</p>
-
-  <p>Node-coverage is another empirical observation. Park 2024 reports CM drops total node coverage by 5-15% on most inputs, because singletons and small fragments fall through the post-CM size filter. The drop is largest on Leiden-CPM at low \(r\), where CM splits aggressively and produces many small leaves. On IKC k=10, node coverage is preserved because nothing gets modified.</p>
-
-  <h3 style="margin-top:1.2rem">A digression: why Leiden refines and Louvain does not</h3>
-  <p>Leiden has a refinement phase after each round of node moves that Louvain lacks. The refinement phase splits a community into sub-communities if doing so increases the quality, then optionally re-merges. The net effect is that every Leiden output community is internally connected: there is no community whose induced subgraph has more than one connected component. Louvain has no such guarantee; a Louvain output community can be disconnected if the node-move sequence happens to leave it that way.</p>
-
-  <p>For CM's re-cluster step, the difference matters. After the base algorithm returns its partition, CM runs <code>RemoveInterClusterEdges + GetConnectedComponents</code> to split any disconnected community into its pieces. On Leiden output, the CC pass usually does nothing because Leiden's communities are already connected. On Louvain output, the CC pass can fragment a community further, adding more entries to <code>to_be_clustered</code> than the base algorithm intended. The CM cost grows correspondingly.</p>
-
-  <p>The wrapper supports Leiden CPM, Leiden Mod, and Louvain; the byte-equal verification covers Leiden CPM (at two resolutions) and Leiden Mod. Louvain is in the binary but rarely deployed; the gallery's stress matrix does not yet include Louvain as the re-clusterer. The reason is the disconnectedness behaviour: Louvain plus CC produces more queue churn than Leiden, and the verification harness has not been re-run for the Louvain case in this gallery cycle.</p>
-
-  <h3 style="margin-top:1.2rem">A note on the RNG streams CM consumes</h3>
-  <p>CM has two independent RNG streams. The first is VieCut's mincut RNG: libstdc++ MT19937, seeded once at binary startup, state drifts across pops. The second is the base algorithm's RNG: igraph's MT19937 (via libleidenalg for Leiden, via igraph's bundled implementations for Louvain and Infomap), re-seeded to 0 on every call. The two streams do not interact; a change in one does not affect the other.</p>
-
-  <p>The choice of "re-seed per call" for the base algorithm is deliberate. Each re-cluster step is supposed to be a function of the side's induced subgraph alone, not of the order of CM's pops. Re-seeding gives that property: two CM runs that happen to re-cluster the same induced subgraph at different pop positions get the same Leiden output. The cost is that the base algorithm's RNG state does not get to "warm up" across CM rounds, but on the small graphs the base algorithm sees per call, this matters less than the determinism gain.</p>
-
-  <p>VieCut's behaviour is the opposite. The mincut RNG state carries across pops, so two mincut calls on identical induced subgraphs at different points in the run can produce different bipartitions (when ties exist; the cut size itself is deterministic from the input). This is a quirk of VieCut's design rather than a CM choice; the CM kernel just reads whatever VieCut returns. The byte-equal verification handles it by chaining through VieCut explicitly.</p>
-
-  <h3 style="margin-top:1.2rem">Why mincut as the diagnostic, not modularity or CPM directly</h3>
-  <p>An alternative design would re-check the base algorithm's quality function on each cluster: a cluster passes if it is a local optimum of modularity (or CPM), fails otherwise. Park 2024 chose mincut + threshold instead. The reasoning is structural rather than algorithm-specific. Mincut measures internal connectivity, which is a property of the cluster's subgraph alone; modularity and CPM measure something else (the optimality of the cluster relative to the rest of the network), and they conflate "the cluster is internally cohesive" with "the cluster fits the network's null model". A cluster can be a local modularity optimum and still have a thin bridge inside it; mincut catches that case where modularity does not.</p>
-
-  <p>The complement also matters. Mincut is base-algorithm-agnostic: the same threshold function applies regardless of whether the input came from Leiden, Louvain, Infomap, IKC, or SBM. The mincut + threshold framework is a uniform diagnostic across the whole gallery; the modularity-vs-CPM-vs-codelength distinction is upstream of CM, and CM does not care about it. Two algorithms can produce the same partition and have different quality scores; CM treats them identically.</p>
-</section>
-
-<!-- ─────────── Stage 8 · paper vs binary divergences ─────────── -->
-<section class="stage">
-  <div class="stage-num">stage 8 &middot; paper vs binary</div>
+  <div class="stage-num">stage 13 &middot; paper vs binary</div>
   <h2>Where the deployed CM differs from Park 2024.</h2>
-  <p>The published algorithm and the shipping binary are not bit-identical specs. A handful of stage 2 / stage 4 niceties live in the Python wrapper, and the binary's own defaults diverge from the paper's defaults on the threshold function. The walker above runs the binary's stage 3 only; the wrapper-side filters are visible in the lineage tree but not applied.</p>
+  <p>The walker runs the binary's stage 3 only. Pre- and post-CM filters live in the Python wrapper.</p>
 
   <table class="cm-divergence-table">
     <thead>
@@ -1186,17 +592,17 @@
       <tr>
         <td>Threshold default</td>
         <td class="col-paper">\(f(n) = \log_{10}(n)\)</td>
-        <td class="col-binary">Binary: \(1 \cdot \log_{10}(n)\). Wrapper: \(0.2 \cdot n^{0.5}\). The wrapper choice is sqrt; the two cross at n=100.</td>
+        <td class="col-binary">Binary: \(1 \cdot \log_{10}(n)\). Wrapper: \(0.2 \cdot n^{0.5}\). The two cross at n=100.</td>
       </tr>
       <tr>
         <td>Pre-prune (degree band peel)</td>
         <td class="col-paper">Iteratively remove every node whose degree inside the cluster is below \(f(n)\)</td>
-        <td class="col-binary">Binary has a partial version (singleton trivial-cut only) behind a flag; wrapper does not enable it. The full degree-band prune is in the Python wrapper.</td>
+        <td class="col-binary">Binary has a partial version (singleton trivial-cut only) behind a flag; wrapper does not enable it. Full degree-band prune lives in the Python wrapper.</td>
       </tr>
       <tr>
         <td>Initial size filter \(B\)</td>
         <td class="col-paper">Drop clusters below \(B = 11\) before stage 3</td>
-        <td class="col-binary">Not in the binary; lives in the Python wrapper.</td>
+        <td class="col-binary">Not in the binary; in the Python wrapper.</td>
       </tr>
       <tr>
         <td>Final size filter \(B\)</td>
@@ -1205,130 +611,21 @@
       </tr>
       <tr>
         <td>Tree-cluster filter</td>
-        <td class="col-paper">Drop tree-shaped clusters before stage 3 (mincut = 1 trivially)</td>
+        <td class="col-paper">Drop tree-shaped clusters before stage 3</td>
         <td class="col-binary">Not in the binary; the wrapper filters post-stage-1.</td>
-      </tr>
-      <tr>
-        <td>Singleton push behaviour</td>
-        <td class="col-paper">Not explicitly addressed</td>
-        <td class="col-binary">Binary pushes every base-algo output component regardless of size. Singletons die in one extra round (size-1 mincut fails threshold, size-1 re-cluster side is filtered, never re-enters). The JS port mirrors.</td>
       </tr>
       <tr>
         <td>Cluster fate labelling</td>
         <td class="col-paper">Four labels derived from the lineage tree</td>
-        <td class="col-binary">Binary writes the raw tree; the four labels are computed by a separate analysis script.</td>
+        <td class="col-binary">Binary writes the raw tree; four labels computed by a separate analysis script.</td>
       </tr>
     </tbody>
   </table>
-
-  <p>None of these divergences is a bug. They are points where the binary delegates to the wrapper or the analysis script, and where the wrapper's defaults differ from the paper's. The walker above represents the binary's behaviour exactly; the wrapper-side filters can be reproduced after the walk completes by applying \(B = 11\) to the survivor list.</p>
-
-  <p>Reading the table top to bottom, the divergences split into two clusters. The threshold and prune entries are policy choices: the binary and the wrapper just have different defaults. The size and tree filter entries are scope choices: the binary does not implement them at all; the wrapper does. The singleton push and cluster fate entries are observation choices: the binary does or does not do something that affects downstream interpretation, and the wrapper or analysis script does the interpretive work.</p>
-
-  <p>A reader reproducing the paper's results bit-for-bit needs all three pieces: the binary, the wrapper, and the cluster-fate analyzer. A reader who just wants CM's modify-or-keep partition can run the binary alone with the paper's threshold (<code>1log_10(n)</code>) and no wrapper-side filters; the output will be the partition the walker on this page produces. A reader running production CM on a research network probably wants the wrapper too, for the filters.</p>
-
-  <h3 style="margin-top:1.2rem">Tracing one divergence: the pre-prune that lives in Python</h3>
-  <p>Park 2024 §3 specifies a pre-prune that iteratively removes every node with degree below \(f(n)\) inside the cluster, before any mincut runs. The binary's <code>--prune</code> flag implements a partial version (only the singleton-trivial-cut variant, where one side of a cut is a single node); the full degree-band prune is in the Python wrapper.</p>
-
-  <p>What the full pre-prune does: scan every node in the cluster, compute its degree within the cluster's induced subgraph, drop any node whose degree is at most \(f(n)\). Repeat until no node falls below the threshold. This shrinks the cluster from the periphery inward, removing the "easy targets" the mincut would otherwise find.</p>
-
-  <p>What the binary does instead: skip the pre-prune. Run mincut on the full cluster. If the cut is trivial (one side is one node) and the cluster is not yet well-connected, optionally remove the singleton via <code>--prune</code> and retry. The binary's variant catches only the cases where a single low-degree node would be peeled off; the full variant catches every low-degree node in one sweep.</p>
-
-  <p>Why the difference matters: on a cluster with many low-degree periphery nodes, the binary's per-cut peel is slower (one mincut per peel) than the wrapper's degree scan (one sweep total). On the 32-node fixture's cluster A, the wrapper's prune would identify nodes 5, 6, 7, 11 as below \(\log_{10}(12) \approx 1.079\) in one sweep (each has degree 1 inside A), drop them, and the residual 8-node cluster (the K<sub>5</sub> plus three nodes) would then face a different mincut. The binary's per-cut peel requires three iterations of mincut to reach the same residual. Functionally, the wrapper's prune is the optimisation; the binary's is the slower fallback.</p>
-
-  <p>The walker above runs the binary's stage 3 only, so the pre-prune does not appear. The Python wrapper's full prune can be reproduced by computing the degree distribution within each cluster before the first mincut and dropping nodes below threshold, then running the walker on the pruned input. The walker does not do this automatically.</p>
-
-  <h3 style="margin-top:1.2rem">The Python wrapper's other duties</h3>
-  <p>The Python wrapper around the binary handles several pre- and post-processing steps that affect what CM ends up doing on a real input. Listing them so the binary's behaviour can be situated:</p>
-
-  <p><strong>Pre-CM size filter.</strong> The wrapper drops every input cluster of size below \(B = 11\) before passing the partition to the binary. The binary never sees those clusters; they pass through to the output unchanged.</p>
-
-  <p><strong>Pre-CM tree filter.</strong> The wrapper identifies tree-shaped clusters (mincut = 1 trivially because every edge is a bridge) and drops them too. The binary never sees them; they pass through to the output unchanged.</p>
-
-  <p><strong>Pre-CM degree-band prune.</strong> The wrapper computes per-node degree within each cluster's induced subgraph, drops nodes with degree at most \(f(n)\), repeats until stable. This is Park 2024's stage 3 pre-prune, applied at the wrapper level. The binary receives the pruned clusters as its input.</p>
-
-  <p><strong>Post-CM size filter.</strong> After the binary returns, the wrapper drops every survivor cluster of size below \(B = 11\). The "degraded" cluster fate is computed here: an input cluster whose every descendant ended up below \(B\) becomes degraded.</p>
-
-  <p><strong>Cluster fate analysis.</strong> The wrapper reads <code>history.log</code>, computes the per-input-cluster fate, and emits a fate distribution report. The binary writes only the raw lineage tree.</p>
-
-  <p>Together, the wrapper and the binary implement Park 2024's four stages. The binary handles stage 3 (the modify-or-recluster loop). The wrapper handles stages 1, 2, and 4 plus the cluster-fate analysis. The split makes the binary fast (it does only the heavy compute) and the wrapper flexible (it does the data wrangling). The walker on this page mirrors the binary's stage 3; the wrapper-side steps are described here for completeness but not exercised in the walker.</p>
-
-  <p>One more piece worth noting: the wrapper passes through the SLURM environment. The binary is designed to run under HPC schedulers; the wrapper's <code>SCRIPT_DIR</code> detection adjusts when running under SLURM. This means the binary itself does not assume a particular runtime environment; the wrapper handles cluster vs local invocation. Anyone running CM as part of a larger pipeline (research workflows often involve SLURM batch jobs across thousands of networks) gets the wrapper's environmental adaptation for free.</p>
-
-  <p>The <code>--keep-state</code> flag in the wrapper preserves intermediate files (the <code>cm.log</code> and <code>history.log</code> in the <code>.state</code> directory) after a run. Without the flag, the wrapper cleans them up after extracting the cluster fate distribution. The walker has no equivalent: every state it computes is in-memory only, and re-running the walker rebuilds the state from scratch.</p>
-
-  <div class="callout">
-    <div class="tag">a smaller point: the leiden inner iter count</div>
-    <p>The binary's re-cluster step runs Leiden twice per call: <code>for i in [0, 2): optimise_partition(part)</code>. The first call builds a partition from a singleton init; the second call refines from the first call's output. Both calls share one RNG instance, so the second call's RNG state is whatever the first call left. The JS port re-seeds the MT19937 before each call, which is a small RNG-stream divergence; the verification tracer compensates by re-seeding on the canonical side too. End state matches.</p>
-  </div>
-
-  <div class="callout">
-    <div class="tag">VieCut's seed-once and the state-drift it implies</div>
-    <p>VieCut's RNG is seeded exactly once at the start of the binary's main, then left to drift. Every mincut call within a single binary run draws from wherever the previous mincut left the state. The intended per-mincut re-seed in <code>mincut_custom.cpp</code> is commented out, so the binary's behaviour is: same input, same seed, same mincut sequence; different ordering of clusters in the queue, different mincut RNG state per cluster. This state drift is one of the reasons the byte-equal verification chains through VieCut explicitly: the JS port has to reproduce the same drift across pops, not just the same initial seed.</p>
-  </div>
 </section>
 
-<!-- ─────────── Stage 8b · stress matrix readout ─────────── -->
+<!-- ─────────── Stage 14 · final ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 8b &middot; verification readout</div>
-  <h2>What "byte-equal" buys.</h2>
-  <p>The walker above is not an approximation. The JS port produces the same lineage tree, the same per-pop cut and threshold, the same survivor list, and the same end partition as the canonical binary under matching seed across the stress matrix below.</p>
-
-  <table class="profile-table dnc-stats" style="margin:.6rem 0 .8rem">
-    <thead>
-      <tr><th>panel</th><th>cells</th><th>records</th><th>mismatches</th></tr>
-    </thead>
-    <tbody>
-      <tr><td>legacy 6-fixture × 9-seed, Leiden-CPM r=0.0001</td><td>54</td><td>4,421</td><td>0</td></tr>
-      <tr><td>3-tier 17-fixture × 9-seed, Leiden-Mod base &larr; Leiden-Mod input</td><td>153</td><td>304,359</td><td>0</td></tr>
-      <tr><td>3-tier 17-fixture × 9-seed, Leiden-Mod base &larr; SBM-Flat-PP input</td><td>153</td><td>174,628</td><td>0</td></tr>
-      <tr><td>3-tier 17-fixture × 9-seed, Leiden-CPM r=0.5 base &larr; Leiden-CPM r=0.5 input</td><td>153</td><td>210,423</td><td>0</td></tr>
-    </tbody>
-  </table>
-
-  <p>Each cell runs the CM kernel on one (graph, partition) pair and checks every pop's record against the canonical tracer's record for the same pop. A mismatch is a byte-different cut value, threshold, queue order, or lineage assignment. Zero mismatches across 513 cells means the JS walker traces the same trajectory the binary traces, step for step, on every input in the matrix.</p>
-
-  <p>What is not in the matrix: comparisons against the unmodified canonical pipeline, where two structural swaps apply (a glibc-vs-V8 log primitive on the threshold computation, and a libstdc++-vs-V8 MT19937 family swap on VieCut's RNG state propagation). Under those swaps, the JS walker is byte-equal to a tracer-mode build of the canonical, and modulo the swaps it is byte-equal to the production canonical. The verification chains: each step is provably bit-equal under the next; the production binary is the only step that differs, and only in the two FP/RNG primitive families that the swap accounts for.</p>
-
-  <h3 style="margin-top:1.2rem">Reading the stress-matrix shape</h3>
-  <p>The stress matrix is structured to cover the regimes where CM is exercised in practice. Four panels are listed in the table above; reading them together shows what coverage looks like.</p>
-
-  <p>The legacy 6-fixture panel uses small handpicked fixtures (the 32-node fixture, plus dnc, polbooks, football, celegansneural, facebook_friends, each at five sizes between 32 and 906 nodes). The Leiden-CPM r=0.0001 base algorithm is the original target of Park 2024's empirical analysis. Cell count is 6 fixtures times 9 seeds = 54 cells; record count is small because the fixtures are small.</p>
-
-  <p>The three 3-tier panels each cover 17 fixtures spanning sizes from 34 to ~23000 nodes (Tier 1, Tier 2, Tier 3 from the gallery's stress-test panel). At 9 seeds each, 153 cells per panel. The three panels exercise different (input source, re-clusterer) pairs: Leiden-Mod input ← Leiden-Mod re-clusterer, SBM-Flat-PP input ← Leiden-Mod re-clusterer, Leiden-CPM r=0.5 input ← Leiden-CPM r=0.5 re-clusterer. Together they cover Leiden's CPM and modularity formulations and the SBM-Flat-PP chain.</p>
-
-  <p>Total stress matrix: 513 cells, ~694K records on the non-delegated CM path (lineage assignment, queue dynamics, threshold scalar). The mincut, base-algo, and log primitive paths are chain-delegated to VieCut, Leiden, and WCC respectively; each of those closes its own ~1M-record floor independently. Cumulatively across the chain, the verification has run ~6.6M records on the combined kernel without a single mismatch.</p>
-
-  <h3 style="margin-top:1.2rem">What a record looks like, and why there are so many of them</h3>
-  <p>Per pop, the verification harness records: round number, parent cluster id, current cluster id, cluster size, cut value, threshold (as a uint64 bit pattern, not as a decimal, to catch FP rounding mismatches), in-side size, out-side size, well-connected verdict, plus the re-cluster output structure if the cluster failed. Per round-end, the harness records: round-end signal, queue size, fresh ids assigned, lineage tree snapshot. Per Leiden call, the harness records the per-iteration membership snapshot, RNG draw counts, and the move trace.</p>
-
-  <p>One CM run on a small fixture produces tens to hundreds of records. The cumulative ~694K records across the four panels comes from many CM runs on many input graphs at many seeds; each individual run's record list is small. The byte-equal check is per record: the JS walker's record at position \(i\) must bit-match the canonical tracer's record at position \(i\), across every field. A single field mismatch is a fail; the harness reports which field, which record, which cell.</p>
-
-  <p>The record schema covers nine field types: <code>INIT_LINEAGE</code> for each seed-step component, <code>MINCUT_POP</code> for each pop, <code>RECLUSTER_SIDE</code> for each base-algo call (one per failing side), <code>END_ROUND_DRAIN</code> for each round boundary, <code>EMIT_DONE</code> for each survivor emission, <code>WRITE_OUTPUT</code> for each row of <code>com.csv</code>, <code>WRITE_HISTORY</code> for each parent row in <code>history.log</code>, plus per-Leiden-iteration probes <code>LD_BEGIN</code> / <code>LD_END</code> with membership snapshots, and per-pop singleton-count probes. Reading the field list gives a sense of how much state the harness has to track: the lineage assignment alone has 8 fields per component (component index, first node id, original cid, original size, sub-size, branch, parent cid, current cid).</p>
-
-  <p>The threshold value is recorded as a uint64 bit pattern (the IEEE 754 binary representation of the double) rather than a decimal string. This makes the check sensitive to last-bit rounding differences between the two log primitives (glibc and V8 fdlibm). Most of the time the bit patterns agree; on the ~0.09% of inputs where they differ, the byte-equal harness flags the cell, and the discrepancy is traced back to the log primitive. The TRACER_MODE swap aligns the log primitive on the canonical side with the JS port, removing the only systematic source of bit-level disagreement.</p>
-
-  <h3 style="margin-top:1.2rem">Three claims, layered</h3>
-  <p>The byte-equal verification splits into three claims for clarity:</p>
-  <ol style="font-family:'IBM Plex Sans',sans-serif; font-size:.92rem; line-height:1.55; color:var(--paper-2); margin:.3rem 0 .6rem; padding-left:1.4rem">
-    <li><strong>JS visualizer == canonical tracer (TRACER_MODE swapped build).</strong> True across all 513 stress matrix cells. The "swapped build" replaces glibc <code>std::log</code> with the same V8 fdlibm port the JS walker uses, replaces libstdc++ MT19937 with the JS MT19937 family, and replaces std::unordered_set with std::set in the hot loops to match JS Map ordering. Under those swaps, the canonical C++ trace and the JS trace bit-match per pop.</li>
-    <li><strong>canonical tracer (CANONICAL_MODE build) == production canonical pipeline.</strong> True. The CANONICAL_MODE build leaves the original glibc + libstdc++ + std::unordered_set untouched; it adds instrumentation probes only. The two emit the same partition.</li>
-    <li><strong>JS visualizer == production canonical pipeline.</strong> Modulo the two structural primitive swaps in claim 1, true. The trajectory is identical; the bit-representation of the threshold value and the order of mincut RNG draws differ. End partitions match in 100% of stress cells empirically; bit-level identity is not asserted.</li>
-  </ol>
-
-  <p>The chained verification of claims 1 + 2 implies the trajectory equality in claim 3, even without bit-level identity, because the two primitive swaps are localised to known sites and their effects are bounded. Anyone running the binary on the same input will get the same partition the walker produces, byte-equal up to the two known primitive families.</p>
-
-  <h3 style="margin-top:1.2rem">What the verification does not cover</h3>
-  <p>The byte-equal check has scope limits worth naming. The check covers single-thread execution exclusively; multi-threaded CM runs (under <code>--num-processors</code> greater than 1) have non-deterministic cluster id assignment because worker threads pull from the FIFO concurrently. The partition itself is stable under multi-thread, but the row order of <code>com.csv</code> varies. The byte-equal harness fixes <code>--num-processors 1</code> and does not assert anything about multi-thread behaviour.</p>
-
-  <p>The check also covers only the binary's stage 3 logic plus the seed step. The Python wrapper's stage 2 filter (drop clusters below \(B\) and tree clusters) and stage 4 filter (drop fragments below \(B\)) are not in the binary, so the byte-equal check does not test them. The JS walker also does not apply these filters, so the walker's "final" partition can include small fragments that the wrapper would drop. Comparing the walker's output to a wrapper run's output requires applying \(B = 11\) post-hoc to the walker's survivor list.</p>
-
-  <p>The check covers the four base-algo configurations in the stress matrix (Leiden-CPM at 0.0001, Leiden-CPM at 0.5, Leiden-Mod, and SBM-Flat-PP as input source). Louvain as a re-clusterer and Infomap as either input source or re-clusterer are not in today's stress matrix; the verification for those configurations is pending future cycles.</p>
-</section>
-
-<!-- ─────────── Stage 9 · final ─────────── -->
-<section class="stage">
-  <div class="stage-num">stage 9 &middot; final</div>
+  <div class="stage-num">stage 14 &middot; final</div>
   <h2>CM output next to ground truth.</h2>
   <p id="g-final-summary">survivors: · &middot; nodes kept / dropped: ·</p>
   <div class="graph g-with-side">
@@ -1339,71 +636,7 @@
     </div>
   </div>
   <div id="g-history" class="step-desc"></div>
-
-  <h3 style="margin-top:1.2rem">Reading the comparison</h3>
-  <p>The ground-truth panel on the right shows the planted partition: four clusters (A, B, C, D) plus two outliers. The CM output on the left shows the survivors after the walker completes. Under the default configuration (criterion \(\log_{10}\), Leiden CPM r=0.0001), the output is: A's 9-node residual, B intact, C<sub>1</sub> and C<sub>2</sub> as separate survivors, D intact. Five clusters; node coverage drops from 30 (the clustered ground-truth count) to 27 (A's three peeled periphery nodes vanish, plus the two original outliers which were never clustered anyway).</p>
-
-  <p>The visual difference between CM's output and the planted partition is at A: the CM output is missing three of A's periphery nodes. The base algorithm's behaviour (Leiden CPM at low resolution returns one community on every side) shapes this outcome; with a different base algorithm or a different resolution, the missing nodes could be peeled differently or kept entirely. The ground truth itself is the planted partition the fixture was built with; CM does not know the ground truth, so the comparison shows where CM agrees or disagrees with it.</p>
-
-  <p>One reading frame: CM operates under the working assumption that the input partition contains errors of the over-merging kind (the base algorithm bundled real communities together). CM's modifications correct this kind of error if it exists. On the 32-node fixture, the input partition has no over-merging error (the planted clusters are correct), so CM's modifications produce a smaller-than-ground-truth output instead of a larger one. The post-CM \(B = 11\) filter would also drop A's 9-node residual under this fixture, leaving only B, C<sub>1</sub>, C<sub>2</sub>, D as final output. Both behaviours are CM doing its job correctly; the fixture is just not a case where CM's job is to do nothing.</p>
-
-  <p>What changes when the input partition has actual over-merging errors. Consider a hypothetical input where A and B are labelled as one big cluster (16 nodes). The seed step splits this into A's 12-node component and B's 8-node component (they are not edge-connected in the residual graph, because the planted edges are intra-cluster only). The threshold check on the 12-node piece fails as before; the threshold check on the 8-node piece passes. CM would produce the same output as on the actual fixture, plus the seed-step would have already separated A and B before CM saw them. The seed step did the over-merge correction; CM did the under-cohesion correction. Both are upstream of the final partition.</p>
-
-  <p>What changes when the input partition has over-splitting errors. Consider a hypothetical input where A is labelled as two clusters (one for the K<sub>5</sub>, one for the periphery). The seed step gets two components from the residual graph. The threshold check on the K<sub>5</sub> piece passes (mincut 4 > log_10(5) = 0.699). The threshold check on the periphery piece passes (mincut 1 > log_10(7) = 0.845 only if some periphery edges exist; otherwise it fails). CM does not merge the two pieces back together; it accepts them as separate clusters because CM has no merging operation. So an over-split input partition stays over-split under CM.</p>
-
-  <p>The lineage tree to the right of the round panel (in stage 3) shows the modification history. The history file on disk (<code>history.log</code>) is the persistent form: parent:children rows that downstream analysis scripts read to compute the cluster fate distribution. The walker visualises the tree; the binary writes the file; the analysis script computes the fates.</p>
-</section>
-
-<!-- ─────────── Stage 10 · take-home ─────────── -->
-<section class="stage">
-  <div class="stage-num">stage 10 &middot; take-home</div>
-  <h2>What this page covered.</h2>
-  <p>CM is the heaviest of three connectivity post-procs in the same binary. It takes a clustering as input, walks each cluster through a mincut + threshold check, and on failure re-clusters each cut half with the base algorithm. The output is a partition where every cluster is well-connected under the threshold AND locally optimal under the base algorithm's quality function, modulo the size filter applied downstream.</p>
-
-  <p>Three forces shape every CM run. The threshold function determines which clusters are subjected to the modify-or-keep choice. The mincut produces the bipartition that exposes the cluster's bottleneck. The base algorithm re-clusters each cut half and decides what each new sub-cluster looks like. Changing any of the three changes the output.</p>
-
-  <p>Two practical observations from the gallery's stress matrix. The byte-equal verification covers four panels totalling 513 cells with ~694K records on the CM-specific path; zero mismatches mean the JS walker reproduces the canonical binary's behaviour bit for bit under matching seed. The two RNG streams (VieCut's mincut RNG, the base algorithm's RNG) are independent; the FP path has exactly one log primitive in the threshold check; the queue dynamics are FIFO and deterministic.</p>
-
-  <p>Cross-link directions: <a href="./cc.html">CC</a> does the seed step only; <a href="./wcc.html">WCC</a> adds the threshold and the recursive cut; CM adds the base-algo re-cluster. <a href="./leiden-cpm.html">Leiden CPM</a> is the inner re-clusterer in the default deployed configuration. <a href="./viecut.html">VieCut</a> is the mincut backend. The technical companion at the link below traces every source-code reference for users porting CM to other languages or auditing the JS port against the canonical binary.</p>
-
-  <h3 style="margin-top:1.2rem">What the page does not cover</h3>
-  <p>Scope limits worth naming for users coming to CM for the first time. The walker shows the binary's stage 3 only; the Python wrapper's stages 2 and 4 (size filter + tree filter + degree-band prune + post-CM filter) are visible in the lineage tree but not applied. Anyone running the canonical pipeline end-to-end will see a partition that has gone through the wrapper's filters as well.</p>
-
-  <p>The page does not cover the multi-threaded binary mode. Under <code>--num-processors</code> greater than 1, worker threads pull from the FIFO concurrently and cluster id labels become non-deterministic across runs. The walker pins to single-thread, which is also what the byte-equal verification requires. Anyone running the canonical pipeline on a large network should expect partition stability but label instability under multi-thread.</p>
-
-  <p>The page does not cover the prune branch's full degree-band pre-prune (only the singleton-trivial-cut variant lives in the binary). Anyone wanting Park 2024's stage 3 exactly should add a pre-pass that drops nodes below the threshold from each cluster's induced subgraph before mincut.</p>
-
-  <p>The page does not cover Infomap or Louvain as re-clusterers. The wrapper accepts Leiden CPM, Leiden Mod, and Louvain; the byte-equal verification today covers Leiden CPM (at two resolutions) and Leiden Mod. Louvain and Infomap are in the binary but not in the gallery's stress matrix; their behaviour with CM is described qualitatively in the chain-input section above.</p>
-
-  <h3 style="margin-top:1.2rem">Reading order, end to end</h3>
-  <p>A reading order through the page for someone learning CM: hook + stage 0 (input fixture). Stage 1 + 1b + 1c (threshold + IsWellConnected + mincut). Stage 2 (the walker). Stage 3 (lineage tree). Stage 4 + 4a + 4b (worked example + termination + queue invariants). Stage 5 + 5b (cluster fate + sibling comparison). Stage 6 (edge cases). Stage 7 (chain inputs). Stage 8 + 8b (paper-vs-binary + verification). Stage 9 + 10 (final + take-home).</p>
-
-  <p>For a reader interested in the algorithm semantics: stages 1, 2, 3, 4 are the core. For a reader interested in empirical behaviour: stages 5, 7. For a reader interested in implementation correctness: stages 8, 8b. The walker itself is in stage 2; everything else is exposition.</p>
-
-  <h3 style="margin-top:1.2rem">A glossary for one page</h3>
-  <p>Terms used throughout this page, with short definitions for quick reference:</p>
-
-  <p><strong>Cluster.</strong> A set of nodes carrying the same partition label.</p>
-
-  <p><strong>Induced subgraph.</strong> The subgraph spanned by a cluster's nodes; intra-cluster edges only, no cross-cluster edges.</p>
-
-  <p><strong>Mincut.</strong> The minimum number of edges whose removal disconnects a graph (here, the cluster's induced subgraph).</p>
-
-  <p><strong>Threshold function.</strong> A function \(f(n)\) that maps cluster size to a minimum required mincut. The cluster passes iff its mincut strictly exceeds \(f(n)\).</p>
-
-  <p><strong>Well-connected.</strong> A cluster whose mincut clears the threshold for its size.</p>
-
-  <p><strong>Re-cluster step.</strong> Run the base community-detection algorithm on a cluster's induced subgraph; replace the cluster with whatever communities the base algorithm returns.</p>
-
-  <p><strong>Lineage tree.</strong> A directed acyclic graph recording parent-child relationships between input clusters and their CM-modified descendants.</p>
-
-  <p><strong>Cluster fate.</strong> A label per input cluster summarising what CM did to it: extant (unchanged), reduced (one smaller child), split (multiple children), or degraded (all children dropped by post-CM filter).</p>
-
-  <p><strong>Round.</strong> One full pass through <code>to_be_mincut</code>, draining it to either the survivor list or to <code>to_be_clustered</code> for the next round.</p>
-
-  <p><strong>Stage 3.</strong> Park 2024's name for the CM loop itself (mincut + threshold check + re-cluster). The binary implements stage 3; the Python wrapper implements stages 1, 2, 4.</p>
-
-  <p><strong>FIFO.</strong> First-in first-out queue discipline. Both <code>to_be_mincut</code> and <code>to_be_clustered</code> are FIFO; the order clusters enter is the order they get processed.</p>
+  <p>Under the default configuration (criterion \(\log_{10}\), Leiden CPM r=0.0001), the output is A's 9-node residual, B intact, C<sub>1</sub> and C<sub>2</sub> separate, D intact. Node coverage drops from 30 (clustered ground-truth count) to 27: three of A's periphery nodes peel off across the chain. The Python wrapper's \(B = 11\) filter would also drop A's 9-node residual; the walker leaves filtering off so every survivor is visible.</p>
 </section>
 
 <aside class="tech-companion">
