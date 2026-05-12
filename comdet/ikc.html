@@ -61,18 +61,28 @@
 </header>
 
 <div class="uc-banner">
-  <strong>Draft.</strong> JS port of <a href="https://github.com/MinhyukPark/cm_pipeline" target="_blank" rel="noopener">community-detection/src/ikc/run_ikc.py</a> against the 32-node fixture; gate verdicts traced per iteration. Shipped IKC's modularity gate is hard-coded to always pass; the page recreates the paper formula for display, with a strict-gate toggle on the outer-loop walker.
+  <strong>Draft.</strong> JS port of <a href="https://github.com/MinhyukPark/cm_pipeline" target="_blank" rel="noopener">community-detection/src/ikc/run_ikc.py</a> against the 32-node fixture; gate verdicts traced per iteration. Shipped IKC's modularity gate is hard-coded to always pass; the page recreates the paper formula for display, with a strict-gate toggle on the outer-loop walker. Implementation pointers (file paths, line numbers, source-of-truth references) live in the <a href="../../docs/algorithms/ikc.md">technical reference</a>.
 </div>
 
 <section class="hook">
-  <p>If a cluster is supposed to mean <em>every member connects to enough others inside it</em>, the densest structure that satisfies the constraint is the \(k\)-core: the maximal subgraph where every node has at least \(k\) intra-subgraph neighbours. On this fixture the \(K_5\) is a 4-core, B's two \(K_4\)'s are 3-cores, C's two triangles are 2-cores, and A's periphery dangles below any \(k \ge 2\). IKC walks these tiers from top down: extract the densest core of the residual, accept every connected component whose nodes still hit the \(k\) threshold inside the component, peel the accepted nodes, repeat. The loop ends when the residual's max core drops below the floor.</p>
-  <p>Where Louvain and Leiden grow communities by absorbing neighbours, IKC strips communities of their loosely-attached members. Coverage is loose; per-cluster core density is high. Wedell 2022 situates IKC as Stage 1 of a four-stage <em>kmp-clustering</em> pipeline (\(k\)-validity, modularity, \(p\)-validity for noncore augmentation); this page covers Stage 1 only.</p>
+  <p>Most community-detection algorithms grow clusters by absorbing neighbours that improve a quality score. IKC is the inverse: it carves clusters out of the densest substructures of the graph and leaves the rest unclustered. The structure it carves around is the <em>k-core</em>, and the way it carves is iterative.</p>
+
+  <p>Wedell, Park, Korobskiy, Warnow, and Chacko introduced IKC in 2022 as part of a four-stage clustering framework they call <em>kmp-clustering</em>. The whole framework guarantees three properties on each non-singleton output cluster: every node has at least \(k\) neighbours inside the cluster (k-validity), the cluster has positive Newman modularity (m-validity), and any node that joined as a periphery member has at least \(p\) attachments back to the core (p-validity). IKC is Stage 1, the part that builds the cores. Stages 2 through 4 are post-processing.</p>
+
+  <p>The objective IKC works against is the connectivity floor \(k\). A cluster is admissible iff every member has at least \(k\) other members as neighbours inside the cluster. Plain-English read: a cluster is "k-tight" when no member is loosely attached. Two properties worth keeping in mind: the threshold is a hard inequality, not a soft penalty, so a single under-connected node disqualifies the whole cluster; and the threshold is intra-cluster, not intra-graph, so a node well-connected globally can still fail if its qualifying neighbours sit in different candidate clusters.</p>
+
+  <p>The structure that maximises tight clusters is the k-core. The k-core of a graph \(G\) is the maximal induced subgraph where every node has degree at least \(k\). It is unique and can be computed by repeatedly removing every node whose current degree is below \(k\) until none remain. IKC walks the cores from the top down: extract the densest core of the residual graph, split it into connected components, accept the components that still pass k-validity inside themselves, peel the accepted nodes off the residual, and repeat. The loop terminates when the residual's densest core drops below the user's floor.</p>
+
+  <p>IKC produces a partial partition. Nodes that never sit inside an accepted cluster come out unlabelled. Coverage on real graphs runs low; cluster purity runs high. The default Park 2024 sweep uses \(k = 10\), at which most of the graph stays unlabelled. The page uses \(k \in [2, 5]\) so something visible happens on a 32-node fixture.</p>
+
   <div class="defs">
-    <div><span class="term">k-core</span> the maximal induced subgraph where every node has degree \(\ge k\). Computed by iterative peel: repeatedly remove every node currently below \(k\); whatever survives is the \(k\)-core.</div>
-    <div><span class="term">k-validity</span> a candidate cluster \(C\) is \(k\)-valid iff every node in \(C\) has \(\ge k\) other \(C\)-nodes among its neighbours <em>within</em> the kcore subgraph. Stricter than belonging to the \(k\)-core globally: a node in the global \(k\)-core can still fail \(k\)-validity for its component if its \(k\) qualifying neighbours sit in a different component of the kcore subgraph. The \(k\)-core is necessary, not sufficient.</div>
+    <div><span class="term">k-core</span> the maximal induced subgraph of \(G\) where every node has degree \(\ge k\). Equivalently: the result of iteratively removing every node with current degree below \(k\). Unique for each \(k\); nests in \(k\): the \((k{+}1)\)-core is contained in the \(k\)-core.</div>
+    <div><span class="term">core number</span> the largest \(k\) such that node \(v\) belongs to the \(k\)-core. Written \(c(v)\). The graph's <em>degeneracy</em> is \(\max_v c(v)\), the densest core that exists.</div>
+    <div><span class="term">k-validity</span> a candidate cluster \(C\) is \(k\)-valid iff every node \(u \in C\) has \(\ge k\) neighbours that are also in \(C\), measured inside the kcore subgraph \(C\) was extracted from. Stricter than belonging to the global \(k\)-core: a node in the global \(k\)-core can still fail \(k\)-validity for its candidate cluster if its qualifying neighbours sit in a different component of the kcore subgraph.</div>
     <div><span class="term">modularity gate</span> paper formula
-\[\mathrm{mod}(s) = \ell_s/L - (d_s/2L)^2\]
-with \(L\) = total edges of the original graph. Shipped IKC short-circuits this to a constant, so the gate is effectively a no-op. The strict-gate toggle on the outer-loop walker switches the constant off and runs the formula.</div>
+\[\mathrm{mod}(s) = \frac{\ell_s}{L} - \left(\frac{d_s}{2L}\right)^2\]
+with \(L\) = total edges of the original graph, \(\ell_s\) = intra-cluster edges of \(s\), \(d_s\) = sum of intra-cluster degrees. Shipped IKC short-circuits this to a constant before the formula runs, so the gate is effectively a no-op. The strict-gate toggle on the outer-loop walker switches the constant off and runs the formula.</div>
+    <div><span class="term">residual graph</span> the subgraph that survives after every accepted cluster's nodes are peeled. The kernel re-computes the core decomposition of the residual at every iteration, so the densest core falls monotonically across iterations.</div>
   </div>
 </section>
 
@@ -80,15 +90,16 @@ with \(L\) = total edges of the original graph. Shipped IKC short-circuits this 
   <div class="algo-refs">
     <span><span class="ref-label">paper</span><a href="https://doi.org/10.1162/qss_a_00184" target="_blank" rel="noopener">Wedell 2022</a></span>
     <span><span class="ref-label">code</span><a href="https://github.com/MinhyukPark/cm_pipeline" target="_blank" rel="noopener">cm_pipeline / src/ikc</a></span>
-    <span><span class="ref-label">docs</span><a href="https://github.com/vlttnh/community-detection/blob/main/docs/algorithms/ikc.md" target="_blank" rel="noopener">technical companion</a></span>
+    <span><span class="ref-label">docs</span><a href="https://github.com/vltanh/community-detection/blob/main/docs/algorithms/ikc.md" target="_blank" rel="noopener">technical companion</a></span>
   </div>
+  <p class="algo-prov">Byte-equal vs the shipped binary on the cd_stress_tiers panel (74 cells across T1+T2+T3, n=800..23k, k_floor ∈ {2,3,5,8,10}; ~10.5k cumulative trace records, 0 mismatches).</p>
 </section>
 
 <!-- ─────────── Fixture ─────────── -->
 <section class="stage">
   <div class="stage-num">fixture &middot; 32 nodes, four planted communities</div>
   <h2>Painted by ground-truth, before any peeling runs.</h2>
-  <p>Hover a node for its label and degree.</p>
+  <p>Same fixture every page in the gallery uses, so cross-algorithm comparisons land on the same canvas. <em>A</em> (12 nodes, blue) is a \(K_5\) on nodes \(\{0,1,2,3,4\}\) with a 7-node periphery. <em>B</em> (8 nodes, ochre) is two \(K_4\)s joined by the single edge \((15, 16)\). <em>C</em> (6 nodes, green) is two disconnected 3-cycles, both labelled the same. <em>D</em> (4 nodes, plum) is two 2-cliques bridged by \((27, 28)\). Outliers 30 and 31 hang off A's periphery and carry the singleton label \(-1\).</p>
   <div class="graph" id="g-input">
     <div class="graph-chrome">
       <span>32 nodes &middot; 52 edges &middot; 4 planted communities + 2 outliers</span>
@@ -96,13 +107,26 @@ with \(L\) = total edges of the original graph. Shipped IKC short-circuits this 
     </div>
     <div class="graph-canvas" id="g-input-cy"></div>
   </div>
+  <p>The fixture is built so the four planted communities occupy different core tiers: A's \(K_5\) lives in the 4-core (every \(K_5\) vertex has degree 4 inside the clique), B's two \(K_4\)s sit in the 3-core (with the bridge \((15, 16)\) lifting each \(K_4\) member to three intra-block neighbours), C's two triangles sit in the 2-core (each triangle vertex has two triangle-internal neighbours), and the periphery of A plus outliers sit in the 1-core or below. IKC walks down this ladder, peeling one tier per iteration.</p>
 </section>
 
 <!-- ─────────── Preflight · core decomposition ─────────── -->
 <section class="stage">
   <div class="stage-num">preflight &middot; every node's core number</div>
   <h2>One integer per node: the densest k-core it survives.</h2>
-  <p>Slide \(k\) from 4 down to 1. The 4-core is just the \(K_5\) in A. Each step down adds the next sturdiest substructure to the same picture: \(k\)-cores nest, so a node with core number \(k\) sits inside every smaller core too.</p>
+
+  <p>Before IKC iterates anything, it needs to know which nodes belong to which cores. The k-core of \(G\) is defined recursively by peeling: repeatedly remove every node whose current degree falls below \(k\) until no more removals are possible. Whatever survives is the k-core. The <em>core number</em> \(c(v)\) of node \(v\) is the largest \(k\) such that \(v\) survives the k-peel.</p>
+
+  <p>The standard linear-time algorithm is Batagelj-Zaversnik 2003: bucket every node by its current degree, pop the smallest-degree node, assign its current degree as its core number, then decrement the degree of every still-present neighbour and slide it down to a smaller bucket. The cost is \(O(|V| + |E|)\), one touch per node and per edge.</p>
+
+  <p style="text-align:center">\(c(v) = \max\, \{\, k : v \in \mathrm{kcore}(G, k)\,\}\)</p>
+
+  <p>In plain terms: \(c(v)\) is the densest tier \(v\) clears. A node with \(c(v) = 4\) has at least four neighbours inside the 4-core (every node in the 4-core does, by definition), at least three inside the 3-core, and so on. Two properties worth keeping in mind: \(c(v) \le \deg(v)\), with equality only when \(v\) sits inside a clique on \(\deg(v) + 1\) nodes; and \(c(v)\) is invariant under graph isomorphism, so it does not depend on the order nodes were inserted or labelled.</p>
+
+  <p>The graph's <em>degeneracy</em> \(d(G) = \max_v c(v)\) is a structural quantity that shows up in many places: bounding the number of edges in any subgraph (\(|E(H)| \le d(G)\,|V(H)|\) for any induced \(H\)), bounding chromatic number (\(\chi(G) \le d(G) + 1\) by greedy colouring of the peeling order), and bounding the size of the densest subgraph. IKC's iteration count is bounded by \(d(G)\): every iteration that peels at least one cluster strictly decreases the residual's degeneracy, and the loop ends at degeneracy \(< k_{\mathrm{floor}}\).</p>
+
+  <p>Slide \(k\) from 4 down to 1. The 4-core is just the \(K_5\) in A. Each step down adds the next sturdiest substructure to the same picture: k-cores nest, so a node with core number \(k\) sits inside every smaller core too.</p>
+
   <div class="graph" id="g-cores">
     <div class="graph-chrome">
       <span>colour = core number; intensity scales with \(k\)</span>
@@ -116,13 +140,75 @@ with \(L\) = total edges of the original graph. Shipped IKC short-circuits this 
     </div>
   </div>
   <div class="kcore-bar" id="g-cores-bar"></div>
+
+  <div class="callout">
+    <div class="tag">why the k-core, not arbitrary subgraph density</div>
+    <p>Two ways to formalise "every member is well-connected inside the cluster": the k-core (every node has degree \(\ge k\)) and the densest subgraph (maximises average degree). The two answer different questions. The densest subgraph optimises a global average; one weakly-connected outlier inside the densest subgraph can drag the average up if a few hubs are dense enough to compensate. The k-core is a hard floor: every member meets it. IKC needs the floor, not the average, because the algorithm reports clusters where each member individually satisfies the connectivity contract.</p>
+  </div>
+
+  <div class="callout">
+    <div class="tag">why decomposition, not a single k-pass</div>
+    <p>For a fixed user floor \(k\), the kcore on its own would already give a candidate clustering: take the connected components of the k-core. IKC does more than this for two reasons. First, the densest substructures of the graph sit in higher cores. Pulling them out first frees the residual for cores at exactly \(k\) to surface cleanly without the high-degree noise of the dense part. Second, the per-cluster connectivity tag \(K^*\) (the core's k at the time the cluster was accepted) becomes a quality stamp downstream: a \(K^* = 10\) cluster is denser than a \(K^* = 3\) one. Park 2024 uses this stamp to bin clusters for the CM-pipeline's noncore-augmentation pass.</p>
+  </div>
+</section>
+
+<!-- ─────────── Preflight · k-validity ─────────── -->
+<section class="stage">
+  <div class="stage-num">preflight &middot; k-validity vs k-core membership</div>
+  <h2>Belonging to the k-core globally does not mean a candidate cluster is k-valid.</h2>
+
+  <p>The k-core is global: every node in the k-core has \(\ge k\) neighbours <em>somewhere in the k-core</em>. Once the kcore is split into connected components, the k-validity question is local to a component: does every node in the component have \(\ge k\) neighbours <em>inside its own component</em>? The answer can be no even when every node passes the global test.</p>
+
+  <p style="text-align:center">\(C \text{ is } k\text{-valid} \iff \forall u \in C,\; \big| \{v \in C : v \sim u \} \big| \ge k.\)</p>
+
+  <p>Plain-English read: every cluster member must have at least \(k\) of their kcore-neighbours sitting inside the same cluster. Two properties worth keeping in mind: a k-valid cluster always sits inside the k-core (sufficient direction of the implication), but the converse fails (a connected component of the k-core can still contain under-connected nodes if their qualifying neighbours sit elsewhere in the kcore subgraph); and the predicate is monotone in \(C\), so removing nodes can never make a cluster more k-valid.</p>
+
+  <p>Concretely, on the fixture at \(k = 2\): the kcore subgraph contains A's \(K_5\), B's two \(K_4\)s + the bridge \((15, 16)\), C's two triangles, and D's two 2-cliques + the bridge \((27, 28)\). The connected components of this kcore subgraph are five candidate clusters. A, B, and C's two triangles all pass k-validity. D's bridged 2-cliques fail: nodes 26 and 29 each have only one cluster-internal neighbour (their pair-mate) once the bridge is excluded as cross-cluster, so they sit at \(k = 1\) inside the candidate, which is below the floor.</p>
+
+  <div class="callout">
+    <div class="tag">what about k-validity inside the component vs the full kcore subgraph?</div>
+    <p>The shipped k-validity check iterates the full kcore subgraph and inspects \(\mathrm{deg}_{\mathrm{sub}}(u)\) for every \(u\) in the candidate. Since the candidate is itself a weakly-connected component of the kcore subgraph, intra-subgraph degree equals intra-component degree for any node in the candidate. The two readings of the predicate agree, even though the loop scope is the larger one. The shipped binary writes it this way for stylistic reasons. The audit captures the loop scope and the per-node degree under \(\verb|k_valid_loop_scope|\) so the tracer can match the canonical's iteration shape, not just its outcome.</p>
+  </div>
+</section>
+
+<!-- ─────────── Preflight · modularity gate ─────────── -->
+<section class="stage">
+  <div class="stage-num">preflight &middot; modularity gate, shipped vs paper</div>
+  <h2>Two readings: what the paper specifies, and what the binary actually runs.</h2>
+
+  <p>Wedell 2022 specifies a second gate on each k-valid candidate. A cluster \(s\) passes the modularity gate iff its Newman modularity (Newman 2006) is positive:</p>
+
+  <p style="text-align:center">\(\mathrm{mod}(s) = \dfrac{\ell_s}{L} - \left(\dfrac{d_s}{2L}\right)^2 > 0\)</p>
+
+  <p>Read the formula as the first term scoring the intra-cluster edges (one point per intra-cluster edge, normalised by total edges) and the second term subtracting the expected count under the configuration null. \(L\) is the full-graph edge count, not the residual's. Two properties worth keeping in mind: the formula needs only per-cluster running totals \(\ell_s, d_s\), so the cost is constant time given an edge sweep that bins each edge by \((c_u, c_v)\); and the threshold is one-sided, so a candidate with exactly zero modularity is rejected (paper convention), not accepted.</p>
+
+  <p>The shipped binary diverges here. The function that should compute \(\mathrm{mod}(s)\) opens with a hard-coded return of a constant positive value, then leaves the paper formula sitting as dead code below the return. Every k-valid candidate clears the modularity gate. The candidate's own modularity is never computed. The strict-gate toggle on the outer-loop walker switches the constant off and runs the formula in JavaScript for comparison; on the 32-node fixture every k-valid cluster has positive paper-modularity already, so the toggle leaves the partition unchanged.</p>
+
+  <div class="callout warn">
+    <div class="tag">why this matters in practice</div>
+    <p>Three downstream consequences. First, the only filter that actually fires in shipped IKC is k-validity. Coverage and purity are decided by \(k\) alone. Second, the per-cluster modularity column written into the output is the dead-gate constant, not a measurement. Any downstream pipeline that reads this column sees 1 for every cluster, regardless of structure. Third, paper-defined <em>m-validity</em> (cluster's core-induced subgraph is connected and has positive modularity) collapses to just "connected", which is true by construction since every candidate is already a weakly-connected component of the kcore subgraph. The full kmp-validity contract advertised by Wedell 2022 holds in the paper but not in the binary.</p>
+  </div>
 </section>
 
 <!-- ─────────── Outer loop · peel + gate ─────────── -->
 <section class="stage">
   <div class="stage-num">outer loop &middot; peel, gate, repeat</div>
   <h2>One core tier per iteration, peeled off the residual.</h2>
-  <p>Step the walker. Each click runs one iteration: compute \(K^*\) of the residual, extract the \(K^*\)-core, split it into connected components, gate each component on \(k\)-validity, peel the survivors. The loop bails when \(K^* < k_{\mathrm{floor}}\). Slide \(k_{\mathrm{floor}}\) to change the floor; toggle the strict-mod gate to compare partitions.</p>
+
+  <p>The outer loop is a fixed point of "compute the residual's core decomposition, take the components of the densest core, gate them, peel the survivors". Each iteration is one frame of the walker below.</p>
+
+  <ol>
+    <li>Compute the core decomposition of the current residual. Read off \(K^*\), the largest core number that still has a member.</li>
+    <li>Bail check: if \(K^* < k_{\mathrm{floor}}\), every remaining node leaves as a singleton and the loop ends.</li>
+    <li>Extract the \(K^*\)-core of the residual.</li>
+    <li>Split the \(K^*\)-core into weakly-connected components. Each component is a candidate cluster.</li>
+    <li>Gate each candidate on k-validity (every node has \(\ge k_{\mathrm{floor}}\) neighbours inside the candidate).</li>
+    <li>Gate each k-valid candidate on the modularity formula. Shipped code short-circuits this to always pass.</li>
+    <li>Accept the survivors; peel their nodes off the residual; tag each accepted cluster with the iteration's \(K^*\) as its connectivity stamp.</li>
+    <li>Repeat from step 1 on the new residual.</li>
+  </ol>
+
+  <p>Step the walker. Each click runs one iteration: compute \(K^*\) of the residual, extract the \(K^*\)-core, split it into connected components, gate each component on k-validity, peel the survivors. The loop bails when \(K^* &lt; k_{\mathrm{floor}}\). Slide \(k_{\mathrm{floor}}\) to change the floor; toggle the strict-mod gate to compare partitions.</p>
   <div class="graph" id="g-loop">
     <div class="graph-chrome">
       <span><span class="level-pill" id="g-loop-level">it 0</span><span id="g-loop-status">iteration &middot; &middot;</span></span>
@@ -153,9 +239,76 @@ with \(L\) = total edges of the original graph. Shipped IKC short-circuits this 
     </div>
   </div>
   <div id="g-loop-panel"></div>
+
   <div class="callout">
     <div class="tag">why the residual matters</div>
     <p>Each accepted cluster removes its nodes from the residual, which lowers the residual's max core and exposes the next tier. Without the removal step the loop would keep finding the same top core every iteration. The walker's iteration counter and \(K^*\) readout track this descent.</p>
+  </div>
+
+  <div class="callout">
+    <div class="tag">why iterative, not a single k-pass</div>
+    <p>A single pass at \(k = k_{\mathrm{floor}}\) would emit every k-valid connected component of the k-core at once. That misses the per-cluster connectivity stamp: every accepted cluster would carry \(K^* = k_{\mathrm{floor}}\), and a 10-core cluster would be indistinguishable from a 2-core cluster. The iterative descent attaches the densest-surviving \(K^*\) to each cluster, which downstream consumers use to weight clusters by internal density. The bookkeeping cost is one extra core decomposition per iteration; the analytic gain is the per-cluster \(K^*\) tag.</p>
+  </div>
+
+  <div class="callout">
+    <div class="tag">why the degeneracy drops by at least one each iteration</div>
+    <p>Suppose iteration \(t\) accepts at least one cluster at level \(K^*\). Every node in that cluster has core number exactly \(K^*\) in the residual (since the cluster is a component of the \(K^*\)-core). Peeling those nodes drops the residual's degeneracy: any node previously at \(K^*\) that survived peeling lost at least one neighbour to the peel, so its core number in the new residual is at most \(K^* - 1\). The degeneracy of the residual therefore strictly decreases. When no cluster is accepted at level \(K^*\) (every candidate fails k-validity), the failing candidates also leave the residual (their nodes are added to the dropped list), so the same descent argument holds. The iteration count is bounded by the original degeneracy.</p>
+  </div>
+</section>
+
+<!-- ─────────── Worked example ─────────── -->
+<section class="stage">
+  <div class="stage-num">worked example &middot; trace on a small graph</div>
+  <h2>Two iterations on a hand-built mini graph.</h2>
+
+  <p>Consider a graph on seven nodes \(\{0, 1, 2, 3, 4, 5, 6\}\) with edges forming a \(K_4\) on \(\{0, 1, 2, 3\}\), a triangle on \(\{4, 5, 6\}\), and a single bridge edge \((3, 4)\). Run IKC with \(k_{\mathrm{floor}} = 2\).</p>
+
+  <p><b>Iteration 0.</b> The full graph is the residual. Core decomposition gives \(c(0) = c(1) = c(2) = c(3) = 3\) (every \(K_4\) vertex has three neighbours inside the clique), \(c(4) = c(5) = c(6) = 2\) (each triangle vertex has two triangle-internal neighbours; node 4 has an extra bridge-edge to node 3 but the bridge does not lift it because removing node 3 from the residual peel would leave node 4 at degree 2). Degeneracy is 3, so \(K^* = 3\). The 3-core is exactly the \(K_4\) on \(\{0, 1, 2, 3\}\). One connected component, four nodes. k-validity at \(k_{\mathrm{floor}} = 2\): every \(K_4\) vertex has three intra-component neighbours, so passes. Accept \(\{0, 1, 2, 3\}\) with \(K^* = 3\). Peel.</p>
+
+  <p><b>Iteration 1.</b> Residual is now \(\{4, 5, 6\}\) with two edges (the triangle edges \((4, 5), (5, 6), (4, 6)\) all survive; the bridge \((3, 4)\) is gone because node 3 was peeled). Core decomposition gives \(c(4) = c(5) = c(6) = 2\). Degeneracy is 2, so \(K^* = 2\). The 2-core is the whole triangle. One component, three nodes. k-validity passes (every triangle vertex has two intra-component neighbours). Accept \(\{4, 5, 6\}\) with \(K^* = 2\). Peel.</p>
+
+  <p><b>Iteration 2.</b> Residual is empty. Loop ends. Output: two clusters, \(\{0, 1, 2, 3\}\) tagged \(K^* = 3\) and \(\{4, 5, 6\}\) tagged \(K^* = 2\). No node was dropped; coverage is full on this fixture.</p>
+
+  <p>Run the same graph with \(k_{\mathrm{floor}} = 3\). Iteration 0 accepts the \(K_4\) at \(K^* = 3\) as before. Iteration 1 finds the residual's degeneracy is 2, which is below the floor, so the loop bails: nodes 4, 5, 6 leave as singletons and never join an output cluster. Two-thirds coverage. The floor controls coverage directly.</p>
+
+  <p>Run with \(k_{\mathrm{floor}} = 4\). Iteration 0 finds the residual's degeneracy is 3, below the floor. Loop bails on the first iteration. Every node leaves as a singleton; the output is empty. The k-core's top tier is the upper bound on what IKC can ever return: nothing denser than the graph's degeneracy ever survives.</p>
+</section>
+
+<!-- ─────────── Invariants ─────────── -->
+<section class="stage">
+  <div class="stage-num">invariants &middot; what holds at every iteration boundary</div>
+  <h2>Seven properties the loop maintains, and why they hold.</h2>
+
+  <p>The outer loop is straightforward but the partial-partition output makes some invariants non-obvious. The list below is what holds at every iteration boundary; combined, the seven imply the algorithm produces a valid partition of (a subset of) the original node set, and IKC always terminates within \(d(G)\) iterations.</p>
+
+  <ol>
+    <li><em>Residual containment.</em> The current residual node set is a subset of the original node set; once a node is removed, it never re-enters. This holds because the residual is only ever shrunk by the peel step at the end of each iteration, never grown.</li>
+    <li><em>Disjoint accepted clusters.</em> Any two accepted clusters are vertex-disjoint. This holds because every accepted cluster's nodes are removed from the residual before the next iteration runs, so subsequent iterations cannot accept them again.</li>
+    <li><em>Output partial-partition.</em> The accepted-cluster nodes plus the dropped nodes form a subset of the original node set; the union grows monotonically across iterations. The complement of the union is the current residual.</li>
+    <li><em>Every accepted cluster is k-valid.</em> The k-validity gate fires before acceptance; only clusters passing the gate get appended to the output list. The kcore subgraph degree of every member is at least \(k_{\mathrm{floor}}\), and intra-component degree equals intra-subgraph degree (since the candidate is a weakly-connected component of the kcore).</li>
+    <li><em>Every accepted cluster has size at least 2.</em> A singleton fails k-validity for any \(k_{\mathrm{floor}} \ge 1\); for \(k_{\mathrm{floor}} = 0\), singletons can pass, but the CSV writer filters every cluster of size \(\le 1\) before output.</li>
+    <li><em>Per-cluster \(K^*\) decreases weakly across iterations.</em> Each accepted cluster carries the iteration's \(K^*\) as its tag. Since each peel strictly decreases the residual's degeneracy when at least one cluster is accepted, the next iteration's \(K^*\) is strictly smaller. When no cluster is accepted, the failed candidates also leave the residual (their nodes are added to the dropped list), so the degeneracy still drops. \(K^*\) is therefore monotone non-increasing across the accepted-cluster sequence.</li>
+    <li><em>Modularity stamp.</em> The per-cluster modularity stamp written into the output is the constant 1, the dead-gate return value, not a measurement. Any post-processing that consumes this column should treat it as a placeholder.</li>
+  </ol>
+
+  <div class="callout">
+    <div class="tag">termination</div>
+    <p>The iteration count is bounded by the original degeneracy \(d(G)\). Each iteration either decreases the residual's degeneracy by at least one (when at least one component leaves the residual) or bails (when \(K^* < k_{\mathrm{floor}}\)). The first kind of iteration can fire at most \(d(G)\) times; the second kind fires once and ends the loop. Total iteration count: at most \(d(G) + 1\).</p>
+  </div>
+</section>
+
+<!-- ─────────── Bail handling ─────────── -->
+<section class="stage">
+  <div class="stage-num">bail &middot; what happens when the residual's top core falls below the floor</div>
+  <h2>Singletons get an FP-flavoured modularity stamp that never reaches the output.</h2>
+
+  <p>The bail branch is short. When the residual's degeneracy \(K^*\) drops below \(k_{\mathrm{floor}}\), the loop exits. Every node still in the residual leaves as a singleton. The shipped binary attaches each singleton a per-node modularity score of \(-(d_i / 2L)^2\), where \(d_i\) is the node's directed out-degree on the original graph and \(L\) is the full-graph edge count. The stamp is a negative number; the contribution to a hypothetical cluster modularity if the singleton were alone.</p>
+
+  <p>The score does not reach the output. The CSV writer filters every cluster of size \(\le 1\), so every singleton is dropped from the output regardless of its stamp. The stamp exists in the in-memory cluster list, surfaces in the per-step trace, but never lands in user-visible output.</p>
+
+  <div class="callout">
+    <div class="tag">why the FP path exists at all if its result is dropped</div>
+    <p>The simplest reading is that the bail-branch FP score is a vestige of an earlier design where singletons were meant to carry their own modularity into the output. The shipped binary still computes the score on every bail. The score is the only floating-point arithmetic on the algorithm's deterministic path. Verifying byte-equal across the canonical Python implementation and the JavaScript port required matching this path exactly. Python's exponentiation operator routes through the standard library's `pow` function, which is faithfully rounded (within 1 ULP, computed as \(\exp(2 \log r)\)). V8's `Math.pow(x, 2)` short-circuits to plain multiplication, which is correctly rounded. The two values differ on roughly 0.09% of inputs by a single ULP. The byte-equal verification port uses plain multiplication on both sides, matching the principle (mathematical squaring) and avoiding the libm-vs-V8 divergence. One real divergence surfaced on the bumped 3-tier panel at a specific physics-collaboration fixture; the page's verification grid in the technical companion records the per-site fix.</p>
   </div>
 </section>
 
@@ -177,20 +330,41 @@ with \(L\) = total edges of the original graph. Shipped IKC short-circuits this 
     <thead><tr><th></th><th>community</th><th>size</th><th>edges in</th><th>edges out</th><th>conductance</th></tr></thead>
     <tbody></tbody>
   </table>
+
   <div class="callout">
     <div class="tag">on this fixture, by region</div>
-    <p>At \(k_{\mathrm{floor}} = 2\): A's \(K_5\) clears at \(k = 4\) and the periphery never recovers (every periphery node has at most one periphery neighbour). B's 8-block clears at \(k = 3\) thanks to the bridge edge \((15, 16)\), which gives every \(K_4\) member a third intra-cluster neighbour. C's two triangles each meet \(k = 2\) and clear independently. D's two 2-cliques fail (each member has only one internal neighbour). Outliers 30 + 31 stay singletons.</p>
+    <p>At \(k_{\mathrm{floor}} = 2\): A's \(K_5\) clears at \(K^* = 4\) and the periphery never recovers (every periphery node has at most one periphery neighbour). B's 8-block clears at \(K^* = 3\) thanks to the bridge edge \((15, 16)\), which gives every \(K_4\) member a third intra-cluster neighbour. C's two triangles each meet \(K^* = 2\) and clear independently as two separate output clusters carrying the same planted label. D's two 2-cliques fail (each member has only one internal neighbour). Outliers 30 and 31 stay singletons.</p>
     <p>Slide the floor on the walker to see the partition shrink at higher \(k\) and barely filter at lower \(k\). At \(k = 0\) the partition reduces almost to connected components of the residual, with size-1 components stripped by the output writer.</p>
   </div>
+
+  <div class="callout">
+    <div class="tag">how this compares to its connectivity-strict siblings</div>
+    <p>Three other algorithms in this gallery test the same axis as IKC: the strictness of "well-connected" inside a cluster.</p>
+    <p><a href="./cc.html">CC</a> uses the weakest version: drop cross-cluster edges, split each cluster into its connected components, ship. The threshold is "connected at all". CC is a post-processor of someone else's clustering, not a clustering algorithm in its own right.</p>
+    <p><a href="./wcc.html">WCC</a> tightens this. After dropping cross-cluster edges, WCC checks that each connected piece has a minimum cut above a logarithmic threshold; pieces that fall below the threshold get cut and re-checked recursively. Same kind of post-processor as CC, but with a real connectivity threshold instead of the trivial one.</p>
+    <p><a href="./cm.html">CM</a> stacks WCC on top of a re-clustering pass. Pieces that fail WCC's threshold get re-clustered by Leiden inside their connected component, then re-checked. Three connectivity tightening passes layered on top of each other.</p>
+    <p>IKC is different in kind: it produces the clustering itself, not a post-processor. The "well-connected" axis IKC tightens is the same (every member has enough cluster-internal neighbours), but the strictness is bound to the core tier the cluster came from rather than to a separate cut threshold. The natural pairing of IKC with the CC/WCC/CM family is <a href="./cm.html">CM</a>: Park 2024's full pipeline runs IKC at \(k = 10\), then CM on the IKC output, exploiting IKC's per-cluster \(K^*\) stamp as a pre-filter for CM's recursive cut.</p>
+  </div>
+
+  <div class="callout">
+    <div class="tag">how this compares to its modularity-optimisation siblings</div>
+    <p><a href="./louvain.html">Louvain</a> and <a href="./leiden-cpm.html">Leiden</a> grow clusters by absorbing neighbours that improve a quality score, sweeping the graph until no per-node move helps. The result covers the whole graph. IKC strips clusters out of the densest substructures and stops; whatever did not reach a cluster sits unlabelled. Coverage is loose, density is high. The 32-node fixture exaggerates this: at \(k_{\mathrm{floor}} = 2\), IKC labels around half the graph, while Louvain and Leiden label every node (and on this fixture, both collapse to one mega-cluster because modularity's resolution limit dominates at 52 edges).</p>
+  </div>
+
   <div class="callout warn">
     <div class="tag">shipped vs paper</div>
-    <p>The shipped <code>run_ikc.py</code> is a strict subset of Wedell 2022. Four places where the binary departs from the paper:</p>
+    <p>The shipped binary is a strict subset of Wedell 2022. Four places where the binary departs from the paper:</p>
     <ol>
-      <li><em>Modularity gate is dead.</em> The shipped <code>modular()</code> begins with a constant return, so the paper's \(\mathrm{mod}(s)\) formula at the bottom of the function is never reached. \(k\)-validity is the only filter that actually fires. The strict-gate toggle on the walker re-enables the formula for comparison; on this fixture every accepted cluster has positive paper-modularity, so the toggle leaves the partition unchanged.</li>
+      <li><em>Modularity gate is dead.</em> The shipped modularity function begins with a constant return, so the paper's \(\mathrm{mod}(s)\) formula at the bottom of the function is never reached. \(k\)-validity is the only filter that actually fires. The strict-gate toggle on the walker re-enables the formula for comparison; on this fixture every accepted cluster has positive paper-modularity, so the toggle leaves the partition unchanged.</li>
       <li><em>m-validity is never enforced.</em> Paper §2.2.2 calls a cluster m-valid iff its core-induced subgraph is connected and has positive modularity. The connectedness half holds by construction, since the gate sees only weakly-connected components of the kcore. The modularity half rides on the dead gate above, so m-validity collapses to "connected", which is always true.</li>
-      <li><em>p-validity is not implemented.</em> Paper §2.2.3 defines a four-stage <em>kmp-clustering</em> pipeline; \(p\)-validity is the Stage 3 augmentation that grows each accepted core cluster by attaching outside nodes adjacent to enough core members. Shipped <code>src/ikc/</code> covers Stage 1 only, so every accepted cluster is exactly its core.</li>
-      <li><em>Modularity column is a placeholder.</em> Each accepted cluster is written with <code>modularity = 1</code>, the dead-gate constant, not a measurement. Downstream consumers reading the column see 1 for every cluster regardless of structure.</li>
+      <li><em>p-validity is not implemented.</em> Paper §2.2.3 defines a four-stage <em>kmp-clustering</em> pipeline; \(p\)-validity is the Stage 3 augmentation that grows each accepted core cluster by attaching outside nodes adjacent to enough core members. The shipped binary covers Stage 1 only, so every accepted cluster is exactly its core.</li>
+      <li><em>Modularity column is a placeholder.</em> Each accepted cluster is written with modularity equal to the dead-gate constant, not a measurement. Downstream consumers reading the column see the same value for every cluster regardless of structure.</li>
     </ol>
+  </div>
+
+  <div class="callout">
+    <div class="tag">where IKC sits in the CM pipeline</div>
+    <p>The CM pipeline (Park 2024) runs IKC as its first stage. Each IKC output cluster carries a \(K^*\) tag; the CM stage takes only clusters with \(K^* \ge k_{\mathrm{floor}}\) and applies its own connectivity-tightening loop on top. The default \(k\) in Park 2024 is 10; everything below that gets dropped before CM sees it. IKC is therefore both an algorithm in its own right and a pre-filter for the CM pipeline; the page above walks IKC in isolation, but the algorithm's main use in the wild is the IKC-then-CM chain.</p>
   </div>
 </section>
 
