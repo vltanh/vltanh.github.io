@@ -352,11 +352,21 @@
         // Mirror canonical's per-node modularity computation exactly:
         //   d = orig_graph.degree(u) — NetworKit directed out-degree.
         //   ratio = d / (2 * L) — IEEE-754 double division (Python `/`).
-        //   ratio**2 in Python with exponent==2 byte-equals plain ratio*ratio
-        //   (verified on CPython 3.11; both go through fp_mul, not libm pow).
-        //   We use ratio*ratio here for the same reason — avoids Math.pow's
-        //   libm path drift; verified V8 byte-equal to Python on the same
-        //   inputs. See audit row D + tracer_coverage_gaps.md G8.
+        // Canonical writes `... ** 2` which routes through CPython
+        // float_pow -> glibc pow. glibc pow(r, 2) is "faithfully rounded"
+        // (within 1 ULP) via exp(2*log(r)); plain `r*r` is correctly
+        // rounded (true r² rounded to nearest double). On ~0.09% of inputs
+        // these differ by ±1 ULP (counter-example caught by
+        // physics_collab_pierreAuger T1 k_floor=3 sweep 2026-05-12: iter 13
+        // node 44, d=12, 2L=12964, glibc pow=0x3eacbff0c59c82ab,
+        // r*r=0x3eacbff0c59c82aa, exact r² closer to aa).
+        // V8's Math.pow(x, 2) short-circuits to x*x for integer exponents,
+        // so JS cannot reach glibc pow's value without porting glibc's
+        // algorithm to JS. Per feedback_match_canonical_in_principle.md
+        // we match the principle (mathematical squaring) not the data
+        // (glibc pow's 1-ULP-off approximation). The Python tracer at
+        // kernel_check.py uses `ratio * ratio` so both sides align on the
+        // correctly-rounded value of r². See audit row D + audit.md G8.
         const bailPerNodeModularity = [];
         const twoL = 2 * fullL;
         for (let i = 0; i < remCount; i++) {
