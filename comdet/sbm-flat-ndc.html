@@ -5,11 +5,40 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>SBM-flat-ndc &middot; non-degree-corrected flat SBM | Community Detection Algorithms</title>
 <link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐖</text></svg>">
-<meta name="description" content="Walker for the non-degree-corrected flat stochastic block model on a 32-node fixture. Per-vertex Metropolis-Hastings; degree heterogeneity sits in the data fit.">
+<meta name="description" content="Walker for the non-degree-corrected flat stochastic block model on a 32-node fixture. Per-vertex Metropolis-Hastings, two-term description length, hub-peeling pathology demoed step by step.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="./shared.css">
+<style>
+.ndc-bars { width: 100%; height: 100%; display: block; font-family: 'Special Elite','Courier New',monospace; font-size: 10px; }
+.ndc-bars .bar { fill: #7b9bd6; }
+.ndc-bars .bar-hub { fill: #c98a8a; }
+.ndc-bars text.lbl { fill: #1b2033; font-size: 9px; }
+.ndc-bars .axis { stroke: #1b2033; }
+.ndc-bars .tick { fill: #1b2033; font-size: 9px; }
+.term-table { width: 100%; border-collapse: collapse; font-size: .88rem; margin: .6rem 0; }
+.term-table th, .term-table td { padding: .4rem .6rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.term-table th { font-family: 'Special Elite','Courier New',monospace; font-size: .72rem; letter-spacing: .12em; color: var(--paper-3); text-align: left; }
+.term-table td.term { font-family: 'Fraunces', serif; font-style: italic; white-space: nowrap; }
+.term-table td.num { font-family: 'Special Elite','Courier New',monospace; text-align: right; }
+.delta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; }
+@media (max-width: 720px) { .delta-grid { grid-template-columns: 1fr; } }
+.delta-grid .panel-mini { padding: .55rem .8rem; background: rgba(237,228,201,.35); border: 1px solid var(--rule); border-radius: 2px; }
+.delta-grid h4 { font-family: 'Fraunces', serif; font-size: .95rem; margin: 0 0 .3rem; }
+.delta-grid .num { font-family: 'Special Elite','Courier New',monospace; font-size: .82rem; }
+.accept-svg { width: 100%; height: 220px; display: block; font-family: 'Special Elite','Courier New',monospace; }
+.contrast-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+@media (max-width: 720px) { .contrast-grid { grid-template-columns: 1fr; } }
+.contrast-grid .panel-mini { padding: .55rem .8rem; }
+.contrast-grid .cap { font-family: 'Special Elite','Courier New',monospace; font-size: .72rem; letter-spacing: .12em; color: var(--paper-3); margin-bottom: .4rem; }
+.contrast-grid .num-row { font-family: 'Special Elite','Courier New',monospace; font-size: .82rem; margin-top: .4rem; }
+.regime-svg { width: 100%; height: 200px; display: block; font-family: 'Special Elite','Courier New',monospace; }
+.coin-strip { display: flex; align-items: center; gap: .5rem; margin: .5rem 0; font-family: 'Special Elite','Courier New',monospace; font-size: .8rem; }
+.coin-strip .pip { width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--rule); display: inline-block; }
+.coin-strip .pip.accept { background: #8fbb70; }
+.coin-strip .pip.reject { background: #b6b6b6; }
+</style>
 </head>
 <body>
 <main class="page">
@@ -20,34 +49,23 @@
   <div class="kicker">community detection &middot; bayesian inference</div>
   <h1><em>SBM-flat-ndc</em></h1>
   <p class="fullname">non-degree-corrected flat stochastic block model</p>
-  <p class="sub">Per-vertex Metropolis-Hastings over the microcanonical posterior under an exchangeable-within-block prior. Every node in a block is interchangeable; degree heterogeneity surfaces in the data fit.</p>
+  <p class="sub">Per-vertex Metropolis-Hastings over the microcanonical posterior under an exchangeable-within-block prior. Two-term description length, fewer parameters than the DC sister, with a known hub-peeling pathology on heterogeneous graphs.</p>
 </header>
 
 <div class="uc-banner">
-  <strong>Draft.</strong> Walker for the NDC variant of the flat SBM. The family-level Bayesian framing, the description-length anatomy, and the cross-algorithm contrasts live on the <a href="./sbm-flat-best.html">SBM-flat-best</a> anchor page; this page focuses on the NDC-specific entropy form and what it does on the 32-node fixture. Byte-equal to the cpp tracer under matched MT19937 across the 17-fixture 3-tier stress panel.
+  <strong>Draft.</strong> Walker for the NDC variant of the flat SBM. The family-level Bayesian framing and cross-variant contrasts live on the <a href="./sbm-flat-best.html">SBM-flat-best</a> anchor; the <a href="./sbm-flat-dc.html">SBM-flat-dc</a> sister page walks the DC counterpart on the same fixture. This page focuses on the NDC-specific entropy form, the hub-peeling regime it falls into on heterogeneous graphs, and the small-data regime where it sometimes wins. Byte-equal to the cpp tracer under matched MT19937 across the 17-fixture 3-tier stress panel.
 </div>
 
 <section class="hook">
-  <p>The non-degree-corrected flat SBM does not condition on the degree sequence. In plain terms: the model treats every node in a block as exchangeable, with no special handling for hubs vs. leaves. Per-node degrees show up in the likelihood through the block-level edge sums, not as fixed auxiliary data. The DC sister (<a href="./sbm-flat-dc.html">flat-dc</a>) takes the opposite stance, lifting degrees into the model conditioning so that high-degree and low-degree nodes can share a block without paying a per-hub penalty.</p>
-  <p>The description length the chain minimises is</p>
-  <p style="text-align:center">\(\Sigma_{\text{NDC}}(\boldsymbol{b}) = S_{\text{NDC}}(\boldsymbol{e}, \boldsymbol{b}) + L_e(B, E) + L_p(\boldsymbol{b})\).</p>
-  <p>Three terms, not four. The NDC variant pays the sparse-entropy data fit \(S_{\text{NDC}}\), the edges DL \(L_e\), and the partition DL \(L_p\); the uniform degree DL that the DC variant carries is absent here, because the NDC formulation does not condition on \(\boldsymbol{k}\). In plain terms: the partition is responsible for explaining degrees through block membership, not through a separate cost term. Two properties. The NDC variant tends to split hubs into singleton blocks when no other community absorbs the hub's degree mass; this is the signature failure mode the DC variant was introduced (Karrer and Newman 2011) to fix. And the NDC sparse-entropy formula falls out of treating block members as exchangeable Bernoulli sources, which makes the model invariant under relabelling of nodes inside a block; this is the right assumption when degrees are roughly homogeneous within communities, and the wrong one on the comdet fixture's A community.</p>
-  <p>The NDC sparse entropy explicitly is</p>
-  <p style="text-align:center">\(S_{\text{NDC}} = \sum_r e_r \log n_r - \sum_{r < s} \log(e_{rs}!) - \sum_r \Big[ \log\!\big((e_{rr}/2)!\big) + (e_{rr}/2)\log 2 \Big]\).</p>
-  <p>In plain terms: the first sum prices the per-stub block lookup under uniform-within-block placement (every internal stub picks one of the \(n_r\) members independently, paying \(\log n_r\) per stub); the second and third are identical to the DC form. The difference between DC and NDC is concentrated in the vertex factor: DC pays \(\log(e_r!)\), NDC pays \(e_r \log n_r\). Two properties. The NDC vertex factor is what Karrer and Newman 2011 named as the source of hub-leaf splitting; an internal edge incident to a degree-9 hub in a 12-member block pays \(9 \log 12 \approx 22.4\) nats, where DC under the same node pays \(\log(9!) \approx 12.8\) nats. The 9.6-nat-per-hub gap is the signature DC-vs-NDC \(\Delta\Sigma\) signal at hub-anchored partitions. And the NDC formula is what falls out of the Poisson stochastic block model in the dense-graph limit, so it is the form most papers from the pre-2011 literature use; DC is the principled correction for the heavy-tailed graphs the literature mostly studies.</p>
-  <div class="defs">
-    <div><span class="term">NDC sparse entropy</span> \(S_{\text{NDC}} = \sum_r e_r \log n_r - \sum_{r<s} \log(e_{rs}!) - \sum_r [\log((e_{rr}/2)!) + (e_{rr}/2)\log 2]\). The data-fit term under exchangeable-within-block assumptions.</div>
-    <div><span class="term">edges DL</span> \(L_e = \log\binom{B(B+1)/2 + E - 1}{E}\). Same as in DC; cost of writing the matrix once \(B\) is known.</div>
-    <div><span class="term">partition DL</span> \(L_p = \log(N!) - \sum_r \log(n_r!) + \log\binom{N - 1}{B - 1} + \log N\). Same as in DC.</div>
-    <div><span class="term">no degree DL</span> NDC does not condition on the degree sequence; the per-node degree cost is folded into the data-fit term through the \(e_r \log n_r\) form. Absent here; present on the <a href="./sbm-flat-dc.html">DC sister page</a>.</div>
-  </div>
+  <p>The non-degree-corrected flat SBM does not condition on the degree sequence. Every node in a block is exchangeable; no special handling for hubs versus leaves. Per-node degrees show up in the likelihood through the block-level edge sums, not as fixed auxiliary data. The DC sister takes the opposite stance, lifting degrees into the model conditioning so high-degree and low-degree nodes can share a block without paying a per-hub penalty.</p>
+  <p>Same MCMC machinery as the DC variant, fewer parameters, simpler description length. The page walks the chain stage by stage on the same 32-node fixture every comdet page uses.</p>
 </section>
 
-<!-- ─────────── Stage 0 · The input ─────────── -->
+<!-- ─────────── Stage 0 · Input fixture ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 0 &middot; input</div>
+  <div class="stage-num">stage 0 &middot; input fixture</div>
   <h2>The 32-node fixture, painted by planted ground-truth.</h2>
-  <p>The comdet gallery shares one small graph across every algorithm. <em>A</em> (12 nodes, blue) is a \(K_5\) on \(\{0..4\}\) plus a 7-node periphery hanging off the \(K_5\). <em>B</em> (8 nodes, ochre) is two \(K_4\)s bridged by the single edge \((15, 16)\). <em>C</em> (6 nodes, green) is two 3-cycles with no edge between them, both labelled the same in ground-truth. <em>D</em> (4 nodes, plum) is two 2-cliques joined by \((27, 28)\). Outliers 30 and 31 dangle off A.</p>
+  <p>The comdet gallery shares one small graph across every algorithm. \(A\) (12 nodes, blue) is a \(K_5\) on \(\{0..4\}\) plus a 7-node periphery hanging off the \(K_5\). \(B\) (8 nodes, ochre) is two \(K_4\)s bridged by the single edge \((15, 16)\). \(C\) (6 nodes, green) is two 3-cycles with no edge between them, both labelled the same in ground-truth. \(D\) (4 nodes, plum) is two 2-cliques joined by \((27, 28)\). Outliers 30 and 31 dangle off \(A\).</p>
   <div class="graph" id="g-input">
     <div class="graph-chrome">
       <span>32 nodes &middot; 52 edges &middot; 4 planted communities + 2 outliers</span>
@@ -55,12 +73,57 @@
     </div>
     <div class="graph-canvas" id="g-input-cy"></div>
   </div>
-  <p>What's interesting about this fixture from the NDC angle. A's hub at node 0 has degree 9 inside a block of 12 nodes; under NDC the block pays \(9 \log 12 \approx 22.4\) nats for the hub's stubs alone, where the rest of the block's leaves pay only \(2 \log 12 \approx 5\) nats each. The hub is the model's most expensive vertex, and the chain often finds it cheaper to peel node 0 into its own block where it costs \(9 \log 1 = 0\) nats (a singleton has \(n_r = 1\) so \(\log n_r = 0\) on every internal stub). The cost in the data fit is offset against the cost in the partition DL (paying for one more block) and the edges DL (paying for a bigger \(\boldsymbol{e}\) matrix); on this fixture the trade tends to favour peeling under most seeds. The DC variant absorbs this gap into the model conditioning and reads A as one cohesive block.</p>
+  <p>The fixture is engineered so each region exercises a different SBM assumption. \(A\)'s hub-plus-periphery has a wide degree gap inside one planted block; \(B\)'s bridge has the SBM's no-min-cut blindspot; \(C\)'s two disconnected 3-cycles expose the no-connectivity-prior blindspot every SBM variant shares; \(D\)'s near-resolution-boundary geometry is where the variants disagree most often across seeds.</p>
 </section>
 
-<!-- ─────────── Stage 1 · Random init ─────────── -->
+<!-- ─────────── Stage 1 · Why non-degree-corrected ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 1 &middot; random init</div>
+  <div class="stage-num">stage 1 &middot; why non-degree-corrected</div>
+  <h2>Fewer parameters, no degree conditioning, regularises on small data.</h2>
+  <p>The non-degree-corrected model drops the per-node degree prior from the description length. Three terms instead of four, no \(L_d\). The data fit term changes shape too: the vertex factor becomes \(e_r \log n_r\) instead of \(\log(e_r!)\). In plain terms: NDC treats block members as exchangeable Bernoulli sources, so degree heterogeneity inside a block is paid for in the likelihood, not absorbed into the model conditioning.</p>
+  <p>Two properties. The parameter count drops: an NDC chain has no degree DL to write down, so on a graph where the planted communities have roughly homogeneous degrees within blocks, NDC compresses better than DC. And the model becomes degree-sensitive in a way DC is not: a hub of degree \(k\) inside a block of size \(n_r\) pays \(k \log n_r\) nats in the data fit alone, where the same hub under DC pays \(\log(k!)\). For a degree-9 hub in a block of size 12 the gap is \(9 \log 12 - \log(9!) \approx 9.6\) nats, all of it borne by NDC.</p>
+  <p>The fixture's degree histogram makes the regime visible. The bars below show every vertex's degree, painted by ground-truth community.</p>
+  <div class="graph" id="g-degrees">
+    <div class="graph-chrome">
+      <span>per-vertex degree &middot; sorted ascending within each block</span>
+      <span class="right">red = NDC hub-cost target (vertex 0, degree 9)</span>
+    </div>
+    <div class="graph-canvas" id="g-degrees-bars" style="height: 220px"></div>
+  </div>
+  <p>\(A\)'s degree range is 2 to 9. \(B\), \(C\), \(D\) are nearly degree-homogeneous within their planted blocks. NDC's regularisation pays off on \(B\), \(C\), \(D\); the hub-cost pathology fires on \(A\).</p>
+</section>
+
+<!-- ─────────── Stage 2 · DL formula for NDC ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 2 &middot; description length for NDC</div>
+  <h2>Three terms: data fit, edges DL, partition DL.</h2>
+  <p>The description length the chain minimises is</p>
+  <p style="text-align:center">\(\Sigma_{\text{NDC}}(\boldsymbol{b}) = S_{\text{NDC}}(\boldsymbol{e}, \boldsymbol{b}) + L_e(B, E) + L_p(\boldsymbol{b})\).</p>
+  <p>The data fit term \(S_{\text{NDC}}\) prices the graph given the block-pair edge counts; \(L_e\) prices the edge-count matrix once \(B\) is known; \(L_p\) prices the labelling. All three are exact logs of counting problems, in nats. In plain terms: every component answers a "how many ways could the model write this down" question; the partition minimising the sum is the maximum-posterior partition under the prior.</p>
+  <p>Two properties. The total has no free parameters: the partition prior fixes the trade-off between block count and data fit automatically, no \(\gamma\) to tune. And the formula is partition-dependent only through \(\boldsymbol{e}\) and \(\{n_r\}\); per-node degrees enter the data fit only through the block sums, not as separate variables, which is the structural meaning of "non-degree-corrected".</p>
+  <p>The NDC data fit explicitly is</p>
+  <p style="text-align:center">\(S_{\text{NDC}} = \sum_r e_r \log n_r - \sum_{r < s} \log(e_{rs}!) - \sum_r \Big[ \log\!\big((e_{rr}/2)!\big) + (e_{rr}/2)\log 2 \Big]\).</p>
+  <p>In plain terms: the first sum prices the per-stub block lookup under uniform-within-block placement (every internal stub picks one of the \(n_r\) members independently, paying \(\log n_r\) per stub); the second and third are identical to the DC form. The difference between DC and NDC is concentrated in the vertex factor: DC pays \(\log(e_r!)\), NDC pays \(e_r \log n_r\).</p>
+  <p>Two properties. The NDC vertex factor is the source of hub-leaf splitting; an internal edge incident to a degree-9 hub in a 12-member block pays \(9 \log 12 \approx 22.4\) nats, where DC under the same node pays \(\log(9!) \approx 12.8\) nats. The 9.6-nat-per-hub gap is the signature DC-vs-NDC \(\Delta\Sigma\) signal at hub-anchored partitions. And the NDC formula falls out of the Poisson stochastic block model in the dense-graph limit, so it is the form most pre-2011 papers use; DC is the principled correction introduced by Karrer and Newman (2011) for the heavy-tailed graphs the literature mostly studies.</p>
+  <p>Numerical anatomy on the fixture's planted partition is below. The viz lists every term that contributes to \(\Sigma_{\text{NDC}}\), evaluated under the ground-truth labelling.</p>
+  <div class="graph" id="g-cost">
+    <div class="graph-chrome">
+      <span>\(\Sigma_{\text{NDC}}\) anatomy at the planted partition</span>
+      <span class="right">vertex factor \(e_r \log n_r\) dominates on \(A\)</span>
+    </div>
+    <div class="graph-canvas" id="g-cost-tbl" style="padding: .7rem 1rem"></div>
+  </div>
+  <div class="defs">
+    <div><span class="term">NDC sparse entropy</span> \(S_{\text{NDC}}\). Data-fit term under exchangeable-within-block assumptions.</div>
+    <div><span class="term">edges DL</span> \(L_e = \log\binom{B(B+1)/2 + E - 1}{E}\). Same as in DC; cost of writing the matrix once \(B\) is known.</div>
+    <div><span class="term">partition DL</span> \(L_p = \log(N!) - \sum_r \log(n_r!) + \log\binom{N - 1}{B - 1} + \log N\). Same as in DC.</div>
+    <div><span class="term">no degree DL</span> NDC does not condition on the degree sequence. The per-node degree cost is folded into the data fit through the \(e_r \log n_r\) vertex factor. Present on the <a href="./sbm-flat-dc.html">DC sister page</a>, absent here.</div>
+  </div>
+</section>
+
+<!-- ─────────── Stage 3 · Init partition ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 3 &middot; init partition</div>
   <h2>Random partition with \(B_0\) blocks; \(\Sigma_0\) on display.</h2>
   <p>MCMC starts from any valid partition. The chain initialises with \(B_0 = \) <span id="g-init-B0">8</span> blocks: the kernel shuffles the identity permutation under MT19937 and assigns block \(i \bmod B_0\) to vertex \(\sigma(i)\). The shuffle is backward Fisher-Yates, matching the std::shuffle direction in the cpp tracer.</p>
   <div class="graph" id="g-init">
@@ -78,22 +141,91 @@
       <span class="step-label">re-runs the chain &middot; init + 20 sweeps</span>
     </div>
   </div>
-  <p>\(\Sigma_0\) is large because the random partition is uninformative: edges cross block boundaries roughly uniformly, the sparse-entropy term gets no concentration discount, and the chain still pays the full edges DL + partition DL. MCMC's job is to push \(\Sigma\) down by re-routing nodes; the NDC variant in particular has a strong incentive to either group hubs with other hubs or peel them into singletons, both of which lower the \(e_r \log n_r\) penalty.</p>
+  <p>\(\Sigma_0\) is large because the random partition is uninformative: edges cross block boundaries roughly uniformly, the data fit term gets no concentration discount, and the chain still pays the full edges DL plus partition DL. MCMC's job is to push \(\Sigma\) down by re-routing nodes; the NDC variant in particular has a strong incentive to either group hubs with other hubs or peel them into singletons, both of which lower the \(e_r \log n_r\) penalty.</p>
 </section>
 
-<!-- ─────────── Stage 2 · MCMC walker ─────────── -->
+<!-- ─────────── Stage 4 · MH proposal step ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 2 &middot; one move at a time</div>
-  <h2>Each visit: pick a vertex, propose a target block, accept or reject.</h2>
-  <p>One sweep visits every vertex once in shuffled order. Each visit runs four steps:</p>
-  <ol>
-    <li>Build the candidate pool: every currently non-empty block, plus one fresh empty slot when the vertex's current block holds more than one member.</li>
-    <li>Sample a target uniformly from the pool (the \(c \to \infty\) limit of Peixoto's local-neighbourhood proposal).</li>
-    <li>Compute \(\Delta\Sigma\) for the move via the subset-entropy delta: apply the move on a transient state, recompute only the entropy terms that touch the two blocks involved, revert.</li>
-    <li>Accept with probability \(\min(1, e^{-\beta\Delta\Sigma})\) at \(\beta = 1\). On accept, commit; on reject, leave the partition unchanged.</li>
-  </ol>
-  <p>The subset-entropy delta for NDC has the same closed-form structure as for DC, but the vertex factor is \(e_r \log n_r\) instead of \(\log(e_r!)\). In plain terms: the kernel maintains \(n_r\) and \(e_r\) for every block and computes the before-after difference of \(e_r \log n_r\) terms directly. Two properties. The NDC delta is also \(O(\deg(v) + B_{\text{ne}})\) per visit, so the per-sweep complexity is the same as for DC. And the NDC vertex factor is sensitive to the exact value of \(n_r\); the change in \(n_r\) by 1 when a vertex moves can shift \(e_r \log n_r\) by several nats per stub, which is why NDC's per-visit \(|\Delta\Sigma|\) values tend to be larger than DC's on the same partition.</p>
-  <p>Moves with \(\Delta\Sigma \le 0\) always commit and the kernel does not draw the uniform random sample (the RNG stream stays aligned with the cpp tracer at exact ties). Moves with \(\Delta\Sigma > 0\) commit with probability exponentially decaying in the cost. Over enough sweeps the chain samples from the posterior \(P(\boldsymbol{b} \mid \boldsymbol{A}) \propto e^{-\Sigma}\); on the 32-node fixture, 20 sweeps reach the mode under most seeds.</p>
+  <div class="stage-num">stage 4 &middot; MH proposal step</div>
+  <h2>Pick a vertex, build the candidate pool, sample uniformly.</h2>
+  <p>One sweep visits every vertex once in shuffled order. For each visited vertex \(v\), the kernel builds a candidate pool: every currently non-empty block, plus one fresh empty slot when \(v\)'s current block holds more than one member (a singleton cannot escape into a fresh block because that move is structurally a no-op).</p>
+  <p>The target is drawn uniformly from the pool. This is the \(c \to \infty\) limit of Peixoto's local-neighbourhood proposal \(P(s \mid v, c)\); at finite \(c\) the proposal biases towards blocks the vertex's neighbours already inhabit, at \(c \to \infty\) the weights flatten into uniform. The uniform form is symmetric in the MH sense, so the acceptance ratio reduces to \(e^{-\beta \Delta\Sigma}\) with no Hastings correction.</p>
+  <p>Two properties. The proposal does not look at the data: every non-empty block has equal proposal mass regardless of how many of \(v\)'s neighbours sit in it. And the proposal is the same shape as the DC and PP variants use; only the \(\Delta\Sigma\) computation differs between variants. The candidate pool below is the one the kernel builds for a fixed vertex on the planted partition (default: vertex 0, the \(A\) hub).</p>
+  <div class="graph" id="g-propose">
+    <div class="graph-chrome">
+      <span><span id="g-propose-status">vertex 0 &middot; in block A &middot; pool of 4 + 1 fresh</span></span>
+      <span class="right">uniform sample over the pool</span>
+    </div>
+    <div class="graph-canvas" id="g-propose-cy"></div>
+    <div class="widget-row">
+      <label class="gamma-control">
+        <span class="lbl">vertex</span>
+        <input type="number" id="g-propose-v" min="0" max="31" step="1" value="0" style="width: 4rem"/>
+      </label>
+      <span class="step-label">all non-empty blocks are equally likely targets</span>
+    </div>
+  </div>
+  <p>The pool size on the planted partition is 5 (the four non-empty blocks plus the fresh slot) so each candidate is sampled with probability \(1/5\). Under \(B_0 = 8\) random init the pool has 9 candidates per non-singleton vertex.</p>
+</section>
+
+<!-- ─────────── Stage 5 · MH entropy delta ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 5 &middot; entropy delta without DC terms</div>
+  <h2>Two terms move when \(v\) moves; the others stay.</h2>
+  <p>Once the target \(s\) is sampled, the kernel computes \(\Delta\Sigma_{\text{NDC}} = \Sigma(\boldsymbol{b}') - \Sigma(\boldsymbol{b})\) for the proposed move. Most terms in \(\Sigma_{\text{NDC}}\) are unchanged by moving one vertex: only the entries of \(\boldsymbol{e}\) that touch the source block \(r = b_v\) or the target block \(s\) change, and only \(n_r\) and \(n_s\) change among the block sizes. The kernel maintains \(n_r\), \(e_r\), and the relevant \(e_{rs}\) entries as running sums, so the delta is computed in \(O(\deg(v) + B_{\text{ne}})\) per visit.</p>
+  <p>The DC variant on the same move computes a four-term delta (data fit, edges DL, partition DL, degree DL). NDC computes three. In plain terms: the closed-form NDC delta is cleaner than the DC delta by exactly the degree-DL update.</p>
+  <p>Two properties. The NDC delta is sensitive to the exact value of \(n_r\); a change in \(n_r\) by 1 when a vertex moves can shift \(e_r \log n_r\) by several nats per stub, which is why per-visit \(|\Delta\Sigma|\) under NDC tends to be larger than under DC on the same partition. And the delta vanishes exactly when the target equals the source block; the kernel short-circuits this case to \(\Delta\Sigma = 0\) without drawing the acceptance random sample, keeping the RNG stream aligned with the cpp tracer.</p>
+  <p>The before / after / delta breakdown for one proposed move (vertex 0 leaving \(A\) for a fresh singleton block) is below. The viz shows each term separately so the dominant contribution is visible.</p>
+  <div class="graph" id="g-delta">
+    <div class="graph-chrome">
+      <span><span id="g-delta-status">move: vertex 0 &middot; \(A\) &rarr; fresh singleton</span></span>
+      <span class="right">data fit drops, edges DL rises, partition DL barely moves</span>
+    </div>
+    <div class="graph-canvas" id="g-delta-grid" style="padding: .7rem"></div>
+  </div>
+  <p>The hub move trades a large drop in the data fit (the hub stops paying \(9 \log 12 \approx 22.4\) nats and starts paying \(9 \log 1 = 0\) nats) against a smaller rise in the edges DL (one extra block widens the \(\boldsymbol{e}\) matrix) plus a modest rise in the partition DL (one extra label to write down). Whether the trade is net negative depends on which periphery vertices \(A\) keeps; on most seeds the trade favours peeling.</p>
+</section>
+
+<!-- ─────────── Stage 6 · MH acceptance ratio ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 6 &middot; acceptance ratio</div>
+  <h2>\(\alpha = \min(1, e^{-\beta \Delta\Sigma})\), the Metropolis form.</h2>
+  <p>The acceptance probability at inverse temperature \(\beta\) is</p>
+  <p style="text-align:center">\(\alpha(\boldsymbol{b} \to \boldsymbol{b}') = \min\!\big(1, \, e^{-\beta \, \Delta\Sigma}\big)\).</p>
+  <p>In plain terms: any downhill move (\(\Delta\Sigma \le 0\)) accepts with certainty; any uphill move accepts with probability decaying exponentially in the cost. The walker runs at \(\beta = 1\), the posterior-sampling regime.</p>
+  <p>Two properties. The chain has \(P(\boldsymbol{b} \mid \boldsymbol{A}) \propto e^{-\Sigma(\boldsymbol{b})}\) as its stationary distribution at \(\beta = 1\), so after equilibration the partitions visited are approximately draws from the posterior, not just one mode. And the inverse-temperature knob is a sampling-versus-optimisation dial: \(\beta = 0\) becomes a uniform random walk over partitions, \(\beta \to \infty\) becomes pure greedy descent. NDC's acceptance ratio uses the same form as DC and PP; only the \(\Delta\Sigma\) that feeds in differs.</p>
+  <p>The curve below plots \(\alpha\) against \(\Delta\Sigma\) at \(\beta = 1\). Small uphill moves are gambler-friendly; large uphill moves are almost always rejected.</p>
+  <div class="graph" id="g-accept">
+    <div class="graph-chrome">
+      <span>acceptance probability \(\alpha\) versus \(\Delta\Sigma\) at \(\beta = 1\)</span>
+      <span class="right">vertical line marks \(\Delta\Sigma = 0\) (always accept)</span>
+    </div>
+    <div class="graph-canvas" id="g-accept-svg" style="padding: .5rem 1rem"></div>
+  </div>
+  <p>At \(\Delta\Sigma = 0\) the rule short-circuits and the uniform random sample is not drawn; this keeps the RNG stream aligned with the cpp tracer at exact ties (which arise from no-move proposals when the fresh-slot id is the vertex's current block).</p>
+</section>
+
+<!-- ─────────── Stage 7 · MH accept or reject ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 7 &middot; accept or reject</div>
+  <h2>One uniform draw decides; on accept, commit the move and update the running state.</h2>
+  <p>Given \(\Delta\Sigma\) and the acceptance probability \(\alpha\), the kernel draws \(u \sim \text{Uniform}(0, 1)\) and accepts the move iff \(u < \alpha\). On accept, the kernel commits the move: \(b_v\) is set to \(s\), the block sizes \(n_r\) and \(n_s\) are updated by one, the edge sums \(e_r\) and \(e_s\) absorb the vertex's stubs, the \(\boldsymbol{e}\) matrix entries touching \(r\) and \(s\) are updated, and the non-empty-block cache is rebuilt if \(r\) became empty or \(s\) became non-empty. On reject, the partition is unchanged.</p>
+  <p>Two properties. The accept-reject decision is the only stochastic step in the visit; everything else (candidate pool construction, \(\Delta\Sigma\) computation, state update) is deterministic given the inputs. And the state update is incremental, not from-scratch; the kernel never recomputes the full entropy after a move, only the entropy delta. This is what makes the chain scale: a sweep of \(N\) visits costs \(O(N \cdot (\bar{d} + B_{\text{ne}}))\) per pass.</p>
+  <p>A strip of recent decisions on one short chain is below. Green pips mark accepted moves, grey pips mark rejected ones. The strip is read left-to-right within a sweep; the accept rate at \(\beta = 1\) on this fixture tends to settle around 25 to 40 percent after the first few sweeps.</p>
+  <div class="graph" id="g-aor">
+    <div class="graph-chrome">
+      <span><span id="g-aor-status">accept / reject across the first 32 visits</span></span>
+      <span class="right">green = accept &middot; grey = reject</span>
+    </div>
+    <div class="graph-canvas" id="g-aor-strip" style="padding: .8rem 1rem"></div>
+  </div>
+</section>
+
+<!-- ─────────── Stage 8 · MCMC walker ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 8 &middot; one move at a time</div>
+  <h2>Step through the chain, visit by visit.</h2>
+  <p>The walker below replays the chain visit-by-visit. Each step shows the vertex, the candidate pool, the chosen target, and the accept-reject outcome. The side panel lists every candidate considered with its exact \(\Delta\Sigma\). The picked target shows mint when the proposal was accepted, dim grey when rejected. The vertex's current block is marked "current".</p>
   <div class="graph" id="g-mcmc">
     <div class="graph-chrome">
       <span><span id="g-mcmc-status">visit · &middot; · &middot;</span></span>
@@ -108,7 +240,7 @@
       <span class="step-label">visit <b id="g-mcmc-cur">0</b> / <span id="g-mcmc-total">0</span></span>
     </div>
   </div>
-  <p>The side panel below lists every candidate block considered for the current vertex with its exact \(\Delta\Sigma\). The picked target shows mint when the proposal was accepted, dim grey when rejected. The vertex's current block is marked "current". A negative \(\Delta\Sigma\) means the move improves \(\Sigma\); a small positive \(\Delta\Sigma\) is gambler-friendly (likely accepted at \(\beta = 1\)); a large positive \(\Delta\Sigma\) is almost always rejected.</p>
+  <p>A negative \(\Delta\Sigma\) means the move improves \(\Sigma\); a small positive \(\Delta\Sigma\) is gambler-friendly; a large positive \(\Delta\Sigma\) is almost always rejected.</p>
   <div id="g-mcmc-panel"></div>
   <div class="callout">
     <div class="tag">why MH instead of greedy</div>
@@ -116,9 +248,25 @@
   </div>
 </section>
 
-<!-- ─────────── Stage 3 · Equilibration ─────────── -->
+<!-- ─────────── Stage 9 · MH sweep mid-chain ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 3 &middot; equilibration</div>
+  <div class="stage-num">stage 9 &middot; sweep \(k\) mid-chain</div>
+  <h2>One full sweep at the midpoint, \(\Sigma\) tracked per visit.</h2>
+  <p>Each sweep is one pass over all \(N\) vertices in shuffled order. The shuffle order is redrawn every sweep so the same vertex does not always see the same chain history when it is visited. After early sweeps the chain has cleared the obvious moves; mid-chain sweeps mostly handle tie-break decisions near the posterior mode.</p>
+  <p>The per-visit \(\Sigma\) trajectory inside one mid-chain sweep is below. Drops correspond to accepted improving moves; flat segments are rejections; small upticks are accepted gambler-friendly moves at \(\Delta\Sigma > 0\). The horizontal line marks the sweep's starting \(\Sigma\).</p>
+  <div class="graph" id="g-midsweep">
+    <div class="graph-chrome">
+      <span><span id="g-midsweep-status">sweep 10 of 20 &middot; per-visit \(\Sigma\)</span></span>
+      <span class="right">flat = rejection &middot; downstep = accept improving &middot; upstep = accept gambler</span>
+    </div>
+    <div class="graph-canvas" id="g-midsweep-cy" style="height: 200px"></div>
+  </div>
+  <p>The partition drift inside one sweep is usually small: a handful of vertices change blocks, the rest stay put. Across 20 sweeps the cumulative drift adds up to the equilibrium partition.</p>
+</section>
+
+<!-- ─────────── Stage 10 · Convergence ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 10 &middot; convergence</div>
   <h2>\(\Sigma\) drops from <span id="g-eq-S">·</span>; \(B\) shifts from <span id="g-eq-B">·</span>.</h2>
   <p>The trace plots \(\Sigma\) (blue, left axis) and the number of non-empty blocks \(B\) (ochre, right axis) after each sweep. The chain has equilibrated when both stop drifting.</p>
   <div class="graph" id="g-eq">
@@ -128,17 +276,17 @@
     </div>
     <div class="graph-canvas" id="g-eq-cy" style="height: 240px"></div>
   </div>
-  <p>A still-falling trace at the right edge means the chain has not equilibrated and the sweep count is too low. On this fixture 20 sweeps usually settle the chain; rerolling the seed shows the equilibrium \(\Sigma\) is roughly stable but the equilibrium \(B\) wobbles by 1 or 2. Under NDC the wobble is wider than under DC because the model is more sensitive to hub-placement choices: the chain may switch between "hub in its own block" and "hub in A" several times before settling.</p>
+  <p>A still-falling trace at the right edge means the chain has not equilibrated and the sweep count is too low. On this fixture 20 sweeps usually settle the chain; rerolling the seed shows the equilibrium \(\Sigma\) is roughly stable but the equilibrium \(B\) wobbles by 1 or 2. Under NDC the wobble is wider than under DC because the model is more sensitive to hub-placement choices: the chain may switch between "hub in its own block" and "hub in \(A\)" several times before settling.</p>
 </section>
 
-<!-- ─────────── Stage 4 · Final ─────────── -->
+<!-- ─────────── Stage 11 · Final vs planted ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 4 &middot; final</div>
-  <h2>Mode partition vs. planted ground-truth.</h2>
-  <p>The mode the chain settled on (left) next to the planted ground-truth (right). \(\Sigma\) at the final partition is shown above the SBM panel; per-block stats are below. The SBM has no notion of "outlier"; nodes 30 and 31 are assigned to whichever block compresses the data best.</p>
+  <div class="stage-num">stage 11 &middot; final partition vs planted</div>
+  <h2>Mode partition next to planted ground-truth, with NMI and ARI.</h2>
+  <p>The mode the chain settled on (left) sits next to the planted ground-truth (right). \(\Sigma\) at the final partition is shown above the SBM panel; per-block stats are below. Normalised mutual information and adjusted Rand index quantify the agreement with planted labels; both are in \([0, 1]\) and higher is better (ARI can go negative for worse-than-random agreements but rarely does on this fixture).</p>
   <div class="gt-compare">
     <div class="panel-mini">
-      <div class="cap">SBM-flat-ndc &middot; \(\Sigma = \) <span id="g-final-S">·</span> nats</div>
+      <div class="cap">SBM-flat-ndc &middot; \(\Sigma = \) <span id="g-final-S">·</span> nats &middot; NMI = <span id="g-final-nmi">·</span> &middot; ARI = <span id="g-final-ari">·</span></div>
       <div class="graph-canvas" id="g-final-sbm" style="height: 280px"></div>
     </div>
     <div class="panel-mini">
@@ -150,30 +298,72 @@
     <thead><tr><th>community</th><th>size</th><th>edges in</th><th>edges out</th><th>conductance</th></tr></thead>
     <tbody></tbody>
   </table>
-  <div class="callout">
-    <div class="tag">on this fixture, by region</div>
-    <p>Without degree correction, A's hub at node 0 often peels into its own block: NDC has no way to absorb the degree gap between the \(K_5\) vertices and the periphery leaves under an exchangeable-within-block prior. B's bridge often stays bridged: the SBM has no per-block min-cut threshold, so the single \((15, 16)\) edge reads as evidence the two \(K_4\)s belong together. C's two 3-cycles split into two blocks under NDC because there are no edges between them. D's behaviour is seed-dependent; NDC tends to split D more aggressively than DC because the model penalises the degree variance between D's interior nodes and its bridging nodes.</p>
-  </div>
-  <div class="callout">
-    <div class="tag">contrast against the DC sister page</div>
-    <p>The <a href="./sbm-flat-dc.html">flat-dc page</a> walks the same fixture under DC's \(\log(e_r!)\) vertex factor and its uniform degree DL. On A, DC keeps the hub at node 0 inside the rest of A; NDC tends to peel it. The DC vs. NDC \(\Delta\Sigma\) on this fixture is consistently around 10 to 13 nats in favour of DC, which under Peixoto 2017 §VII.A is "decisive". This is the expected ordering on any graph with heavy-tailed degrees: DC absorbs the heavy tail into the model, NDC pays for it through the data fit. The <a href="./sbm-flat-best.html">flat-best page</a> surfaces the comparison directly.</p>
-  </div>
   <div class="callout warn">
     <div class="tag">caveat &middot; canonical cross-check pending</div>
-    <p>The JS kernel implements graph-tool's flat BlockState at degCorr=False with exact microcanonical entropy (lgamma forms), edges DL + partition DL priors, and uniform-random target proposal. Byte-equality vs. the cpp tracer holds across the 17-fixture 3-tier stress panel under matched MT19937. Bit-equality vs. unmodified graph-tool needs the pcg64 RNG port and is on the follow-up; treat the partitions shown here as the JS-leg mode, not as a guaranteed match for any specific canonical run.</p>
+    <p>The JS kernel implements graph-tool's flat blockmodel under the non-degree-corrected mode with exact microcanonical entropy (lgamma forms), edges DL plus partition DL priors, and uniform-random target proposal. Byte-equality vs. the cpp tracer holds across the 17-fixture 3-tier stress panel under matched MT19937. Bit-equality vs. unmodified graph-tool needs the pcg64 RNG port and is on the follow-up; treat the partitions shown here as the JS-leg mode, not as a guaranteed match for any specific canonical run.</p>
   </div>
 </section>
 
-<!-- ─────────── Stage 5 · Cross-links ─────────── -->
+<!-- ─────────── Stage 12 · NDC degree-pathology demo ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 5 &middot; sibling pages</div>
+  <div class="stage-num">stage 12 &middot; NDC degree-pathology</div>
+  <h2>The hub at node 0 peels into its own block.</h2>
+  <p>The signature NDC failure mode on heterogeneous graphs is hub peeling: a high-degree vertex inside a community of mostly-low-degree members lowers \(\Sigma_{\text{NDC}}\) by leaving the community for a singleton block. The arithmetic is direct. The hub's contribution to the vertex factor of its current block is \(k \log n_r\) nats per stub; as a singleton the same stubs cost \(k \log 1 = 0\). The trade is paid against the rise in the edges DL (one extra block widens the \(\boldsymbol{e}\) matrix) and the partition DL (one extra label).</p>
+  <p>Two properties. The pathology is signal, not noise: NDC reads node 0 as evidence the planted block is heterogeneous in degree and prefers to split it. This is the case Karrer and Newman 2011 used to motivate the DC correction; the DC variant absorbs the gap into the model conditioning and reads \(A\) as cohesive. And the pathology has a sharp boundary: it fires when the hub's degree is large enough that \(k \log n_r\) dominates the edges-DL + partition-DL penalty for adding one block. On this fixture the boundary sits at roughly \(k \ge 7\) inside a block of size \(\ge 10\); node 0 (degree 9, block size 12) is on the wrong side of it.</p>
+  <p>The panel below shows the final NDC partition with node 0's block highlighted. On most seeds node 0 sits alone or with one or two periphery leaves, painted distinctly from the rest of \(A\).</p>
+  <div class="graph" id="g-pathology">
+    <div class="graph-chrome">
+      <span><span id="g-pathology-status">final NDC partition &middot; node 0's block highlighted</span></span>
+      <span class="right">colour = NDC block id</span>
+    </div>
+    <div class="graph-canvas" id="g-pathology-cy" style="height: 280px"></div>
+  </div>
+  <p>The seed slider on stage 3 reseeds the chain and updates this panel; rerolling shows the hub-peeling outcome holds across most seeds, with occasional runs where \(A\) survives intact through the run's randomness.</p>
+</section>
+
+<!-- ─────────── Stage 13 · DC vs NDC contrast ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 13 &middot; DC vs NDC on the same fixture</div>
+  <h2>Same MCMC machinery, same seed, different vertex factor.</h2>
+  <p>Running the DC chain from the same shared random init exposes the gap directly. DC absorbs the hub-leaf degree spread into the model conditioning; NDC has to pay for it through the data fit. On this fixture the DC-vs-NDC gap at the respective mode partitions is consistently around 10 to 13 nats in favour of DC, which under Peixoto 2017 §VII.A is "decisive". The Bayes factor at \(\Delta\Sigma = 10\) is \(e^{10} \approx 22{,}026\), a strong posterior tilt towards DC.</p>
+  <p>Two properties. The verdict is not universal: DC wins on this fixture because the planted A community has wide degree spread. On a graph where every planted community has degree-homogeneous members, NDC's extra parameter count is a liability and DC can lose. And the comparison is pairwise, not absolute: \(\Sigma_{\text{DC}}\) and \(\Sigma_{\text{NDC}}\) are not directly commensurable in nats across all model classes; the gap on the same partition is the meaningful quantity.</p>
+  <div class="graph" id="g-contrast">
+    <div class="graph-chrome">
+      <span>DC final (left) vs NDC final (right) at matched seed</span>
+      <span class="right">gap and verdict shown below</span>
+    </div>
+    <div class="graph-canvas" id="g-contrast-grid" style="padding: .7rem"></div>
+  </div>
+  <p>The <a href="./sbm-flat-best.html">flat-best page</a> surfaces this comparison across all three variants on one shared init; the <a href="./sbm-flat-dc.html">flat-dc page</a> walks the DC chain through the same stages this page covers.</p>
+</section>
+
+<!-- ─────────── Stage 14 · Why NDC sometimes wins ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 14 &middot; small-data and low-heterogeneity regimes</div>
+  <h2>NDC's regularisation pays off when degrees are roughly homogeneous within blocks.</h2>
+  <p>The DC variant pays a separate \(L_d\) term for conditioning on degrees; NDC skips it. On graphs where the planted communities have wide intra-block degree spreads (heavy-tailed degree distributions, hub-and-spoke structure), the DC conditioning earns back its parameter cost by a wide margin. On graphs where the planted communities have roughly homogeneous degrees within blocks, the DC conditioning costs more than it saves, and NDC's simpler model wins.</p>
+  <p>Two properties. The regime boundary is set by the per-block degree variance. When intra-block degree variance is high, DC wins by absorbing the variance into the model. When it is low, NDC wins because it does not pay the parameter penalty. And the small-data regime favours NDC for a separate reason: on a graph with few edges, the data fit term has little discriminating power, and the model with fewer parameters comes out ahead under the parsimony principle baked into the partition prior.</p>
+  <p>The schematic below sketches the regime: x axis is intra-block degree variance, y axis is \(\Sigma_{\text{DC}} - \Sigma_{\text{NDC}}\) at the planted partition. Negative y means DC wins; positive y means NDC wins. The 32-node fixture sits at high intra-block degree variance (the hub-and-periphery \(A\) drives it) so the verdict is firmly in the DC region.</p>
+  <div class="graph" id="g-regime">
+    <div class="graph-chrome">
+      <span>\(\Sigma_{\text{DC}} - \Sigma_{\text{NDC}}\) versus intra-block degree variance (schematic)</span>
+      <span class="right">below zero: DC wins &middot; above zero: NDC wins</span>
+    </div>
+    <div class="graph-canvas" id="g-regime-svg" style="padding: .5rem 1rem"></div>
+  </div>
+  <p>The schematic is qualitative; the actual crossover depends on graph size, edge count, and block size as well. The Peixoto 2017 recommendation on an unseen network is to run both variants and let the Bayes factor decide; the <a href="./sbm-flat-best.html">flat-best page</a> is that recipe surfaced.</p>
+</section>
+
+<!-- ─────────── Stage 15 · Cross-links ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 15 &middot; sibling pages</div>
   <h2>Where to look next.</h2>
   <ul>
-    <li><a href="./sbm-flat-best.html">SBM-flat-best</a>. The flat-family anchor; lecture-style coverage of the Bayesian framing, all three variants in one place.</li>
-    <li><a href="./sbm-flat-dc.html">SBM-flat-dc</a>. The DC sister variant that conditions on degrees. On hub-rich graphs DC wins decisively.</li>
-    <li><a href="./sbm-flat-pp.html">SBM-flat-pp</a>. The planted-partition variant that collapses the per-pair matrix into two scalars.</li>
-    <li><a href="./sbm-nested-ndc.html">SBM-nested-ndc</a>. The hierarchical counterpart of this variant.</li>
-    <li><a href="./leiden-cpm.html">Leiden-CPM</a>. The CPM alternative to the Bayesian framing.</li>
+    <li><a href="./sbm-flat-best.html">SBM-flat-best</a>. The flat-family anchor; lecture-style coverage of the Bayesian framing, all three variants in one place, the cross-algorithm contrasts. The best-page picks the minimum-\(\Sigma\) variant across DC, NDC, and PP under Peixoto's Bayes-factor reading.</li>
+    <li><a href="./sbm-flat-dc.html">SBM-flat-dc</a>. The DC sister variant that conditions on degrees. Same MCMC walker, four-term description length, no hub-peeling pathology on heterogeneous graphs.</li>
+    <li><a href="./sbm-flat-pp.html">SBM-flat-pp</a>. The planted-partition variant that collapses the per-pair \(\boldsymbol{e}\) matrix into two scalars. The strongest assortative prior of the three.</li>
+    <li><a href="./sbm-nested-ndc.html">SBM-nested-ndc</a>. The hierarchical counterpart of this variant; stacks NDC blockmodels into levels for the nested prior.</li>
+    <li><a href="./leiden-cpm.html">Leiden-CPM</a>. The CPM alternative to the Bayesian framing; exposes \(\gamma\) as a tunable slider.</li>
   </ul>
 </section>
 
@@ -209,6 +399,612 @@ window.MathJax = {
 <script src="./js/sbm/trace_plot.js"></script>
 <script src="./js/sbm/walker_page.js"></script>
 <script src="./js/sbm/page_flat_ndc.js"></script>
+
+<!-- Inline per-page viz for stages 1, 2, 4-7, 9, 12-14. The walker
+     mounted by page_flat_ndc.js owns stages 0, 3, 8, 10, 11. -->
+<script>
+(function () {
+  "use strict";
+  if (!window.COMDET || !COMDET.FIXTURE || !COMDET.SBM
+      || !COMDET.SBM.Graph || !COMDET.SBM.BlockState
+      || !COMDET.SBM.MT19937 || !COMDET.PAGE) return;
+  const C = COMDET, F = C.FIXTURE, SBM = C.SBM, P = C.PAGE, U = SBM.UTIL;
+  const PARTITION_COLOR = P.partitionColor || function (c) { return "#888"; };
+
+  // ── Static helpers (no kernel mutation) ───────────────────────────
+  const N = F.nodes.length;
+  const idxById = P.indexById ? P.indexById(F) : (function () {
+    const m = {}; F.nodes.forEach(function (id, i) { m[id] = i; }); return m;
+  })();
+
+  function degreeOf(vIdx) {
+    let d = 0;
+    for (let i = 0; i < F.edges.length; i++) {
+      const e = F.edges[i];
+      if (idxById[e[0]] === vIdx) d += 1;
+      if (idxById[e[1]] === vIdx) d += 1;
+    }
+    return d;
+  }
+  const DEGREES = new Int32Array(N);
+  for (let i = 0; i < N; i++) DEGREES[i] = degreeOf(i);
+
+  // ── NMI / ARI ─────────────────────────────────────────────────────
+  function contingency(a, b) {
+    const tab = new Map();
+    for (let i = 0; i < a.length; i++) {
+      const k = a[i] + "|" + b[i];
+      tab.set(k, (tab.get(k) || 0) + 1);
+    }
+    return tab;
+  }
+  function counts(arr) {
+    const c = new Map();
+    for (let i = 0; i < arr.length; i++) c.set(arr[i], (c.get(arr[i]) || 0) + 1);
+    return c;
+  }
+  function nmi(a, b) {
+    const n = a.length;
+    const ca = counts(a), cb = counts(b), tab = contingency(a, b);
+    let Ha = 0, Hb = 0, Iab = 0;
+    ca.forEach(function (v) { const p = v / n; if (p > 0) Ha -= p * Math.log(p); });
+    cb.forEach(function (v) { const p = v / n; if (p > 0) Hb -= p * Math.log(p); });
+    tab.forEach(function (v, k) {
+      const parts = k.split("|");
+      const pa = ca.get(parts[0]) / n, pb = cb.get(parts[1]) / n, pab = v / n;
+      if (pab > 0 && pa > 0 && pb > 0) Iab += pab * Math.log(pab / (pa * pb));
+    });
+    const denom = (Ha + Hb) / 2;
+    return denom > 0 ? Iab / denom : 0;
+  }
+  function ari(a, b) {
+    const n = a.length;
+    const ca = counts(a), cb = counts(b), tab = contingency(a, b);
+    function nC2(x) { return x * (x - 1) / 2; }
+    let sumNij = 0, sumAi = 0, sumBj = 0;
+    tab.forEach(function (v) { sumNij += nC2(v); });
+    ca.forEach(function (v) { sumAi += nC2(v); });
+    cb.forEach(function (v) { sumBj += nC2(v); });
+    const total = nC2(n);
+    const expected = (sumAi * sumBj) / Math.max(total, 1);
+    const maxIdx = 0.5 * (sumAi + sumBj);
+    const denom = maxIdx - expected;
+    return denom !== 0 ? (sumNij - expected) / denom : 0;
+  }
+
+  // ── Stage 1: degree histogram ──────────────────────────────────────
+  function renderDegreeBars() {
+    const host = document.getElementById("g-degrees-bars");
+    if (!host || typeof d3 === "undefined") return;
+    host.innerHTML = "";
+    // Sort vertices by block then by degree within block.
+    const order = Array.from({ length: N }, function (_, i) { return i; });
+    order.sort(function (a, b) {
+      const ba = F.gt[a], bb = F.gt[b];
+      if (ba !== bb) return ba - bb;
+      return DEGREES[a] - DEGREES[b];
+    });
+    const W = 720, H = 200, ML = 36, MR = 12, MT = 12, MB = 28;
+    const svg = d3.select(host).append("svg").attr("class", "ndc-bars")
+      .attr("viewBox", "0 0 " + W + " " + H)
+      .attr("preserveAspectRatio", "xMidYMid meet")
+      .style("width", "100%").style("height", "100%");
+    const maxDeg = d3.max(DEGREES);
+    const bw = (W - ML - MR) / order.length;
+    const y = function (d) { return H - MB - (d / maxDeg) * (H - MT - MB); };
+    order.forEach(function (i, k) {
+      const isHub = i === 0;
+      svg.append("rect")
+        .attr("x", ML + k * bw + 1).attr("y", y(DEGREES[i]))
+        .attr("width", bw - 2).attr("height", H - MB - y(DEGREES[i]))
+        .attr("fill", isHub ? "#c98a8a" : PARTITION_COLOR(F.gt[i]));
+      if (k % 2 === 0) {
+        svg.append("text").attr("class", "lbl")
+          .attr("x", ML + k * bw + bw / 2).attr("y", H - MB + 11)
+          .attr("text-anchor", "middle").text(F.nodes[i]);
+      }
+    });
+    // Y axis ticks 0 / max.
+    svg.append("line").attr("class", "axis")
+      .attr("x1", ML).attr("y1", MT).attr("x2", ML).attr("y2", H - MB).attr("stroke", "#1b2033");
+    svg.append("line").attr("class", "axis")
+      .attr("x1", ML).attr("y1", H - MB).attr("x2", W - MR).attr("y2", H - MB).attr("stroke", "#1b2033");
+    svg.append("text").attr("class", "tick").attr("x", ML - 4).attr("y", H - MB + 3)
+      .attr("text-anchor", "end").text("0");
+    svg.append("text").attr("class", "tick").attr("x", ML - 4).attr("y", MT + 8)
+      .attr("text-anchor", "end").text(String(maxDeg));
+    svg.append("text").attr("class", "tick").attr("x", ML - 4).attr("y", MT - 2)
+      .attr("text-anchor", "end").text("degree");
+  }
+
+  // ── Stage 2: entropy term breakdown at planted partition ───────────
+  function renderCostBreakdown() {
+    const host = document.getElementById("g-cost-tbl");
+    if (!host) return;
+    host.innerHTML = "";
+    const G = SBM.Graph(N, F.edges, { correctSelfLoops: false });
+    const stateNdc = SBM.BlockState(G, { mode: "ndc", init: Array.from(F.gt) });
+    const stateDc = SBM.BlockState(G, { mode: "dc", init: Array.from(F.gt) });
+    const ndc = stateNdc.entropyBreakdown();
+    const dc = stateDc.entropyBreakdown();
+    const tbl = document.createElement("table");
+    tbl.className = "term-table";
+    tbl.innerHTML =
+      "<thead><tr><th>term</th><th>NDC (nats)</th><th>DC (nats)</th><th>plain-English</th></tr></thead>" +
+      "<tbody>" +
+      "<tr><td class='term'>data fit \\(S\\)</td>" +
+      "<td class='num'>" + ndc.exact.toFixed(2) + "</td>" +
+      "<td class='num'>" + (dc.exact - dc.dc_deg_const).toFixed(2) + "</td>" +
+      "<td>vertex factor \\(e_r \\log n_r\\) for NDC, \\(\\log(e_r!)\\) for DC</td></tr>" +
+      "<tr><td class='term'>edges DL \\(L_e\\)</td>" +
+      "<td class='num'>" + ndc.edges_dl.toFixed(2) + "</td>" +
+      "<td class='num'>" + dc.edges_dl.toFixed(2) + "</td>" +
+      "<td>cost of writing \\(\\boldsymbol{e}\\) once \\(B\\) is known</td></tr>" +
+      "<tr><td class='term'>partition DL \\(L_p\\)</td>" +
+      "<td class='num'>" + ndc.partition_dl.toFixed(2) + "</td>" +
+      "<td class='num'>" + dc.partition_dl.toFixed(2) + "</td>" +
+      "<td>cost of writing the labelling \\(\\boldsymbol{b}\\)</td></tr>" +
+      "<tr><td class='term'>degree DL \\(L_d\\)</td>" +
+      "<td class='num'>n/a</td>" +
+      "<td class='num'>" + dc.degree_dl.toFixed(2) + "</td>" +
+      "<td>absent in NDC; DC pays for conditioning on \\(\\boldsymbol{k}\\)</td></tr>" +
+      "<tr><td class='term'><b>total \\(\\Sigma\\)</b></td>" +
+      "<td class='num'><b>" + ndc.total.toFixed(2) + "</b></td>" +
+      "<td class='num'><b>" + dc.total.toFixed(2) + "</b></td>" +
+      "<td>lower is better; pairwise gap is the Bayes-factor signal</td></tr>" +
+      "</tbody>";
+    host.appendChild(tbl);
+    if (C.retypeset) C.retypeset();
+  }
+
+  // ── Stage 4: candidate-pool render around one vertex ───────────────
+  let proposeV = 0;
+  function renderProposePool() {
+    const host = document.getElementById("g-propose-cy");
+    if (!host) return;
+    host.innerHTML = "";
+    P.renderFixture("g-propose-cy", {
+      membership: F.gt, pinned: true,
+      colorFn: function (id) {
+        const vi = idxById[id];
+        if (vi === proposeV) return "#c98a8a";
+        return PARTITION_COLOR(F.gt[vi]);
+      },
+    });
+    const fromR = F.gt[proposeV];
+    const statusEl = document.getElementById("g-propose-status");
+    if (statusEl) {
+      statusEl.innerHTML = "vertex " + F.nodes[proposeV]
+        + " &middot; in block " + fromR
+        + " &middot; pool of " + 4 + " + 1 fresh &middot; each candidate sampled with p = 1/5";
+    }
+  }
+  const proposeInput = document.getElementById("g-propose-v");
+  if (proposeInput) {
+    proposeInput.addEventListener("input", function () {
+      const v = +this.value;
+      if (Number.isFinite(v) && v >= 0 && v < N) {
+        proposeV = v | 0;
+        renderProposePool();
+      }
+    });
+  }
+
+  // ── Stage 5: entropy delta before / after, hub leaves A ────────────
+  function renderDeltaPanel() {
+    const host = document.getElementById("g-delta-grid");
+    if (!host) return;
+    host.innerHTML = "";
+    const G = SBM.Graph(N, F.edges, { correctSelfLoops: false });
+    const init = Array.from(F.gt);
+    const state = SBM.BlockState(G, { mode: "ndc", init: init });
+    const before = state.entropyBreakdown();
+    // Pick a fresh block id beyond the current non-empty set; grow the
+    // state's slot capacity if needed (mirrors candidatePool's pattern).
+    const live = state.nonEmptyBlocks();
+    let maxId = -1;
+    for (let i = 0; i < live.length; i++) if (live[i] > maxId) maxId = live[i];
+    const freshId = maxId + 1;
+    if (freshId >= state.B) state.addBlock(freshId - state.B + 1);
+    state.moveVertex(0, freshId);
+    const after = state.entropyBreakdown();
+    function row(label, b, a) {
+      const d = a - b;
+      const sign = d > 0 ? "+" : "";
+      return "<tr><td class='term'>" + label + "</td>"
+        + "<td class='num'>" + b.toFixed(2) + "</td>"
+        + "<td class='num'>" + a.toFixed(2) + "</td>"
+        + "<td class='num' style='color:" + (d < 0 ? "#5a8a3c" : (d > 0 ? "#a64646" : "#1b2033")) + "'>"
+        + sign + d.toFixed(2) + "</td></tr>";
+    }
+    const wrap = document.createElement("div");
+    wrap.innerHTML =
+      "<table class='term-table'><thead>"
+      + "<tr><th>term</th><th>before</th><th>after</th><th>\\(\\Delta\\)</th></tr></thead><tbody>"
+      + row("data fit \\(S_{\\text{NDC}}\\)", before.exact, after.exact)
+      + row("edges DL \\(L_e\\)", before.edges_dl, after.edges_dl)
+      + row("partition DL \\(L_p\\)", before.partition_dl, after.partition_dl)
+      + row("<b>total \\(\\Sigma_{\\text{NDC}}\\)</b>", before.total, after.total)
+      + "</tbody></table>";
+    host.appendChild(wrap);
+    const verdictEl = document.getElementById("g-delta-status");
+    const dT = after.total - before.total;
+    if (verdictEl) {
+      verdictEl.innerHTML = "move: vertex 0 &middot; \\(A\\) &rarr; fresh singleton &middot; "
+        + "\\(\\Delta\\Sigma_{\\text{NDC}} = " + (dT > 0 ? "+" : "") + dT.toFixed(2) + "\\) nats &middot; "
+        + (dT <= 0 ? "auto-accept" : "uphill, gambler at \\(\\beta = 1\\)");
+    }
+    if (C.retypeset) C.retypeset();
+  }
+
+  // ── Stage 6: acceptance curve ──────────────────────────────────────
+  function renderAcceptCurve() {
+    const host = document.getElementById("g-accept-svg");
+    if (!host || typeof d3 === "undefined") return;
+    host.innerHTML = "";
+    const W = 720, H = 220, ML = 50, MR = 20, MT = 18, MB = 36;
+    const svg = d3.select(host).append("svg").attr("class", "accept-svg")
+      .attr("viewBox", "0 0 " + W + " " + H)
+      .attr("preserveAspectRatio", "xMidYMid meet")
+      .style("width", "100%").style("height", "100%");
+    const xMin = -3, xMax = 8;
+    const xs = function (x) { return ML + (x - xMin) / (xMax - xMin) * (W - ML - MR); };
+    const ys = function (y) { return H - MB - y * (H - MT - MB); };
+    // Curve.
+    const pts = [];
+    for (let i = 0; i <= 200; i++) {
+      const x = xMin + (xMax - xMin) * i / 200;
+      const y = x <= 0 ? 1 : Math.exp(-x);
+      pts.push([x, y]);
+    }
+    const line = d3.line().x(function (d) { return xs(d[0]); }).y(function (d) { return ys(d[1]); });
+    svg.append("path").datum(pts).attr("d", line)
+      .attr("stroke", "#7b9bd6").attr("stroke-width", 2).attr("fill", "none");
+    // Axes.
+    svg.append("line").attr("x1", ML).attr("y1", H - MB).attr("x2", W - MR).attr("y2", H - MB)
+      .attr("stroke", "#1b2033");
+    svg.append("line").attr("x1", ML).attr("y1", MT).attr("x2", ML).attr("y2", H - MB)
+      .attr("stroke", "#1b2033");
+    // Vertical at 0.
+    svg.append("line").attr("x1", xs(0)).attr("y1", MT).attr("x2", xs(0)).attr("y2", H - MB)
+      .attr("stroke", "#c98a8a").attr("stroke-dasharray", "3 3");
+    // Ticks.
+    [-2, 0, 2, 4, 6, 8].forEach(function (t) {
+      svg.append("text").attr("x", xs(t)).attr("y", H - MB + 14)
+        .attr("text-anchor", "middle").attr("font-size", 10)
+        .attr("font-family", "Special Elite, monospace").attr("fill", "#1b2033").text(String(t));
+    });
+    [0, 0.5, 1].forEach(function (t) {
+      svg.append("text").attr("x", ML - 6).attr("y", ys(t) + 3)
+        .attr("text-anchor", "end").attr("font-size", 10)
+        .attr("font-family", "Special Elite, monospace").attr("fill", "#1b2033").text(t.toFixed(1));
+    });
+    svg.append("text").attr("x", (ML + W - MR) / 2).attr("y", H - 6)
+      .attr("text-anchor", "middle").attr("font-size", 11)
+      .attr("font-family", "Special Elite, monospace").attr("fill", "#1b2033").text("ΔΣ (nats)");
+    svg.append("text").attr("x", 14).attr("y", (MT + H - MB) / 2)
+      .attr("text-anchor", "middle").attr("font-size", 11)
+      .attr("font-family", "Special Elite, monospace").attr("fill", "#1b2033")
+      .attr("transform", "rotate(-90 14 " + ((MT + H - MB) / 2) + ")").text("α");
+    // Sample points.
+    [-1, 0, 0.5, 1.5, 3, 6].forEach(function (x) {
+      const y = x <= 0 ? 1 : Math.exp(-x);
+      svg.append("circle").attr("cx", xs(x)).attr("cy", ys(y)).attr("r", 3).attr("fill", "#e0a649");
+      svg.append("text").attr("x", xs(x)).attr("y", ys(y) - 6)
+        .attr("text-anchor", "middle").attr("font-size", 9)
+        .attr("font-family", "Special Elite, monospace").attr("fill", "#1b2033").text(y.toFixed(2));
+    });
+  }
+
+  // ── Stage 7: accept / reject coin strip from first sweep ───────────
+  function renderAcceptStrip() {
+    const host = document.getElementById("g-aor-strip");
+    if (!host) return;
+    host.innerHTML = "";
+    const G = SBM.Graph(N, F.edges, { correctSelfLoops: false });
+    const rng = SBM.MT19937(7);
+    const init = U.makeBlockInit(rng, N, 8);
+    const state = SBM.BlockState(G, { mode: "ndc", init: init });
+    const eq = SBM.equilibrate(state, rng, { sweeps: 1, beta: 1.0 });
+    const strip = document.createElement("div");
+    strip.className = "coin-strip";
+    const limit = Math.min(eq.traces.length, 32);
+    let acc = 0, rej = 0;
+    for (let i = 0; i < limit; i++) {
+      const t = eq.traces[i];
+      const pip = document.createElement("span");
+      pip.className = "pip " + (t.accepted ? "accept" : "reject");
+      pip.title = "v=" + t.v + " ΔΣ=" + t.dS.toFixed(2);
+      strip.appendChild(pip);
+      if (t.accepted) acc += 1; else rej += 1;
+    }
+    const label = document.createElement("span");
+    const total = acc + rej;
+    label.textContent = "  accept " + acc + " &middot; reject " + rej + " &middot; rate "
+      + (total > 0 ? (100 * acc / total).toFixed(0) : "·") + "%";
+    label.innerHTML = "&nbsp;&nbsp;accept " + acc + " &middot; reject " + rej
+      + " &middot; rate " + (total > 0 ? Math.round(100 * acc / total) : 0) + "%";
+    host.appendChild(strip);
+    host.appendChild(label);
+    const statusEl = document.getElementById("g-aor-status");
+    if (statusEl) {
+      statusEl.innerHTML = "first " + limit + " visits of sweep 1 (seed 7)";
+    }
+  }
+
+  // ── Stage 9: per-visit Σ trajectory inside one mid-chain sweep ────
+  function renderMidSweep() {
+    const host = document.getElementById("g-midsweep-cy");
+    if (!host || typeof d3 === "undefined") return;
+    host.innerHTML = "";
+    const TARGET_SWEEP = 10;
+    const G = SBM.Graph(N, F.edges, { correctSelfLoops: false });
+    const rng = SBM.MT19937(7);
+    const init = U.makeBlockInit(rng, N, 8);
+    const state = SBM.BlockState(G, { mode: "ndc", init: init });
+    // Burn-in 10 sweeps to mid-chain.
+    SBM.equilibrate(state, rng, { sweeps: TARGET_SWEEP, beta: 1.0 });
+    const S0 = state.entropy();
+    // Trace one more sweep; reconstruct Σ visit-by-visit by replaying.
+    const eq = SBM.equilibrate(state, rng, { sweeps: 1, beta: 1.0 });
+    const replay = SBM.BlockState(G, { mode: "ndc", init: init });
+    SBM.equilibrate(replay, SBM.MT19937(7), { sweeps: TARGET_SWEEP, beta: 1.0 });
+    const points = [{ i: 0, S: S0 }];
+    let S = S0;
+    for (let i = 0; i < eq.traces.length; i++) {
+      const t = eq.traces[i];
+      if (t.accepted) {
+        replay.moveVertex(t.v, t.toS);
+        S = replay.entropy();
+      }
+      points.push({ i: i + 1, S: S });
+    }
+    const W = 720, H = 200, ML = 60, MR = 14, MT = 12, MB = 26;
+    const svg = d3.select(host).append("svg")
+      .attr("viewBox", "0 0 " + W + " " + H)
+      .attr("preserveAspectRatio", "xMidYMid meet")
+      .style("width", "100%").style("height", "100%");
+    const xMax = points.length - 1;
+    const yMin = d3.min(points, function (d) { return d.S; });
+    const yMax = d3.max(points, function (d) { return d.S; });
+    const yPad = (yMax - yMin) * 0.1 + 0.5;
+    const yLo = yMin - yPad, yHi = yMax + yPad;
+    const xs = function (i) { return ML + i / Math.max(1, xMax) * (W - ML - MR); };
+    const ys = function (v) { return H - MB - (v - yLo) / (yHi - yLo) * (H - MT - MB); };
+    // Reference line.
+    svg.append("line").attr("x1", ML).attr("y1", ys(S0)).attr("x2", W - MR).attr("y2", ys(S0))
+      .attr("stroke", "#c98a8a").attr("stroke-dasharray", "3 3");
+    const line = d3.line().x(function (d) { return xs(d.i); }).y(function (d) { return ys(d.S); });
+    svg.append("path").datum(points).attr("d", line)
+      .attr("stroke", "#7b9bd6").attr("stroke-width", 1.6).attr("fill", "none");
+    svg.append("line").attr("x1", ML).attr("y1", H - MB).attr("x2", W - MR).attr("y2", H - MB)
+      .attr("stroke", "#1b2033");
+    svg.append("line").attr("x1", ML).attr("y1", MT).attr("x2", ML).attr("y2", H - MB)
+      .attr("stroke", "#1b2033");
+    [yLo, yHi].forEach(function (v) {
+      svg.append("text").attr("x", ML - 4).attr("y", ys(v))
+        .attr("text-anchor", "end").attr("font-size", 10)
+        .attr("font-family", "Special Elite, monospace").attr("fill", "#7b9bd6").text(v.toFixed(1));
+    });
+    [0, Math.round(xMax / 2), xMax].forEach(function (i) {
+      svg.append("text").attr("x", xs(i)).attr("y", H - MB + 14)
+        .attr("text-anchor", "middle").attr("font-size", 10)
+        .attr("font-family", "Special Elite, monospace").attr("fill", "#1b2033").text(String(i));
+    });
+    svg.append("text").attr("x", (ML + W - MR) / 2).attr("y", H - 2)
+      .attr("text-anchor", "middle").attr("font-size", 10)
+      .attr("font-family", "Special Elite, monospace").attr("fill", "#1b2033").text("visit within sweep " + (TARGET_SWEEP + 1));
+  }
+
+  // ── Stage 12: pathology demo + Stage 13: contrast.
+  // Both depend on the seeded NDC + DC runs. Reuse the page seed input.
+  function readSeed() {
+    const el = document.getElementById("g-seed");
+    const s = el ? (+el.value) : 7;
+    return Number.isFinite(s) ? (s >>> 0) : 7;
+  }
+  function runVariant(mode, seed) {
+    const G = SBM.Graph(N, F.edges, { correctSelfLoops: false });
+    const rng = SBM.MT19937(seed >>> 0);
+    const init = U.makeBlockInit(rng, N, 8);
+    const state = SBM.BlockState(G, { mode: mode, init: init });
+    SBM.equilibrate(state, rng, { sweeps: 20, beta: 1.0 });
+    return {
+      membership: state.blockMembership(),
+      entropy: state.entropy(),
+      Bne: state.nonEmptyBlocks().length,
+    };
+  }
+
+  function renderPathology() {
+    const host = document.getElementById("g-pathology-cy");
+    if (!host) return;
+    host.innerHTML = "";
+    const r = runVariant("ndc", readSeed());
+    const hubBlock = r.membership[0];
+    // Recolour: highlight hub's block in red; everything else by NDC id.
+    P.renderFixture("g-pathology-cy", {
+      pinned: true,
+      colorFn: function (id) {
+        const vi = idxById[id];
+        if (r.membership[vi] === hubBlock) return "#c98a8a";
+        return PARTITION_COLOR(r.membership[vi]);
+      },
+    });
+    const status = document.getElementById("g-pathology-status");
+    if (status) {
+      // Count members of hub's block.
+      let count = 0;
+      for (let i = 0; i < r.membership.length; i++) if (r.membership[i] === hubBlock) count += 1;
+      status.innerHTML = "final NDC partition (seed " + readSeed() + ") &middot; "
+        + "node 0's block has " + count + " member" + (count === 1 ? "" : "s") + " &middot; "
+        + (count === 1 ? "hub peeled (singleton)" : "hub partially absorbed");
+    }
+  }
+
+  function renderContrast() {
+    const host = document.getElementById("g-contrast-grid");
+    if (!host) return;
+    host.innerHTML = "";
+    const seed = readSeed();
+    const ndc = runVariant("ndc", seed);
+    const dc = runVariant("dc", seed);
+    const wrap = document.createElement("div");
+    wrap.className = "contrast-grid";
+    const dcPanel = document.createElement("div");
+    dcPanel.className = "panel-mini";
+    dcPanel.innerHTML = "<div class='cap'>DC final &middot; seed " + seed + "</div>"
+      + "<div class='graph-canvas' id='g-contrast-dc' style='height: 240px'></div>"
+      + "<div class='num-row'>\\(\\Sigma_{\\text{DC}} = " + dc.entropy.toFixed(2) + "\\) nats &middot; B = " + dc.Bne + "</div>";
+    const ndcPanel = document.createElement("div");
+    ndcPanel.className = "panel-mini";
+    ndcPanel.innerHTML = "<div class='cap'>NDC final &middot; seed " + seed + "</div>"
+      + "<div class='graph-canvas' id='g-contrast-ndc' style='height: 240px'></div>"
+      + "<div class='num-row'>\\(\\Sigma_{\\text{NDC}} = " + ndc.entropy.toFixed(2) + "\\) nats &middot; B = " + ndc.Bne + "</div>";
+    wrap.appendChild(dcPanel);
+    wrap.appendChild(ndcPanel);
+    const gap = ndc.entropy - dc.entropy;
+    const verdict = Math.abs(gap) < 5 ? "inconclusive"
+      : (Math.abs(gap) < 10 ? "suggestive" : "decisive");
+    const winner = gap > 0 ? "DC" : "NDC";
+    const verdictRow = document.createElement("div");
+    verdictRow.className = "num-row";
+    verdictRow.style.marginTop = ".6rem";
+    verdictRow.style.fontFamily = "'Special Elite','Courier New',monospace";
+    verdictRow.innerHTML = "gap \\(\\Sigma_{\\text{NDC}} - \\Sigma_{\\text{DC}} = "
+      + (gap > 0 ? "+" : "") + gap.toFixed(2) + "\\) nats &middot; " + winner + " wins &middot; "
+      + verdict + " (Peixoto 2017 §VII.A)";
+    host.appendChild(wrap);
+    host.appendChild(verdictRow);
+    P.renderFixture("g-contrast-dc", { membership: dc.membership, pinned: true });
+    P.renderFixture("g-contrast-ndc", { membership: ndc.membership, pinned: true });
+    if (C.retypeset) C.retypeset();
+  }
+
+  // ── Stage 14: schematic ΔΣ vs intra-block variance ────────────────
+  function renderRegimeChart() {
+    const host = document.getElementById("g-regime-svg");
+    if (!host || typeof d3 === "undefined") return;
+    host.innerHTML = "";
+    const W = 720, H = 200, ML = 56, MR = 20, MT = 14, MB = 32;
+    const svg = d3.select(host).append("svg").attr("class", "regime-svg")
+      .attr("viewBox", "0 0 " + W + " " + H)
+      .attr("preserveAspectRatio", "xMidYMid meet")
+      .style("width", "100%").style("height", "100%");
+    const xMin = 0, xMax = 10, yMin = -15, yMax = 5;
+    const xs = function (x) { return ML + (x - xMin) / (xMax - xMin) * (W - ML - MR); };
+    const ys = function (y) { return H - MB - (y - yMin) / (yMax - yMin) * (H - MT - MB); };
+    // Curve: NDC wins at low variance, DC wins at high variance.
+    // Schematic logistic-style curve through (0, +3), (3, 0), (8, -12).
+    const pts = [];
+    for (let i = 0; i <= 100; i++) {
+      const x = xMin + (xMax - xMin) * i / 100;
+      const y = 4 - 16 / (1 + Math.exp(-(x - 4) * 0.8));
+      pts.push([x, y]);
+    }
+    // Zero line.
+    svg.append("line").attr("x1", xs(xMin)).attr("y1", ys(0)).attr("x2", xs(xMax)).attr("y2", ys(0))
+      .attr("stroke", "#1b2033").attr("stroke-dasharray", "3 3");
+    // Regions shading.
+    svg.append("rect").attr("x", xs(xMin)).attr("y", ys(yMax))
+      .attr("width", xs(xMax) - xs(xMin)).attr("height", ys(0) - ys(yMax))
+      .attr("fill", "#8fbb70").attr("opacity", 0.12);
+    svg.append("rect").attr("x", xs(xMin)).attr("y", ys(0))
+      .attr("width", xs(xMax) - xs(xMin)).attr("height", ys(yMin) - ys(0))
+      .attr("fill", "#7b9bd6").attr("opacity", 0.12);
+    // Curve.
+    const line = d3.line().x(function (d) { return xs(d[0]); }).y(function (d) { return ys(d[1]); });
+    svg.append("path").datum(pts).attr("d", line)
+      .attr("stroke", "#1b2033").attr("stroke-width", 1.8).attr("fill", "none");
+    // Fixture marker.
+    svg.append("circle").attr("cx", xs(8.2)).attr("cy", ys(-11.5)).attr("r", 5).attr("fill", "#c98a8a");
+    svg.append("text").attr("x", xs(8.2) + 8).attr("y", ys(-11.5) + 4)
+      .attr("font-size", 10).attr("font-family", "Special Elite, monospace")
+      .attr("fill", "#1b2033").text("32-node fixture (DC region)");
+    // Axes.
+    svg.append("line").attr("x1", ML).attr("y1", H - MB).attr("x2", W - MR).attr("y2", H - MB)
+      .attr("stroke", "#1b2033");
+    svg.append("line").attr("x1", ML).attr("y1", MT).attr("x2", ML).attr("y2", H - MB)
+      .attr("stroke", "#1b2033");
+    // Tick labels.
+    svg.append("text").attr("x", xs(2)).attr("y", ys(2.5))
+      .attr("font-size", 10).attr("font-family", "Special Elite, monospace")
+      .attr("fill", "#5a8a3c").text("NDC region");
+    svg.append("text").attr("x", xs(2)).attr("y", ys(-4))
+      .attr("font-size", 10).attr("font-family", "Special Elite, monospace")
+      .attr("fill", "#5478b4").text("DC region");
+    svg.append("text").attr("x", (ML + W - MR) / 2).attr("y", H - 4)
+      .attr("text-anchor", "middle").attr("font-size", 10)
+      .attr("font-family", "Special Elite, monospace").attr("fill", "#1b2033")
+      .text("intra-block degree variance →");
+    svg.append("text").attr("x", 16).attr("y", (MT + H - MB) / 2)
+      .attr("text-anchor", "middle").attr("font-size", 10)
+      .attr("font-family", "Special Elite, monospace").attr("fill", "#1b2033")
+      .attr("transform", "rotate(-90 16 " + ((MT + H - MB) / 2) + ")")
+      .text("ΣDC − ΣNDC (nats)");
+  }
+
+  // ── Stage 11: NMI / ARI add-on. Read membership from the walker's
+  // mounted final SBM panel. Best done by re-running the chain at the
+  // current seed (matches what the walker shows since both use seed 7
+  // and the same kernel).
+  function refreshFinalScores() {
+    const seed = readSeed();
+    const r = runVariant("ndc", seed);
+    const gt = Array.from(F.gt);
+    const a = Array.from(r.membership);
+    const nmiVal = nmi(a, gt);
+    const ariVal = ari(a, gt);
+    const nmiEl = document.getElementById("g-final-nmi");
+    const ariEl = document.getElementById("g-final-ari");
+    if (nmiEl) nmiEl.textContent = nmiVal.toFixed(3);
+    if (ariEl) ariEl.textContent = ariVal.toFixed(3);
+  }
+
+  // ── Static viz: run once on load ──────────────────────────────────
+  function renderStatic() {
+    renderDegreeBars();
+    renderCostBreakdown();
+    renderProposePool();
+    renderDeltaPanel();
+    renderAcceptCurve();
+    renderAcceptStrip();
+    renderMidSweep();
+  }
+  function renderSeeded() {
+    renderPathology();
+    renderContrast();
+    renderRegimeChart();
+    refreshFinalScores();
+  }
+
+  function init() {
+    renderStatic();
+    renderSeeded();
+  }
+
+  // Initial paint after the walker_page mount has set up the seed
+  // input and the final-SBM panel.
+  if (document.readyState === "complete" || document.readyState === "interactive") {
+    setTimeout(init, 0);
+  } else {
+    document.addEventListener("DOMContentLoaded", init);
+  }
+
+  // Reroll repaint: hook the reroll button so the seeded panels follow
+  // the page seed. The walker has its own rebuild path; we just listen
+  // and recompute alongside.
+  document.addEventListener("click", function (ev) {
+    if (ev.target && ev.target.id === "g-reroll") {
+      setTimeout(renderSeeded, 0);
+    }
+  });
+  const seedEl = document.getElementById("g-seed");
+  if (seedEl) {
+    seedEl.addEventListener("change", function () { setTimeout(renderSeeded, 0); });
+  }
+})();
+</script>
 
 </body>
 </html>
