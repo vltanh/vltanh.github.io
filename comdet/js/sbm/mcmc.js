@@ -143,7 +143,16 @@
     if (state.blockSize(state.blockOf(v)) > 1) {
       let maxId = -1;
       for (let i = 0; i < cands.length; i++) if (cands[i] > maxId) maxId = cands[i];
-      cands.push(maxId + 1);
+      const freshId = maxId + 1;
+      // Ensure the fresh-block id is a live slot. Mirrors graph-tool
+      // `get_empty_block` (graph_blockmodel.hh:1513-1528) which calls
+      // `add_block()` when `_empty_groups.empty()`, and the cpp tracer
+      // (tools/viz_check/sbm/instrumented/flat_traced.cpp `candidatePool`
+      // post-2026-05-12 revert+redo).
+      if (freshId >= state.B) {
+        state.addBlock(freshId - state.B + 1);
+      }
+      cands.push(freshId);
     }
     return cands;
   }

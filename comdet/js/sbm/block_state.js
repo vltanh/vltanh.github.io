@@ -43,20 +43,65 @@
     let dcDegreeConst = 0;
     for (let v = 0; v < N; v++) dcDegreeConst += lgamma(graph.strength(v) + 1);
 
-    // Capacity = N, the maximum-possible block count. Pre-allocating
-    // avoids ensureCapacity reallocations when MCMC opens fresh blocks.
-    const B = N;
+    // Initial capacity = N, the max-possible flat partition. `addBlock`
+    // (below) grows the per-block scalars and B*B `ers` matrix when
+    // MCMC opens a fresh-block id beyond the current allocation —
+    // mirrors graph-tool `BlockState::add_block(n=1)` in
+    // src/graph/inference/blockmodel/graph_blockmodel.hh:912-933 which
+    // resizes _wr/_mrm/_mrp/_bclabel/_brecsum (and recursively grows
+    // the _emat adjacency) on every fresh-block proposal. The cpp
+    // tracer port (tools/viz_check/sbm/instrumented/flat_traced.cpp
+    // `addBlock`) implements the same growth.
+    let B = N;
     const b = new Int32Array(N);
-    const nr = new Int32Array(B);
-    const er = new Float64Array(B);
-    const ers = new Float64Array(B * B);
+    let nr = new Int32Array(B);
+    let er = new Float64Array(B);
+    let ers = new Float64Array(B * B);
     let Bne = 0;
     // Incremental non-empty-block cache. neList[0..Bne-1] = active block
     // ids; neIdx[r] = position of r in neList (-1 if empty). Maintained
     // by moveVertex + rebuildFromMembership; rebuilt from scratch only
-    // on full membership reset.
-    const neList = new Int32Array(B);
-    const neIdx = new Int32Array(B);
+    // on full membership reset. Also grown by addBlock.
+    let neList = new Int32Array(B);
+    let neIdx = new Int32Array(B);
+
+    // Grow per-block scalars + B*B `ers` matrix by `n` fresh empty
+    // slots. Mirrors graph-tool's `add_block(size_t n=1)`
+    // (graph_blockmodel.hh:912-933) and the cpp tracer's
+    // `BlockState::addBlock` in flat_traced.cpp. Each fresh slot is
+    // zero-initialised (nr=0, er=0, ers row+col 0, neIdx=-1) — the
+    // canonical also leaves _wr[r]==0 on add_block (line 923) and
+    // inserts r into _empty_groups until a vertex moves there.
+    //
+    // Sized arrays in JS aren't resizable in place; we realloc + copy
+    // every typed array. The cost is amortised — fresh-block proposals
+    // are rare (only when blockSize(blockOf(v)) > 1 AND empty slots are
+    // exhausted), and `addBlock` is called once per candidatePool that
+    // hits the capacity boundary.
+    function addBlock(n) {
+      n = n | 0; if (n <= 0) return;
+      const oldB = B;
+      const newB = B + n;
+      const newNr = new Int32Array(newB); newNr.set(nr); nr = newNr;
+      const newEr = new Float64Array(newB); newEr.set(er); er = newEr;
+      const newNeList = new Int32Array(newB); newNeList.set(neList);
+      for (let i = oldB; i < newB; i++) newNeList[i] = -1;
+      neList = newNeList;
+      const newNeIdx = new Int32Array(newB); newNeIdx.set(neIdx);
+      for (let i = oldB; i < newB; i++) newNeIdx[i] = -1;
+      neIdx = newNeIdx;
+      // Row-by-row copy preserves ers[i*oldB+j] -> new_ers[i*newB+j]
+      // for i,j in [0,oldB). Trailing rows/cols default to 0 — matches
+      // canonical: a fresh empty block has no e_rs to any other.
+      const newErs = new Float64Array(newB * newB);
+      for (let i = 0; i < oldB; i++) {
+        for (let j = 0; j < oldB; j++) {
+          newErs[i * newB + j] = ers[i * oldB + j];
+        }
+      }
+      ers = newErs;
+      B = newB;
+    }
 
     function rebuildFromMembership() {
       const seen = new Map();
@@ -394,8 +439,9 @@
 
     return {
       get N() { return N; },
+      get B() { return B; },
       blockOf: function (v) { return b[v]; },
-      blockSize: function (r) { return nr[r] | 0; },
+      blockSize: function (r) { return (r >= 0 && r < B) ? (nr[r] | 0) : 0; },
       blockMembership: function () { return new Int32Array(b); },
       nonEmptyBlocks: function () {
         // Slice off the live prefix of the cached list. Caller gets a
@@ -407,6 +453,7 @@
       virtualMove: virtualMove,
       virtualMoveTraced: virtualMoveTraced,
       moveVertex: moveVertex,
+      addBlock: addBlock,
     };
   }
 
