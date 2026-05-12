@@ -3,13 +3,136 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>SBM-flat-pp &middot; planted-partition flat SBM | Community Detection Algorithms</title>
+<title>SBM-flat-pp &middot; planted-partition flat SBM + CC/WCC/CM chain | Community Detection Algorithms</title>
 <link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐖</text></svg>">
-<meta name="description" content="Walker for the planted-partition flat stochastic block model on a 32-node fixture. Two-rate Bernoulli likelihood; intra-block density vs. inter-block density.">
+<meta name="description" content="Walker for the planted-partition flat stochastic block model on a 32-node fixture, plus the CC + WCC + CM post-processing chain applied to its raw output.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="./shared.css">
+<style>
+/* Local chain-stage chrome, scoped to .pp-chain. */
+.pp-chain .chain-band {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: .5rem;
+  margin: 1rem 0 1.4rem;
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .72rem; letter-spacing: .1em;
+  text-transform: uppercase;
+}
+@media (max-width: 720px) {
+  .pp-chain .chain-band { grid-template-columns: repeat(2, 1fr); }
+}
+.pp-chain .chain-cell {
+  background: var(--ink-2);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--paper-3);
+  border-radius: 2px;
+  padding: .55rem .65rem;
+  color: var(--paper-2);
+}
+.pp-chain .chain-cell .head {
+  display: block;
+  color: var(--paper-3);
+  font-size: .62rem;
+  margin-bottom: .2rem;
+}
+.pp-chain .chain-cell .body {
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: .82rem;
+  letter-spacing: 0; text-transform: none;
+  color: var(--paper);
+  line-height: 1.4;
+}
+.pp-chain .chain-cell.pp     { border-left-color: var(--cobalt); }
+.pp-chain .chain-cell.cc     { border-left-color: var(--azure); }
+.pp-chain .chain-cell.wcc    { border-left-color: var(--amber); }
+.pp-chain .chain-cell.cm     { border-left-color: var(--mint); }
+
+.pp-chain .delta-row {
+  display: flex; flex-wrap: wrap;
+  gap: .5rem 1.2rem;
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .76rem;
+  color: var(--paper-2);
+  margin: .4rem 0 .2rem;
+}
+.pp-chain .delta-row b { color: var(--paper); font-weight: 600; }
+.pp-chain .delta-row .lbl { color: var(--paper-3); margin-right: .3rem; }
+
+.pp-chain .four-panel {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: .8rem;
+  margin: .8rem 0 .4rem;
+}
+@media (max-width: 900px) { .pp-chain .four-panel { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 540px) { .pp-chain .four-panel { grid-template-columns: 1fr; } }
+.pp-chain .four-panel .panel-mini {
+  background: rgba(237,228,201,.35);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  padding: .55rem .65rem;
+}
+.pp-chain .four-panel .panel-mini .cap {
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .68rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--paper-3);
+  margin-bottom: .35rem;
+}
+.pp-chain .four-panel .panel-mini .cap b { color: var(--paper); font-weight: 600; }
+.pp-chain .four-panel .panel-mini .graph-canvas {
+  min-height: 200px;
+}
+
+.pp-chain .reorder-table {
+  width: 100%; border-collapse: collapse;
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: .9rem;
+  margin: .6rem 0 .4rem;
+}
+.pp-chain .reorder-table th, .pp-chain .reorder-table td {
+  padding: .45rem .65rem;
+  border-bottom: 1px solid var(--rule);
+  text-align: left;
+  vertical-align: top;
+}
+.pp-chain .reorder-table th {
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .68rem;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--paper-3);
+}
+.pp-chain .reorder-table td.col-order { color: var(--paper); font-family: 'Special Elite', monospace; font-size: .82rem; }
+.pp-chain .reorder-table td.col-note { color: var(--paper-2); font-size: .86rem; }
+
+.pp-chain .sister-table {
+  width: 100%; border-collapse: collapse;
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: .92rem;
+  margin: .5rem 0 .4rem;
+}
+.pp-chain .sister-table th, .pp-chain .sister-table td {
+  padding: .45rem .7rem;
+  border-bottom: 1px solid var(--rule);
+  text-align: left;
+}
+.pp-chain .sister-table th {
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .68rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--paper-3);
+}
+.pp-chain .sister-table td.col-name {
+  font-family: 'Fraunces', serif; font-style: italic;
+  color: var(--paper);
+}
+</style>
 </head>
 <body>
 <main class="page">
@@ -17,14 +140,14 @@
 <div id="links"></div>
 
 <header class="hdr">
-  <div class="kicker">community detection &middot; bayesian inference</div>
+  <div class="kicker">community detection &middot; bayesian inference + connectivity post-proc</div>
   <h1><em>SBM-flat-pp</em></h1>
-  <p class="fullname">planted-partition flat stochastic block model</p>
-  <p class="sub">Per-vertex Metropolis-Hastings over a microcanonical two-rate Bernoulli likelihood. Collapses the per-pair edge matrix into two scalars: intra-block edges and inter-block edges.</p>
+  <p class="fullname">planted-partition flat stochastic block model, with CC + WCC + CM chain</p>
+  <p class="sub">Per-vertex Metropolis-Hastings over a microcanonical two-rate Bernoulli likelihood, then the three connectivity post-processors enforce structural constraints the SBM does not have. The page walks both halves of the pipeline on the 32-node fixture.</p>
 </header>
 
 <div class="uc-banner">
-  <strong>Draft.</strong> Walker for the PP variant of the flat SBM. The family-level Bayesian framing, the description-length anatomy, and the cross-algorithm contrasts live on the <a href="./sbm-flat-best.html">SBM-flat-best</a> anchor page; this page focuses on the PP-specific likelihood and what it does on the 32-node fixture. The JS PP likelihood is the microcanonical two-rate form (Zhang and Peixoto 2020), distinct from graph-tool's PPBlockState (the degree-corrected Peixoto 2018 variant); the cpp tracer mirrors the JS form. Byte-equal to the cpp tracer under matched MT19937 across the 17-fixture 3-tier stress panel.
+  <strong>Draft.</strong> Two-part walker. The first half steps through the MCMC chain that produces the SBM-Flat-PP mode partition; the second half feeds that partition through the CC, WCC, and CM post-processors and shows what each one does to it. The family-level Bayesian framing, the description-length anatomy, and the cross-algorithm contrasts live on the <a href="./sbm-flat-best.html">SBM-flat-best</a> anchor page. The JS PP likelihood is the microcanonical two-rate form (Zhang and Peixoto 2020), distinct from graph-tool's PPBlockState. The chain end-state (PP &rarr; CC &rarr; WCC &rarr; CM) is what the verification harness uses as one of the four base-algorithm chain inputs alongside Leiden-Mod, Leiden-CPM(0.5), and Infomap.
 </div>
 
 <section class="hook">
@@ -43,6 +166,7 @@
     <div><span class="term">PP edges DL</span> \(L_e^{\text{PP}} = \log(\min(E, M_{\text{in}}) + 1)\). Uniform prior over the single scalar \(E_{\text{in}}\).</div>
     <div><span class="term">partition DL</span> \(L_p = \log(N!) - \sum_r \log(n_r!) + \log\binom{N - 1}{B - 1} + \log N\). Same as in the DC and NDC variants.</div>
     <div><span class="term">\(p_{\text{in}}, p_{\text{out}}\)</span> the two rates: intra-block density \(p_{\text{in}} = E_{\text{in}}/M_{\text{in}}\), inter-block density \(p_{\text{out}} = E_{\text{out}}/M_{\text{out}}\). The PP model wins when \(p_{\text{in}} \gg p_{\text{out}}\).</div>
+    <div><span class="term">post-proc chain</span> the three connectivity post-processors run in sequence on PP's mode partition: <a href="./cc.html">CC</a> splits each cluster into its connected components; <a href="./wcc.html">WCC</a> recursively cuts clusters whose mincut sits below \(\log_{10}(n)\); <a href="./cm.html">CM</a> re-clusters each split half via Leiden. The chain's job is to patch the connectivity gaps the SBM does not have a prior for.</div>
   </div>
 </section>
 
@@ -130,14 +254,14 @@
   <p>A still-falling trace at the right edge means the chain has not equilibrated and the sweep count is too low. On this fixture 20 sweeps usually settle the chain; rerolling the seed shows the equilibrium \(\Sigma\) is roughly stable but the equilibrium \(B\) wobbles by 1 or 2.</p>
 </section>
 
-<!-- ─────────── Stage 4 · Final ─────────── -->
+<!-- ─────────── Stage 4 · PP mode partition ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 4 &middot; final</div>
-  <h2>Mode partition vs. planted ground-truth.</h2>
-  <p>The mode the chain settled on (left) next to the planted ground-truth (right). \(\Sigma\) at the final partition is shown above the SBM panel; per-block stats are below. The SBM has no notion of "outlier"; nodes 30 and 31 are assigned to whichever block compresses the data best.</p>
+  <div class="stage-num">stage 4 &middot; PP mode partition</div>
+  <h2>SBM-Flat-PP raw output vs. planted ground-truth.</h2>
+  <p>The mode the chain settled on (left) next to the planted ground-truth (right). \(\Sigma\) at the final partition is shown above the SBM panel. This is the raw output of the SBM-Flat-PP variant. It is also the input to every downstream stage on this page: the three post-processors take this partition and patch the connectivity gaps the SBM does not have a prior for.</p>
   <div class="gt-compare">
     <div class="panel-mini">
-      <div class="cap">SBM-flat-pp &middot; \(\Sigma = \) <span id="g-final-S">·</span> nats</div>
+      <div class="cap">SBM-flat-pp raw &middot; \(\Sigma = \) <span id="g-final-S">·</span> nats</div>
       <div class="graph-canvas" id="g-final-sbm" style="height: 280px"></div>
     </div>
     <div class="panel-mini">
@@ -151,11 +275,7 @@
   </table>
   <div class="callout">
     <div class="tag">on this fixture, by region</div>
-    <p>A's \(K_5\) plus periphery is the cleanest assortative region: high \(p_{\text{in}}\), close to zero \(p_{\text{out}}\) once isolated. B's two \(K_4\)s split readily under PP because the single bridge edge contributes one edge to \(E_{\text{out}}\) and zero to internal density. C's two 3-cycles split into two blocks since cross-block density is exactly zero. D is the most ambiguous case under PP and the most seed-dependent: cross-edges to A and B push \(p_{\text{out}}\) up, sometimes triggering D's two halves to merge with their neighbour blocks.</p>
-  </div>
-  <div class="callout">
-    <div class="tag">PP-flat is the SBM input to the connectivity post-processors</div>
-    <p>The `run_cd.sh` pipeline pairs SBM-flat-pp with three post-processors that enforce connectivity constraints the SBM does not have: <a href="./cc.html">CC</a> splits the partition by simple-connected components, <a href="./wcc.html">WCC</a> uses a weak well-connectivity threshold, <a href="./cm.html">CM</a> decomposes into cliques. The chain runs PP first (which gives a strong assortative partition), then applies the post-processor (which patches the connectivity gaps). On the comdet fixture the SBM-flat-pp + CC chain almost always produces the planted ground-truth, because the CC step splits C's disconnected triangles and the PP step handles the rest. The <a href="./cc.html">CC page</a> walks the post-processing step on this same fixture.</p>
+    <p>A's \(K_5\) plus periphery is the cleanest assortative region: high \(p_{\text{in}}\), close to zero \(p_{\text{out}}\) once isolated. B's two \(K_4\)s split readily under PP because the single bridge edge contributes one edge to \(E_{\text{out}}\) and zero to internal density. C's two 3-cycles share a single ground-truth label, but PP has no notion of "connectivity" in the prior: when its data-fit term reads the disconnected pair, it usually keeps them under one block (the two-rate Bernoulli does not pay for the absent inside-pair density), which is exactly the structural blindspot the post-processors patch. D is the most ambiguous case under PP and the most seed-dependent.</p>
   </div>
   <div class="callout warn">
     <div class="tag">caveat &middot; PP form diverges from graph-tool's PPBlockState</div>
@@ -163,16 +283,202 @@
   </div>
 </section>
 
-<!-- ─────────── Stage 5 · Cross-links ─────────── -->
+<!-- ─────────── Stage 5 · why post-process ─────────── -->
+<section class="stage pp-chain">
+  <div class="stage-num">stage 5 &middot; why post-process the SBM output</div>
+  <h2>The SBM optimises description length, not connectivity.</h2>
+  <p>The PP likelihood reads "denser inside than outside" through two scalars \(E_{\text{in}}\) and \(E_{\text{out}}\). The aggregates do not record which inside-block pairs are actually adjacent; the two-rate Bernoulli treats every pair inside a block as a slot, occupied with rate \(p_{\text{in}}\). A block whose internal subgraph is two unconnected halves has the same \(p_{\text{in}}\) as a block whose internal subgraph is one well-connected piece of the same size and edge count; PP cannot tell them apart. That is the structural gap.</p>
+  <p>The connectivity post-processors restore the missing prior. Each one defines a structural test that every output cluster has to clear, and recursively cuts any cluster that fails. The three tests sit on a ladder of strictness:</p>
+  <div class="chain-band">
+    <div class="chain-cell pp"><span class="head">stage 0 &middot; input</span><span class="body">SBM-Flat-PP mode partition. Each block is dense in expectation, no structural check.</span></div>
+    <div class="chain-cell cc"><span class="head">stage A &middot; CC</span><span class="body">cluster must be connected. Split into BFS components, drop singletons.</span></div>
+    <div class="chain-cell wcc"><span class="head">stage B &middot; WCC</span><span class="body">cluster mincut must exceed \(\log_{10}(n)\). Recursively cut and repeat.</span></div>
+    <div class="chain-cell cm"><span class="head">stage C &middot; CM</span><span class="body">same test as WCC, plus Leiden re-cluster on each cut half before recursing.</span></div>
+  </div>
+  <p>Two interesting properties. The chain is monotone in strictness: every cluster that passes CM also passes WCC and CC, and every cluster that passes WCC also passes CC; what changes is how many clusters the test rejects and how the cuts compose. And each step writes its own output partition; the chain is not a single composite filter but three labelled passes whose results can be read separately to attribute the patch to a specific test.</p>
+  <p>On the 32-node fixture the chain has the easiest possible time: every cluster is small enough that the log threshold sits below most realistic mincut values, and Leiden has little room to re-shape a 10-node induced subgraph. The pedagogy stages below are deliberately small so every cut is hand-checkable; the verification harness exercises the same chain on networks up to ~23k nodes where the post-processors do non-trivial work.</p>
+</section>
+
+<!-- ─────────── Stage 6 · CC pass ─────────── -->
+<section class="stage pp-chain">
+  <div class="stage-num">stage A &middot; CC pass</div>
+  <h2>Split each cluster into its connected components.</h2>
+  <p>The cheapest of the three. For each cluster in the PP mode partition, take the subgraph induced by that cluster's nodes (drop every edge crossing out to a different cluster), run a breadth-first search, replace the cluster with one output cluster per connected piece. The cost is \(O(|V| + |E|)\) over the whole graph; no parameter to tune; no model to fit. The <a href="./cc.html">CC page</a> walks the per-frame mechanics.</p>
+  <p>On the PP output: the test fires whenever a PP block is internally disconnected, which on the 32-node fixture is the C region case. PP's likelihood happily packs the two disjoint 3-cycles under one label because the two-rate Bernoulli is blind to the missing density. CC's BFS sees the gap immediately and emits two clusters where the SBM emitted one.</p>
+  <div class="graph" id="g-cc-graph">
+    <div class="graph-chrome">
+      <span>after CC &middot; <span id="g-cc-summary">·</span></span>
+      <span class="right">colour = output cluster id</span>
+    </div>
+    <div class="graph-canvas" id="g-cc-cy" style="height: 300px"></div>
+  </div>
+  <p>The delta versus the PP raw output is the only thing CC ever changes:</p>
+  <div class="delta-row">
+    <span><span class="lbl">PP raw clusters</span><b id="g-cc-delta-in">·</b></span>
+    <span><span class="lbl">CC output clusters</span><b id="g-cc-delta-out">·</b></span>
+    <span><span class="lbl">clusters split</span><b id="g-cc-delta-split">·</b></span>
+    <span><span class="lbl">nodes dropped (singletons)</span><b id="g-cc-delta-dropped">·</b></span>
+  </div>
+  <p>Two properties of this step worth noting. CC never merges clusters: if PP under-splits a community (one ground-truth piece labelled as two PP blocks), CC cannot undo it. And CC drops singleton components from the output: a node whose only intra-cluster neighbours sit in different connected pieces ends up unlabelled.</p>
+</section>
+
+<!-- ─────────── Stage 7 · WCC pass ─────────── -->
+<section class="stage pp-chain">
+  <div class="stage-num">stage B &middot; WCC pass</div>
+  <h2>Each cluster's mincut must clear \(\log_{10}(n)\), or it gets recursively cut.</h2>
+  <p>WCC turns "is the cluster connected" into "is the cluster well-connected". The test runs <a href="./viecut.html">VieCut's cactus mincut</a> on each survivor of the CC pass and compares the cut value to \(f(n) = \log_{10}(n)\). On pass, the cluster moves to the survivor list. On fail, the cluster is cut at the most-balanced minimum cut and each connected piece of the two halves pushes back into the queue. The recursion terminates because every push-back component is strictly smaller than the popped cluster. The <a href="./wcc.html">WCC page</a> walks the per-pop mechanics and the threshold-family tradeoffs.</p>
+  <p>On the PP output, the test fires whenever a cluster is connected but only just: a thin bridge or a pendant pulls the mincut down to 1, which fails the threshold for any cluster of size 10 or larger. On the 32-node fixture the typical PP mode partition contains one large block over A (the \(K_5\) core plus its 7-node periphery). The pendants in A are 1-edge cuts; WCC peels them off one at a time until the threshold drops below 1.</p>
+  <div class="graph" id="g-wcc-graph">
+    <div class="graph-chrome">
+      <span>after WCC &middot; <span id="g-wcc-summary">·</span></span>
+      <span class="right">colour = output cluster id &middot; grey = peeled / unlabelled</span>
+    </div>
+    <div class="graph-canvas" id="g-wcc-cy" style="height: 300px"></div>
+  </div>
+  <div class="delta-row">
+    <span><span class="lbl">after CC</span><b id="g-wcc-delta-in">·</b></span>
+    <span><span class="lbl">after WCC</span><b id="g-wcc-delta-out">·</b></span>
+    <span><span class="lbl">recursive cuts</span><b id="g-wcc-delta-cuts">·</b></span>
+    <span><span class="lbl">nodes peeled</span><b id="g-wcc-delta-peeled">·</b></span>
+  </div>
+  <p>Two properties. WCC's threshold is local to the cluster's size, not the graph's size: a 10-node cluster faces the same bar whether it sits in a 32-node graph or a 32-million-node graph, which is what makes the pass composable on top of any upstream clustering. And the strict-above comparison treats equality as a fail: at \(n = 10\) the threshold lands exactly at 1.000, so a mincut of 1 fails by tolerance band rather than by inequality.</p>
+</section>
+
+<!-- ─────────── Stage 8 · CM pass ─────────── -->
+<section class="stage pp-chain">
+  <div class="stage-num">stage C &middot; CM pass</div>
+  <h2>Same threshold as WCC, plus Leiden replay on every failing side.</h2>
+  <p>CM is the heaviest of the three. The threshold check matches WCC's exactly; the difference is what happens after a fail. WCC pushes the two cut halves directly back to the queue. CM instead hands each side to <a href="./leiden-cpm.html">Leiden CPM</a> (resolution \(r = 0.0001\) by default), runs two iterations, and pushes whatever sub-communities Leiden returns. The implication: one failing cluster can spawn many children, not just two, and the lineage tree branches accordingly. The <a href="./cm.html">CM page</a> walks the round structure, the lineage tree, and the four cluster-fate labels.</p>
+  <p>On the PP output: CM and WCC produce the same partition when Leiden at \(r = 0.0001\) returns one community on every cut side it sees. That is the default case on the 32-node fixture, because Leiden's CPM at near-zero resolution prefers a single community on any small dense subgraph. Raising the resolution past about \(r = 0.1\) makes Leiden find multiple sub-communities on the 11-node residual of A, and the CM and WCC outputs diverge.</p>
+  <div class="graph" id="g-cm-graph">
+    <div class="graph-chrome">
+      <span>after CM &middot; <span id="g-cm-summary">·</span></span>
+      <span class="right">colour = output cluster id (after Leiden replay)</span>
+    </div>
+    <div class="graph-canvas" id="g-cm-cy" style="height: 300px"></div>
+  </div>
+  <div class="delta-row">
+    <span><span class="lbl">after WCC</span><b id="g-cm-delta-in">·</b></span>
+    <span><span class="lbl">after CM</span><b id="g-cm-delta-out">·</b></span>
+    <span><span class="lbl">Leiden replay calls</span><b id="g-cm-delta-replays">·</b></span>
+    <span><span class="lbl">rounds</span><b id="g-cm-delta-rounds">·</b></span>
+  </div>
+  <p>Two properties. CM's re-cluster step is local: Leiden runs on the induced subgraph of one cut half, not the whole graph, so the inner optimisation has no notion of the rest of the partition. And the inner Leiden RNG is re-seeded to 0 at every call, so two re-cluster runs on identical induced subgraphs produce identical sub-partitions regardless of where they sit in the pop sequence; this is what makes the chain deterministic given the input partition.</p>
+</section>
+
+<!-- ─────────── Stage 9 · final chain vs planted ─────────── -->
+<section class="stage pp-chain">
+  <div class="stage-num">stage 9 &middot; chain end-state vs. planted ground-truth</div>
+  <h2>Side by side, four partitions: PP raw, after CC, after WCC, after CM.</h2>
+  <p>The four partitions on this fixture under the default chain configuration (CC unparameterised, WCC and CM at \(f(n) = \log_{10}(n)\), CM running Leiden CPM at \(r = 0.0001\) for two iterations). Reading left to right traces the patch: PP raw lacks the connectivity constraint, CC catches the disconnected case, WCC trims the bridge-only and pendant cases, CM matches WCC at this resolution.</p>
+  <div class="four-panel">
+    <div class="panel-mini">
+      <div class="cap">PP raw &middot; <b id="g-cmp-pp-n">·</b> clusters</div>
+      <div class="graph-canvas" id="g-cmp-pp-cy"></div>
+    </div>
+    <div class="panel-mini">
+      <div class="cap">after CC &middot; <b id="g-cmp-cc-n">·</b> clusters</div>
+      <div class="graph-canvas" id="g-cmp-cc-cy"></div>
+    </div>
+    <div class="panel-mini">
+      <div class="cap">after WCC &middot; <b id="g-cmp-wcc-n">·</b> clusters</div>
+      <div class="graph-canvas" id="g-cmp-wcc-cy"></div>
+    </div>
+    <div class="panel-mini">
+      <div class="cap">after CM &middot; <b id="g-cmp-cm-n">·</b> clusters</div>
+      <div class="graph-canvas" id="g-cmp-cm-cy"></div>
+    </div>
+  </div>
+  <table class="cluster-stats" id="g-chain-metrics">
+    <thead><tr><th>partition</th><th>clusters</th><th>nodes labelled</th><th>NMI vs planted</th><th>ARI vs planted</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <p>NMI is the normalised mutual information between the partition and the planted ground-truth, computed under the arithmetic-mean normaliser. ARI is the adjusted Rand index. Both range over \([0, 1]\) for non-degenerate partitions of this fixture; higher is closer to ground-truth. Unlabelled nodes (peeled pendants, dropped singletons) are excluded from the comparison; the "nodes labelled" column shows how many of the 32 fixture nodes carry a label in each partition.</p>
+  <div class="callout">
+    <div class="tag">what the chain buys on this fixture</div>
+    <p>The chain's win is mostly in the CC step. CC catches the disconnected-C case, which is PP's structural blindspot; the NMI and ARI both jump at that step. WCC peels A's pendants; the NMI shifts by a smaller amount because the peeled nodes drop out of the comparison rather than getting re-labelled. CM matches WCC here because Leiden CPM at \(r = 0.0001\) returns one community on every side, so the re-cluster step is a no-op. On larger graphs where Leiden has room to find sub-communities, CM and WCC diverge.</p>
+  </div>
+</section>
+
+<!-- ─────────── Stage 10 · why chain order matters ─────────── -->
+<section class="stage pp-chain">
+  <div class="stage-num">stage 10 &middot; why the chain order is CC &rarr; WCC &rarr; CM</div>
+  <h2>The three tests are not commutative.</h2>
+  <p>The pipeline order is CC first, then WCC, then CM. Each step's invariants depend on the previous step's invariants holding. Reversing any pair breaks something.</p>
+  <table class="reorder-table">
+    <thead>
+      <tr><th>chain order</th><th>what breaks</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="col-order">CC &rarr; WCC &rarr; CM</td>
+        <td class="col-note">the shipped order. CC produces connected clusters; WCC runs mincut on connected inputs (mincut is undefined on a disconnected graph; running it returns 0 with an arbitrary bipartition); CM runs Leiden on connected, mincut-cleared inputs.</td>
+      </tr>
+      <tr>
+        <td class="col-order">WCC &rarr; CC</td>
+        <td class="col-note">WCC's mincut would return 0 with an arbitrary bipartition on any disconnected input cluster. The "cut" would peel one disjoint piece off and treat the other as a normal cluster; the bipartition is meaningless. WCC's own implementation runs CC as its pre-pass for exactly this reason; reversing the order strips the safety net.</td>
+      </tr>
+      <tr>
+        <td class="col-order">CM &rarr; WCC</td>
+        <td class="col-note">Leiden runs on the SBM output before any connectivity filter. Leiden's CPM at low resolution can absorb a thin-bridge community back into a larger one, which undoes the structural information WCC's threshold relies on. The post-proc gain shrinks; on benchmarks the inversion measurably loses NMI versus the shipped order.</td>
+      </tr>
+      <tr>
+        <td class="col-order">CC &rarr; CM &rarr; WCC</td>
+        <td class="col-note">CM's Leiden replay can produce sub-communities with low mincut that the subsequent WCC would then shred. The shipped order folds the WCC test into the CM loop itself (CM checks the threshold per pop, then re-clusters on fail), so the test runs at the right granularity.</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>The shipped order is the only one that respects all three tests' preconditions. In plain terms: CC's job is to feed WCC well-defined inputs; WCC's job is to fail well-defined clusters and let CM's Leiden replay choose what to do with the failing sides; CM's job is to run that replay under the same threshold WCC enforces, so the chain's output is consistent at every step.</p>
+</section>
+
+<!-- ─────────── Stage 11 · sister variants ─────────── -->
+<section class="stage pp-chain">
+  <div class="stage-num">stage 11 &middot; sister variants do not chain through CC/WCC/CM</div>
+  <h2>SBM-flat-best, flat-dc, flat-ndc emit raw partitions; this page is the post-processed leg.</h2>
+  <p>The flat SBM family runs three variants under one MCMC chain (DC, NDC, PP) and reports the lowest-\(\Sigma\) partition on the <a href="./sbm-flat-best.html">flat-best</a> anchor page. None of the three sister variants pipes its output through CC, WCC, or CM by default. The SBM-Flat-PP variant is paired with the chain in the verification harness because PP's structural blindspot (it cannot see internal connectivity) is the cleanest case for the post-processors to patch.</p>
+  <table class="sister-table">
+    <thead>
+      <tr><th>variant</th><th>raw partition</th><th>post-proc chain</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="col-name"><a href="./sbm-flat-best.html">flat-best</a></td>
+        <td>lowest-\(\Sigma\) of DC, NDC, PP</td>
+        <td>not in the harness; the anchor page focuses on Bayes-factor model selection across the three variants.</td>
+      </tr>
+      <tr>
+        <td class="col-name"><a href="./sbm-flat-dc.html">flat-dc</a></td>
+        <td>degree-corrected sparse entropy + degree DL</td>
+        <td>not in the harness; DC's data-fit term absorbs degree variance under the existing prior, so the post-proc gain is smaller in expectation.</td>
+      </tr>
+      <tr>
+        <td class="col-name"><a href="./sbm-flat-ndc.html">flat-ndc</a></td>
+        <td>non-degree-corrected sparse entropy</td>
+        <td>not in the harness; NDC's failure mode is hub-peeling rather than connectivity, which is a different patch.</td>
+      </tr>
+      <tr>
+        <td class="col-name">flat-pp (this page)</td>
+        <td>microcanonical two-rate Bernoulli</td>
+        <td><b>shipped</b>. PP &rarr; CC &rarr; WCC &rarr; CM is one of the four base-algorithm chain inputs in the verification harness; the others are Leiden-Mod, Leiden-CPM(0.5), and Infomap.</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>The reason PP is the SBM variant that pairs with the chain is structural, not historical. PP's likelihood depends on global aggregates only, so a partition that lines up assortative density wins regardless of whether the inside-block subgraph is one piece or many. DC and NDC carry the per-pair edge matrix; a partition that under-connects an inside block pays in the data-fit term, which gives those variants a partial structural prior the chain duplicates. PP has no such partial prior, so the chain's job is unambiguous on PP output and the patch is cleaner to attribute.</p>
+</section>
+
+<!-- ─────────── Stage 12 · Cross-links ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 5 &middot; sibling pages</div>
+  <div class="stage-num">stage 12 &middot; sibling pages</div>
   <h2>Where to look next.</h2>
   <ul>
     <li><a href="./sbm-flat-best.html">SBM-flat-best</a>. The flat-family anchor; lecture-style coverage of the Bayesian framing, all three variants in one place, the cross-algorithm contrasts.</li>
     <li><a href="./sbm-flat-dc.html">SBM-flat-dc</a>. The DC sister with full per-pair edge matrix and degree conditioning.</li>
     <li><a href="./sbm-flat-ndc.html">SBM-flat-ndc</a>. The NDC sister with full per-pair edge matrix and no degree conditioning.</li>
-    <li><a href="./cc.html">CC</a>, <a href="./wcc.html">WCC</a>, <a href="./cm.html">CM</a>. The connectivity post-processors the SBM-flat-pp output is paired with in the standard pipeline.</li>
-    <li><a href="./leiden-cpm.html">Leiden-CPM</a>. The alternative assortative-prior framing via tunable \(\gamma\). PP makes the same assortative bias more rigid; CPM exposes it as a slider.</li>
+    <li><a href="./cc.html">CC</a>. The connected-component split. Walks the per-frame mechanics of stage A on this page.</li>
+    <li><a href="./wcc.html">WCC</a>. The well-connectedness threshold and recursive cut loop. Walks the per-pop mechanics of stage B on this page.</li>
+    <li><a href="./cm.html">CM</a>. The connectivity modifier (threshold + Leiden replay). Walks the per-pop mechanics of stage C on this page, plus the round structure and the lineage tree.</li>
+    <li><a href="./viecut.html">VieCut</a>. The minimum-cut engine called inside every WCC and CM pop.</li>
+    <li><a href="./leiden-cpm.html">Leiden-CPM</a>. The base re-clusterer CM hands each failing cut side to. Also the alternative assortative-prior framing via tunable \(\gamma\): PP makes the same assortative bias more rigid; CPM exposes it as a slider.</li>
   </ul>
 </section>
 
@@ -208,6 +514,364 @@ window.MathJax = {
 <script src="./js/sbm/trace_plot.js"></script>
 <script src="./js/sbm/walker_page.js"></script>
 <script src="./js/sbm/page_flat_pp.js"></script>
+
+<!-- Post-processing chain deps (Stoer-Wagner mincut + CC + WCC + CM).
+     No VieCut on this page; the Stoer-Wagner fallback in mincut.js is
+     adequate for the 32-node fixture and avoids loading ~20 VieCut
+     files for what is a pedagogical illustration. -->
+<script src="./js/mincut.js"></script>
+<script src="./js/cc/cc.js"></script>
+<script src="./js/wcc/wcc.js"></script>
+<script src="./js/common/common.js"></script>
+<script src="./js/louvain/louvain.js"></script>
+<script src="./js/leiden/leiden.js"></script>
+<script src="./js/cm/cm.js"></script>
+
+<!-- Inline page JS: derives the CC/WCC/CM partitions from the
+     SBM-Flat-PP mode partition and renders the chain stages.
+     Re-runs whenever the seed input changes (the SBM walker already
+     re-runs its kernel on reroll, so the chain follows). -->
+<script>
+(function () {
+  "use strict";
+  if (!window.COMDET) return;
+  const C = window.COMDET;
+  const F = C.FIXTURE;
+  if (!F || !C.SBM || !C.PAGE) return;
+
+  // ── partition utilities ─────────────────────────────────────
+  // Re-label an arbitrary integer-array partition so cluster ids
+  // run 0, 1, 2, ... in first-occurrence order. Negative ids
+  // (unlabelled) pass through as -1.
+  function canonicalise(arr) {
+    const out = new Int32Array(arr.length);
+    const seen = new Map();
+    let next = 0;
+    for (let i = 0; i < arr.length; i++) {
+      const v = arr[i];
+      if (v == null || v < 0) { out[i] = -1; continue; }
+      if (!seen.has(v)) { seen.set(v, next++); }
+      out[i] = seen.get(v);
+    }
+    return out;
+  }
+  function clusterCount(arr) {
+    const s = new Set();
+    for (let i = 0; i < arr.length; i++) if (arr[i] != null && arr[i] >= 0) s.add(arr[i]);
+    return s.size;
+  }
+  function labelledCount(arr) {
+    let k = 0;
+    for (let i = 0; i < arr.length; i++) if (arr[i] != null && arr[i] >= 0) k++;
+    return k;
+  }
+
+  // ── NMI / ARI (arithmetic-mean NMI, standard ARI) ───────────
+  // Both metrics operate on labelled nodes only; unlabelled nodes
+  // (cluster id < 0) are dropped before the contingency table is
+  // built. Standard reference implementations.
+  function nmiArithmetic(a, b) {
+    const idx = [];
+    for (let i = 0; i < a.length; i++) if (a[i] >= 0 && b[i] >= 0) idx.push(i);
+    const n = idx.length;
+    if (n === 0) return 0;
+    const ka = new Map(), kb = new Map();
+    const joint = new Map();
+    for (let k = 0; k < n; k++) {
+      const i = idx[k]; const x = a[i], y = b[i];
+      ka.set(x, (ka.get(x) || 0) + 1);
+      kb.set(y, (kb.get(y) || 0) + 1);
+      const key = x + "|" + y;
+      joint.set(key, (joint.get(key) || 0) + 1);
+    }
+    function H(counts) {
+      let h = 0;
+      counts.forEach(function (c) { const p = c / n; h -= p * Math.log(p); });
+      return h;
+    }
+    let mi = 0;
+    joint.forEach(function (cxy, key) {
+      const parts = key.split("|");
+      const cx = ka.get(parseInt(parts[0], 10));
+      const cy = kb.get(parseInt(parts[1], 10));
+      const pxy = cxy / n;
+      mi += pxy * Math.log((cxy * n) / (cx * cy));
+    });
+    const Ha = H(ka), Hb = H(kb);
+    if (Ha + Hb === 0) return 1;
+    return (2 * mi) / (Ha + Hb);
+  }
+  function ariScore(a, b) {
+    const idx = [];
+    for (let i = 0; i < a.length; i++) if (a[i] >= 0 && b[i] >= 0) idx.push(i);
+    const n = idx.length;
+    if (n < 2) return 0;
+    const ka = new Map(), kb = new Map();
+    const joint = new Map();
+    for (let k = 0; k < n; k++) {
+      const i = idx[k]; const x = a[i], y = b[i];
+      ka.set(x, (ka.get(x) || 0) + 1);
+      kb.set(y, (kb.get(y) || 0) + 1);
+      const key = x + "|" + y;
+      joint.set(key, (joint.get(key) || 0) + 1);
+    }
+    function binom2(x) { return x * (x - 1) / 2; }
+    let sumNij = 0;
+    joint.forEach(function (c) { sumNij += binom2(c); });
+    let sumAi = 0; ka.forEach(function (c) { sumAi += binom2(c); });
+    let sumBj = 0; kb.forEach(function (c) { sumBj += binom2(c); });
+    const total = binom2(n);
+    const expected = (sumAi * sumBj) / total;
+    const max = (sumAi + sumBj) / 2;
+    if (max === expected) return 0;
+    return (sumNij - expected) / (max - expected);
+  }
+
+  // ── per-cluster intra/inter edge counts ─────────────────────
+  // Re-used by the stage-4 stats table for the PP raw partition.
+  function clusterEdgeStats(membership) {
+    const N = F.nodes.length;
+    const idxById = {};
+    F.nodes.forEach(function (id, i) { idxById[id] = i; });
+    const sizes = new Map();
+    for (let i = 0; i < N; i++) {
+      const c = membership[i];
+      if (c < 0) continue;
+      sizes.set(c, (sizes.get(c) || 0) + 1);
+    }
+    const ein = new Map(), eout = new Map();
+    for (let e = 0; e < F.edges.length; e++) {
+      const a = idxById[F.edges[e][0]];
+      const b = idxById[F.edges[e][1]];
+      const ca = membership[a], cb = membership[b];
+      if (ca < 0 || cb < 0) continue;
+      if (ca === cb) ein.set(ca, (ein.get(ca) || 0) + 1);
+      else {
+        eout.set(ca, (eout.get(ca) || 0) + 1);
+        eout.set(cb, (eout.get(cb) || 0) + 1);
+      }
+    }
+    const rows = [];
+    sizes.forEach(function (n, c) {
+      const ei = ein.get(c) || 0;
+      const eo = eout.get(c) || 0;
+      const cond = (ei + eo) > 0 ? eo / (2 * ei + eo) : 0;
+      rows.push({ c: c, n: n, ein: ei, eout: eo, cond: cond });
+    });
+    rows.sort(function (a, b) { return a.c - b.c; });
+    return rows;
+  }
+
+  // ── recover the PP mode partition for the current seed ──────
+  // The walker page mounts its own SBM run inside walker_page.js;
+  // the kernel does not export the result to the global scope.
+  // We re-run the same MCMC chain inline (same fixture, same
+  // seed, same MT19937 stream, same BlockState options) and use
+  // the recovered finalMembership as the chain input.
+  function ppRunForSeed(seed) {
+    const SBM = C.SBM;
+    const G = SBM.Graph(F.nodes.length, F.edges, { correctSelfLoops: false });
+    const rng = SBM.MT19937(seed >>> 0);
+    const N = F.nodes.length;
+    const init = SBM.UTIL.makeBlockInit(rng, N, 8);
+    const state = SBM.BlockState(G, { mode: "pp", init: init });
+    SBM.equilibrate(state, rng, { sweeps: 20, beta: 1.0, recordCandidates: false });
+    return state.blockMembership();
+  }
+
+  // ── chain step runners ──────────────────────────────────────
+  function runChain(ppMembership) {
+    const cc = C.CC.runCC(ppMembership);
+    const ccLabels = canonicalise(cc.finalAssign);
+    let wccLabels, wccMeta, cmLabels, cmMeta;
+    try {
+      const wcc = C.WCC.runWCC(ccLabels, { criterion: "1log_10(n)" });
+      wccLabels = canonicalise(wcc.finalAssign);
+      let cuts = 0, peeled = 0;
+      if (wcc.carve && wcc.carve.events) {
+        wcc.carve.events.forEach(function (ev) {
+          if (ev && ev.wellConnected === false) cuts++;
+        });
+      }
+      for (let i = 0; i < wccLabels.length; i++) {
+        if (ccLabels[i] >= 0 && wccLabels[i] < 0) peeled++;
+      }
+      wccMeta = { cuts: cuts, peeled: peeled };
+    } catch (e) {
+      wccLabels = ccLabels.slice();
+      wccMeta = { cuts: 0, peeled: 0, error: String(e) };
+    }
+    try {
+      const cm = C.CM.runCM(wccLabels, {
+        criterion: "1log_10(n)",
+        algorithm: "leiden-cpm",
+        resolution: 0.0001,
+        seed: 0,
+      });
+      cmLabels = canonicalise(cm.finalAssign);
+      let replays = 0, rounds = 0;
+      (cm.events || []).forEach(function (ev) {
+        if (!ev) return;
+        if (ev.kind === "recluster" || ev.kind === "leiden-replay") replays++;
+        if (ev.kind === "round-end") rounds++;
+      });
+      cmMeta = { replays: replays, rounds: rounds };
+    } catch (e) {
+      cmLabels = wccLabels.slice();
+      cmMeta = { replays: 0, rounds: 0, error: String(e) };
+    }
+    return {
+      pp: canonicalise(ppMembership),
+      cc: ccLabels,
+      wcc: wccLabels,
+      cm: cmLabels,
+      wccMeta: wccMeta,
+      cmMeta: cmMeta,
+    };
+  }
+
+  // ── render helpers ──────────────────────────────────────────
+  function setText(id, v) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = String(v);
+  }
+  function paint(hostId, membership) {
+    C.PAGE.renderFixture(hostId, { membership: membership, pinned: true });
+  }
+  function clusterChangedCount(before, after) {
+    const beforeMap = new Map();
+    for (let i = 0; i < before.length; i++) {
+      if (before[i] < 0) continue;
+      let arr = beforeMap.get(before[i]);
+      if (!arr) { arr = []; beforeMap.set(before[i], arr); }
+      arr.push(i);
+    }
+    let split = 0;
+    beforeMap.forEach(function (ids) {
+      const labels = new Set();
+      ids.forEach(function (i) { if (after[i] >= 0) labels.add(after[i]); });
+      if (labels.size > 1) split++;
+    });
+    return split;
+  }
+  function summary(labels) {
+    const k = clusterCount(labels);
+    const lab = labelledCount(labels);
+    return k + " clusters &middot; " + lab + " / " + labels.length + " nodes labelled";
+  }
+  function setHTML(id, v) {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = v;
+  }
+
+  function renderAll(chain, gt) {
+    // Stage 6 (CC).
+    paint("g-cc-cy", chain.cc);
+    setHTML("g-cc-summary", summary(chain.cc));
+    setText("g-cc-delta-in", clusterCount(chain.pp));
+    setText("g-cc-delta-out", clusterCount(chain.cc));
+    setText("g-cc-delta-split", clusterChangedCount(chain.pp, chain.cc));
+    let dropped = 0;
+    for (let i = 0; i < chain.cc.length; i++) {
+      if (chain.pp[i] >= 0 && chain.cc[i] < 0) dropped++;
+    }
+    setText("g-cc-delta-dropped", dropped);
+
+    // Stage 7 (WCC).
+    paint("g-wcc-cy", chain.wcc);
+    setHTML("g-wcc-summary", summary(chain.wcc));
+    setText("g-wcc-delta-in", clusterCount(chain.cc));
+    setText("g-wcc-delta-out", clusterCount(chain.wcc));
+    setText("g-wcc-delta-cuts", chain.wccMeta.cuts);
+    setText("g-wcc-delta-peeled", chain.wccMeta.peeled);
+
+    // Stage 8 (CM).
+    paint("g-cm-cy", chain.cm);
+    setHTML("g-cm-summary", summary(chain.cm));
+    setText("g-cm-delta-in", clusterCount(chain.wcc));
+    setText("g-cm-delta-out", clusterCount(chain.cm));
+    setText("g-cm-delta-replays", chain.cmMeta.replays);
+    setText("g-cm-delta-rounds", chain.cmMeta.rounds);
+
+    // Stage 9 (four-panel + metrics).
+    paint("g-cmp-pp-cy", chain.pp);
+    paint("g-cmp-cc-cy", chain.cc);
+    paint("g-cmp-wcc-cy", chain.wcc);
+    paint("g-cmp-cm-cy", chain.cm);
+    setText("g-cmp-pp-n", clusterCount(chain.pp));
+    setText("g-cmp-cc-n", clusterCount(chain.cc));
+    setText("g-cmp-wcc-n", clusterCount(chain.wcc));
+    setText("g-cmp-cm-n", clusterCount(chain.cm));
+
+    const tbody = document.querySelector("#g-chain-metrics tbody");
+    if (tbody) {
+      const rows = [
+        { name: "PP raw",     m: chain.pp },
+        { name: "after CC",   m: chain.cc },
+        { name: "after WCC",  m: chain.wcc },
+        { name: "after CM",   m: chain.cm },
+      ];
+      tbody.innerHTML = rows.map(function (r) {
+        return "<tr><td>" + r.name + "</td>"
+             + "<td>" + clusterCount(r.m) + "</td>"
+             + "<td>" + labelledCount(r.m) + " / " + r.m.length + "</td>"
+             + "<td>" + nmiArithmetic(r.m, gt).toFixed(3) + "</td>"
+             + "<td>" + ariScore(r.m, gt).toFixed(3) + "</td>"
+             + "</tr>";
+      }).join("");
+    }
+  }
+
+  // ── boot: wait for fixture + kernels, then run on the
+  //         current seed (default 7). On reroll, the SBM walker
+  //         updates the DOM; we re-read the seed input and
+  //         re-run the chain to match. Since the SBM kernel is
+  //         deterministic in seed, re-running here produces the
+  //         same finalMembership the walker page is showing.
+  function gtArray() {
+    return Int32Array.from(F.gt);
+  }
+  function boot() {
+    if (!C.CC || !C.WCC || !C.CM || !C.SBM || !C.MINCUT) {
+      // Wait for deferred scripts.
+      window.setTimeout(boot, 60);
+      return;
+    }
+    const gt = gtArray();
+    function rerunForSeed(seed) {
+      const ppMem = ppRunForSeed(seed);
+      const chain = runChain(ppMem);
+      renderAll(chain, gt);
+      if (C.retypeset) C.retypeset();
+    }
+    const seedInput = document.getElementById("g-seed");
+    const rerollBtn = document.getElementById("g-reroll");
+    function readSeed() {
+      const v = seedInput ? parseInt(seedInput.value, 10) : 7;
+      return Number.isFinite(v) ? v : 7;
+    }
+    rerunForSeed(readSeed());
+    if (rerollBtn) {
+      rerollBtn.addEventListener("click", function () {
+        // Walker re-renders synchronously inside its own click handler;
+        // schedule the chain re-run after it lands.
+        window.setTimeout(function () { rerunForSeed(readSeed()); }, 0);
+      });
+    }
+    if (seedInput) {
+      seedInput.addEventListener("change", function () {
+        window.setTimeout(function () { rerunForSeed(readSeed()); }, 0);
+      });
+    }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", boot);
+  } else {
+    boot();
+  }
+})();
+</script>
 
 </body>
 </html>
