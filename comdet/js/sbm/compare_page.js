@@ -90,7 +90,7 @@
         const cap = document.getElementById("g-cap-" + r.id);
         if (cap) {
           cap.innerHTML = r.label + " &middot; \\(\\Sigma = \\) "
-            + r.Sfinal.toFixed(2) + " bits &middot; B = " + r.Bfinal;
+            + r.Sfinal.toFixed(2) + " nats &middot; B = " + r.Bfinal;
         }
       });
       const tbody = document.querySelector("#g-cmp tbody");

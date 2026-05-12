@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>SBM-nested-dc &middot; hierarchical (nested) degree-corrected SBM | Community Detection Algorithms</title>
+<title>SBM-nested-dc &middot; nested degree-corrected SBM | Community Detection Algorithms</title>
 <link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐖</text></svg>">
-<meta name="description" content="Hierarchical degree-corrected SBM walked one Metropolis-Hastings move at a time on a 32-node fixture. Level-0 walker over a faithful graph-tool BlockState port.">
+<meta name="description" content="Walker for the hierarchical degree-corrected SBM. Stacks flat blockmodels across levels; raises the asymptotic resolution limit. Page animates level 0.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
@@ -19,23 +19,25 @@
 <header class="hdr">
   <div class="kicker">community detection &middot; bayesian inference</div>
   <h1><em>SBM-nested-dc</em></h1>
-  <p class="fullname">hierarchical (nested) degree-corrected stochastic block model</p>
-  <p class="sub">Stack flat blockmodels across levels; raise the resolution limit from \(\sqrt{N}\) to \(N/\log N\). Page walks level-0 only.</p>
+  <p class="fullname">nested (hierarchical) degree-corrected stochastic block model</p>
+  <p class="sub">Stacks flat blockmodels into a hierarchy; level 0 uses DC entropy, every level above uses NDC. The page walks level 0.</p>
 </header>
 
 <div class="uc-banner">
-  <strong>Draft, level-0 walker only.</strong> The nested SBM stacks flat blockmodels across hierarchy levels (Peixoto 2014, <a href="https://doi.org/10.1103/PhysRevX.4.011047" target="_blank" rel="noopener">Phys. Rev. X 4 011047</a>). The JS kernel composes the full <code>NestedBlockState</code> end-to-end and the cpp tracer + JS replay exercise full multi-level e_rs propagation under self-RNG (306/306 cells PASS on the 3-tier stress panel); this page surfaces only the level-0 walker. Sparse-entropy formulas verbatim from <code>graph_blockmodel_entropy.hh</code>; partition + level priors from Peixoto's review (<a href="https://doi.org/10.1002/9781119483298.ch11" target="_blank" rel="noopener">10.1002/9781119483298.ch11</a>) Eq 17 + 28-30. Cross-check vs. canonical graph-tool output is on the follow-up.
+  <strong>Draft, level-0 walker only.</strong> Walker for the DC variant of the nested SBM. The family-level Bayesian framing, the hierarchical construction, the round-robin MCMC, and the cross-algorithm contrasts live on the <a href="./sbm-nested-best.html">SBM-nested-best</a> anchor page; this page focuses on the level-0 DC walker and how it composes into the hierarchy. The kernel runs the full multi-level chain end-to-end and the cpp tracer plus JS replay leg exercise the hierarchy under self-RNG (306/306 cells PASS on the 3-tier stress panel); the page animates only the level-0 trajectory.
 </div>
 
 <section class="hook">
-  <p>Community detection as Bayesian inference: posit a generative model where each node carries a block label \(b_i \in \{1,\dots,B\}\), the model freezes the count of edges between every pair of blocks \(e_{rs}\) and the per-node degree \(k_i\), and the actual graph is a uniform draw from the simple graphs that meet those constraints. The inference problem is the inverse: given the observed graph, find the partition that compresses it the most.</p>
-  <p>The microcanonical formulation gives a clean target: the partition that minimises \(\Sigma = -\log P(\boldsymbol{A}, \boldsymbol{e}, \boldsymbol{b})\). Each candidate partition carries a cost in nats, split between data fit (sparse entropy of \(\boldsymbol{e}\)) and model complexity (writing down \(B\), \(\boldsymbol{b}\), \(\boldsymbol{e}\)). The minimum sits in the middle.</p>
-  <p>The <em>nested</em> SBM stacks multiple flat blockmodels into a hierarchy: level 0 is the input graph plus its block partition; level \(l\) is the block-multigraph collapsed at level \(l-1\) plus its own block partition. The hierarchical prior raises the resolution limit from the flat SBM's \(B_{\max} \propto \sqrt{N}\) (one of the well-known SBM failure modes, Peixoto 2017 §VI) to nested's \(B_{\max} \propto N / \log N\). This page runs the level-0 walker for the <em>degree-corrected</em> nested SBM: pick a vertex, sample a target block uniformly, compute \(\Delta\Sigma\), accept with \(\min(1, e^{-\beta\Delta\Sigma})\) at \(\beta = 1\). The upper-level MCMC and the joint multi-level inference exist in the kernel and the cpp tracer; surfacing them in the walker is on the follow-up.</p>
+  <p>The nested degree-corrected SBM is the hierarchical lift of the <a href="./sbm-flat-dc.html">flat-dc variant</a>. Level 0 uses the DC entropy form, with the per-node degree sequence conditioned and the uniform degree DL term active. Every level above 0 uses NDC entropy on the collapsed block-multigraph. In plain terms: at the bottom of the hierarchy the model knows the per-node degrees and reads them as auxiliary data; at every level above, the "vertices" are level-0 blocks whose "degrees" are the per-block edge totals, which are part of the level-0 entropy rather than independent quantities at the upper level. The split is what allows the same flat-BlockState code to handle every level under one entropy framework.</p>
+  <p>The description length the chain minimises is</p>
+  <p style="text-align:center">\(\Sigma_{\text{nested-DC}} = \Sigma^{(0)}_{\text{DC}} + \sum_{l = 1}^{L - 1} \Sigma^{(l)}_{\text{NDC}}\),</p>
+  <p>where \(\Sigma^{(0)}_{\text{DC}}\) is the full flat-DC \(\Sigma\) on the input graph (sparse entropy DC + edges DL + partition DL + degree DL) and each \(\Sigma^{(l)}_{\text{NDC}}\) for \(l > 0\) is the flat-NDC \(\Sigma\) on the level-\(l\) block-multigraph (sparse entropy NDC + edges DL + partition DL; no degree DL at upper levels). In plain terms: pay the DC cost at level 0, pay the NDC cost at every level above. Two properties. The decomposition is fully additive across levels with no inter-level coupling term; this is the JS-side self-consistent form that diverges (intentionally) from graph-tool's NestedBlockState entropy which adds a small Lrecdx coupling. And the level-0 DC entropy is what the level-0 walker on this page minimises directly; the upper-level contributions are computed by the kernel after the round-robin chain converges but are not animated on this page.</p>
+  <p>The level-0 walker is structurally identical to the <a href="./sbm-flat-dc.html">flat-dc walker</a>. The difference is in the reported \(\Sigma\): the nested page computes the multi-level total, the flat page computes only \(\Sigma^{(0)}\). On the 32-node fixture the level-0 mode partitions typically coincide; the asymptotic benefit of the hierarchy applies to graphs much larger than this fixture.</p>
   <div class="defs">
-    <div><span class="term">sparse entropy (DC)</span> the data-fit term: \(\sum_r \log(e_r!) - \sum_{r<s} \log(e_{rs}!) - \sum_r [\log((e_{rr}/2)!) + (e_{rr}/2)\log 2]\). The vertex factor \(\log(e_r!)\) is the degree-corrected form (Peixoto Eq 43). Drops when edges concentrate inside blocks.</div>
-    <div><span class="term">edges DL</span> per-level cost of writing down \(\boldsymbol{e}_l\) given \(B_l\): \(\log\binom{B_l(B_l+1)/2 + E_l - 1}{E_l}\). Each level contributes; total summed across levels.</div>
-    <div><span class="term">partition DL</span> per-level cost of writing down which node lives in which block: \(\log N_l! - \sum_r \log n_{l,r}! + \log\binom{N_l-1}{B_l-1} + \log N_l\). Hierarchical prior, Peixoto Eq 17 + 28.</div>
-    <div><span class="term">degree DL</span> the cost of writing down per-node degrees given block sums: \(\sum_r \log\binom{n_r + e_r - 1}{e_r}\). Level 0 only; the upper levels work on edge-count multigraphs that already absorb degree information.</div>
+    <div><span class="term">level 0</span> DC entropy on the input graph; the walker animates this level.</div>
+    <div><span class="term">level \(l > 0\)</span> NDC entropy on the block-multigraph from level \(l - 1\). The level's vertices are non-empty level-\((l-1)\) blocks; edges carry the level-\((l-1)\) \(e_{rs}\) counts; self-loops carry \(e_{rr}/2\).</div>
+    <div><span class="term">\(\Sigma_{\text{nested-DC}}\)</span> sum of per-level \(\Sigma\). Lower is better. Self-consistent, no inter-level coupling.</div>
+    <div><span class="term">round-robin sweep</span> one outer iteration runs one MH sweep at every level in order, with deterministic upper-level rebuilds between sweeps. See the <a href="./sbm-nested-best.html">anchor page</a>.</div>
   </div>
 </section>
 
@@ -43,7 +45,7 @@
 <section class="stage">
   <div class="stage-num">stage 0 &middot; input</div>
   <h2>The 32-node fixture, painted by planted ground-truth.</h2>
-  <p>The comdet gallery shares one small graph across every algorithm. <em>A</em> (12 nodes, blue) is a \(K_5\) on \(\{0..4\}\) plus a 7-node periphery hanging off the \(K_5\). <em>B</em> (8 nodes, ochre) is two \(K_4\)s bridged by the single edge \((15,16)\). <em>C</em> (6 nodes, green) is two 3-cycles with no edge between them, both labelled the same in ground-truth. <em>D</em> (4 nodes, plum) is two 2-cliques joined by \((27,28)\). Outliers 30 + 31 dangle off A.</p>
+  <p>Same fixture as every other comdet page. <em>A</em> (12, blue) is a \(K_5\) plus a 7-node periphery. <em>B</em> (8, ochre) is two \(K_4\)s bridged by one edge. <em>C</em> (6, green) is two disconnected 3-cycles. <em>D</em> (4, plum) is two 2-cliques bridged. Outliers 30 and 31 dangle off A.</p>
   <div class="graph" id="g-input">
     <div class="graph-chrome">
       <span>32 nodes &middot; 52 edges &middot; 4 planted communities + 2 outliers</span>
@@ -51,14 +53,14 @@
     </div>
     <div class="graph-canvas" id="g-input-cy"></div>
   </div>
-  <p>On the 32-node fixture the resolution-limit benefit of the nested form is mostly cosmetic: \(\sqrt{32} \approx 5.7\), so the flat SBM can already represent the 4-community ground-truth comfortably. The hierarchy starts paying for itself when \(B^{\star} \gtrsim \sqrt{N}\), so this page is more of a structural reference than a place to see nested do better than flat at a given size. DC absorbs the degree gap between A's \(K_5\) hub and its periphery into the model, so degree alone does not split A.</p>
+  <p>On the 32-node fixture the resolution-limit benefit of the nested form is mostly cosmetic. \(\sqrt{32} \approx 5.7\), so the flat SBM can already represent the 4-community ground-truth comfortably. The hierarchy starts paying for itself when the optimal block count exceeds \(\sqrt{N}\), which on graphs of the kind the gallery's stress panel covers requires \(N\) at least in the high thousands. The DC variant here mirrors the <a href="./sbm-flat-dc.html">flat-dc page</a>'s handling of A's hub: degree correction absorbs the gap between node 0 (degree 9) and its periphery leaves, so A reads as cohesive.</p>
 </section>
 
 <!-- ─────────── Stage 1 · Random init ─────────── -->
 <section class="stage">
   <div class="stage-num">stage 1 &middot; random init</div>
   <h2>Random partition with \(B_0\) blocks; \(\Sigma_0\) on display.</h2>
-  <p>MCMC starts from any valid partition. The level-0 chain initialises with \(B_0 = \) <span id="g-init-B0">8</span> blocks: the kernel shuffles the identity permutation under MT19937 and assigns block \(i \bmod B_0\) to vertex \(\sigma(i)\). The shuffle is backward Fisher-Yates, matching <code>std::shuffle</code> in the cpp tracer.</p>
+  <p>MCMC starts from any valid partition. The level-0 chain initialises with \(B_0 = \) <span id="g-init-B0">8</span> blocks: the kernel shuffles the identity permutation under MT19937 and assigns block \(i \bmod B_0\) to vertex \(\sigma(i)\). The shuffle is backward Fisher-Yates, matching the std::shuffle direction in the cpp tracer.</p>
   <div class="graph" id="g-init">
     <div class="graph-chrome">
       <span>random init &middot; \(\Sigma_0 = \) <span id="g-init-S0">·</span> nats (level 0)</span>
@@ -74,7 +76,7 @@
       <span class="step-label">re-runs the chain &middot; init + 20 sweeps</span>
     </div>
   </div>
-  <p>\(\Sigma_0\) is large because the random partition is uninformative: edges cross block boundaries roughly uniformly, the sparse-entropy term gets no concentration discount, and the chain still pays the full edges-DL + partition-DL + degree-DL cost. MCMC's job is to push \(\Sigma\) down by re-routing nodes.</p>
+  <p>\(\Sigma_0\) is the level-0 DC entropy at the random init; the kernel also computes the level-1+ contributions in the background but the walker traces level 0 only. MCMC's job at level 0 is to push the level-0 \(\Sigma\) down by re-routing nodes into blocks where their edge neighbourhoods cohere; the upper levels then absorb the residual structure on the rebuild.</p>
 </section>
 
 <!-- ─────────── Stage 2 · MCMC walker ─────────── -->
@@ -84,11 +86,12 @@
   <p>One sweep visits every level-0 vertex once in shuffled order. Each visit runs four steps:</p>
   <ol>
     <li>Build the candidate pool: every currently non-empty block at level 0, plus one fresh empty slot when the vertex's current block holds more than one member.</li>
-    <li>Sample a target uniformly from the pool (the \(c \to \infty\) limit of graph-tool's <code>sample_block</code>; the canonical proposal weights candidates by neighbour-block frequencies).</li>
-    <li>Compute \(\Delta\Sigma\) for the move via <code>virtualMove</code>: apply the move on a transient state, recompute the subset entropy that touches the two blocks, revert.</li>
-    <li>Accept with \(\min(1, e^{-\beta\Delta\Sigma})\) at \(\beta = 1\). On accept, commit; on reject, leave the partition unchanged.</li>
+    <li>Sample a target uniformly from the pool (the \(c \to \infty\) limit of Peixoto's local-neighbourhood proposal).</li>
+    <li>Compute \(\Delta\Sigma\) for the move via the subset-entropy delta on the level-0 DC entropy.</li>
+    <li>Accept with probability \(\min(1, e^{-\beta\Delta\Sigma})\) at \(\beta = 1\). On accept, commit; on reject, leave the partition unchanged.</li>
   </ol>
-  <p>Moves with \(\Delta\Sigma \le 0\) always commit (the RNG draw is skipped to keep the stream aligned with the cpp tracer). Moves with \(\Delta\Sigma > 0\) commit with exponentially-decaying probability, which gives the chain room to walk over saddle points. The kernel composes <code>NestedBlockState</code> over the level-0 mode partition: level \(l + 1\) is a flat NDC <code>BlockState</code> on the level-\(l\) block-multigraph (vertices = non-empty level-\(l\) blocks, edges = level-\(l\) \(e_{rs}\) counts). Per-level MCMC and joint multi-level inference exist in the kernel and the cpp tracer; the walker on this page shows only the level-0 trajectory.</p>
+  <p>The \(\Delta\Sigma\) computed at each visit is the level-0 delta only. The upper-level contributions to \(\Sigma_{\text{nested-DC}}\) are deterministic given the level-0 partition (the upper-level rebuild path takes the updated \(e^{(0)}_{rs}\) matrix and produces the level-1 graph), but they are not part of the per-visit acceptance ratio. In plain terms: the level-0 sweep optimises the level-0 likelihood under the level-0 prior; the upper levels see the level-0 mode partition after the sweep and adjust their own partitions during the next round-robin pass. Two properties. The single-level acceptance ratio is what makes the chain factorise across levels; if the per-visit acceptance included the upper-level rebuild costs, each level-0 move would require a full upper-level recompute (O(\(N \log N\)) per visit). And the round-robin pattern guarantees the chain still samples the joint posterior asymptotically; the per-level MH moves are valid Gibbs-style updates of the level's conditional posterior given the other levels.</p>
+  <p>Moves with \(\Delta\Sigma \le 0\) always commit and the kernel does not draw the uniform random sample (the RNG stream stays aligned with the cpp tracer at exact ties). Moves with \(\Delta\Sigma > 0\) commit with probability exponentially decaying in the cost.</p>
   <div class="graph" id="g-mcmc">
     <div class="graph-chrome">
       <span><span id="g-mcmc-status">visit · &middot; · &middot;</span></span>
@@ -107,7 +110,7 @@
   <div id="g-mcmc-panel"></div>
   <div class="callout">
     <div class="tag">how the hierarchy composes</div>
-    <p>Level 0's mode partition collapses into the level-1 graph: vertices are the non-empty level-0 blocks renumbered \(0\ldots B_{\text{ne}}-1\), edges carry the level-0 \(e_{rs}\) counts as weights, and self-loops carry \(e_{rr}/2\) per the doubled-diagonal convention. Level 1 is itself a flat NDC <code>BlockState</code> over that smaller multigraph. The nested total \(\Sigma_{\text{nested}} = \sum_l \Sigma_l\) (self-consistent across levels). The walker on this page only animates level 0; the full multi-level e_rs propagation runs end-to-end in <code>nested_state.js</code> and the cpp tracer matches it byte-for-byte under the 3-tier stress panel.</p>
+    <p>Level 0's mode partition collapses into the level-1 graph: vertices are the non-empty level-0 blocks renumbered \(0 \ldots B_{\text{ne}} - 1\), edges carry the level-0 \(e_{rs}\) counts as weights, and self-loops carry \(e_{rr}/2\) per the doubled-diagonal convention. Level 1 is itself a flat NDC BlockState over that smaller multigraph. The nested total \(\Sigma_{\text{nested-DC}} = \Sigma^{(0)}_{\text{DC}} + \sum_{l \ge 1} \Sigma^{(l)}_{\text{NDC}}\) is self-consistent across levels. The walker on this page animates level 0; the full multi-level \(e_{rs}\) propagation runs end-to-end in the kernel and the cpp tracer matches it byte-for-byte under the 3-tier stress panel.</p>
   </div>
 </section>
 
@@ -115,7 +118,7 @@
 <section class="stage">
   <div class="stage-num">stage 3 &middot; equilibration</div>
   <h2>\(\Sigma\) drops from <span id="g-eq-S">·</span>; \(B\) shifts from <span id="g-eq-B">·</span>.</h2>
-  <p>The trace plots level-0 \(\Sigma\) (blue, left axis) and the number of non-empty level-0 blocks \(B\) (ochre, right axis) after each sweep. The chain has equilibrated when both stop drifting. Upper-level \(\Sigma\) contributions are not animated on this page.</p>
+  <p>The trace plots level-0 \(\Sigma\) (blue, left axis) and the number of non-empty level-0 blocks \(B\) (ochre, right axis) after each sweep. Upper-level \(\Sigma\) contributions are computed by the kernel but are not animated.</p>
   <div class="graph" id="g-eq">
     <div class="graph-chrome">
       <span>per-sweep &middot; level-0 \(\Sigma\) and \(B\) over the chain</span>
@@ -123,7 +126,7 @@
     </div>
     <div class="graph-canvas" id="g-eq-cy" style="height: 240px"></div>
   </div>
-  <p>A still-falling trace at the right edge means the chain has not equilibrated and the sweep count is too low. On this fixture 20 sweeps usually settle the chain.</p>
+  <p>A still-falling trace at the right edge means the chain has not equilibrated and the sweep count is too low. On this fixture 20 sweeps usually settle the chain. The hierarchy adds a small overhead to wall-clock convergence (the per-sweep round-robin spends some of its budget at higher levels), but on a 32-node fixture the level-0 trajectory closely matches the <a href="./sbm-flat-dc.html">flat-dc page</a>.</p>
 </section>
 
 <!-- ─────────── Stage 4 · Final ─────────── -->
@@ -147,12 +150,29 @@
   </table>
   <div class="callout">
     <div class="tag">on this fixture, by region</div>
-    <p>A's \(K_5\) almost always anchors a level-0 block: the internal edges are dense, so peeling A's hub away from its periphery pays a steep sparse-entropy cost that DC has nothing else to absorb. B's bridge often stays bridged; C's two 3-cycles split into two blocks (no edges between them); D is seed-dependent. Under nested, the upper levels would package A + D into one super-block when the cross-edges between them are dense relative to other inter-block pairs, but level 0 alone reads the same as the flat-dc page on this fixture.</p>
+    <p>A's \(K_5\) almost always anchors a level-0 block: the internal edges are dense, so peeling A's hub away from its periphery pays a steep sparse-entropy cost that DC absorbs through the model. B's bridge often stays bridged; C's two 3-cycles split into two blocks (no edges between them); D is seed-dependent. Under nested, the upper levels would package A and D into one super-block when the cross-edges between them are dense relative to other inter-block pairs, but level 0 alone reads the same as the <a href="./sbm-flat-dc.html">flat-dc page</a> on this fixture.</p>
+  </div>
+  <div class="callout">
+    <div class="tag">contrast against the NDC sister page</div>
+    <p>The <a href="./sbm-nested-ndc.html">nested-ndc page</a> walks the same fixture with NDC entropy at every level (including level 0). On A, the level-0 NDC entropy pays the same hub-vs-leaf penalty as the flat-ndc page, and the chain often peels node 0 into its own block at level 0. The nested-DC vs. nested-NDC \(\Delta\Sigma\) on this fixture is in the same ballpark as the flat-DC vs. flat-NDC gap, plus or minus a few nats for the level-1+ contributions. The <a href="./sbm-nested-best.html">nested-best page</a> surfaces the comparison directly.</p>
   </div>
   <div class="callout warn">
     <div class="tag">caveat &middot; level-0 walker only</div>
-    <p>This page animates only the level-0 MCMC walker. The kernel composes <code>NestedBlockState</code> across all levels end-to-end and the cpp tracer matches it byte-for-byte; surfacing upper-level walkers in the page UI is on the follow-up. The bottom-line caveat is that the partition shown is the level-0 mode, not the fully-coupled nested fit; cross-check vs. graph-tool's nested output via <code>minimize_nested_blockmodel_dl</code> is on the same follow-up.</p>
+    <p>This page animates only the level-0 MCMC walker. The kernel composes the full NestedBlockState across all levels end-to-end and the cpp tracer matches it byte-for-byte; surfacing upper-level walkers in the page UI is on the follow-up. Cross-check vs. graph-tool's nested output via minimize_nested_blockmodel_dl is on the same follow-up.</p>
   </div>
+</section>
+
+<!-- ─────────── Stage 5 · Cross-links ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 5 &middot; sibling pages</div>
+  <h2>Where to look next.</h2>
+  <ul>
+    <li><a href="./sbm-nested-best.html">SBM-nested-best</a>. The nested-family anchor; covers the hierarchical construction, the round-robin MCMC, the resolution-limit lift, and the contrast against the flat family.</li>
+    <li><a href="./sbm-nested-ndc.html">SBM-nested-ndc</a>. The NDC sister variant; NDC entropy at every level.</li>
+    <li><a href="./sbm-flat-dc.html">SBM-flat-dc</a>. The flat counterpart of this variant; same level-0 walker without the upper levels.</li>
+    <li><a href="./sbm-flat-best.html">SBM-flat-best</a>. The flat-family anchor.</li>
+    <li><a href="./leiden-cpm.html">Leiden-CPM</a>. The CPM alternative to the Bayesian framing.</li>
+  </ul>
 </section>
 
 <div id="kin"></div>

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>SBM-flat-ndc &middot; non-degree-corrected flat SBM | Community Detection Algorithms</title>
 <link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐖</text></svg>">
-<meta name="description" content="Non-degree-corrected flat SBM walked one Metropolis-Hastings move at a time on a 32-node fixture. Per-stage viz over a faithful graph-tool BlockState port.">
+<meta name="description" content="Walker for the non-degree-corrected flat stochastic block model on a 32-node fixture. Per-vertex Metropolis-Hastings; degree heterogeneity sits in the data fit.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
@@ -20,22 +20,26 @@
   <div class="kicker">community detection &middot; bayesian inference</div>
   <h1><em>SBM-flat-ndc</em></h1>
   <p class="fullname">non-degree-corrected flat stochastic block model</p>
-  <p class="sub">Posit an exchangeable-within-block generative model; minimise the description length \(\Sigma\) by single-vertex Metropolis-Hastings.</p>
+  <p class="sub">Per-vertex Metropolis-Hastings over the microcanonical posterior under an exchangeable-within-block prior. Every node in a block is interchangeable; degree heterogeneity surfaces in the data fit.</p>
 </header>
 
 <div class="uc-banner">
-  <strong>Draft.</strong> Walker over a JS port of graph-tool's flat <code>BlockState</code> at <code>deg_corr=False</code>. Sparse-entropy formulas verbatim from <code>graph_blockmodel_entropy.hh</code>; DL priors from Peixoto's review (<a href="https://doi.org/10.1002/9781119483298.ch11" target="_blank" rel="noopener">10.1002/9781119483298.ch11</a>) Eq 17 + 23. Proposal is uniform over current blocks (the \(c \to \infty\) limit of graph-tool's <code>sample_block</code>). Byte-equal to the cpp tracer under matched MT19937 across the 17-fixture 3-tier stress panel; cross-check vs. canonical graph-tool output is on the follow-up.
+  <strong>Draft.</strong> Walker for the NDC variant of the flat SBM. The family-level Bayesian framing, the description-length anatomy, and the cross-algorithm contrasts live on the <a href="./sbm-flat-best.html">SBM-flat-best</a> anchor page; this page focuses on the NDC-specific entropy form and what it does on the 32-node fixture. Byte-equal to the cpp tracer under matched MT19937 across the 17-fixture 3-tier stress panel.
 </div>
 
 <section class="hook">
-  <p>Community detection as Bayesian inference: posit a generative model where each node carries a block label \(b_i \in \{1,\dots,B\}\), the model freezes the count of edges between every pair of blocks \(e_{rs}\), and the actual graph is a uniform draw from the simple graphs that meet those constraints. The inference problem is the inverse: given the observed graph, find the partition that compresses it the most.</p>
-  <p>The microcanonical formulation gives a clean target: the partition that minimises the description length \(\Sigma = -\log P(\boldsymbol{A}, \boldsymbol{e}, \boldsymbol{b})\). Each candidate partition carries a cost in nats, split between data fit (sparse entropy of \(\boldsymbol{e}\)) and model complexity (writing down \(B\), \(\boldsymbol{b}\), \(\boldsymbol{e}\)). A single-block partition fits the data perfectly but pays no model-cost discount; an \(N\)-singleton partition spends its whole budget on writing down which node is where. The minimum sits in the middle.</p>
-  <p>The NDC variant does not condition on the observed degree sequence. The model treats every node in a block as exchangeable, so degree heterogeneity ends up in the data-fit term rather than the model. On networks with heavy-tailed degrees, NDC tends to split hubs and leaves into separate blocks even when their connection neighbourhoods coincide. The sister DC page handles the same fixture under a degree-conditional prior. The walker pushes \(\Sigma\) down by single-vertex MH moves: pick a vertex, sample a target block uniformly, compute \(\Delta\Sigma\), accept with \(\min(1, e^{-\beta\Delta\Sigma})\) at \(\beta = 1\). Iterate until \(\Sigma\) stops dropping.</p>
+  <p>The non-degree-corrected flat SBM does not condition on the degree sequence. In plain terms: the model treats every node in a block as exchangeable, with no special handling for hubs vs. leaves. Per-node degrees show up in the likelihood through the block-level edge sums, not as fixed auxiliary data. The DC sister (<a href="./sbm-flat-dc.html">flat-dc</a>) takes the opposite stance, lifting degrees into the model conditioning so that high-degree and low-degree nodes can share a block without paying a per-hub penalty.</p>
+  <p>The description length the chain minimises is</p>
+  <p style="text-align:center">\(\Sigma_{\text{NDC}}(\boldsymbol{b}) = S_{\text{NDC}}(\boldsymbol{e}, \boldsymbol{b}) + L_e(B, E) + L_p(\boldsymbol{b})\).</p>
+  <p>Three terms, not four. The NDC variant pays the sparse-entropy data fit \(S_{\text{NDC}}\), the edges DL \(L_e\), and the partition DL \(L_p\); the uniform degree DL that the DC variant carries is absent here, because the NDC formulation does not condition on \(\boldsymbol{k}\). In plain terms: the partition is responsible for explaining degrees through block membership, not through a separate cost term. Two properties. The NDC variant tends to split hubs into singleton blocks when no other community absorbs the hub's degree mass; this is the signature failure mode the DC variant was introduced (Karrer and Newman 2011) to fix. And the NDC sparse-entropy formula falls out of treating block members as exchangeable Bernoulli sources, which makes the model invariant under relabelling of nodes inside a block; this is the right assumption when degrees are roughly homogeneous within communities, and the wrong one on the comdet fixture's A community.</p>
+  <p>The NDC sparse entropy explicitly is</p>
+  <p style="text-align:center">\(S_{\text{NDC}} = \sum_r e_r \log n_r - \sum_{r < s} \log(e_{rs}!) - \sum_r \Big[ \log\!\big((e_{rr}/2)!\big) + (e_{rr}/2)\log 2 \Big]\).</p>
+  <p>In plain terms: the first sum prices the per-stub block lookup under uniform-within-block placement (every internal stub picks one of the \(n_r\) members independently, paying \(\log n_r\) per stub); the second and third are identical to the DC form. The difference between DC and NDC is concentrated in the vertex factor: DC pays \(\log(e_r!)\), NDC pays \(e_r \log n_r\). Two properties. The NDC vertex factor is what Karrer and Newman 2011 named as the source of hub-leaf splitting; an internal edge incident to a degree-9 hub in a 12-member block pays \(9 \log 12 \approx 22.4\) nats, where DC under the same node pays \(\log(9!) \approx 12.8\) nats. The 9.6-nat-per-hub gap is the signature DC-vs-NDC \(\Delta\Sigma\) signal at hub-anchored partitions. And the NDC formula is what falls out of the Poisson stochastic block model in the dense-graph limit, so it is the form most papers from the pre-2011 literature use; DC is the principled correction for the heavy-tailed graphs the literature mostly studies.</p>
   <div class="defs">
-    <div><span class="term">sparse entropy (NDC)</span> the data-fit term: \(\sum_r e_r \log n_r - \sum_{r<s} \log(e_{rs}!) - \sum_r [\log((e_{rr}/2)!) + (e_{rr}/2)\log 2]\). The vertex factor \(e_r \log n_r\) replaces DC's \(\log(e_r!)\) (Peixoto Eq 22). Drops when edges concentrate inside blocks of similar size.</div>
-    <div><span class="term">edges DL</span> the cost of writing down \(\boldsymbol{e}\) given \(B\): \(\log\binom{B(B+1)/2 + E - 1}{E}\). Grows with \(B\); penalises over-splitting.</div>
-    <div><span class="term">partition DL</span> the cost of writing down which node is in which block: \(\log N! - \sum_r \log n_r! + \log\binom{N-1}{B-1} + \log N\). Peixoto's Bayesian-hierarchical prior, Eq 17.</div>
-    <div><span class="term">no degree DL</span> NDC does not condition on the degree sequence; the per-node degree cost is absorbed into the data-fit term rather than priced separately. Absent on this page; present on the sister DC page.</div>
+    <div><span class="term">NDC sparse entropy</span> \(S_{\text{NDC}} = \sum_r e_r \log n_r - \sum_{r<s} \log(e_{rs}!) - \sum_r [\log((e_{rr}/2)!) + (e_{rr}/2)\log 2]\). The data-fit term under exchangeable-within-block assumptions.</div>
+    <div><span class="term">edges DL</span> \(L_e = \log\binom{B(B+1)/2 + E - 1}{E}\). Same as in DC; cost of writing the matrix once \(B\) is known.</div>
+    <div><span class="term">partition DL</span> \(L_p = \log(N!) - \sum_r \log(n_r!) + \log\binom{N - 1}{B - 1} + \log N\). Same as in DC.</div>
+    <div><span class="term">no degree DL</span> NDC does not condition on the degree sequence; the per-node degree cost is folded into the data-fit term through the \(e_r \log n_r\) form. Absent here; present on the <a href="./sbm-flat-dc.html">DC sister page</a>.</div>
   </div>
 </section>
 
@@ -43,7 +47,7 @@
 <section class="stage">
   <div class="stage-num">stage 0 &middot; input</div>
   <h2>The 32-node fixture, painted by planted ground-truth.</h2>
-  <p>The comdet gallery shares one small graph across every algorithm. <em>A</em> (12 nodes, blue) is a \(K_5\) on \(\{0..4\}\) plus a 7-node periphery hanging off the \(K_5\). <em>B</em> (8 nodes, ochre) is two \(K_4\)s bridged by the single edge \((15,16)\). <em>C</em> (6 nodes, green) is two 3-cycles with no edge between them, both labelled the same in ground-truth. <em>D</em> (4 nodes, plum) is two 2-cliques joined by \((27,28)\). Outliers 30 + 31 dangle off A.</p>
+  <p>The comdet gallery shares one small graph across every algorithm. <em>A</em> (12 nodes, blue) is a \(K_5\) on \(\{0..4\}\) plus a 7-node periphery hanging off the \(K_5\). <em>B</em> (8 nodes, ochre) is two \(K_4\)s bridged by the single edge \((15, 16)\). <em>C</em> (6 nodes, green) is two 3-cycles with no edge between them, both labelled the same in ground-truth. <em>D</em> (4 nodes, plum) is two 2-cliques joined by \((27, 28)\). Outliers 30 and 31 dangle off A.</p>
   <div class="graph" id="g-input">
     <div class="graph-chrome">
       <span>32 nodes &middot; 52 edges &middot; 4 planted communities + 2 outliers</span>
@@ -51,14 +55,14 @@
     </div>
     <div class="graph-canvas" id="g-input-cy"></div>
   </div>
-  <p>The SBM has no connectivity preference, so C (two disconnected triangles labelled identically) tests how the model handles a disconnected community. Without degree correction, A's hub (node 0, degree 9) often peels off into its own block: the model has no way to absorb the degree gap between the \(K_5\) vertices and the periphery leaves under an exchangeable-within-block prior.</p>
+  <p>What's interesting about this fixture from the NDC angle. A's hub at node 0 has degree 9 inside a block of 12 nodes; under NDC the block pays \(9 \log 12 \approx 22.4\) nats for the hub's stubs alone, where the rest of the block's leaves pay only \(2 \log 12 \approx 5\) nats each. The hub is the model's most expensive vertex, and the chain often finds it cheaper to peel node 0 into its own block where it costs \(9 \log 1 = 0\) nats (a singleton has \(n_r = 1\) so \(\log n_r = 0\) on every internal stub). The cost in the data fit is offset against the cost in the partition DL (paying for one more block) and the edges DL (paying for a bigger \(\boldsymbol{e}\) matrix); on this fixture the trade tends to favour peeling under most seeds. The DC variant absorbs this gap into the model conditioning and reads A as one cohesive block.</p>
 </section>
 
 <!-- ─────────── Stage 1 · Random init ─────────── -->
 <section class="stage">
   <div class="stage-num">stage 1 &middot; random init</div>
   <h2>Random partition with \(B_0\) blocks; \(\Sigma_0\) on display.</h2>
-  <p>MCMC starts from any valid partition. The chain initialises with \(B_0 = \) <span id="g-init-B0">8</span> blocks: the kernel shuffles the identity permutation under MT19937 and assigns block \(i \bmod B_0\) to vertex \(\sigma(i)\). The shuffle is backward Fisher-Yates, matching <code>std::shuffle</code> in the cpp tracer.</p>
+  <p>MCMC starts from any valid partition. The chain initialises with \(B_0 = \) <span id="g-init-B0">8</span> blocks: the kernel shuffles the identity permutation under MT19937 and assigns block \(i \bmod B_0\) to vertex \(\sigma(i)\). The shuffle is backward Fisher-Yates, matching the std::shuffle direction in the cpp tracer.</p>
   <div class="graph" id="g-init">
     <div class="graph-chrome">
       <span>random init &middot; \(\Sigma_0 = \) <span id="g-init-S0">·</span> nats</span>
@@ -74,7 +78,7 @@
       <span class="step-label">re-runs the chain &middot; init + 20 sweeps</span>
     </div>
   </div>
-  <p>\(\Sigma_0\) is large because the random partition is uninformative: edges cross block boundaries roughly uniformly, the sparse-entropy term gets no concentration discount, and the chain still pays the full edges-DL + partition-DL cost. MCMC's job is to push \(\Sigma\) down by re-routing nodes.</p>
+  <p>\(\Sigma_0\) is large because the random partition is uninformative: edges cross block boundaries roughly uniformly, the sparse-entropy term gets no concentration discount, and the chain still pays the full edges DL + partition DL. MCMC's job is to push \(\Sigma\) down by re-routing nodes; the NDC variant in particular has a strong incentive to either group hubs with other hubs or peel them into singletons, both of which lower the \(e_r \log n_r\) penalty.</p>
 </section>
 
 <!-- ─────────── Stage 2 · MCMC walker ─────────── -->
@@ -84,11 +88,12 @@
   <p>One sweep visits every vertex once in shuffled order. Each visit runs four steps:</p>
   <ol>
     <li>Build the candidate pool: every currently non-empty block, plus one fresh empty slot when the vertex's current block holds more than one member.</li>
-    <li>Sample a target uniformly from the pool (the \(c \to \infty\) limit of graph-tool's <code>sample_block</code>; the canonical proposal weights candidates by neighbour-block frequencies).</li>
-    <li>Compute \(\Delta\Sigma\) for the move via <code>virtualMove</code>: apply the move on a transient state, recompute the subset entropy that touches the two blocks, revert.</li>
-    <li>Accept with \(\min(1, e^{-\beta\Delta\Sigma})\) at \(\beta = 1\). On accept, commit; on reject, leave the partition unchanged.</li>
+    <li>Sample a target uniformly from the pool (the \(c \to \infty\) limit of Peixoto's local-neighbourhood proposal).</li>
+    <li>Compute \(\Delta\Sigma\) for the move via the subset-entropy delta: apply the move on a transient state, recompute only the entropy terms that touch the two blocks involved, revert.</li>
+    <li>Accept with probability \(\min(1, e^{-\beta\Delta\Sigma})\) at \(\beta = 1\). On accept, commit; on reject, leave the partition unchanged.</li>
   </ol>
-  <p>Moves with \(\Delta\Sigma \le 0\) always commit (the RNG draw is skipped to keep the stream aligned with the cpp tracer). Moves with \(\Delta\Sigma > 0\) commit with exponentially-decaying probability, which gives the chain room to walk over saddle points. Over enough sweeps the chain samples from the posterior \(P(\boldsymbol{b} \mid \boldsymbol{A}) \propto e^{-\Sigma}\); on the 32-node fixture, 20 sweeps reaches the mode.</p>
+  <p>The subset-entropy delta for NDC has the same closed-form structure as for DC, but the vertex factor is \(e_r \log n_r\) instead of \(\log(e_r!)\). In plain terms: the kernel maintains \(n_r\) and \(e_r\) for every block and computes the before-after difference of \(e_r \log n_r\) terms directly. Two properties. The NDC delta is also \(O(\deg(v) + B_{\text{ne}})\) per visit, so the per-sweep complexity is the same as for DC. And the NDC vertex factor is sensitive to the exact value of \(n_r\); the change in \(n_r\) by 1 when a vertex moves can shift \(e_r \log n_r\) by several nats per stub, which is why NDC's per-visit \(|\Delta\Sigma|\) values tend to be larger than DC's on the same partition.</p>
+  <p>Moves with \(\Delta\Sigma \le 0\) always commit and the kernel does not draw the uniform random sample (the RNG stream stays aligned with the cpp tracer at exact ties). Moves with \(\Delta\Sigma > 0\) commit with probability exponentially decaying in the cost. Over enough sweeps the chain samples from the posterior \(P(\boldsymbol{b} \mid \boldsymbol{A}) \propto e^{-\Sigma}\); on the 32-node fixture, 20 sweeps reach the mode under most seeds.</p>
   <div class="graph" id="g-mcmc">
     <div class="graph-chrome">
       <span><span id="g-mcmc-status">visit · &middot; · &middot;</span></span>
@@ -103,11 +108,11 @@
       <span class="step-label">visit <b id="g-mcmc-cur">0</b> / <span id="g-mcmc-total">0</span></span>
     </div>
   </div>
-  <p>The side panel lists every candidate block considered for the current vertex with its exact \(\Delta\Sigma\). The picked target shows mint when the proposal was accepted, dim grey when rejected. The vertex's current block is marked "current". A negative \(\Delta\Sigma\) means the move improves \(\Sigma\); a small positive \(\Delta\Sigma\) is gambler-friendly (likely accepted at \(\beta = 1\)); a large positive \(\Delta\Sigma\) is almost always rejected.</p>
+  <p>The side panel below lists every candidate block considered for the current vertex with its exact \(\Delta\Sigma\). The picked target shows mint when the proposal was accepted, dim grey when rejected. The vertex's current block is marked "current". A negative \(\Delta\Sigma\) means the move improves \(\Sigma\); a small positive \(\Delta\Sigma\) is gambler-friendly (likely accepted at \(\beta = 1\)); a large positive \(\Delta\Sigma\) is almost always rejected.</p>
   <div id="g-mcmc-panel"></div>
   <div class="callout">
     <div class="tag">why MH instead of greedy</div>
-    <p>A pure greedy step (always take the best candidate) collapses to a local minimum quickly; \(\Sigma\) plateaus within one sweep at a partition that is roughly right but stuck. The stochastic acceptance trades a small uphill cost for the freedom to walk over saddle points. Graph-tool's <code>multilevel_mcmc_sweep</code> runs single-vertex MH alongside agglomerative merges that propose joining two whole blocks at once; the merges are what give the canonical sampler its fast convergence on large graphs. The walker on this page uses single-vertex moves only: same algorithm, less plumbing.</p>
+    <p>A pure greedy step (always take the best candidate) collapses to a local minimum quickly; \(\Sigma\) plateaus within one sweep at a partition that is roughly right but stuck. The stochastic acceptance trades a small uphill cost for the freedom to walk over saddle points. Graph-tool's canonical multilevel sweep runs single-vertex MH alongside agglomerative merges that propose joining two whole blocks at once; the merges give the canonical sampler its fast convergence on large graphs. The walker on this page uses single-vertex moves only.</p>
   </div>
 </section>
 
@@ -115,7 +120,7 @@
 <section class="stage">
   <div class="stage-num">stage 3 &middot; equilibration</div>
   <h2>\(\Sigma\) drops from <span id="g-eq-S">·</span>; \(B\) shifts from <span id="g-eq-B">·</span>.</h2>
-  <p>The trace plots \(\Sigma\) (blue, left axis) and the number of non-empty blocks \(B\) (ochre, right axis) after each sweep. The chain has equilibrated when both stop drifting. Early sweeps see big drops in \(\Sigma\) as obvious moves commit. Later sweeps oscillate as the chain explores partitions of similar quality near the posterior mode.</p>
+  <p>The trace plots \(\Sigma\) (blue, left axis) and the number of non-empty blocks \(B\) (ochre, right axis) after each sweep. The chain has equilibrated when both stop drifting.</p>
   <div class="graph" id="g-eq">
     <div class="graph-chrome">
       <span>per-sweep &middot; \(\Sigma\) and \(B\) over the chain</span>
@@ -123,7 +128,7 @@
     </div>
     <div class="graph-canvas" id="g-eq-cy" style="height: 240px"></div>
   </div>
-  <p>A still-falling trace at the right edge means the chain has not equilibrated and the sweep count is too low. On this fixture 20 sweeps usually settle the chain; rerolling the seed shows the equilibrium \(\Sigma\) is roughly stable but the equilibrium \(B\) wobbles by 1–2. Under NDC the wobble is wider than under DC because the model is more sensitive to hub-placement choices.</p>
+  <p>A still-falling trace at the right edge means the chain has not equilibrated and the sweep count is too low. On this fixture 20 sweeps usually settle the chain; rerolling the seed shows the equilibrium \(\Sigma\) is roughly stable but the equilibrium \(B\) wobbles by 1 or 2. Under NDC the wobble is wider than under DC because the model is more sensitive to hub-placement choices: the chain may switch between "hub in its own block" and "hub in A" several times before settling.</p>
 </section>
 
 <!-- ─────────── Stage 4 · Final ─────────── -->
@@ -147,12 +152,29 @@
   </table>
   <div class="callout">
     <div class="tag">on this fixture, by region</div>
-    <p>Without degree correction, A's hub (node 0, degree 9) often peels into its own block: NDC has no way to absorb the degree gap between the \(K_5\) vertices and the periphery leaves under an exchangeable-within-block prior. B's bridge often stays bridged: the SBM has no per-block min-cut threshold, so the single \((15,16)\) edge reads as evidence the two \(K_4\)s belong together. C's two 3-cycles split into two blocks under NDC — no edges between them, so any block containing both pays full sparse entropy with no concentration benefit. D's behaviour is seed-dependent.</p>
+    <p>Without degree correction, A's hub at node 0 often peels into its own block: NDC has no way to absorb the degree gap between the \(K_5\) vertices and the periphery leaves under an exchangeable-within-block prior. B's bridge often stays bridged: the SBM has no per-block min-cut threshold, so the single \((15, 16)\) edge reads as evidence the two \(K_4\)s belong together. C's two 3-cycles split into two blocks under NDC because there are no edges between them. D's behaviour is seed-dependent; NDC tends to split D more aggressively than DC because the model penalises the degree variance between D's interior nodes and its bridging nodes.</p>
+  </div>
+  <div class="callout">
+    <div class="tag">contrast against the DC sister page</div>
+    <p>The <a href="./sbm-flat-dc.html">flat-dc page</a> walks the same fixture under DC's \(\log(e_r!)\) vertex factor and its uniform degree DL. On A, DC keeps the hub at node 0 inside the rest of A; NDC tends to peel it. The DC vs. NDC \(\Delta\Sigma\) on this fixture is consistently around 10 to 13 nats in favour of DC, which under Peixoto 2017 §VII.A is "decisive". This is the expected ordering on any graph with heavy-tailed degrees: DC absorbs the heavy tail into the model, NDC pays for it through the data fit. The <a href="./sbm-flat-best.html">flat-best page</a> surfaces the comparison directly.</p>
   </div>
   <div class="callout warn">
     <div class="tag">caveat &middot; canonical cross-check pending</div>
-    <p>The JS kernel implements graph-tool's flat <code>BlockState</code> at <code>deg_corr=False</code> with exact-microcanonical entropy (lgamma forms), edges-DL + partition-DL priors, and uniform-random target proposal. Byte-equality vs. the cpp tracer holds across the 17-fixture 3-tier stress panel under MT19937. Bit-equality vs. unmodified graph-tool needs the pcg64 RNG port and is on the follow-up; treat the partitions shown here as the JS-leg mode, not as a guaranteed match for any specific canonical run.</p>
+    <p>The JS kernel implements graph-tool's flat BlockState at degCorr=False with exact microcanonical entropy (lgamma forms), edges DL + partition DL priors, and uniform-random target proposal. Byte-equality vs. the cpp tracer holds across the 17-fixture 3-tier stress panel under matched MT19937. Bit-equality vs. unmodified graph-tool needs the pcg64 RNG port and is on the follow-up; treat the partitions shown here as the JS-leg mode, not as a guaranteed match for any specific canonical run.</p>
   </div>
+</section>
+
+<!-- ─────────── Stage 5 · Cross-links ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 5 &middot; sibling pages</div>
+  <h2>Where to look next.</h2>
+  <ul>
+    <li><a href="./sbm-flat-best.html">SBM-flat-best</a>. The flat-family anchor; lecture-style coverage of the Bayesian framing, all three variants in one place.</li>
+    <li><a href="./sbm-flat-dc.html">SBM-flat-dc</a>. The DC sister variant that conditions on degrees. On hub-rich graphs DC wins decisively.</li>
+    <li><a href="./sbm-flat-pp.html">SBM-flat-pp</a>. The planted-partition variant that collapses the per-pair matrix into two scalars.</li>
+    <li><a href="./sbm-nested-ndc.html">SBM-nested-ndc</a>. The hierarchical counterpart of this variant.</li>
+    <li><a href="./leiden-cpm.html">Leiden-CPM</a>. The CPM alternative to the Bayesian framing.</li>
+  </ul>
 </section>
 
 <div id="kin"></div>
