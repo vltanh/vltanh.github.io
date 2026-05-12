@@ -68,19 +68,34 @@
   <div class="kicker">community detection &middot; primitive &middot; global minimum cut</div>
   <h1><em>VieCut</em></h1>
   <p class="fullname">cactus mincut with most-balanced tie-break &middot; Henzinger, Noe, Schulz, Strash 2018</p>
-  <p class="sub">The global-minimum-cut engine sitting under <a href="./wcc.html">WCC</a> and <a href="./cm.html">CM</a>. Builds the cactus tree that encodes every minimum cut, then picks the cut that splits the graph most evenly.</p>
+  <p class="sub">The global-minimum-cut engine sitting under <a href="./wcc.html">WCC</a> and <a href="./cm.html">CM</a>. Builds the cactus tree that encodes every minimum cut, then picks the cut that splits the graph most evenly. <a href="./cc.html">CC</a> sits on the trivial-cut side of the same family: it accepts a cluster whenever the mincut is zero (i.e. the cluster is already disconnected).</p>
 </header>
 
 <div class="uc-banner">
-  <strong>Draft.</strong> First-pass walker over a JavaScript port of VieCut (Henzinger et al. 2018, ALENEX). The kernel under this page owns the seven phases of <code>cactus_mincut</code> and is shared with the <a href="./wcc.html">WCC</a> and <a href="./cm.html">CM</a> pages as their mincut backend. Implementation detail and source-code pointers live in the <a href="../../docs/algorithms/viecut.md">technical reference</a>.
+  <strong>Draft.</strong> First-pass walker over a JavaScript port of VieCut (Henzinger et al. 2018, ALENEX). The kernel under this page owns the cactus mincut pipeline and is shared with the <a href="./wcc.html">WCC</a> and <a href="./cm.html">CM</a> pages as their mincut backend. Implementation detail and source-code pointers live in the <a href="../../docs/algorithms/viecut.md">technical reference</a>.
 </div>
 
 <section class="hook">
-  <p>Take a connected graph. The <em>minimum cut</em> is the smallest set of edges you can remove to disconnect it. Write \(\delta(S)\) for the set of edges with exactly one endpoint in \(S \subset V\). The minimum cut value is</p>
-  <p style="text-align:center">\(\lambda(G) = \min_{\varnothing \neq S \subsetneq V}\; \sum_{e \in \delta(S)} w_e\).</p>
-  <p>The cardinality of any minimising \(\delta(S)\) (when edge weights are unit) is the graph's edge connectivity. Any question of the form "is this cluster well-connected enough to keep as one piece" reduces to a minimum-cut query, which is why <a href="./wcc.html">WCC</a> and <a href="./cm.html">CM</a> call mincut on every cluster they inspect.</p>
-  <p>Two things make the global-mincut problem harder than it looks. First, \(2^{|V|-1}\) subsets to consider in the naive picture. Second, the minimum cut is often not unique: any pendant node sits behind a cut of size 1, but so does a genuine community boundary, and choosing among them changes what the surrounding algorithm sees next.</p>
+  <p>Take a connected graph \(G = (V, E)\) with non-negative edge weights \(w_e\). A <em>cut</em> is any non-trivial vertex bipartition \((S, V \setminus S)\); its cut-set is the edges with exactly one endpoint on each side, written \(\delta(S)\), and its weight is</p>
+  <p style="text-align:center">\(w(\delta(S)) = \sum_{e \in \delta(S)} w_e\).</p>
+  <p>In words: walk the boundary of \(S\), add up the weights of the edges that cross it. The <em>global minimum cut</em> is the smallest such weight over every choice of \(S\):</p>
+  <p style="text-align:center">\(\lambda(G) = \min_{\varnothing \neq S \subsetneq V}\; w(\delta(S))\).</p>
+  <p>In plain terms: \(\lambda(G)\) is the cheapest way to break \(G\) into two pieces. Two interesting properties: when edge weights are unit, \(\lambda(G)\) coincides with the edge connectivity of \(G\); and any vertex \(v\) sits behind a cut of weight \(\deg(v)\) consisting of all its incident edges, so \(\lambda(G) \le \min_v \deg(v)\) is a free upper bound the algorithm can start from.</p>
+  <p>The dual quantity is the max-flow. For any source \(s\) and sink \(t\), the maximum flow from \(s\) to \(t\) in \(G\) equals the minimum \((s, t)\)-cut by the max-flow-min-cut theorem (Ford-Fulkerson 1956); and the global minimum cut equals the minimum over all \((s, t)\)-cuts. That duality is what lets VieCut's recursive cactus build use a single \((s, t)\) max-flow probe per recursion frame to decide whether a candidate edge can be on any minimum cut.</p>
+  <p>Any question of the form "is this cluster well-connected enough to keep as one piece" reduces to a minimum-cut query, which is why <a href="./wcc.html">WCC</a> and <a href="./cm.html">CM</a> call mincut on every cluster they inspect. <a href="./cc.html">CC</a> uses only the degenerate \(\lambda = 0\) case: it splits a cluster whenever the cluster is already disconnected.</p>
+  <p>Two things make the global-mincut problem harder than it looks. First, \(2^{|V|-1}\) subsets to consider in the naive picture. Second, the minimum cut is often not unique: any pendant node sits behind a cut of weight 1, but so does a genuine community boundary, and choosing among them changes what the surrounding algorithm sees next.</p>
   <p>VieCut handles both. It builds the <em>cactus tree</em> (Karzanov 1973), a compact data structure whose tree edges and tree cycles enumerate every minimum cut of the original graph, then runs a DFS over the cactus to pick the cut whose two sides come closest to equal in node count.</p>
+</section>
+
+<section class="hook">
+  <h2>The classical baseline: Stoer-Wagner.</h2>
+  <p>Before VieCut, the standard textbook recipe for the global minimum cut on a weighted undirected graph was Stoer and Wagner's 1997 algorithm. Run a <em>maximum-adjacency ordering</em> of the vertices: pick any starting vertex, then repeatedly add to the order the vertex with the highest summed weight of edges back into the already-ordered set; the second-to-last and last vertex in this order define an \((s, t)\) pair, and the cut isolating the last vertex from everything else is a minimum \((s, t)\)-cut. Contract \(s\) and \(t\) into a single super-vertex, recurse on the smaller graph, keep the lightest cut seen across all \(n - 1\) phases. That is \(\lambda(G)\).</p>
+  <p>The Stoer-Wagner running time is</p>
+  <p style="text-align:center">\(O(|V| \cdot |E| + |V|^2 \log |V|)\).</p>
+  <p>In plain terms: every phase scans every edge once and maintains a max-adjacency priority queue, and there are \(|V| - 1\) phases. Two interesting properties: it never invokes max-flow, so the constants are small; but the \(|V| \cdot |E|\) factor is unforgiving on dense graphs, and the algorithm produces one minimum cut, not the whole family.</p>
+  <p>The proof of correctness is short. After each maximum-adjacency phase, the last two vertices added are \(s\) and \(t\), and the cut-of-phase isolating \(t\) has weight equal to the sum of \(t\)'s incident weights, which is the minimum \((s, t)\)-cut. Either this minimum is a global minimum (and the phase records it), or every global minimum cut keeps \(s\) and \(t\) on the same side. In the second case, contracting \(\{s, t\}\) into one vertex preserves every global minimum cut. Recursion finds the global minimum across the \(|V| - 1\) phases.</p>
+  <p>VieCut improves on Stoer-Wagner along three axes. It contracts aggressively before running anything expensive (NOI capforest, Padberg-Rinaldi tests, degree-1 trivia), so the graph going into max-flow is much smaller than \(|V|\). It uses Goldberg-Tarjan push-relabel max-flow per \((s, t)\) probe inside Karzanov's cactus construction, where each probe is cheap because the graph has already been contracted. And it returns the cactus, which encodes every minimum cut at once, so a downstream selector can pick the one with the best balance instead of being handed an arbitrary single cut.</p>
+  <p>A useful rule of thumb on this gallery's empirical inputs: Stoer-Wagner spends most of its time recomputing the maximum-adjacency ordering on graphs that have already been mostly contracted. VieCut's NOI capforest is structurally the same ordering, but only run once per outer pass, and the contractions accumulate across passes. On a cluster of 5000 nodes, Stoer-Wagner runs the ordering 4999 times; VieCut's outer loop typically converges in 3 to 5 passes.</p>
 </section>
 
 <section class="hook">
@@ -91,7 +106,18 @@
     <li>each tree edge of \(T\) corresponds to a cut of weight exactly \(\lambda\); cutting that edge splits \(T\) into two pieces, and the union of original vertices on each side gives a minimum cut of \(G\);</li>
     <li>each cycle of \(T\) holds a family of cuts of weight \(\lambda\) obtained by cutting any two cycle edges; the original-vertex sides are read off the two cycle pieces.</li>
   </ul>
-  <p>So instead of enumerating exponentially many subsets of \(V\), VieCut builds one cactus and reads every minimum cut off it. The cactus has at most \(O(|V|)\) nodes, and any minimum cut on \(G\) corresponds to either one tree-edge cut or one two-cycle-edge cut on the cactus.</p>
+  <p>So instead of enumerating exponentially many subsets of \(V\), VieCut builds one cactus and reads every minimum cut off it. The cactus has at most \(O(|V|)\) nodes, and any minimum cut on \(G\) corresponds to either one tree-edge cut or one two-cycle-edge cut on the cactus. The number of distinct minimum cuts is at most \(\binom{|V|}{2}\), so the cactus is a much tighter representation than enumerating cuts directly.</p>
+  <p>A useful intuition: the cactus is to mincuts what the Gomory-Hu tree is to all-pairs max-flow. The Gomory-Hu tree compresses \(|V| \cdot (|V| - 1) / 2\) max-flow values into a tree on \(|V|\) nodes. The cactus compresses every minimum-weight cut into a tree-with-cycles on at most \(|V|\) nodes. Both rely on the same algebraic structure: cuts behave like a sub-modular lattice, and the lattice of minimum-value elements has a tree representation.</p>
+  <p>An example helps. Take the cycle graph \(C_4\) (four vertices, four unit-weight edges, one cycle). Every cut of \(C_4\) crosses at least two edges, so \(\lambda = 2\). The minimum cuts come in pairs: any two non-adjacent cycle edges form one. There are exactly two such pairs (the two diagonals of the cycle), so the cactus is a single 4-cycle on four cactus nodes (one per original vertex), with each cactus edge of weight 1; the cycle-pair rule recovers both cuts. Single 4-cycle on the cactus encodes both global mincuts; no tree edges appear.</p>
+  <p>Now take two disjoint triangles joined by a single bridge edge. The bridge is a single minimum cut of weight 1. The cactus has three cactus nodes: one for each triangle (each holds three original vertices), joined by one cactus tree edge of weight 1 representing the bridge. The cactus is a path, not a cycle, because there is exactly one minimum cut.</p>
+  <p>The general pattern: tree edges in the cactus correspond to "isolated" minimum cuts that cannot be obtained from another by exchanging two cycle edges; cactus cycles correspond to "equivalence classes" of minimum cuts that share the same two cactus partition shapes.</p>
+</section>
+
+<section class="hook">
+  <h2>How the pipeline composes.</h2>
+  <p>A bird's-eye view of one mincut call on a moderate input. The driver takes a graph, runs an outer loop of four contraction phases until shrinkage drops below 1%, then hands the contracted graph stack to the recursive cactus build. The build runs push-relabel max-flow per recursion frame, branching on the flow value; whenever the flow matches \(\lambda\), it runs strongly-connected-components on the residual and segments the resulting quotient into cycle and tree pieces via the findSTCactus routine. The accumulated cactus is then walked by a depth-first search that records each candidate cut and picks the most-balanced one. The output is a single bipartition of the original graph together with the integer mincut value.</p>
+  <p>Each phase has a different cost profile. The contraction phases (Phase A, B, C1, C2) are nearly linear in the edge count per pass. The recursive build is the heavy step: each frame runs one max-flow, and the number of frames is bounded by the cactus tree size. The balanced DFS at the end is linear in the cactus size, which is at most \(|V|\).</p>
+  <p>A second large input path is the LP-loop heuristic. When \(|V| &gt; 10{,}000\), the driver first runs label-propagation clustering plus a small-block trimming pass plus another Padberg-Rinaldi sweep on the contracted graph; this provides a tighter mincut estimate before the cactus pipeline runs. The threshold is part of the canonical pipeline, not an external knob.</p>
 </section>
 
 <section class="hook">
@@ -102,7 +128,8 @@
     <li><strong>pendant</strong>: cut the pendant edge; one node ends up isolated, the rest stays together.</li>
   </ul>
   <p>Both are minimum cuts. The pendant choice peels one node and leaves the structural problem untouched; the balanced choice exposes the actual structure. Algorithms like WCC and CM recurse on the resulting halves, so the choice of which minimum cut to return shapes the entire downstream recursion.</p>
-  <p>VieCut walks the cactus and picks the cut whose lighter side has the most nodes. If two cuts tie on balance, the first one encountered in DFS order wins. This is the <em>most-balanced minimum cut</em>; it gives WCC and CM a partition that exposes the structural boundary instead of stripping one node per round.</p>
+  <p>VieCut walks the cactus and picks the cut whose lighter side has the most nodes. Formally, if a cut splits the vertices into \((S, V \setminus S)\), the score is \(\min(|S|, |V \setminus S|)\), and the selector maximises this score over every minimum cut. If two cuts tie on this score, the first one encountered in DFS order wins (tree edges) or the last one encountered in the cycle window wins (cycle pairs). This is the <em>most-balanced minimum cut</em>; it gives WCC and CM a partition that exposes the structural boundary instead of stripping one node per round.</p>
+  <p>The balance score is intentionally simple. A more sophisticated alternative would be to score by the lighter side's total edge weight, or by the cluster-quality metric of the surrounding post-processor. VieCut returns the most-balanced cut by node count because the cactus naturally exposes that metric (the contained-vertex tables on each cactus node) and because the consumers (WCC, CM) use the resulting halves to recurse, where node count is the relevant size measure for the recursion's progress.</p>
 </section>
 
 <section class="algo-meta">
@@ -112,6 +139,8 @@
     <span><span class="ref-label">code</span><a href="https://github.com/VieCut/VieCut" target="_blank" rel="noopener">VieCut</a></span>
     <span><span class="ref-label">used by</span><a href="./wcc.html">WCC</a></span>
     <span><span class="ref-label">used by</span><a href="./cm.html">CM</a></span>
+    <span><span class="ref-label">trivial-cut</span><a href="./cc.html">CC</a></span>
+    <span><span class="ref-label">docs</span><a href="../../docs/algorithms/viecut.md">viecut.md</a></span>
   </div>
   <p class="algo-prov">Byte-equal vs the canonical VieCut tracer build across 2,309 cells / 19.3M per-step records / 0 mismatches (legacy whole-graph, 3-tier per-cluster under three input partitions, and n &gt; 10000 LP-LCC panels combined).</p>
 </section>
@@ -120,7 +149,8 @@
 <section class="stage">
   <div class="stage-num">stage 0 &middot; the example fixture</div>
   <h2>An 8-node graph designed to exercise every phase.</h2>
-  <p>The cactus pipeline runs seven distinct phases on a single mincut call. To see them all on one canvas, the walker uses a small hand-tuned graph: two triangles \(\{0,1,2\}\) and \(\{3,4,5\}\) joined by a bridge \((2,3)\), plus pendants \(6\) attached to \(2\) and \(7\) attached to \(3\), plus two extra cross-edges \((0,4)\) and \((1,5)\) so the push-relabel max-flow inside the cactus build has non-trivial work to do. Twelve edges, all of unit weight. The global minimum cut value is \(\lambda = 1\) (the bridge edge or either pendant edge each split the graph into two pieces).</p>
+  <p>The cactus pipeline runs several distinct phases on a single mincut call. To see them all on one canvas, the walker uses a small hand-tuned graph: two triangles \(\{0,1,2\}\) and \(\{3,4,5\}\) joined by a bridge \((2,3)\), plus pendants \(6\) attached to \(2\) and \(7\) attached to \(3\), plus two extra cross-edges \((0,4)\) and \((1,5)\) so the push-relabel max-flow inside the cactus build has non-trivial work to do. Twelve edges, all of unit weight. The global minimum cut value is \(\lambda = 1\) (the bridge edge or either pendant edge each split the graph into two pieces).</p>
+  <p>This fixture is intentionally near-degenerate. Three different edges are minimum cuts on their own (the bridge and the two pendant edges), so the most-balanced selector has a meaningful tie to resolve: removing the bridge produces a 4-4 split, while removing pendant \((2, 6)\) produces a 1-7 split. The walker will end on the bridge choice.</p>
 </section>
 
 <!-- ─────────── Stage 1 · phase walker ─────────── -->
@@ -167,27 +197,65 @@
 <section class="stage">
   <div class="stage-num">stage 2 &middot; the outer loop</div>
   <h2>Contract until the graph stops shrinking.</h2>
-  <p>The top-level driver runs an outer while-loop. Each pass through the body applies four contraction phases (NOI capforest, degree-1 cleanup, Padberg-Rinaldi tests 1+2, Padberg-Rinaldi tests 3+4) in sequence. After each phase, edges identified as definitely-kept (their endpoints are guaranteed to share the cut side) get merged via union-find, and the graph is rebuilt at the new coarser granularity.</p>
-  <p>The loop guard is a 1% shrinkage test: keep going while <code>n_after &lt; 0.99 &cdot; n_before</code>. Once the four phases together fail to shrink the graph by at least 1%, the outer loop exits and control passes to Phase E (recursive cactus build).</p>
-  <p>This is a fixed-point pattern. Every phase either tightens the running mincut estimate or guarantees an edge contraction; nothing is ever undone. The running estimate starts at the minimum node degree of the graph (a trivial upper bound on \(\lambda\)) and tightens as contractions surface lower-degree super-nodes.</p>
+  <p>The top-level driver runs an outer while-loop. Each pass through the body applies four contraction phases in sequence: NOI capforest, degree-1 cleanup, Padberg-Rinaldi tests 1+2, and Padberg-Rinaldi tests 3+4. After each phase, edges identified as definitely-kept (their endpoints are guaranteed to share the cut side) get merged via union-find, and the graph is rebuilt at the new coarser granularity.</p>
+  <p>The loop guard is a 1% shrinkage test. Let \(n_k\) be the node count at the start of pass \(k\). The loop continues while</p>
+  <p style="text-align:center">\(1.01 \cdot n_{k+1} \;<\; n_k\)</p>
+  <p>so that an outer pass that fails to shrink the graph by at least 1% exits. In words: keep iterating while the four contraction phases together still trim noticeable mass. Two interesting properties: the threshold is strict, so a graph that contracts to exactly 0.99 of its previous size will exit (rare on integer node counts); and the threshold is multiplicative, which makes the wall-clock per-pass cost decrease geometrically across passes on inputs where contraction succeeds.</p>
+  <p>This is a fixed-point pattern. Every phase either tightens the running mincut estimate or guarantees an edge contraction; nothing is ever undone. The running estimate starts at the minimum node degree of the graph (a trivial upper bound on \(\lambda\)) and tightens as contractions surface lower-degree super-nodes. Whenever it tightens, the list of edges previously marked guaranteed-kept is discarded, because a lighter cut now exists and those guarantees no longer hold.</p>
   <div class="callout">
     <div class="tag">why four contraction phases</div>
-    <p>Phase A (NOI capforest, Nagamochi-Ono-Ibaraki 1992) is a priority-queue traversal that accumulates a per-vertex residual mass and unions endpoints when the running residual hits the mincut estimate. Phase B is a one-liner: any node with degree exactly \(\lambda\) and one incident edge of weight \(\lambda\) is the endpoint of a trivial cut, so the edge is merged. Phases C1+C2 (Padberg-Rinaldi tests, Padberg + Rinaldi 1990) are local edge criteria of the form "this edge is on some minimum cut" or "this edge is heavier than \(\lambda\) so it cannot be on any minimum cut"; both directions lead to contractions. Each phase has different strengths on different graph shapes, which is why they run in sequence rather than picking one.</p>
+    <p>Phase A (NOI capforest, Nagamochi-Ono-Ibaraki 1992) is a priority-queue traversal that accumulates a per-vertex residual mass and unions endpoints when the running residual hits the mincut estimate. Phase B is a one-liner: any node with degree exactly \(\lambda\) and one incident edge of weight \(\lambda\) is the endpoint of a trivial cut, so the edge is merged. Phases C1+C2 (Padberg-Rinaldi tests, Padberg and Rinaldi 1990) are local edge criteria of the form "this edge is on some minimum cut" or "this edge is heavier than \(\lambda\) so it cannot be on any minimum cut"; both directions lead to contractions. Each phase has different strengths on different graph shapes, which is why they run in sequence rather than picking one.</p>
+  </div>
+  <div class="callout">
+    <div class="tag">what happens after the outer loop exits</div>
+    <p>The contracted graph at the loop exit is small. Two paths follow. If more than one super-node remains, the bare NOI capforest path runs once on the contracted residual to lock in the final mincut value. Then the recursive cactus build (stage 4) consumes the entire stack of contracted graphs, not just the final one: the stack is what lets the cactus reconstruct the partition back over original vertices.</p>
   </div>
 </section>
 
 <!-- ─────────── Stage 3 · capforest contraction ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 3 &middot; capforest contraction</div>
+  <div class="stage-num">stage 3 &middot; capforest contraction (Phase A)</div>
   <h2>One pop per step, accumulate per-vertex residual mass.</h2>
-  <p>Phase A is the workhorse. Pick a random starting vertex (one RNG draw, <code>next() % n</code>), insert it into a bucket-bounded max priority queue with key zero, then loop:</p>
+  <p>Phase A is the workhorse contraction. It is a modified <em>maximum-adjacency traversal</em>, structurally identical to a Stoer-Wagner phase but with the trick that the residual mass per vertex is capped at \(\lambda\). This cap is what makes the bucket priority queue work: the queue has \(\lambda + 1\) buckets instead of the \(O(n)\) buckets a uncapped max-adjacency would need.</p>
+  <p>Pick a random starting vertex (one RNG draw, modulus \(n\)), insert it into a bucket-bounded max priority queue with key zero, then loop. Each iteration of the loop is one pop and one neighbour scan:</p>
   <ul>
     <li>pop the highest-key vertex \(u\); mark it visited;</li>
-    <li>for each unvisited neighbour \(t\) of \(u\): if the running residual \(r_v[t]\) is still below the current mincut estimate, check whether adding the incident edge weight \(w\) would push it to or above \(\lambda\); if so, union \(u\) and \(t\) (they are now guaranteed to share a side in some minimum cut);</li>
-    <li>update \(r_v[t] \mathrel{+}= w\) and either insert \(t\) into the queue or raise its key to \(\min(r_v[t], \lambda)\).</li>
+    <li>for each unvisited neighbour \(t\) of \(u\), with edge weight \(w(u, t) = w\): if the running residual \(r_v[t]\) is still below the current mincut estimate, check whether \(r_v[t] + w \ge \lambda\); if so, union \(u\) and \(t\) in the union-find (they are now guaranteed to share a side in some minimum cut);</li>
+    <li>update \(r_v[t] \mathrel{+}= w\) and either insert \(t\) into the queue (if first time) or raise its key to \(\min(r_v[t], \lambda)\) (otherwise).</li>
   </ul>
-  <p>The accumulator \(r_v\) is integer everywhere (edge weights are integer in VieCut), so there is no floating-point drift to worry about. Tie-break is by adjacency-iteration order, which is stable because the underlying mutable graph stores neighbours in insertion order.</p>
-  <p>Why this works: the union-find at the end of the pass partitions \(V\) into super-nodes such that all edges within a super-node are guaranteed to be on the same side of <em>some</em> minimum cut. Contracting those super-nodes shrinks the graph without losing any minimum cut.</p>
+  <p>The accumulator \(r_v\) is integer everywhere (edge weights are integer in VieCut), so there is no floating-point drift. Tie-break is by adjacency-iteration order, which is stable because the underlying mutable graph stores neighbours in insertion order.</p>
+  <p>The union trigger is the centerpiece. The inequality</p>
+  <p style="text-align:center">\(r_v[t] + w(u, t) \;\ge\; \lambda\)</p>
+  <p>says: by the time \(u\) and \(t\) are both visited, the accumulator on \(t\) has been pushed across the running mincut estimate by this one edge. Two interesting properties: the comparison is non-strict, so exact-equal triggers the union (this matters for byte-equal replay across language boundaries); and the test fires only when \(r_v[t]\) was still strictly below \(\lambda\) before the edge weight was added, which means each pair of vertices unions at most once across the whole pass.</p>
+  <p>Why this works: the union-find at the end of the pass partitions \(V\) into super-nodes such that all edges within a super-node are guaranteed to be on the same side of <em>some</em> minimum cut. Contracting those super-nodes shrinks the graph without losing any minimum cut. The proof is a clean exchange argument: if some minimum cut separates two vertices that the capforest unioned, swap one of them to the other side and the cut weight strictly decreases, contradicting minimality.</p>
+  <div class="callout">
+    <div class="tag">why max-adjacency ordering</div>
+    <p>Phase A is Stoer-Wagner's maximum-adjacency ordering with one twist: the priority queue key is capped at \(\lambda\) so it fits in a bucket of size at most \(\lambda + 1\). This swaps the \(\log |V|\) cost of a binary heap for a constant cost per operation when \(\lambda\) is moderate. On every benchmark graph, the per-cluster mincut stays small (typically under 50), so the bucket queue is the fast path.</p>
+  </div>
+  <div class="callout">
+    <div class="tag">bucket queue tie-break: FIFO inside bucket</div>
+    <p>The bucket priority queue pops the highest-key bucket first; within a bucket, the realised variant in this pipeline is first-in-first-out. Other variants exist (LIFO inside bucket, or a binary heap altogether), but on every input the gallery sees, the FIFO bucket variant fires. The tie-break inside a bucket matters for byte-equal replay: two vertices that share the same residual mass pop in the order they were inserted, not in vertex-ID order, so the JS port mirrors a FIFO bucket structure explicitly.</p>
+  </div>
+</section>
+
+<!-- ─────────── Stage 3b · degree-1 cleanup ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 3b &middot; degree-1 cleanup (Phase B)</div>
+  <h2>Pendants are free contractions.</h2>
+  <p>After capforest, a one-pass sweep over the contracted vertices looks for degree-1 super-nodes whose single incident edge weighs exactly \(\lambda\). Each such super-node sits behind a cut of weight \(\lambda\) on its own: cut its one edge and it becomes a one-vertex side. The cut is already a minimum cut by definition, so the edge is on at least one minimum cut, so its endpoints can be unioned. The two endpoints share the same side of the most-balanced cut (their union becomes one cactus node holding both originals).</p>
+  <p>The phase is a one-liner because the test is local: read the degree, read the one weight, compare to \(\lambda\). Phase B catches every pendant the capforest missed and contracts it in linear time over the vertex set. Two interesting properties: it never tightens the running mincut estimate (pendant cuts realise \(\lambda\) exactly, never lower); and it relies only on the running estimate being correct as an upper bound, so it composes cleanly between heavier phases.</p>
+  <p>On real inputs the phase often does no work after the first outer pass: by then, most degree-1 super-nodes have already been absorbed by their neighbours via the capforest union triggers. The phase is left in the pipeline as a cheap insurance against degenerate input shapes where the capforest skips the union (typically when the starting vertex sits on the far side of the graph from the pendant).</p>
+</section>
+
+<!-- ─────────── Stage 3c · Padberg-Rinaldi tests ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 3c &middot; Padberg-Rinaldi tests (Phases C1 + C2)</div>
+  <h2>Local edge tests that prove an edge cannot survive any minimum cut.</h2>
+  <p>The Padberg-Rinaldi (1990) tests are four short certificates that the edge \((u, v)\) cannot be on any minimum cut. PR1 and PR2 are the lightweight pair: they look at the weight \(w(u, v)\) plus a single neighbour-sum, and conclude in constant time whether the edge can be contracted. PR3 and PR4 are slightly heavier: they check a two-hop neighbourhood instead of one. The pipeline runs PR12 first, then PR34, with a contraction step in between.</p>
+  <p>The certificate idea is uniform. For each test, write \(\lambda\) for the running mincut estimate and define a function of the edge's local neighbourhood. If the value crosses a threshold, the edge is provably on no minimum cut, so its endpoints can be unioned. PR1, the cleanest, observes: if \(w(u, v) \ge \lambda\) and \(u\) has degree-weight summing to \(\ge 2\lambda\) on edges other than \((u, v)\), every cut separating \(u\) from \(v\) costs at least \(2\lambda &gt; \lambda\), so no minimum cut has \(u\) and \(v\) on opposite sides. Union \(u\) and \(v\).</p>
+  <p>PR2 sharpens the inequality by considering common neighbours: if \(u\) and \(v\) share a common neighbour \(w\) with \(w(u, w) + w(v, w) \ge \lambda\), the same argument applies via the triangle \(\{u, v, w\}\). PR3 and PR4 widen the scope further: PR3 looks at two-hop chains, and PR4 looks at edge-pairs sharing only one endpoint. The full proof of each certificate is in Padberg and Rinaldi 1990; the implementation here is a faithful port.</p>
+  <p>The four tests differ in which side of \((u, v)\) they probe and how they combine the neighbour weights. The aggregate effect on graphs in this gallery's range is substantial: PR12+PR34 typically contracts another 5-20% of the vertices each outer pass after capforest. Two interesting properties: the tests never see edge weights below \(\lambda / 2\), so they have no effect on sparse periphery; and they compose monotonically with capforest, so the order of phase application matters only for wall-clock, not for correctness.</p>
+  <p>The pipeline runs PR12 then a contraction step, then PR34 then another contraction step. The interleave matters: PR34's two-hop tests benefit from PR12 having already contracted the obvious edges, because contracting an edge can merge two neighbourhoods and let a PR3 certificate fire on the merged neighbourhood.</p>
 </section>
 
 <!-- ─────────── Stage 4 · the recursive cactus build ─────────── -->
@@ -196,44 +264,142 @@
   <h2>Pick a vertex pair, run max-flow, branch on whether the flow exceeds \(\lambda\).</h2>
   <p>Once the outer loop has contracted as much as it can, Phase E builds the cactus itself. The driver picks two vertices \(s, t\) using the <em>heaviest-weighted-flow-edge</em> selector (no RNG draw; deterministic over the contracted graph), runs Goldberg-Tarjan push-relabel max-flow between them, and branches on the resulting flow value:</p>
   <ul>
-    <li>if <code>max_flow &gt; \(\lambda\)</code>: the \((s, t)\) edge is on no minimum cut, so contract it and recurse on the smaller graph;</li>
-    <li>if <code>max_flow = \(\lambda\)</code>: the cut exists in the current residual graph, so run strongly-connected-components on the residual; the SCC quotient gives the cactus structure;</li>
+    <li>if the max-flow strictly exceeds \(\lambda\): the \((s, t)\) edge is on no minimum cut, so contract it and recurse on the smaller graph;</li>
+    <li>if the max-flow equals \(\lambda\): a cut of value \(\lambda\) exists in the current residual graph, so run strongly-connected-components on the residual; the SCC quotient gives the cactus structure for this round, and recursion proceeds on each block of the quotient;</li>
     <li>if \(n = 2\): single-edge base case; return the two-node cactus.</li>
   </ul>
-  <p>The SCC-and-merge step is where the cactus takes its actual shape. Each SCC becomes one cactus node holding the originally-contracted vertices; an inner routine called <code>findSTCactus</code> walks a priority-queue ordering of the SCC quotient and segments it into A-cycles (corresponding to families of equivalent minimum cuts crossing a cycle pair) and B-tree-segments (single-edge minimum cuts).</p>
+  <p>The SCC-and-merge step is where the cactus takes its actual shape. Each SCC becomes one cactus node holding the originally-contracted vertices; an inner routine called findSTCactus walks a priority-queue ordering of the SCC quotient and segments it into A-cycles (corresponding to families of equivalent minimum cuts crossing a cycle pair) and B-tree-segments (single-edge minimum cuts).</p>
+  <p>The heaviest-weighted-flow-edge selector deserves a note. The driver picks \(s\) as the vertex with the largest total incident weight, then picks \(t\) as the neighbour of \(s\) connected by the heaviest single edge. Both ties resolve by first-encountered-ASC vertex iteration, so the choice is deterministic and depends only on the input. No RNG draw is consumed at this site, which makes the cactus build reproducible at the same seed.</p>
+  <p>The recursion structure is worth pausing on. Each frame of the recursive cactus build receives a graph and a depth counter. At depth divisible by 10, the frame first runs an inner fixed-point loop of capforest plus Padberg-Rinaldi tests until the graph stops shrinking; this is the same machinery as the outer loop, but with the contracted graph plus a tighter mincut estimate. Then the frame picks its \((s, t)\) pair and runs max-flow. Branch on the result: contract and recurse (one cactus tree edge built per recursion frame), or SCC-and-merge (build a sub-cactus on the SCC quotient, recurse on each SCC, and glue the sub-cacti back into the parent cactus). Eventually \(n = 1\) or \(m = 0\), the base case fires, and the recursion unwinds.</p>
+  <p>Within one SCC-and-merge step, the gluing order matters. The frame iterates the SCC blocks in two passes: first the small blocks (size at most \(n / 2\)), then the large blocks (size more than \(n / 2\)). For each small block, recurse and merge into the running cactus. For each large block, do the same. The two-pass structure ensures that the "main" block (the one containing the original source vertex) processes last and absorbs the others, which keeps the cactus's contained-vertex tables coherent across the merge.</p>
   <div class="callout">
     <div class="tag">a small subtlety: the singleton-cut variant</div>
-    <p>Three conditions can co-occur after a max-flow call: max_flow equals \(\lambda\), the SCC decomposition yields exactly two components, and at least one of \(s, t\) already has weighted degree exactly \(\lambda\). When all three hold, one endpoint is already a "minimum-degree witness" for its own cut, and the cactus build takes a special branch that contracts \((s, t)\), recurses, and then attaches a fresh cactus node holding the contracted-side originals with a tree edge of weight \(\lambda\). This preserves the singleton cut as an explicit tree edge in the output instead of folding it into the recursion.</p>
+    <p>Three conditions can co-occur after a max-flow call: the max-flow equals \(\lambda\), the SCC decomposition yields exactly two components, and at least one of \(s, t\) already has weighted degree exactly \(\lambda\). When all three hold, one endpoint is already a "minimum-degree witness" for its own cut, and the cactus build takes a special branch that contracts \((s, t)\), recurses, and then attaches a fresh cactus node holding the contracted-side originals with a tree edge of weight \(\lambda\). This preserves the singleton cut as an explicit tree edge in the output instead of folding it into the recursion.</p>
   </div>
+  <div class="callout">
+    <div class="tag">heavy edges are pre-contracted</div>
+    <p>Before any recursion frame runs, a sweep over the input graph collapses every edge whose weight strictly exceeds \(\lambda\), and every degree-2 vertex whose two incident edges both weigh \(\lambda\) (a degenerate cycle that the cactus will represent as one tree edge anyway). These pre-contractions are reversed at the end so that the output cactus references original vertices. The pre-contraction step is local and fast, and on dense subgraphs it shrinks the input to the recursive build substantially.</p>
+  </div>
+</section>
+
+<!-- ─────────── Stage 4b · push-relabel primer ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 4b &middot; push-relabel max-flow</div>
+  <h2>Goldberg-Tarjan flow as the inner loop of the cactus build.</h2>
+  <p>The max-flow probe inside Phase E is Goldberg-Tarjan push-relabel (1988). Each \((s, t)\) probe seeds the graph with a preflow of \(\infty\) leaving the source, then iteratively <em>discharges</em> active vertices by pushing excess flow forward and raising vertex distances when no forward push is possible. The algorithm terminates when no vertex has positive excess; the resulting flow value is the max-flow, and by the max-flow-min-cut theorem this equals the minimum \((s, t)\)-cut.</p>
+  <p>The state on each vertex \(u\) is a pair (excess, distance). The excess is the amount of flow that has entered \(u\) but not yet left it. The distance is a lower bound on the residual-graph distance from \(u\) to the sink \(t\). The invariant connecting the two is that for every residual edge \((u, v)\), the relation \(d(u) \le d(v) + 1\) holds: no edge crosses more than one distance layer downward.</p>
+  <p>The discharge primitive picks an active vertex \(u\) (the discharge queue is the priority queue used here, ordered by distance), iterates the residual edges out of \(u\), and pushes excess along each edge to a neighbour at strictly lower distance. If the push exhausts the excess, the discharge ends. If excess remains after every outgoing residual edge has been tried, the algorithm either applies the <em>gap heuristic</em> (if \(u\)'s distance label is the only one of its kind, every vertex at higher distance can be detached from the sink) or relabels \(u\) to one plus the minimum neighbour distance and re-discharges.</p>
+  <p>One tie-break inside push-relabel matters for byte-equal replay. The push condition is</p>
+  <p style="text-align:center">\(d_{\text{source}}(u) \;>\; d(\text{target})\)</p>
+  <p>so the comparator at the implementation site is non-strict \(\le\) reading "block if not strictly higher", and equal-distance pushes are blocked. In plain terms: flow only moves to strictly-lower distance labels, never sideways. Two interesting properties: this rule keeps the distance labels admissible (they form a valid lower bound on residual shortest-path distance), which proves correctness; and it makes the relabel events monotone, which gives the \(O(|V|^2 |E|^{1/2})\) running time.</p>
+  <p>The gap heuristic is a clean optimization. If at some point no vertex has distance exactly \(k\), then every vertex at distance \(\ge k + 1\) is disconnected from the sink in the residual graph (no edge crosses the gap). Their excess will never reach the sink, so they can be relabeled in bulk to distance \(\ge |V|\) and excluded from further discharge. The pipeline triggers the gap check every time a distance count drops to zero, which is the per-step boundary at the implementation site.</p>
+  <p>The global-relabeling heuristic is the other major speed-up. Every few thousand work units, the algorithm runs a full reverse-BFS from the sink and resets every vertex's distance to its actual residual-graph distance. This corrects any over-estimation that the local relabels have accumulated, and keeps the per-vertex distance close to its true value. The frequency is a constant times the edge count.</p>
+</section>
+
+<!-- ─────────── Stage 4c · findSTCactus ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 4c &middot; findSTCactus and the cycle-tree split</div>
+  <h2>How the cactus separates "cycle of equivalent cuts" from "single-edge cut".</h2>
+  <p>When the max-flow comes back equal to \(\lambda\), the residual graph carries a strongly-connected-components decomposition whose blocks are the cactus nodes for this round. findSTCactus then walks a priority-queue ordering of the SCC quotient: it pops the source-side block first, then drains each neighbouring block by the heaviest residual edge, in priority order.</p>
+  <p>The output of the walk is a sequence of slots indexed \(0, 1, \ldots, k - 1\) over the SCC blocks, plus a segmentation of those slots into <em>A-cycles</em> and <em>B-tree-segments</em>. The segmentation rule is a cycle-degree accumulator: at each slot, look at the running sum of weights crossing into already-popped slots. When the accumulator hits exactly 0 or exactly \(\lambda\) on a slot boundary, the current segment closes and a new one starts; otherwise the slot extends the current segment.</p>
+  <p>A-cycles materialise as cycle-of-length-\(\ell\) substructures in the cactus, with each cycle edge weighing \(\lambda / 2\); the two-edge cut at any cycle position is a minimum cut of weight \(\lambda\). B-tree-segments materialise as single tree edges of weight \(\lambda\). The cycle-tree split is what lets the cactus encode families of equivalent cuts in cycles instead of as separate tree edges.</p>
+  <p>The cycle-degree test is the heart of the segmentation:</p>
+  <p style="text-align:center">cycle_degree \(== 0\) or cycle_degree \(== \lambda\).</p>
+  <p>In plain terms: a slot continues the current segment if its accumulated cross-weight is either fully drained (0) or fully saturated (\(\lambda\)); anything in between closes the segment. Two interesting properties: this is a double-equality predicate, so exact-equal at \(\lambda\) is the active branch (off-by-one breaks the cactus); and the test fires per slot, so the cycle-tree pattern is decided greedily in one pass without backtracking.</p>
+  <p>Once the slot sequence is partitioned into A-cycles and B-tree-segments, findSTCactus emits the cactus edges. For each A-cycle of length \(\ell\), emit a cycle of \(\ell\) cactus edges, each of weight \(\lambda / 2\) (so that any two-edge cut on the cycle sums to \(\lambda\)). For each B-tree-segment, emit a single tree edge of weight \(\lambda\). The cactus build glues these into the running cactus by attaching the new segments at the source-side cactus node, then recursing on each block of the SCC quotient.</p>
+  <p>The two-edge-cut weight rule \(\lambda / 2\) per cycle edge is what forces \(\lambda\) to be even for the cactus to use cycle edges with integer weights. On graphs with odd \(\lambda\) the implementation uses scaled integer weights internally to avoid the half-integer; the JS port mirrors the scaling to stay bit-equal with the C++ reference.</p>
 </section>
 
 <!-- ─────────── Stage 5 · most-balanced bipartition ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 5 &middot; most-balanced bipartition</div>
+  <div class="stage-num">stage 5 &middot; most-balanced bipartition (Phase F)</div>
   <h2>DFS the cactus to pick the most-even cut.</h2>
   <p>Once the cactus is built, every tree edge and every cycle-pair represents a minimum cut. The most-balanced selector enumerates those by depth-first search:</p>
   <ul>
-    <li>start at a random cactus node (one RNG draw, <code>nextInt(0, |T| - 1)</code>);</li>
-    <li>for each tree edge \(e\) of weight \(\lambda\): compute the lighter side's node count after removing \(e\) from the tree; this gives a candidate balance score;</li>
+    <li>start at a random cactus node (one RNG draw, integer in \([0, |T| - 1]\));</li>
+    <li>for each tree edge \(e\) of weight \(\lambda\): compute the lighter side's node count after removing \(e\) from the tree; this gives a candidate balance score \(\min(|S_e|, |V \setminus S_e|)\);</li>
     <li>for each cycle: slide a window over the cycle vertex sequence; at each window position the two endpoints define a candidate two-edge cut; compute the lighter side's node count;</li>
     <li>keep the running maximum lighter-side node count.</li>
   </ul>
-  <p>The tie-break inside the cycle walk is non-strict (<code>&gt;=</code> instead of <code>&gt;</code>): when two window positions tie on balance, the later one wins. The tree-edge tie-break is strict (<code>&gt;</code>): the first encountered wins. These are read directly off the canonical source and matter for byte-equal verification, but on most fixtures the result is the same partition either way.</p>
-  <p>The chosen cut translates back into the original graph by reading the <code>containedVertices</code> tables on each cactus node: the lighter-side cactus nodes hold one set of original vertices, the heavier-side cactus nodes hold the other.</p>
+  <p>The tie-break inside the cycle walk is non-strict (\(\ge\) instead of \(&gt;\)): when two window positions tie on balance, the later one wins. The tree-edge tie-break is strict (\(&gt;\)): the first encountered wins. These are read directly off the canonical source and matter for byte-equal verification, but on most fixtures the result is the same partition either way.</p>
+  <p>The sliding window inside a cycle is delicate. The window walks the cycle vertex sequence twice (once forward, once backward), maintaining a running weight on the inside. At each position, the heuristic test</p>
+  <p style="text-align:center">\(2 \cdot \text{in\_weight} \;\ge\; \text{total\_weight}\)</p>
+  <p>flips the direction of the window slide, ensuring the walk always moves toward the median position. In words: when the window has accumulated half or more of the total cycle weight, start contracting it from the back instead of expanding it from the front. Two interesting properties: the test is non-strict, so exact-half flips immediately (matters at small cycles with even total weight); and the predicate is integer-only, so it composes cleanly with the integer running accumulators.</p>
+  <p>The chosen cut translates back into the original graph by reading the contained-vertex tables on each cactus node: the lighter-side cactus nodes hold one set of original vertices, the heavier-side cactus nodes hold the other.</p>
+  <p>A worked instance helps. Take a 4-cycle on the cactus (four cactus nodes \(a, b, c, d\) joined in a ring, each holding two original vertices, so 8 vertices total). The minimum cuts are the two cycle-pair cuts: cut \(\{(a, b), (c, d)\}\) for the split \(\{a, d\} \cup \{b, c\}\), or cut \(\{(b, c), (a, d)\}\) for the split \(\{a, b\} \cup \{c, d\}\). Both cuts produce 4-4 vertex balance, so the balance score is 4 in both cases.</p>
+  <p>The sliding window walks the cycle in order \(a, b, c, d\), maintaining the running weight on the "in" side. At position 0 the in-side is \(\{a\}\), in-weight is 2. At position 1 the in-side is \(\{a, b\}\), in-weight is 4. At this point \(2 \cdot 4 = 8 \ge 8\) (total cycle weight is 8, four edges of weight 2 each in the cactus encoding), so the slide flips direction. The balance score peaks at 4 on this position, ties update non-strictly with later positions equal at 4, and the selector locks the last equal-score window encountered (position \(c\)).</p>
 </section>
 
 <!-- ─────────── Stage 6 · the LP-loop heuristic ─────────── -->
 <section class="stage">
   <div class="stage-num">stage 6 &middot; the LP-loop heuristic for \(n &gt; 10000\)</div>
   <h2>On large graphs, a label-propagation pass tightens the mincut estimate first.</h2>
-  <p>For graphs with more than \(10000\) nodes, the cactus pipeline above is too slow to apply directly. VieCut adds a fast outer heuristic that runs <em>before</em> the cactus build: a label-propagation pass that clusters the graph, contracts the clusters into super-nodes, and reads the contracted graph's minimum degree as an upper bound on \(\lambda\). The cactus pipeline then runs against that tighter bound, which lets the contraction phases prune more aggressively.</p>
-  <p>The LP body is the standard semi-synchronous label-propagation step. Initialise every node with its own label; for two iterations, walk the nodes in a chunk-shuffled order; for each node, sum incoming edge weight per neighbour-label, pick the heaviest. Tie-break is one fair coin per equal-weight pair (one <code>next() % 2</code> draw on each tie).</p>
-  <p>The shuffle is local. Rather than a single global Fisher-Yates over all \(n\) positions, VieCut shuffles each contiguous chunk of 128 positions in place. This calls <code>std::shuffle</code>'s optimised branch, which pulls roughly one RNG draw per swap; on \(n = 22963\) the LP path alone consumes around \(99{\small,}000\) draws per iteration. The byte-equal port hand-replicates the libstdc++ pairwise-swap order, so the JS walker consumes RNG in the same order as the C++ tracer.</p>
-  <p>After two LP iterations the graph is re-indexed by encounter order, then a <code>findTrivialCuts</code> sweep peels small blocks whose contracted node degree falls below the current mincut estimate, then the result is contracted into a super-graph. PR12 and PR34 fire on the super-graph for one more pass each. The loop continues while the super-graph still has more than 10000 nodes <em>and</em> the previous iteration actually shrank it.</p>
+  <p>For graphs with more than \(10{,}000\) nodes, the cactus pipeline above is too slow to apply directly. VieCut adds a fast outer heuristic that runs <em>before</em> the cactus build: a label-propagation pass that clusters the graph, contracts the clusters into super-nodes, and reads the contracted graph's minimum degree as an upper bound on \(\lambda\). The cactus pipeline then runs against that tighter bound, which lets the contraction phases prune more aggressively.</p>
+  <p>The LP body is the standard semi-synchronous label-propagation step. Initialise every node with its own label; for two iterations, walk the nodes in a chunk-shuffled order; for each node, sum incoming edge weight per neighbour-label, pick the heaviest. Tie-break is one fair coin per equal-weight pair (one modulo-2 RNG draw on each tie).</p>
+  <p>The shuffle is local. Rather than a single global Fisher-Yates over all \(n\) positions, VieCut shuffles each contiguous chunk of 128 positions in place. This calls the standard library's optimised pairwise-swap branch, which pulls roughly one RNG draw per swap; on \(n = 22{,}963\) the LP path alone consumes around 99,000 draws per iteration. The byte-equal port hand-replicates the libstdc++ pairwise-swap order, so the JS walker consumes RNG in the same order as the C++ tracer.</p>
+  <p>After two LP iterations the graph is re-indexed by encounter order, then a small-block trimming pass peels blocks whose size falls below \(\log_2 n\) and whose contracted node degree falls below the current mincut estimate. The result is contracted into a super-graph; PR12 and PR34 fire on the super-graph for one more pass each. The loop continues while the super-graph still has more than 10,000 nodes <em>and</em> the previous iteration actually shrank it.</p>
   <div class="callout">
     <div class="tag">a small head-scratcher</div>
     <p>The LP body does <em>not</em> draw RNG when one block strictly beats the rest; the draw only fires on equal-weight ties. This is a deliberate short-circuit in the canonical source and was the trickiest part of getting the byte-equal port to match: on a graph with many strict winners the RNG stream stays untouched for long stretches, while on a graph with many ties (e.g. binary edge weights and roughly balanced communities) the stream advances rapidly. The walker on this page runs at \(n = 8\) and never enters the LP-loop path, but the kernel exposes it for the \(n &gt; 10000\) fixtures the verification harness runs against.</p>
   </div>
+  <div class="callout">
+    <div class="tag">the one floating-point primitive on the LP path</div>
+    <p>The trim threshold compares a block size against \(\log_2 n\), the only floating-point primitive on the whole pipeline. V8 ships the same fdlibm-derived logarithm as libstdc++, and on integer-valued \(n\) both produce identical bit patterns. This is a happy accident worth flagging because it is the one place where a different math library would have surfaced ulp-level disagreement. The byte-equal verification confirms agreement at every input size sampled in stress testing.</p>
+  </div>
+</section>
+
+<!-- ─────────── Tie-breaks ─────────── -->
+<section class="stage">
+  <div class="stage-num">tie-breaks worth knowing</div>
+  <h2>Strict vs non-strict at each decision boundary.</h2>
+  <p>Cactus mincut has many comparisons of the form "is this value at or above the running threshold". The strict vs non-strict choice at each of those comparisons is locked to the canonical implementation, because cuts of value exactly equal to the threshold are the entire point of cactus construction. Roughly thirty distinct tie-break sites exist across the pipeline; the technical companion lists them all. A few that matter most for the algorithm's output:</p>
+  <ul>
+    <li><strong>capforest union trigger</strong>: \(r_v[t] + w \ge \lambda\) is non-strict; exact equality triggers the union. Stricter would miss legitimate boundary contractions on integer-weighted graphs.</li>
+    <li><strong>outer-loop shrinkage threshold</strong>: \(n_{k+1} \cdot 1.01 &lt; n_k\) is strict. Exactly-1% shrink exits the loop rather than continuing for another (likely-no-shrink) pass.</li>
+    <li><strong>recursive-cactus branch</strong>: max-flow \(&gt; \lambda\) is strict. Equality falls into the SCC-and-merge branch, which is where the cactus actually grows.</li>
+    <li><strong>push-relabel push gate</strong>: \(d_{\text{source}} &gt; d_{\text{target}}\) is strict. Sideways pushes are blocked, which preserves distance-label admissibility.</li>
+    <li><strong>balanced-DFS tree-edge update</strong>: lighter-side count \(&gt;\) running best is strict. First improvement wins, equal scores keep the earlier choice.</li>
+    <li><strong>balanced-DFS cycle-window update</strong>: lighter-side count \(\ge\) running best is non-strict. Later equal-score positions override earlier, which biases toward the cycle's median position.</li>
+    <li><strong>findSTCactus segment boundary</strong>: cycle-degree \(== 0\) or \(== \lambda\) closes the current segment. Exact-equality at \(\lambda\) is the active branch.</li>
+  </ul>
+  <p>The list reads small, but each of these sites surfaces in the verification trace as a per-step decision. Stress testing on tens of millions of decision records confirms the JS port mirrors strict vs non-strict at every site.</p>
+  <p>A worth-flagging consequence of the cycle-window non-strict tie-break: on a cactus cycle of even length with perfectly balanced cuts, the selector locks the last balanced position in DFS order rather than the first. This is the inverse of the tree-edge rule (first balanced wins). The asymmetry is intentional: cycles naturally produce families of equivalent balanced cuts, and locking the last one in window order biases toward the cycle's centre, which is structurally meaningful.</p>
+  <p>Two other sites worth noting. The iteration order over the contracted-graph vertex set inside several union-find and contraction routines is dictated by container choice: the canonical C++ uses unordered hash sets at eight sites, the tracer build swaps these for ordered sets that iterate in vertex-ID order, and the JS port mirrors the ordered-set iteration by sorting before consumption. The swap is transparent to the algorithm's correctness because the contraction is order-invariant on integer accumulators, but it matters for bit-equal verification of the per-step trace.</p>
+</section>
+
+<!-- ─────────── How they compare ─────────── -->
+<section class="stage">
+  <div class="stage-num">how the parts fit</div>
+  <h2>VieCut as a stack of well-chosen subroutines.</h2>
+  <p>The pipeline is best understood as a stack of subroutines, each plugging a different gap. Stoer-Wagner alone would work, but only on small graphs. NOI capforest is faster than Stoer-Wagner on graphs with low minimum cut value, because the bucket-capped priority queue replaces the binary heap. Padberg-Rinaldi tests are even faster: they check a local property and never iterate the entire graph. Goldberg-Tarjan push-relabel is the heavy hammer reserved for the cactus-build inner loop, where it sees a graph that has already been aggressively contracted.</p>
+  <p>The stack-of-subroutines mental model also explains the parameter-free design. VieCut has no quality knob, no resolution parameter, no annealing schedule. It computes the global minimum cut exactly, and the only non-determinism is the seed for the three RNG draws (capforest start vertex, recursive-cactus problem-id init, balanced-DFS start vertex). Two runs at the same seed produce bit-equal output.</p>
+  <p>One subtlety: the cactus tree is not unique in general. Two runs at different seeds can produce structurally different cactus trees that both encode the same set of minimum cuts. The most-balanced selector reads the same cut family from either, so the final partition agrees in <em>value</em> (the cut weight is \(\lambda\)) but can differ in <em>shape</em> (which side a particular vertex lands on) when the input has multiple cuts of equal balance score. On every input in this gallery, the balance score is unique enough that the choice of seed is invisible at the output level.</p>
+</section>
+
+<!-- ─────────── Worked tiny example ─────────── -->
+<section class="stage">
+  <div class="stage-num">worked tiny example</div>
+  <h2>Three vertices, two edges, one minimum cut.</h2>
+  <p>Take the path \(0 - 1 - 2\) with both edges of unit weight. The minimum cut is \(\lambda = 1\): either edge alone disconnects the graph. The cactus encodes both: two cactus nodes joined by a single tree edge (after contracting the trivial degenerate cycle into a tree edge during the build).</p>
+  <p>Run capforest from vertex 0. The accumulator starts at zero on every vertex. Pop 0 (the only vertex in the queue). Look at neighbour 1: \(r_v[1] = 0 &lt; 1 = \lambda\), so check the union trigger \(0 + 1 \ge 1\). True (non-strict). Union 0 and 1. Update \(r_v[1] = 1\). Insert 1 into the queue with key \(\min(1, 1) = 1\).</p>
+  <p>Pop 1. Look at neighbour 2: \(r_v[2] = 0 &lt; 1\), check \(0 + 1 \ge 1\). True. Union 1 and 2 (which means all three vertices are now in one union-find component). Update \(r_v[2] = 1\). Insert 2 with key 1.</p>
+  <p>Pop 2. No unvisited neighbours. Done.</p>
+  <p>The union-find has one component containing all three vertices, but the contraction step uses this for the <em>contracted</em> graph (collapsing into one super-node), and the recursive cactus build then runs max-flow on the trivial one-node residual, which short-circuits to \(n = 1\) and returns the singleton cactus. The minimum-degree fallback on the contracted residual gives \(\lambda = 1\), matching expectation.</p>
+  <p>Now scale up to the fixture in stage 0. The capforest produces a similar pattern (most vertex pairs union) but stops short of merging the bridge endpoints because \(r_v\) on the far-side vertices is already saturated when the bridge edge is encountered. The bridge survives into the cactus build; max-flow on the bridge probes returns 1, equal to \(\lambda\), so the SCC-and-merge branch fires and findSTCactus emits a single tree edge for the bridge plus tree edges for each pendant.</p>
+  <p>One step further. Replace the bridge in the fixture with two parallel bridge edges (so the two triangles connect by a 2-edge bridge). The minimum cut value rises to \(\lambda = 2\): every cut must cross both bridges, or peel off a pendant. The cactus now has a cycle of length 2 (a "doubled" cactus edge) connecting the two triangle super-nodes, because cutting either bridge alone is not a minimum cut but cutting both together is. The cycle's two edges share the same two cactus nodes, and the cycle-pair rule recovers the bridge-pair cut.</p>
+</section>
+
+<!-- ─────────── Reading paths ─────────── -->
+<section class="stage">
+  <div class="stage-num">reading paths</div>
+  <h2>If you read three things about this algorithm.</h2>
+  <ul>
+    <li><strong>Karzanov 1973</strong> for the cactus structure theorem. The paper is in Soviet Math. Dokl., short and dense; the modern English exposition in Dinic-Karzanov-Lomonosov 1976 is more accessible. Either gives the existence proof plus the lattice-of-cuts intuition behind the cactus.</li>
+    <li><strong>Nagamochi-Ono-Ibaraki 1992</strong> for the modified capforest contraction (Phase A here). The contraction lemma is the cleanest piece of the pipeline: every \(r_v[t] + w \ge \lambda\) test is a certificate that some minimum cut keeps two vertices on the same side.</li>
+    <li><strong>Henzinger, Noe, Schulz, Strash 2018 (ALENEX)</strong> for VieCut itself. The paper assembles the cactus, NOI, Padberg-Rinaldi, push-relabel pieces into one pipeline and benchmarks against Stoer-Wagner, KS, Matula approx; the experiments motivate the parameter-free design.</li>
+  </ul>
+  <p>For the most-balanced selector, no canonical reference exists; the routine is an implementation choice in VieCut, designed for use by surrounding clustering post-processors. The closest external reference is the literature on "all minimum cuts" enumeration (Karger-Stein 1996 for randomised; Dinic-Karzanov-Lomonosov 1976 for the cactus version).</p>
+  <p>The Padberg-Rinaldi 1990 paper covers the local edge-contraction tests; PR1 and PR2 are the lightweight pair worth reading first. The push-relabel max-flow is Goldberg-Tarjan 1988 in its original form; any modern survey on max-flow (e.g. Schrijver's textbook) covers it more accessibly than the original.</p>
 </section>
 
 <!-- ─────────── edge cases ─────────── -->
@@ -242,7 +408,7 @@
   <h2>Branches the walker may not show.</h2>
   <details>
     <summary><strong>What if \(\lambda = 0\)?</strong></summary>
-    <p>The graph is already disconnected. The driver short-circuits before Phase E and returns the existing components as the partition; the cactus build never runs. WCC and CM treat this case as the trivial-skip path; the SBM-Flat-PP per-cluster stress panel exercises it 10285 times across 153 cells.</p>
+    <p>The graph is already disconnected. The driver short-circuits before Phase E and returns the existing components as the partition; the cactus build never runs. WCC and CM treat this case as the trivial-skip path; <a href="./cc.html">CC</a> uses this case as its entire output, since CC's whole job is to surface components inside clusters labelled as one. The SBM-Flat-PP per-cluster stress panel exercises this short-circuit 10,285 times across 153 cells.</p>
   </details>
   <details>
     <summary><strong>What if \(n = 2\)?</strong></summary>
@@ -250,12 +416,30 @@
   </details>
   <details>
     <summary><strong>What if shrinkage is below 1%?</strong></summary>
-    <p>The outer-while loop exits. The four contraction phases stop reducing the graph, so control passes to the recursive cactus build with whatever super-graph the loop left behind.</p>
+    <p>The outer-while loop exits. The four contraction phases stop reducing the graph, so control passes to the recursive cactus build with whatever super-graph the loop left behind. A short follow-up call to bare NOI runs first if the super-graph still has more than one super-node, to lock in the final value of \(\lambda\) before the cactus build consumes the contracted graph stack.</p>
   </details>
   <details>
     <summary><strong>What if the singleton-cut variant fires?</strong></summary>
-    <p>When push-relabel finds <code>max_flow = \(\lambda\)</code>, the SCC decomposition produces two components, and one of \(\deg(s), \deg(t)\) equals \(\lambda\), the cactus build takes a special branch (stage 4 callout above). The contracted side becomes one cactus node and is reattached as a singleton after the recursion returns.</p>
+    <p>When push-relabel finds the max-flow equals \(\lambda\), the SCC decomposition produces two components, and one of \(\deg(s), \deg(t)\) equals \(\lambda\), the cactus build takes the special branch from the stage 4 callout. The contracted side becomes one cactus node and is reattached as a singleton after the recursion returns, preserving the trivial cut as an explicit tree edge.</p>
   </details>
+  <details>
+    <summary><strong>What if \(n &gt; 10000\)?</strong></summary>
+    <p>The LP-loop heuristic from stage 6 fires before the cactus pipeline. It contracts the graph via label-propagation clusters and Padberg-Rinaldi tests until the contracted size drops below the threshold or the previous iteration failed to shrink the graph. The cactus pipeline then runs on whatever super-graph the LP-loop left behind, with the LP-loop's contracted minimum degree as the initial upper bound on \(\lambda\).</p>
+  </details>
+  <details>
+    <summary><strong>What about the priority queue choice?</strong></summary>
+    <p>NOI capforest needs a max-priority queue. The bucket queue is the default because \(\lambda\) is typically small (under 50 on this gallery's inputs), so the queue's bucket array fits in a few hundred entries and per-operation cost is constant. When \(\lambda\) exceeds 10,000 and also exceeds the node count, the driver switches to a binary heap (\(O(\log n)\) per operation). The switch is automatic; no flag tunes it. On every benchmark in this gallery the bucket path fires.</p>
+  </details>
+</section>
+
+<!-- ─────────── On real inputs ─────────── -->
+<section class="stage">
+  <div class="stage-num">behaviour on real inputs</div>
+  <h2>What the pipeline looks like at the scales the gallery sees.</h2>
+  <p>The empirical networks the gallery runs on range from a few dozen nodes (per-cluster mincut queries on a small fixture) to roughly 25,000 nodes per cluster (per-cluster queries on the largest networks). Cluster sizes follow the underlying partition algorithm: Leiden-Mod produces medium-to-large clusters (peak observed 5,072 vertices), Leiden-CPM with \(\gamma = 0.5\) produces small dense clusters (peak 239), SBM-Flat-PP produces small random-block clusters (peak 249).</p>
+  <p>On these inputs the cactus pipeline rarely enters the LP-loop branch: only the whole-graph queries with more than 10,000 nodes do, and the gallery runs three such inputs. The per-cluster queries stay strictly under the threshold, so the bulk of work is the cactus build on already-small graphs.</p>
+  <p>Per-call run times sit in the millisecond range on the gallery's hardware. The expensive operation is push-relabel max-flow, which fires multiple times per recursion frame; total recursion depth is bounded by the cactus size which is at most \(|V|\), and in practice converges in a few dozen frames even on the largest clusters. The outer contraction loop typically runs 3-5 passes before exiting.</p>
+  <p>Two failure modes worth flagging. First, on cluster subgraphs whose connectivity is provably 0 (the cluster is disconnected after the partition strips inter-cluster edges), the pipeline short-circuits to the trivial path and returns \(\lambda = 0\) immediately. This is the case the SBM-Flat-PP per-cluster panel hits for every multi-node cluster, because the SBM partition is essentially random and the induced subgraph is almost-surely disconnected. Second, on clusters with \(|V| = 1\), the pipeline returns \(\lambda = \infty\) (or equivalently, "no cut exists"); the surrounding post-processor handles this case by accepting the cluster as-is.</p>
 </section>
 
 <!-- ─────────── used by ─────────── -->
@@ -264,10 +448,15 @@
   <h2>VieCut's place in the gallery.</h2>
   <p>VieCut is a primitive, not a clustering algorithm itself. It is the mincut backend other post-processors call when they need an exact global minimum cut on a cluster:</p>
   <ul>
-    <li><a href="./wcc.html">WCC</a> calls VieCut on every cluster to check whether the cluster's intra-edge mincut clears a connectivity threshold; clusters that fail get split along the most-balanced cut and re-checked recursively.</li>
-    <li><a href="./cm.html">CM</a> does the same well-connectedness check, and additionally re-clusters each half with the base algorithm (Leiden or Louvain) before re-checking, which lets a deeper recursion expose smaller well-connected pieces.</li>
+    <li><a href="./wcc.html">WCC</a> (well-connected check) calls VieCut on every cluster to check whether the cluster's intra-edge mincut clears a connectivity threshold \(f(n) = \log_{10} n\); clusters that fail get split along the most-balanced cut and re-checked recursively. The cactus tells WCC which cut to use; the most-balanced selector makes sure WCC's recursion does not strip a single node per round.</li>
+    <li><a href="./cm.html">CM</a> (Connectivity Modifier) does the same well-connectedness check, and additionally re-clusters each half with the base algorithm (Leiden or Louvain) before re-checking, which lets a deeper recursion expose smaller well-connected pieces. The mincut RNG state carries across rounds; the base algorithm's RNG is re-seeded per round.</li>
+    <li><a href="./cc.html">CC</a> (connected-components check) is the trivial-cut consumer. CC accepts a cluster only when it is connected (mincut at least 1 over the cluster), which lifts the \(\lambda = 0\) short-circuit of VieCut to its entire output. CC ships in the same binary as WCC and CM, invoked with the threshold disabled.</li>
   </ul>
-  <p>Both pipelines are byte-equal verified against the canonical <code>constrained-clustering</code> binary because the VieCut kernel under them is byte-equal verified against the canonical <code>VieCut/build/mincut</code> tracer.</p>
+  <p>All three pipelines are byte-equal verified against the canonical constrained-clustering binary because the VieCut kernel under them is byte-equal verified against the canonical VieCut tracer. The chain of equalities runs: JS port = TRACER_MODE swapped C++ build = unmodified C++ build (modulo container-iteration order ties that the swapped build resolves to identifier order). The technical companion holds the per-claim verification numbers and the audit grid.</p>
+  <div class="callout">
+    <div class="tag">why a separate primitive rather than inlining</div>
+    <p>Park 2024 and Vu-Le 2026 designed CM and WCC as algorithm-agnostic post-processors. Both define a "well-connected" predicate that depends only on the cluster's induced subgraph and a connectivity threshold. The mincut subroutine sits behind that predicate; swapping VieCut for Stoer-Wagner (or a Gomory-Hu tree) would change wall-clock but not output. The cactus build is the only piece of the chain that materialises every minimum cut at once, which is what the most-balanced selector needs to make a structurally sensible split.</p>
+  </div>
 </section>
 
 <div id="kin"></div>
