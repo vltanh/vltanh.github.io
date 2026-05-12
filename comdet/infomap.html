@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Infomap &middot; map equation on random walks | Community Detection Algorithms</title>
 <link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐖</text></svg>">
-<meta name="description" content="Infomap (map equation on random walks). Walked stage by stage on the shared 32-node fixture, side by side with the planted ground truth.">
+<meta name="description" content="Infomap (map equation on random walks). Walked stage by stage on the shared 32-node fixture, side by side with the planted ground truth. The page kernel is a pedagogical port of the 2008 PNAS algorithm; the modern canonical multi-level binary is sketched in the final-stage callout.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
@@ -72,6 +72,77 @@
 .hier-tree .row.l1 { padding-left: 0; color: var(--paper); }
 .hier-tree .row.l2 { padding-left: 1.6rem; color: var(--paper-2); }
 .hier-tree .row .meta { color: var(--paper-3); font-size: .76rem; margin-left: .5rem; }
+
+/* Tiny worked-example schematic: 6-node toy graph rendered inline. */
+.toy-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 220px) minmax(0, 1fr);
+  gap: 1.1rem;
+  align-items: center;
+  margin: .8rem 0;
+}
+.toy-grid svg { width: 100%; height: auto; }
+.toy-grid .calc {
+  font-family: 'Special Elite','Courier New',monospace;
+  font-size: .82rem;
+  line-height: 1.55;
+  color: var(--paper-2);
+}
+.toy-grid .calc .lbl { color: var(--paper-3); display: inline-block; min-width: 6.2rem; }
+.toy-grid .calc .val { color: var(--paper); }
+.toy-grid .calc .sum { color: var(--cobalt); }
+@media (max-width: 720px) {
+  .toy-grid { grid-template-columns: 1fr; }
+}
+
+/* Two-level codebook schematic. */
+.codebook {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  margin: .8rem 0;
+  font-family: 'Special Elite','Courier New',monospace;
+  font-size: .78rem;
+}
+.codebook .cb-card {
+  background: var(--ink-2);
+  border: 1px solid var(--rule);
+  padding: .7rem .9rem;
+  border-radius: 2px;
+}
+.codebook .cb-card h4 {
+  margin: 0 0 .45rem; font-family: 'Special Elite','Courier New',monospace;
+  font-size: .72rem; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--paper-3);
+}
+.codebook .cb-card .row {
+  display: flex; justify-content: space-between;
+  border-bottom: 1px dotted var(--rule);
+  padding: .15rem 0;
+}
+.codebook .cb-card .row:last-child { border-bottom: none; }
+.codebook .cb-card .row .sym { color: var(--paper-2); }
+.codebook .cb-card .row .bits { color: var(--cobalt); font-variant-numeric: tabular-nums; }
+@media (max-width: 720px) {
+  .codebook { grid-template-columns: 1fr; }
+}
+
+/* Two-line termwise breakdown for the per-stage L composition. */
+.L-terms {
+  font-family: 'Special Elite','Courier New',monospace;
+  font-size: .8rem;
+  color: var(--paper-2);
+  background: var(--ink-2);
+  border: 1px solid var(--rule);
+  padding: .55rem .9rem;
+  border-radius: 2px;
+  margin: .6rem 0;
+}
+.L-terms .ln { padding: .15rem 0; }
+.L-terms .ln .lbl { color: var(--paper-3); display: inline-block; min-width: 14rem; }
+.L-terms .ln .val { color: var(--paper); font-variant-numeric: tabular-nums; }
+.L-terms .ln.sum { border-top: 1px dashed var(--rule); padding-top: .35rem; margin-top: .25rem; }
+.L-terms .ln.sum .val { color: var(--cobalt); }
 </style>
 </head>
 <body>
@@ -83,24 +154,36 @@
   <div class="kicker">community detection &middot; map equation on random walks</div>
   <h1><em>Infomap</em></h1>
   <p class="fullname">Maps of random walks reveal community structure</p>
-  <p class="sub">Walk through Rosvall and Bergstrom's two-level codebook idea on the 32-node comdet fixture, one merge and one move at a time. The page kernel is a pedagogical port of the 2008 PNAS algorithm; the modern canonical implementation is sketched in the final callout and verified separately.</p>
+  <p class="sub">Walk through Rosvall and Bergstrom's two-level codebook idea on the 32-node comdet fixture, one merge and one move at a time. The page kernel is a pedagogical port of the 2008 PNAS algorithm; the modern canonical implementation has a different shape and is sketched in the final callout.</p>
 </header>
 
 <div class="uc-banner">
-  Two algorithms travel under the name "Infomap". The 2008 PNAS paper describes a greedy pair-join phase followed by a heat-bath simulated-annealing refinement. The maintained <a href="https://github.com/mapequation/infomap" target="_blank" rel="noopener">mapequation/infomap</a> code base replaces both with a multi-level <a href="./louvain.html">Louvain</a> pass on the map equation, wrapped in an outer loop that alternates two refinement phases (a fine-tune that re-sweeps the leaves and a coarse-tune that splits each top-module with a fresh sub-Infomap). This page walks the 2008 paper version. The trajectory of the modern multi-level implementation is the subject of the final-stage callout and a separate bit-identical port; see the technical companion for details.
+  Two algorithms travel under the name "Infomap". The 2008 PNAS paper describes a greedy pair-join phase followed by a heat-bath simulated-annealing refinement. The maintained <a href="https://github.com/mapequation/infomap" target="_blank" rel="noopener">mapequation/infomap</a> code base replaces both with a multi-level <a href="./louvain.html">Louvain</a> pass on the map equation, wrapped in an outer loop that alternates two refinement phases (a fine-tune that re-sweeps the leaves and a coarse-tune that splits each top-module with a fresh sub-Infomap). This page walks the 2008 paper version. The trajectory of the modern multi-level implementation is the subject of the final-stage callout and a separate bit-identical port; see the technical companion for source paths, flag tables, and the per-row audit grid.
 </div>
 
 <section class="hook">
-  <p>Modularity asks whether there are more edges inside groups than chance would predict. The map equation asks: drop a random walker on the graph, what's the cheapest two-level codebook for describing where it goes? The codelength stays short when the walker spends long stretches inside one cluster before jumping to another, because the within-cluster code can reuse short codewords across clusters (Rosvall and Bergstrom 2008, paper §"Highlighting Important Objects").</p>
+  <p>Modularity asks whether there are more edges inside groups than chance would predict. The map equation asks: drop a random walker on the graph, what is the cheapest two-level codebook for describing where it goes? The codelength stays short when the walker spends long stretches inside one cluster before jumping to another, because the within-cluster code can reuse short codewords across clusters (Rosvall and Bergstrom 2008, §"Highlighting Important Objects").</p>
   <p>Modularity counts edges; the map equation counts <em>flow</em>. They disagree on directed networks: Fig. 2 of the paper builds two graphs where modularity and the map equation pick opposite partitions. On undirected graphs the disagreement narrows; on the 32-node fixture they roughly agree on A's K_5, B's K_4 split, and C's two halves, and disagree on what to do with A's periphery and the outliers.</p>
-  <p>This page steps through the 2008 paper algorithm: stationary distribution, singleton init, greedy pair-joining, single-node tuning, sub-level hierarchical recursion. Map equation in flat form (Eq. 1 of the paper):</p>
+  <p>This page steps through the 2008 paper algorithm: stationary distribution, singleton init, greedy pair-joining, single-node tuning, sub-level hierarchical recursion. Map equation in flat form (paper Eq. 1):</p>
   <p style="text-align:center">\(L(M) = q_{\curvearrowright} \cdot H(\mathcal{Q}) + \sum_{i=1}^m p_{\circlearrowright}^i \cdot H(\mathcal{P}^i)\)</p>
-  <p>In words: the codelength is a weighted sum of two entropies. The first term is how often the walker crosses between modules (\(q_\curvearrowright\)) times the entropy of which module it jumps into (\(H(\mathcal{Q})\)). The second term sums, over modules, how often the walker is "inside" the module (\(p_\circlearrowright^i\)) times the entropy of which node it visits inside (\(H(\mathcal{P}^i)\)). Two properties worth holding: the bound is tight when each codebook is a Huffman code, so optimising \(L\) really is optimising an information-theoretic description of the walk; and the same formula handles flat and hierarchical partitions, so adding a layer of sub-modules is a recursive application of the same scoring.</p>
+  <p>In words: the codelength is a weighted sum of two entropies. The first term is how often the walker crosses between modules (\(q_\curvearrowright\)) times the entropy of which module it jumps into (\(H(\mathcal{Q})\)). The second term sums, over modules, how often the walker is "inside" the module (\(p_\circlearrowright^i\)) times the entropy of which node it visits inside (\(H(\mathcal{P}^i)\)). Two properties worth holding. The bound is tight when each codebook is a Huffman code, so optimising \(L\) really is optimising an information-theoretic description of the walk. The same formula handles flat and hierarchical partitions, so adding a layer of sub-modules is a recursive application of the same scoring.</p>
   <div class="defs">
     <div><span class="term">stationary distribution</span> \(p_\alpha\) = long-run probability the walker is at node \(\alpha\). For undirected unweighted graphs this collapses to \(p_\alpha = d_\alpha / (2m)\). The paper uses smart-teleportation PageRank for directed graphs.</div>
     <div><span class="term">exit probability</span> \(q_i^{\curvearrowright}\) = probability the walker is at some node in module \(i\) and the next step leaves the module: \(\sum_{\alpha \in i} p_\alpha \cdot (\text{out}_\alpha / d_\alpha)\). The total \(q_\curvearrowright = \sum_i q_i^{\curvearrowright}\) is the bandwidth of the index codebook.</div>
     <div><span class="term">within-module total</span> \(p_\circlearrowright^i = \pi_i + q_i^{\curvearrowright}\) where \(\pi_i = \sum_{\alpha \in i} p_\alpha\). The paper SI shows \(\sum_i p_\circlearrowright^i = 1 + q_\curvearrowright\): every step pays once for the within-codeword, with the exit symbol counted both inside (as the per-module exit code) and outside (in the index code).</div>
     <div><span class="term">codelength</span> \(L(M)\) is the lower bound (in bits per step) on the average codeword length of any prefix-free code naming the random walker's positions under partition \(M\). Smaller \(L\) corresponds to the walker spending long stretches inside modules so that the index code is rarely invoked.</div>
+  </div>
+  <div class="callout">
+    <div class="tag">map equation as MDL</div>
+    <p>The map equation is a minimum description length objective in disguise. A two-part code first names the model (which module is the walker in?) and then names the data within that model (which node inside the module?). The Shannon source coding theorem says the cheapest prefix-free code for a source with distribution \(\{\pi_k\}\) costs \(H(\{\pi_k\})\) bits per symbol in expectation. Apply that to the random walk's two-level naming scheme: every step contributes \(q_\curvearrowright\) probability of crossing into another module (paid for by the index codebook, cost \(H(\mathcal{Q})\) bits), and \(p_\circlearrowright^i\) probability of being in module \(i\) (paid for by the module-\(i\) codebook, cost \(H(\mathcal{P}^i)\) bits). The total expected bits per step is the map equation. A partition that compresses well is one that captures the flow's natural clustering.</p>
+  </div>
+  <div class="callout">
+    <div class="tag">why \(p \log p\) is the unit of currency</div>
+    <p>Every term of the map equation expands into a sum of \(p_k \log_2 p_k\) values, one per symbol in the relevant codebook. The product appears because Shannon's bound says a symbol of probability \(p\) needs \(-\log_2 p\) bits to encode, and the average bits per emission weights that codeword length by its probability of occurrence. The function \(p \mapsto p \log_2 p\) is zero at both endpoints (\(p = 0\) by convention; \(p = 1\) because a deterministic symbol is free to name), peaks negatively at \(p = 1/e \approx 0.37\), and bows in a smooth U between. The map equation evaluator computes these products one by one and sums them up. The maintained binary defines a helper named <em>plogp</em> with a strict short-circuit at \(p \le 0\) (skip the \(\log_2\)); ten plogp calls drive every closed-form \(\Delta L\) for a single node move. Counting those calls is how the byte-equal port verifies its arithmetic matches the binary.</p>
+  </div>
+  <div class="callout">
+    <div class="tag">random walker as the bridge</div>
+    <p>Community detection has two natural framings. The combinatorial framing counts edges: a partition is good if it places many edges inside communities and few across boundaries. The dynamical framing watches flow: a partition is good if it traps a process inside communities for long stretches. The two framings agree when the dynamics is uniform-mixing-on-edges, which is roughly the case for undirected unweighted graphs. They diverge when the dynamics has structure that the edge count misses (directed graphs with cycles and sinks, weighted graphs with strong heterogeneity, multi-layer networks with cross-layer relaxations). The map equation chooses the dynamical framing on purpose. Its random walker is the canonical Markov chain on the graph: each step picks an outgoing edge uniformly at random (weighted by edge weight when the graph carries weights). The stationary distribution of that walker is the long-run visit rate per node, and the per-module visit and exit rates are integrals of that distribution. Optimising the map equation is therefore optimising the description length of a process, not a static structure.</p>
   </div>
 </section>
 
@@ -116,6 +199,7 @@
     </div>
     <div class="graph-canvas" id="g-input-cy"></div>
   </div>
+  <p>The five planted regions exercise different parts of the flow-compression mechanism. A's K_5 is the cleanest flow trap: every K_5 node has four of its five edges going inside, so the random walker spends most of its time bouncing inside the clique. B's two K_4s share a single bridge edge; the bridge carries one inter-block step per round trip while each K_4 contains three intra-block steps, a flow contrast the map equation is designed to detect. C's two disconnected triangles have zero inter-block flow by construction, so the map equation must put them in separate modules under any flow model. D and the outliers test the limit: low intra-edge density means the within-module entropy stays near the singleton baseline, and the bookkeeping cost of carrying a module label may exceed the index-code saving.</p>
 </section>
 
 <!-- ─────────── Stage 1 · stationary distribution ─────────── -->
@@ -123,6 +207,8 @@
   <div class="stage-num">stage 1 &middot; stationary distribution</div>
   <h2>Visit rate per node = degree / (2m).</h2>
   <p>For an undirected, connected, unweighted graph, the stationary distribution of a simple random walk is \(p_\alpha = d_\alpha / (2m)\). High-degree nodes hold more probability mass; periphery nodes hold less. Below: the per-node visit rate, sorted by node id.</p>
+  <p style="text-align:center">\(p_\alpha = \dfrac{d_\alpha}{2m}\)</p>
+  <p>In plain terms: the long-run share of time the walker spends at node \(\alpha\) is the node's degree divided by twice the edge count. Two properties worth holding. The distribution sums to one (\(\sum_\alpha d_\alpha = 2m\) by the handshake lemma), so \(\{p_\alpha\}\) is a probability distribution over nodes. The form is independent of the starting node, which is why the walker forgets where it started.</p>
   <div class="graph" id="g-flow">
     <div class="graph-chrome">
       <span>node area scales with \(p_\alpha\)</span>
@@ -131,7 +217,19 @@
     <div class="graph-canvas" id="g-flow-cy"></div>
   </div>
   <div class="flow-bar" id="g-flow-bar" aria-label="per-node stationary distribution"></div>
-  <p>The hub node 0 has degree 9, the biggest share of any single node (\(p_0 = 9/104 \approx 0.087\)). The outlier 30 has degree 1, the smallest (\(p_{30} \approx 0.0096\)). The map-equation cost of putting all 32 nodes into one giant module is \(L_1 = H(P) + 0\) where \(H(P) \approx 4.81\) bits, since the index code is unused (no cross-module steps). The cost of singletons is \(L_0 = H(P) + 2\): every step pays both the index code (1 bit, since \(q_\curvearrowright = 1\) under singletons, so the walker exits on every step) and the per-module exit codeword (cost 1 bit per module, summing to 1 across all modules). \(L_1\) is the lower bound for any \(M\); the optimum sits between.</p>
+  <p>The hub node 0 has degree 9, the biggest share of any single node (\(p_0 = 9/104 \approx 0.087\)). The outlier 30 has degree 1, the smallest (\(p_{30} \approx 0.0096\)). The entropy of this distribution, \(H(P) = -\sum_\alpha p_\alpha \log_2 p_\alpha \approx 4.81\) bits per step, is the average codeword length any prefix-free code naming nodes must pay before any community structure is introduced.</p>
+  <div class="callout">
+    <div class="tag">why a random walker, not edges</div>
+    <p>Modularity scores partitions by counting how many edges fall inside each community. The map equation scores partitions by counting how often the walker stays inside each community. Two graphs with the same edge count but different degree distributions can have very different flow distributions, and the map equation sees the difference. On a directed graph the gap is even larger: edges still tell us the topology, but the stationary distribution depends on the global flow structure (PageRank-style cycles, sinks, and sources), not just local degree. The 2008 paper makes this its central design choice. On undirected unweighted graphs the gap shrinks because the stationary distribution reduces to local degree, which is what modularity already uses implicitly.</p>
+  </div>
+  <div class="callout">
+    <div class="tag">how the closed form is derived</div>
+    <p>For a simple random walk on a connected undirected graph, the transition matrix is \(P_{\alpha \beta} = A_{\alpha \beta} / d_\alpha\). The detailed-balance equation \(p_\alpha P_{\alpha \beta} = p_\beta P_{\beta \alpha}\) becomes \(p_\alpha A_{\alpha \beta} / d_\alpha = p_\beta A_{\beta \alpha} / d_\beta\); on an undirected graph \(A_{\alpha \beta} = A_{\beta \alpha}\), so the equation reduces to \(p_\alpha / d_\alpha = p_\beta / d_\beta\), meaning the ratio is the same for every node. Normalising to a probability distribution gives \(p_\alpha = d_\alpha / Z\) where \(Z = \sum_\alpha d_\alpha = 2m\). On directed graphs the symmetry breaks and the stationary distribution becomes the dominant left-eigenvector of \(P\), computed by power iteration in practice. The 2008 paper uses smart-teleportation PageRank to handle dangling sinks: with small probability \(\tau\) the walker teleports to a node sampled uniformly from the set of nodes the source recorded, which keeps the chain ergodic.</p>
+  </div>
+  <div class="callout">
+    <div class="tag">mixing time bounds the flow signal</div>
+    <p>The stationary distribution is what the walker looks like after running forever. Real evaluations care about the mixing time: how long until the walker forgets its starting node. On a connected undirected graph the mixing time is bounded by \(O((1/\lambda_2) \log n)\), where \(\lambda_2\) is the second-smallest eigenvalue of the normalised Laplacian. Communities show up as spectral gaps: a graph with two well-separated communities has \(\lambda_2\) close to zero, meaning the walker takes a long time to mix because it gets trapped inside one community. The map equation reads this gap operationally as the per-module exit probability. A small \(q_i^{\curvearrowright}\) is the same observation as a small contribution to \(\lambda_2\) from boundary edges. Optimising \(L\) is therefore a spectral problem in operational clothing.</p>
+  </div>
 </section>
 
 <!-- ─────────── Stage 2 · singleton init ─────────── -->
@@ -139,6 +237,8 @@
   <div class="stage-num">stage 2 &middot; singleton init</div>
   <h2>Every node a module; \(L_0\) is the high-water mark.</h2>
   <p>Greedy joining starts from the singleton partition. At that point every step exits its module with probability 1, so \(q_\curvearrowright = 1\); the index code names which module the walker visits each step, contributing \(H(P)\) bits. Within-module entropy collapses because each module has one node and one exit, both with equal weight \(p_v\); per-module bookkeeping adds an extra 2 bits across the partition.</p>
+  <p style="text-align:center">\(L_0 = H(P) + 2\)</p>
+  <p>In plain terms: the singleton starting cost is the node-entropy plus a fixed overhead. The first \(H(P)\) bit is the index code, paid every step. The "+2" decomposes as 1 bit for the walker to declare its current within-module symbol (each module has two symbols, the lone node and the exit, each at weight \(p_v\)) and 1 bit for the fact that the per-module exit codeword fires on every step. Two properties worth holding. \(L_0\) is the worst case for any reasonable partition: every merge that connects neighbours in a connected component lowers \(L\) (we lose an index-code symbol and gain at most a tiny within-module symbol). The cost decomposes cleanly into a partition-independent baseline \(H(P)\) plus a partition-dependent compression bonus \(L_0 - L\), which is what the algorithm tries to maximise.</p>
   <div class="graph" id="g-singleton">
     <div class="graph-chrome">
       <span>singleton partition &middot; \(L_0 = H(P) + 2 \approx \) <span id="g-singleton-L">·</span></span>
@@ -147,6 +247,82 @@
     <div class="graph-canvas" id="g-singleton-cy"></div>
   </div>
   <p>Every merge from this state either grows the within-module entropy (we name more nodes inside one module) or shrinks the index entropy (fewer modules to switch between, fewer cross-module steps). Greedy joining picks the merge that buys the most index reduction for the least within-module cost, and stops when no merge is net negative.</p>
+  <div class="callout">
+    <div class="tag">why the one-module partition is the lower bound</div>
+    <p>The opposite extreme of singletons is the one-module partition: every node in the same module, \(q_\curvearrowright = 0\) (no inter-module steps), \(H(\mathcal{P}^1) = H(P)\). The map equation collapses to \(L_1 = H(P)\). Singletons cost \(L_0 = H(P) + 2\); one module costs \(L_1 = H(P)\). The two-bit gap is the slack a partition can compress through, and it is small. On dense graphs with strong community structure the optimum sits a few tenths of a bit below \(L_1\); on a graph with no detectable structure the optimum is \(L_1\) itself, and the bail-out logic at the end of the binary returns the one-module solution. \(L_1\) is not always the lower bound, because a partition with strong inter-module flow contrast can sit below it; the precise floor is the partition-conditional Shannon entropy of the walk.</p>
+  </div>
+  <div class="codebook">
+    <div class="cb-card">
+      <h4>index codebook (singleton)</h4>
+      <div class="row"><span class="sym">module 0 (=node 0)</span><span class="bits">\(-\log_2 p_0\)</span></div>
+      <div class="row"><span class="sym">module 1 (=node 1)</span><span class="bits">\(-\log_2 p_1\)</span></div>
+      <div class="row"><span class="sym">module 2 (=node 2)</span><span class="bits">\(-\log_2 p_2\)</span></div>
+      <div class="row"><span class="sym">...</span><span class="bits">...</span></div>
+      <div class="row"><span class="sym">module 31 (=node 31)</span><span class="bits">\(-\log_2 p_{31}\)</span></div>
+    </div>
+    <div class="cb-card">
+      <h4>module 0 codebook (singleton)</h4>
+      <div class="row"><span class="sym">node 0</span><span class="bits">1 bit</span></div>
+      <div class="row"><span class="sym">exit ⤸</span><span class="bits">1 bit</span></div>
+      <div class="row"><span class="sym" style="opacity:.5">total weight</span><span class="bits" style="opacity:.5">\(2 p_0\)</span></div>
+      <div class="row"><span class="sym" style="opacity:.5">module entropy</span><span class="bits" style="opacity:.5">1 bit</span></div>
+    </div>
+  </div>
+  <p>The codebooks above are the prefix-free codes the walker uses to broadcast its trajectory under the singleton partition. The index codebook (left) lists one codeword per module, with length set by Shannon's bound at \(-\log_2 p_i\) bits. The module-0 codebook (right) lists the two within-module symbols (the node itself, and the exit-from-module symbol), both at weight \(p_0\), so each gets a 1-bit codeword. Under singletons every module's within-codebook looks the same, just rescaled by \(p_v\). At every step the walker emits an index codeword to declare which module it is in, then a within-module codeword to declare what it does there. The expected bits per step is the map equation, evaluated at the singleton partition.</p>
+</section>
+
+<!-- ─────────── Stage 2.5 · worked tiny example ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 2.5 &middot; worked example</div>
+  <h2>A six-node toy: two triangles glued by one edge.</h2>
+  <p>Before turning the algorithm loose on the 32-node fixture, here is the map equation evaluated by hand on the smallest graph where two non-trivial partitions exist. Nodes \(\{a, b, c\}\) form one triangle, nodes \(\{d, e, f\}\) form another, and a single bridge edge connects \(c\) to \(d\). Seven edges total, so \(2m = 14\). Every triangle node has degree 2 except \(c\) and \(d\), which have degree 3.</p>
+  <div class="toy-grid">
+    <svg viewBox="0 0 200 140" aria-label="two triangles joined by one bridge edge">
+      <line x1="40" y1="40" x2="80" y2="40" stroke="#8b7541" stroke-width="1.5"/>
+      <line x1="40" y1="40" x2="60" y2="80" stroke="#8b7541" stroke-width="1.5"/>
+      <line x1="80" y1="40" x2="60" y2="80" stroke="#8b7541" stroke-width="1.5"/>
+      <line x1="60" y1="80" x2="140" y2="80" stroke="#c7801e" stroke-width="2" stroke-dasharray="4 3"/>
+      <line x1="120" y1="40" x2="160" y2="40" stroke="#8b7541" stroke-width="1.5"/>
+      <line x1="120" y1="40" x2="140" y2="80" stroke="#8b7541" stroke-width="1.5"/>
+      <line x1="160" y1="40" x2="140" y2="80" stroke="#8b7541" stroke-width="1.5"/>
+      <circle cx="40" cy="40" r="9" fill="#5fa0b3" stroke="#1b2033" stroke-width="1"/>
+      <circle cx="80" cy="40" r="9" fill="#5fa0b3" stroke="#1b2033" stroke-width="1"/>
+      <circle cx="60" cy="80" r="9" fill="#5fa0b3" stroke="#1b2033" stroke-width="1"/>
+      <circle cx="120" cy="40" r="9" fill="#c79460" stroke="#1b2033" stroke-width="1"/>
+      <circle cx="160" cy="40" r="9" fill="#c79460" stroke="#1b2033" stroke-width="1"/>
+      <circle cx="140" cy="80" r="9" fill="#c79460" stroke="#1b2033" stroke-width="1"/>
+      <text x="40" y="44" text-anchor="middle" font-size="9" font-family="Special Elite, monospace" fill="#1b2033">a</text>
+      <text x="80" y="44" text-anchor="middle" font-size="9" font-family="Special Elite, monospace" fill="#1b2033">b</text>
+      <text x="60" y="84" text-anchor="middle" font-size="9" font-family="Special Elite, monospace" fill="#1b2033">c</text>
+      <text x="120" y="44" text-anchor="middle" font-size="9" font-family="Special Elite, monospace" fill="#1b2033">d</text>
+      <text x="160" y="44" text-anchor="middle" font-size="9" font-family="Special Elite, monospace" fill="#1b2033">e</text>
+      <text x="140" y="84" text-anchor="middle" font-size="9" font-family="Special Elite, monospace" fill="#1b2033">f</text>
+      <text x="100" y="94" text-anchor="middle" font-size="8" font-family="Special Elite, monospace" fill="#c7801e">bridge</text>
+    </svg>
+    <div class="calc">
+      <div><span class="lbl">degrees</span><span class="val">d = (2, 2, 3, 3, 2, 2)</span></div>
+      <div><span class="lbl">2m</span><span class="val">14</span></div>
+      <div><span class="lbl">p (each)</span><span class="val">(1, 1, 3/2, 3/2, 1, 1) / 7</span></div>
+      <div><span class="lbl">\(H(P)\)</span><span class="val">≈ 2.557 bits</span></div>
+      <div><span class="lbl">\(L_0\) = H(P)+2</span><span class="val">≈ 4.557 bits</span></div>
+      <div><span class="lbl">\(L_1\) = H(P)</span><span class="val">≈ 2.557 bits</span></div>
+    </div>
+  </div>
+  <p>Now evaluate the two-module partition \(\{a, b, c\} \mid \{d, e, f\}\), the one the map equation should prefer. Per-module visit fractions are \(\pi_1 = \pi_2 = 1/2\) (each module has total degree 7, half of \(2m\)). The bridge edge \((c, d)\) carries one half-edge out of module 1 and one half-edge out of module 2. Walker-at-\(c\), step out: probability \(p_c \cdot (1/3) = (3/14)(1/3) = 1/14\). Same for walker-at-\(d\). So \(q_1^{\curvearrowright} = q_2^{\curvearrowright} = 1/14\), and \(q_\curvearrowright = 2/14 = 1/7\).</p>
+  <div class="L-terms">
+    <div class="ln"><span class="lbl">\(q_\curvearrowright\)</span><span class="val">2/14 = 0.1429</span></div>
+    <div class="ln"><span class="lbl">\(H(\mathcal{Q})\) (uniform over 2)</span><span class="val">1.0 bit</span></div>
+    <div class="ln"><span class="lbl">\(q_\curvearrowright \cdot H(\mathcal{Q})\)</span><span class="val">0.1429 bits</span></div>
+    <div class="ln"><span class="lbl">\(p_\circlearrowright^i = \pi_i + q_i^{\curvearrowright}\)</span><span class="val">1/2 + 1/14 = 8/14</span></div>
+    <div class="ln"><span class="lbl">\(H(\mathcal{P}^i)\) per module</span><span class="val">≈ 1.811 bits</span></div>
+    <div class="ln"><span class="lbl">\(\sum_i p_\circlearrowright^i H(\mathcal{P}^i)\)</span><span class="val">2 · (8/14) · 1.811 ≈ 2.069 bits</span></div>
+    <div class="ln sum"><span class="lbl">\(L\) (two-module)</span><span class="val">≈ 2.212 bits</span></div>
+  </div>
+  <p>The two-module partition scores \(L \approx 2.21\) bits per step, below the one-module \(L_1 \approx 2.56\) and well below the singleton \(L_0 \approx 4.56\). The savings come from the within-module entropies: instead of paying \(H(P) \approx 2.56\) bits to name any of six nodes uniformly-ish, the walker pays \(\approx 1.81\) bits to name one of four within-module symbols (three nodes plus the exit), weighted by how often it is inside that module. The index codebook adds \(0.14\) bits per step for the rare crossing, far less than what it saved on the within-module side. This is the compression mechanism the algorithm searches for at scale.</p>
+  <div class="callout">
+    <div class="tag">why does the within-module entropy go down?</div>
+    <p>Across all six nodes, the walker can be in any of six places with stationary weight \(p_\alpha\). The full-graph entropy is \(H(P) \approx 2.56\). Inside one triangle, the walker can be at one of three nodes (plus the exit symbol). Conditional on being inside, the four within-module symbols are roughly equiprobable, so the conditional entropy is around \(\log_2 4 \approx 1.81\). The map equation pays this conditional entropy weighted by how often the walker is inside the module. Two compact codebooks of 4 symbols each beat one codebook of 6 symbols whenever the within-module weight is concentrated enough; that condition is exactly what high intra-edge density secures.</p>
+  </div>
 </section>
 
 <!-- ─────────── Stage 3 · greedy joining ─────────── -->
@@ -154,6 +330,8 @@
   <div class="stage-num">stage 3 &middot; greedy joining</div>
   <h2>Merge the pair that drops \(L\) the most; halt when no merge helps.</h2>
   <p>At every step, scan the inter-module edges to enumerate adjacent module pairs (modules with no inter-edge cannot merge profitably under the map equation, so we skip them). For each pair, compute \(\Delta L\) = \(L(\text{after merge}) - L(\text{before})\). Pick the most-negative \(\Delta L\) and apply the merge; re-scan; repeat. Halt when every adjacent pair has \(\Delta L \ge 0\).</p>
+  <p style="text-align:center">\(\Delta L_{i \cup j} = L(M_{i \cup j}) - L(M)\)</p>
+  <p>In plain terms: the cost of merging modules \(i\) and \(j\) is the codelength under the merged partition minus the codelength under the current one. Two properties worth holding. The merge is profitable iff \(\Delta L &lt; 0\), because the algorithm wants the shortest description. Adjacent pairs (those sharing at least one edge) are the only candidates: merging two non-adjacent modules raises \(L\) because the index code gains one less symbol while the within-module entropies stay roughly the same.</p>
   <div class="graph" id="g-join">
     <div class="graph-chrome">
       <span><span class="level-pill" id="g-join-level">step 0</span><span id="g-join-status">merged: ·</span></span>
@@ -169,7 +347,19 @@
     </div>
   </div>
   <div id="g-join-panel"></div>
-  <p>This phase carries most of the \(L\) reduction; the singleton-to-greedy gap closes most of the way to the simulated-annealing optimum on typical networks. The order of merges matters. Infomap's default heuristic is deterministic for fixed input, so re-running the kernel reproduces the same trace.</p>
+  <p>This phase carries most of the \(L\) reduction; the singleton-to-greedy gap closes most of the way to the simulated-annealing optimum on typical networks. The order of merges matters, because the most-negative \(\Delta L\) at step \(k\) depends on the partition state going in. Picking a slightly different merge at step \(k\) re-orders the search through partition space, and a later merge that would have been most profitable can be ruled out by the early choice. The page kernel ties the order to input order so a re-run reproduces the same trace; the binary breaks ties with a Mersenne Twister.</p>
+  <div class="callout">
+    <div class="tag">why a small-codeword community gets re-coded</div>
+    <p>Merging modules \(i\) and \(j\) does two things. On the index side: the merged module's exit symbol is the sum of the two outgoing flows, minus the inter-module bridge flow that now stays inside. The index codebook loses one symbol. On the within side: the merged codebook gains the union of the two within-symbol sets, with weights rescaled. If the bridge flow between \(i\) and \(j\) was large, the index code shrinks a lot (a frequent crossing becomes an internal step) and the within-module entropy grows by little (the union codebook adds symbols of small weight). That is the profitable merge. If the bridge flow was small, the index code shrinks by little and the within-module entropy grows by the full \(\pi_j H(\mathcal{P}^j)\) worth of new symbols. That is the merge the algorithm rejects.</p>
+  </div>
+  <div class="callout">
+    <div class="tag">greedy is myopic, but cheaply so</div>
+    <p>The greedy join is a hill-climber. At each step it picks the locally best merge without lookahead, which means it can lock the partition into a basin where a later move would have helped more had it been tried first. Two compensations help in practice. The 2008 paper's claim is that on real networks the greedy pair-join captures within a few percent of the optimum on \(L\); the residual is what the simulated-annealing refinement (or the modern Louvain-style sweep) is for. The cost saving is large: each merge evaluation is O(1) in the number of modules thanks to the closed-form \(\Delta L\), and the number of merges is bounded by the number of modules at the start. Total runtime is near-linear in graph size, which is what made Infomap practical on the social-sciences map of 1,431 journals before clusters of GPUs were common.</p>
+  </div>
+  <div class="callout">
+    <div class="tag">why C's two cycles stay separate</div>
+    <p>C is two disconnected 3-cycles with no inter-component edges. The greedy join enumerates adjacent module pairs, which requires at least one shared edge; C's two components share zero. The pair-join scan therefore never proposes merging them, and they survive into the final partition as two separate modules. This is the right answer under the map equation: the walker cannot reach one component from the other, so the index code crossing the boundary would have weight zero, contributing nothing to the codelength. Putting the two components into one module would mean naming six within-module symbols when three suffice for either half. Modularity, by contrast, would happily fuse them at the right resolution because the configuration null has them at expected weight zero already. The map equation's flow view gets this case right by construction.</p>
+  </div>
 </section>
 
 <!-- ─────────── Stage 4 · single-node tuning ─────────── -->
@@ -177,6 +367,8 @@
   <div class="stage-num">stage 4 &middot; tuning</div>
   <h2>For each node, try every neighbour-module; accept the move with best \(\Delta L\).</h2>
   <p>The paper proposes a heat-bath simulated-annealing refinement after greedy joining (paper §"Mapping Flow Compared with Maximizing Modularity"; SI for the SA recipe). The greedy variant walked here is the same single-node-move loop used by Louvain and Leiden: cheaper, deterministic, captures the bulk of the residual \(\Delta L\). For each node \(v\), every distinct neighbour-module is evaluated (including \(v\)'s current one, which always scores 0 by definition); the best is picked and the move applied. One sweep per pass; halt when a sweep makes no moves.</p>
+  <p style="text-align:center">\(v^* = \arg\min_{c \in \mathcal{N}(v)} \Delta L_{v \to c}\)</p>
+  <p>In plain terms: for each candidate community \(c\) that \(v\) could join, evaluate the codelength gap and pick the most-negative. Two properties worth holding. The move is committed iff \(\Delta L_{v \to v^*} &lt; 0\); a tie at zero leaves the node where it is. The candidate set is the union of \(v\)'s neighbours' modules, so the search per node costs \(O(\deg(v))\) ΔL evaluations rather than \(O(K)\) over all \(K\) modules.</p>
   <div class="graph" id="g-tune">
     <div class="graph-chrome">
       <span><span class="level-pill" id="g-tune-level">pass 1</span><span id="g-tune-status">visit · &middot; · &middot;</span></span>
@@ -196,6 +388,18 @@
     <div class="tag">why tuning matters</div>
     <p>Greedy pair-joining is myopic about merge order: the locally cheapest merge at step \(k\) can lock the partition into a basin that a later move would have escaped. A few single-node moves at the end exit some of those basins. On the 32-node fixture this stage shifts \(L\) by a fraction of a bit; on larger benchmarks the gap to the simulated-annealing optimum is around 1 to 2 percent. The modern <a href="https://github.com/mapequation/infomap" target="_blank" rel="noopener">mapequation/infomap</a> code base takes this observation further and replaces the pair-join phase entirely with a <a href="./louvain.html">Louvain</a>-style per-vertex sweep over the map equation; the final callout sketches that trajectory.</p>
   </div>
+  <div class="callout">
+    <div class="tag">closed-form \(\Delta L\) for a single move</div>
+    <p>Computing \(\Delta L\) by re-evaluating the full map equation on every candidate is wasteful. The maintained binary uses a closed form that touches only the two affected modules. Define \(\delta^{\curvearrowright}_{\text{old}}\) = enter+exit flow rebalance on the module \(v\) is leaving, \(\delta^{\curvearrowright}_{\text{new}}\) = same on the module \(v\) is joining. The ΔL contribution decomposes into four terms (one for the global enter-flow, one each for the old and new module's enter, exit, and flow accumulators). Every term is a difference of \(p \log_2 p\) values, where the arguments are sums the algorithm maintains as running tallies. The whole update costs ten \(\log_2\) evaluations plus a handful of additions: O(1) per move, independent of graph size. The maintained binary's per-move arithmetic is what makes Infomap fast on networks of tens of millions of nodes.</p>
+  </div>
+  <div class="callout">
+    <div class="tag">greedy and simulated-annealing converge near the same minimum</div>
+    <p>The paper's heat-bath refinement accepts moves with probability proportional to \(\exp(-\Delta L / T)\), where \(T\) is a temperature that cools geometrically across passes. At high \(T\), uphill moves (positive \(\Delta L\)) are accepted often, so the partition explores a wide basin of partition space. At low \(T\), the acceptance reduces to the greedy rule: only strict-better moves are taken. The paper SI shows that on the social-sciences map the SA refinement picks up roughly one to two percent of \(L\) over the pure greedy variant, mostly by escaping basins where two neighbouring modules would prefer to swap a single node but the greedy rule sees each individual move as uphill. On small fixtures (the 32-node comdet input is one) the gap closes faster: greedy alone often lands within ulp of the SA optimum because there is little room to escape. The page kernel ships greedy by default and exposes an SA option via the kernel's <em>opts.refine</em> flag; the technical companion documents the schedule.</p>
+  </div>
+  <div class="callout">
+    <div class="tag">greedy makes order matter</div>
+    <p>One assumption of the greedy single-node loop is that the visit order is a permutation of the nodes. The 2008 paper's wording is "go through nodes in a random order"; the page kernel uses input order for reproducibility; the maintained binary uses a Mersenne-Twister-shuffled order. Different orders can produce different final partitions of similar \(L\), because the basin of attraction the loop falls into depends on which node moves first. On the 32-node fixture the partition under input order coincides with the partition under most seeds the binary picks; on larger graphs the partitions differ by a few node assignments. The standard mitigation is multi-trial: run the algorithm under several seeds and keep the best-\(L\) result. The maintained binary's <em>numTrials</em> flag does exactly this.</p>
+  </div>
 </section>
 
 <!-- ─────────── Stage 5 · sub-level recursion ─────────── -->
@@ -203,8 +407,22 @@
   <div class="stage-num">stage 5 &middot; sub-level recursion</div>
   <h2>Recurse inside each module to surface fine-grained structure.</h2>
   <p>Up to here the algorithm returns a flat partition. Hierarchy comes from running the same procedure inside each module's induced subgraph. If recursion finds a multi-module split that beats the flat single-module \(L\), the module gets a sub-partition; otherwise it stays atomic. Recursion stops at depth at most 3 by default; beyond that, the resolution limit of the map equation absorbs whatever is left.</p>
+  <p style="text-align:center">\(L_{\text{hier}}(M) = q^{\curvearrowright}_{\text{top}} H(\mathcal{Q}_{\text{top}}) + \sum_{i} p^i_{\circlearrowright} \cdot \big[ q^{i,\curvearrowright}_{\text{sub}} H(\mathcal{Q}^i_{\text{sub}}) + \sum_{j \subset i} p^{ij}_{\circlearrowright} H(\mathcal{P}^{ij}) \big]\)</p>
+  <p>In plain terms: the hierarchical map equation pays an index codebook at every level. At the top level it pays for crossings between top-modules. Inside each top-module it pays a sub-index codebook for crossings between its sub-modules, weighted by how often the walker is inside that top-module. Inside each sub-module it pays the within-codebook. Two properties worth holding. The formula collapses to the flat one when a top-module has only one sub-module (the inner index codebook costs 0 because there is nothing to switch between). Each level is independently scored, so the algorithm can decide level-by-level whether to add a layer based on whether the local \(\Delta L\) is negative.</p>
   <div class="hier-tree" id="g-hier-tree" aria-label="Infomap hierarchical partition"></div>
   <p>On the 32-node fixture the flat partition is already fine-grained (the greedy and tune pass split A's periphery and the outliers into their own modules), so recursion finds little extra. On the paper's social-sciences map (Fig. 4 of the 2008 paper: 1,431 journals, 217k citations) recursion picks up two clean levels of nesting and a third level for the densest sub-fields.</p>
+  <div class="callout">
+    <div class="tag">two-level vs n-level hierarchies</div>
+    <p>The two-level form is the headline result of the 2008 paper and the form most readers see first. The paper's appendix shows the same scoring function extends to arbitrary depth: every internal node of the partition tree contributes a per-level index codebook, weighted by how often the walker sits inside its sub-tree. The hierarchy is built greedily, level by level, by asking whether splitting a flat module into a sub-partition lowers \(L\). It stops when no module benefits from being split. The two-level mode used in the comdet pipeline forces depth-1 nesting (top-modules over leaves, no sub-modules); the binary's default depth is unbounded, but in practice the resolution limit caps useful depth at 3 or 4 levels on networks of \(10^6\) nodes.</p>
+  </div>
+  <div class="callout">
+    <div class="tag">what the index codebook actually encodes</div>
+    <p>At any level of the hierarchy, the index codebook lists one symbol per sub-module at that level, weighted by how often the walker exits its current sub-module into that one. The codeword length is \(-\log_2(q_i^{\curvearrowright} / q_\curvearrowright)\) bits, the Shannon bound. A sub-module that is rarely exited gets a long codeword; a sub-module that is often exited (because many edges land in it) gets a short one. This is why merging a high-exit sub-module into its neighbour saves a lot of index code: the rare-exit destination is what survives, with a shorter overall codeword length.</p>
+  </div>
+  <div class="callout">
+    <div class="tag">resolution limit of the map equation</div>
+    <p>The map equation has its own resolution limit, narrower than modularity's but real. Two analyses bound it. Kawamoto and Rosvall 2015 prove that on a network of \(n\) nodes with mean degree \(\bar{k}\), the smallest detectable module has size \(O(\sqrt{n/\bar{k}})\); below that size the per-module \(\pi_i\) is too small for the index code saving to beat the within-module bookkeeping. Schaub et al. 2012 show that the modularity resolution limit \(O(\sqrt{m})\) gets relaxed under the map equation by a logarithmic factor, because the bandwidth cost of an extra module is logarithmic in the number of modules (Shannon's bound) rather than linear in module count. On the 32-node fixture (\(n = 32\), \(\bar{k} \approx 3.25\)) the bound is \(\sqrt{32 / 3.25} \approx 3.1\), so modules of size three are at the detectability edge. The outliers at size one survive because their position at the K_5 periphery makes the singleton partition still cheaper than absorbing them, but the K_4 size-4 fragments of B are deep inside the detectable range.</p>
+  </div>
 </section>
 
 <!-- ─────────── Stage 6 · final ─────────── -->
@@ -234,14 +452,266 @@
   </table>
   <div class="callout">
     <div class="tag">on this fixture, by region</div>
-    <p>Infomap pulls A's K_5 and most of A's periphery into one big module (the K_5's flow is dense enough that a random walker spends most of its time inside, even when it occasionally hops out to a periphery neighbour). It splits B at the bridge: each \(K_4\) is a flow trap with one cross-bridge edge, and the bridge edge's contribution to inter-module flow is barely worth paying for. C's two disconnected 3-cycles are necessarily separate modules (no flow between them, no merge possible). D and the periphery nodes that bridge to outliers come out as small mixed modules; Infomap's flow-based view does not recover D's planted-cluster structure because D's intra-edges are too few to trap flow.</p>
+    <p>Infomap pulls A's K_5 and most of A's periphery into one big module: the K_5's flow is dense enough that a random walker spends most of its time inside, even when it occasionally hops out to a periphery neighbour. It splits B at the bridge: each \(K_4\) is a flow trap with one cross-bridge edge, and the bridge edge's contribution to inter-module flow is barely worth paying for. C's two disconnected 3-cycles are necessarily separate modules (no flow between them, no merge possible). D and the periphery nodes that bridge to outliers come out as small mixed modules; Infomap's flow-based view does not recover D's planted-cluster structure because D's intra-edges are too few to trap flow.</p>
   </div>
+
   <div class="callout">
     <div class="tag">what the modern Infomap binary actually does</div>
     <p>The walker above mirrors the 2008 PNAS paper. The current <a href="https://github.com/mapequation/infomap" target="_blank" rel="noopener">mapequation/infomap</a> binary takes a different route to optimising the same map equation. The greedy pair-join phase is gone. In its place is a multi-level <a href="./louvain.html">Louvain</a>-style optimiser: one full per-vertex sweep over the leaves, consolidate the resulting modules into super-vertices, sweep at the super-vertex level, consolidate again, repeat until a sweep no longer reduces \(L\). The per-vertex visit order is randomised by a Mersenne Twister; ties are broken by preferring the strongest-connected module; nodes that found no improving move on the previous pass are skipped via a dirty bit.</p>
     <p>An outer loop wraps the multi-level pass with two refinement phases that alternate. The first, called <em>fine-tune</em>, projects every leaf back to its current top-module label and re-runs the per-vertex sweep on the leaf graph; this lets nodes that got carried along by an early consolidation reconsider their assignment. The second, called <em>coarse-tune</em>, runs a fresh sub-Infomap inside each top-module to discover sub-modules, then re-runs the multi-level pass seeded by the sub-module labels; this lets a coarse module split into a finer grouping when the sub-Infomap finds one. The outer loop continues until neither pass strictly improves \(L\) under a compound absolute-and-relative gate. The two-level mode used in the comdet pipeline returns the leaf-to-top-module map at that point.</p>
+    <p>Six conventions inside the per-vertex sweep matter for byte-equal reproducibility. A first-loop guard refuses to move a node out of a multi-member module on the very first sweep of the very first iteration, which softens the initial dissolution of the singleton seed. A strongest-connected tie-break prefers the most-connected candidate module when its \(\Delta L\) is within tolerance of the best. An empty-module candidate is considered once after a move that empties a module, so the algorithm can pull a different node into the just-vacated slot. A singleton-companion move drags along the lone remaining member of a module that just got emptied of all its other connections to a neighbour. A dirty bit skips nodes that found no improving move on the previous pass and whose neighbours have not moved since. And a one-module bail-out at the end of the outer loop dumps the partition into a single module if the optimised codelength is worse than the trivial one-module solution. Each one is documented in the technical companion with the exact line in the canonical source.</p>
     <p>That trajectory is also implemented in JavaScript as a sibling file to the walker on this page, and verified bit-identical to the maintained binary on a 17-fixture by 9-seed panel covering 23.7 million per-visit decisions. See <a href="https://github.com/vltanh/community-detection/blob/main/docs/algorithms/infomap.md" target="_blank" rel="noopener">the technical companion</a> for the closed-form \(\Delta L\), the libstdc++ uniform-integer sampler, and the per-row audit grid.</p>
   </div>
+
+  <div class="callout">
+    <div class="tag">fine-tune and coarse-tune are not symmetric</div>
+    <p>Both phases re-run the per-vertex sweep, but they project the partition differently before the re-run. Fine-tune takes the current top-module labels and assigns every leaf to its top-module's label, so the sweep starts from a partition with a few large modules and asks "does any leaf want to switch its top-module?" The candidate set for each leaf is its neighbours' top-modules; the search radius is large (one full graph) but the partition is coarse, so most leaves stay put. Coarse-tune does the opposite. It freezes the top-module boundary and runs a fresh sub-Infomap inside each top-module to discover sub-modules. The output is a sub-module label per leaf, finer than the top-module label. The sweep then runs at the sub-module level: each sub-module is a single vertex, its candidate set is the neighbouring sub-modules. The search radius is small (one top-module's worth of sub-vertices) but the partition is fine, so many sub-modules find a better top-module label to live under.</p>
+    <p>The asymmetry is the algorithm's hedge against local minima. Fine-tune escapes minima where a leaf got dragged along with its early-formed module and would, in retrospect, rather live somewhere else. Coarse-tune escapes minima where a top-module is internally splittable but the original sweep never tried the split because the sweep operates one leaf at a time. Alternating between the two covers both failure modes and is why the modern Infomap binary is more accurate on dense graphs than a single pass at any aggregation depth would be.</p>
+  </div>
+
+</section>
+
+<!-- ─────────── Stage 7 · the canonical binary in depth ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 7 &middot; the canonical trajectory</div>
+  <h2>How the maintained binary actually optimises the same map equation.</h2>
+  <p>The 2008 paper is one algorithm; the binary that ships under the same name is a different one with the same objective. The maintained code base re-uses every map-equation quantity (\(p_\alpha\), \(\pi_i\), \(q_i^{\curvearrowright}\), \(L(M)\)) but searches partition space with a Louvain-style trajectory. This section sketches that trajectory in enough depth to read alongside the per-row audit grid in the technical companion. The page walker above stays on the 2008 paper; this section is a verbal walk-through of the canonical algorithm without a per-step viz, because its trajectory does not split into a clean per-stage UI without a hierarchical-graph viewer.</p>
+
+  <h3 style="font-family:'Special Elite','Courier New',monospace;font-size:.9rem;letter-spacing:.1em;text-transform:uppercase;color:var(--paper-3);margin:1.2rem 0 .4rem">phase A &middot; flow + singleton init</h3>
+  <p>The binary computes \(p_\alpha\) from the configured flow model (default undirected, falling back to PageRank-with-teleportation for directed). It builds an in-memory tree with one root and \(N\) leaves, each leaf at its own singleton module, and computes the initial codelength from the four running accumulators: an enter-flow sum, an enter-log-enter sum, an exit-log-exit sum, and a flow-log-flow sum. These four scalars suffice to recover \(L\) at any point via a closed-form combination, and every move updates them in O(1).</p>
+
+  <h3 style="font-family:'Special Elite','Courier New',monospace;font-size:.9rem;letter-spacing:.1em;text-transform:uppercase;color:var(--paper-3);margin:1.2rem 0 .4rem">phase B &middot; multi-level Louvain core</h3>
+  <p>The binary's main optimisation is a function called <em>findTopModulesRepeatedly</em>. Starting from the singleton partition, it runs one full per-vertex sweep: shuffle the visit order with a Mersenne Twister, walk every node, evaluate the closed-form \(\Delta L\) for each candidate module (which is the union of the node's neighbours' current modules, plus optionally one empty module), pick the best, commit the move if \(\Delta L &lt; 0\). After the sweep, consolidate: each module becomes a super-vertex, edges between modules sum into a single weighted super-edge, edges inside a module become a self-loop on the super-vertex. Repeat the sweep at the super-vertex level. Halt when a sweep makes no moves. The resulting tree has the leaves at the bottom and the top-modules at the top, with intermediate aggregation levels in between.</p>
+
+  <h3 style="font-family:'Special Elite','Courier New',monospace;font-size:.9rem;letter-spacing:.1em;text-transform:uppercase;color:var(--paper-3);margin:1.2rem 0 .4rem">phase C &middot; fine-tune</h3>
+  <p>After phase B converges, the binary calls <em>fineTune</em>. It collapses every intermediate level so the tree has just two levels: leaves and top-modules. Each leaf gets assigned to its current top-module label. It re-runs the per-vertex sweep on the leaf graph. Some leaves move; most stay put. If the sweep moved anything, the binary re-runs phase B from the new partition; the multi-level core might find a different aggregation structure now that the leaves have been shuffled. If the sweep moved nothing, fine-tune is idle and the outer loop falls through to phase D.</p>
+
+  <h3 style="font-family:'Special Elite','Courier New',monospace;font-size:.9rem;letter-spacing:.1em;text-transform:uppercase;color:var(--paper-3);margin:1.2rem 0 .4rem">phase D &middot; coarse-tune</h3>
+  <p>If fine-tune is idle (or the outer loop alternates), the binary calls <em>coarseTune</em>. For each top-module \(i\) of size \(\ge 2\), it instantiates a fresh sub-Infomap on the induced sub-graph of \(i\) with the top-module's boundary treated as a teleportation source (the sub-walker's exit flow goes back into the main walker's index codebook). The sub-Infomap runs phases A through C until its own outer loop converges, producing a sub-module label per leaf inside \(i\). After every top-module has been processed, coarse-tune collapses the leaves to their sub-module labels, sets up an active network of sub-vertices, and re-runs the per-vertex sweep one more time at the sub-module level. If any sub-module moves to a different top-module, the binary re-runs phase B from the new partition. If nothing moves, coarse-tune is idle.</p>
+
+  <h3 style="font-family:'Special Elite','Courier New',monospace;font-size:.9rem;letter-spacing:.1em;text-transform:uppercase;color:var(--paper-3);margin:1.2rem 0 .4rem">phase E &middot; outer-loop alternation</h3>
+  <p>The outer loop alternates fine-tune and coarse-tune until neither strictly improves \(L\). The improvement gate is a compound condition: the new \(L\) must beat the old by at least an absolute threshold (1e-10 by default) AND by at least a relative threshold (1e-5 of the initial two-level \(L\) by default). The loop terminates after a coarse-tune pass that did not improve, on the reasoning that a coarse-tune is the deeper of the two refinements and an idle coarse-tune means the partition is locally optimal at both granularities.</p>
+
+  <h3 style="font-family:'Special Elite','Courier New',monospace;font-size:.9rem;letter-spacing:.1em;text-transform:uppercase;color:var(--paper-3);margin:1.2rem 0 .4rem">phase F &middot; final bail-out</h3>
+  <p>After the outer loop terminates, the binary compares the optimised \(L\) to the trivial one-module codelength \(L_1 = H(P)\). If \(L &gt; L_1\) and the user did not pass <em>prefer-modular-solution</em>, the binary discards the partition and returns the one-module solution. This guard catches degenerate cases where the optimisation produced a worse-than-trivial partition (rare, but possible on small disconnected graphs). On the 32-node comdet fixture the optimised \(L\) is around 3.54 bits per step and \(L_1\) is around 4.81; the bail-out does not fire.</p>
+
+  <div class="callout">
+    <div class="tag">why ties go to the strongest-connected module</div>
+    <p>When the binary evaluates \(\Delta L\) for each candidate module, several candidates may produce the same value within a 1e-16 tolerance. The strict argmin would pick the first encountered, which depends on the enumeration order (RNG-shuffled). To remove this hidden source of seed-dependence, the binary keeps a separate "strongest-connected" candidate alongside the argmin: the module that contributes the most exit flow toward the visited node, regardless of \(\Delta L\). If the strongest-connected module's \(\Delta L\) is within tolerance of the best, the binary picks the strongest-connected one. The effect is to prefer the natural attractor under flow, breaking ties in favour of the dense neighbourhood. On a graph with no ties this rule never fires and behaviour matches a pure argmin. On a graph with ties (small fixtures, degenerate flow regions) the rule produces more stable partitions across seeds.</p>
+  </div>
+
+  <div class="callout">
+    <div class="tag">why the first-loop guard exists</div>
+    <p>On the very first sweep of the very first outer iteration, every node sits in its own module. A naive per-vertex sweep would move every node into the strongest-connected neighbour's module one by one, with the result depending on the visit order: the first-visited node defines a small module that the next node either joins or not, and so on. The output is a sequence of cascading early moves that lock the partition into a path-dependent state. The first-loop guard cuts this. It refuses to move a node out of a module that already has more than one member, on the first sweep of the first iteration only. The effect is to let every leaf join a module before any module starts moving as a unit, which produces more symmetric initial partitions. Subsequent sweeps drop the guard and behave as normal.</p>
+  </div>
+
+  <div class="callout">
+    <div class="tag">why the empty-module candidate exists</div>
+    <p>The per-vertex sweep enumerates candidate modules from the visited node's neighbours. A node whose neighbours are all in modules other than its own gets to evaluate every possible destination among its neighbour modules. But what about pulling the node into a fresh module? Without help, the sweep cannot do this: a fresh module has no member, so no edge points to it, so it never appears in the candidate enumeration. The binary fixes this by maintaining a stack of recently emptied modules. After every move that empties a module (the last member moved out), the module's index gets pushed onto the stack. On every subsequent visit, if the visited node is in a module with size \(\ge 2\) and the stack is non-empty, the top of the stack is added as one extra candidate. The visit then evaluates \(\Delta L\) for moving the node into the empty module, and the move is committed if it beats the alternatives. The effect is bounded module splitting: a module can break apart by emptying first and then refilling. The stack is bounded by the number of modules, so the cost is O(1) per visit.</p>
+  </div>
+
+  <div class="callout">
+    <div class="tag">singleton-companion move</div>
+    <p>A subtle case: a node \(v\) leaves module \(A\) for module \(B\), and \(A\) drops to size one. The lone remaining node \(u\) in \(A\) is now "stranded": its neighbours are mostly in \(B\) (since \(v\) was its main connection), but it cannot move because the per-vertex sweep only re-visits a node when its neighbourhood has changed (the dirty bit) and \(u\) is still sitting in its own module. The binary handles this with a singleton-companion move: after a move that empties \(A\) down to one member, if that one member's only inter-module edge points to \(B\), drag it along into \(B\) as part of the same visit. The cost is one extra ΔL evaluation and one extra move counter increment per visit. On the comdet fixture the rule fires rarely but matters on graphs with many small bridges.</p>
+  </div>
+
+  <div class="callout">
+    <div class="tag">dirty bit and the convergence rate</div>
+    <p>After the first few sweeps, most nodes have found their preferred module and the sweep makes no moves at them. A naive loop would re-visit every node on every sweep, paying the candidate enumeration cost for no gain. The binary keeps a dirty bit per node, set to true at sweep start, cleared when a visit finds no improving move, and re-set to true when any neighbour moves. A sweep visits only the dirty nodes and exits when no dirty node remains. The effect is that the per-vertex sweep converges in roughly O(N log N) total visits across all sweeps, even when the number of sweeps grows with graph size. The page kernel uses a simpler "moved-this-pass" flag because the visit-order is deterministic; the seedable maintained binary needs the per-node dirty bit so that random visit orders converge cleanly.</p>
+  </div>
+
+  <div class="callout">
+    <div class="tag">verification against the binary</div>
+    <p>The trajectory above is also implemented in JavaScript as a sibling kernel file. Under matching seed, the JavaScript kernel produces the same partition as the maintained binary, bit-identical, across a 17-fixture by 9-seed panel covering 23.7 million per-visit decisions and 3.1 million per-move arithmetic updates. The verification harness streams the binary's tracer output (one JSON record per visit) and compares against the JavaScript kernel's self-RNG run record by record. The strict-fail criteria cover per-visit identity (which node was visited, which module did it move to, what was the codelength after), per-move flow updates (the four enter/exit/flow accumulators on the affected modules), and per-call partition snapshots. Sub-ulp residuals on transient accumulators are tracked separately as informational, because they do not propagate into observed partitions. The audit grid in the technical companion documents the row-by-row breakdown.</p>
+  </div>
+</section>
+
+<!-- ─────────── Stage 8 · the closed form, term by term ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 8 &middot; the closed-form \(\Delta L\)</div>
+  <h2>What ten \(p \log p\) calls actually compute.</h2>
+  <p>The greedy join at stage 3 and the tuning sweep at stage 4 both ask the same operational question: how does \(L\) change when a single node moves between two modules? The page kernel answers by re-evaluating the full map equation on the proposed partition and subtracting; that is O(N) per evaluation. The maintained binary answers with a closed form that is O(1) per evaluation, regardless of graph size. The form is the algebraic identity that drops out of the map equation when only two modules change. This section unpacks it.</p>
+
+  <p>Let \(v\) be the moving node. Write \(A\) for the old module and \(B\) for the new module. Define five short-hand sums the algorithm maintains as running tallies:</p>
+
+  <ul style="font-family:'Special Elite','Courier New',monospace;font-size:.86rem;line-height:1.7;margin:.8rem 0 1rem 1.5rem;color:var(--paper-2)">
+    <li><em>flow</em>\(_M\) = total stationary mass of module \(M\): \(\pi_M = \sum_{\alpha \in M} p_\alpha\)</li>
+    <li><em>enter</em>\(_M\) = enter-flow on module \(M\) (sum over edges entering \(M\) of edge flow)</li>
+    <li><em>exit</em>\(_M\) = exit-flow on module \(M\) (sum over edges leaving \(M\) of edge flow)</li>
+    <li><em>enterFlow</em> = sum across modules of <em>enter</em>\(_M\), plus a constant for any teleportation</li>
+    <li>\(\delta^{\curvearrowright}_A, \delta^{\curvearrowright}_B\) = enter+exit flow rebalance on \(A\) and \(B\) from this specific move (closed-form expressions over \(v\)'s edge weights)</li>
+  </ul>
+
+  <p>The map equation decomposes into four scalar terms that depend only on these tallies:</p>
+
+  <ul style="font-family:'Special Elite','Courier New',monospace;font-size:.86rem;line-height:1.7;margin:.8rem 0 1rem 1.5rem;color:var(--paper-2)">
+    <li>\(T_1\) = \(p \log p\) applied to <em>enterFlow</em></li>
+    <li>\(T_2\) = sum across modules of \(p \log p\) applied to <em>enter</em>\(_M\)</li>
+    <li>\(T_3\) = sum across modules of \(p \log p\) applied to <em>exit</em>\(_M\)</li>
+    <li>\(T_4\) = sum across modules of \(p \log p\) applied to (<em>exit</em>\(_M\) + <em>flow</em>\(_M\))</li>
+  </ul>
+
+  <p>And the codelength is \(L = T_1 - T_2 - T_3 + T_4 -\) (a constant that cancels in any difference). After a move, only \(T_1\) (which depends on the global enter-flow), and the \(A\) and \(B\) contributions to \(T_2\), \(T_3\), \(T_4\) change. The remaining modules' contributions are unaffected. The \(\Delta L\) is therefore the difference of two ten-term \(p \log p\) expressions:</p>
+
+  <p style="text-align:center;font-family:'Special Elite','Courier New',monospace;font-size:.78rem;line-height:1.7">
+    \(\Delta L = \Delta T_1 - \Delta T_2 - \Delta T_3 + \Delta T_4\)
+  </p>
+
+  <p>Each \(\Delta T_k\) is a small algebraic combination of \(p \log p\) values. \(\Delta T_1\) is two \(p \log p\) calls (the new enter-flow minus the old). \(\Delta T_2\), \(\Delta T_3\), \(\Delta T_4\) are each four \(p \log p\) calls (subtract the two old module contributions, add the two new). That sums to fourteen calls in the naive form, but the binary factors out two common subexpressions, leaving ten \(p \log p\) evaluations per ΔL. The page kernel and the byte-equal port both make exactly ten \(p \log p\) calls per ΔL, in the same argument order, so the arithmetic matches the binary bit for bit.</p>
+
+  <div class="callout">
+    <div class="tag">what makes the form O(1) instead of O(N)</div>
+    <p>The full map equation has a \(\sum_i p_\circlearrowright^i H(\mathcal{P}^i)\) term that touches every module. Re-evaluating the full sum on each candidate is O(K) in the number of modules. The closed-form trick is to observe that all modules except \(A\) and \(B\) carry the same \(\pi_i\), <em>enter</em>\(_i\), <em>exit</em>\(_i\) after the move as before; their contributions cancel exactly between the two map-equation evaluations. The cancellation leaves only the \(A\) and \(B\) terms, plus the global enter-flow which changes by a known closed-form increment from the moved node's incident edges. The result is constant time regardless of \(K\). This trick is the algorithmic backbone of every fast modularity-style optimiser; the same identity drives Louvain's \(\Delta Q\) and Leiden's \(\Delta\mathcal{H}\), evaluated over different objective functions.</p>
+  </div>
+
+  <div class="callout">
+    <div class="tag">what \(p \log p\) actually evaluates</div>
+    <p>The \(p \log p\) helper takes a probability \(p \in [0, 1]\) and returns \(p \log_2 p\) if \(p &gt; 0\), or 0 if \(p = 0\). The strict short-circuit at \(p \le 0\) is important: \(\log_2 0\) is \(-\infty\) on IEEE-754, and \(0 \cdot (-\infty)\) is NaN, which would propagate through the accumulator and poison the codelength. The convention \(0 \log 0 = 0\) is the standard information-theoretic extension. The helper also matters for byte-equal reproducibility: the V8 implementation of \(\log_2\) and the glibc implementation of \(\log_2\) differ by one unit in the last place on roughly one in a hundred thousand inputs, so a faithful port routes through \(\log_2(x) = \log(x) \cdot \log_2 e\) with a special-case at \(\log_2 1 = 0\), which both runtimes implement identically.</p>
+  </div>
+</section>
+
+<!-- ─────────── Stage 9 · per-region prediction ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 9 &middot; per-region predictions</div>
+  <h2>What the map equation says about each fixture region, before running.</h2>
+  <p>The map equation is concrete enough that a careful reader can predict the final partition by inspection. This section works through each region of the 32-node fixture and explains what the algorithm should do there, then compares to what it actually does.</p>
+
+  <h3 style="font-family:'Special Elite','Courier New',monospace;font-size:.9rem;letter-spacing:.1em;text-transform:uppercase;color:var(--paper-3);margin:1.2rem 0 .4rem">region A &middot; the K_5 and its periphery</h3>
+  <p>A is a K_5 on nodes 0..4 with a 7-node periphery hanging off it. The K_5 has 10 internal edges, each contributing flow \(1 / (2m) = 1/104\) per half-edge or 1/52 per full edge. Total internal flow on the K_5 is 10/52 \(\approx\) 0.192. The K_5 nodes each have degree 4 (inside the K_5) plus zero or one periphery edge, so per-node stationary mass averages around \(4.5/104 \approx 0.043\); total K_5 mass is around 0.216, which means the within-module \(\pi_A \approx 0.22\). The exit flow from the K_5 to the periphery depends on how many periphery edges each K_5 node carries, but for the comdet fixture the periphery has 7 edges total, contributing \(q^{\curvearrowright}_{K_5} = 7/104 \approx 0.067\) of exit flow. The K_5 is the cleanest flow trap on the graph: \(\pi / q^{\curvearrowright} \approx 3.3\), meaning the walker spends about 3.3 steps inside the K_5 for every step that exits.</p>
+  <p>The greedy join should merge the K_5 first because every pair of K_5 nodes is adjacent and every merge reduces the within-module entropy by 1 bit while saving an index-code symbol. After the K_5 collapses, the periphery nodes are pulled in one by one by the tuning sweep: each periphery node has one edge into the K_5 and zero or one edge to another periphery node, so the candidate set for each periphery node is its K_5 neighbour's module (the big K_5+periphery module) and possibly its neighbour periphery node's module. The dominant flow rule pulls the periphery node into the K_5 module unless the periphery node has more flow to another periphery node than to the K_5. For the comdet fixture, every periphery node has its dominant edge into the K_5, so they all end up in one big A module. The map equation prediction matches what the walker produces.</p>
+
+  <h3 style="font-family:'Special Elite','Courier New',monospace;font-size:.9rem;letter-spacing:.1em;text-transform:uppercase;color:var(--paper-3);margin:1.2rem 0 .4rem">region B &middot; two K_4s bridged by one edge</h3>
+  <p>B is two K_4s with a single bridge edge between them. Each K_4 has 6 internal edges contributing 6/52 \(\approx\) 0.115 of within-flow; the bridge edge contributes 1/52 \(\approx\) 0.019 of inter-K_4 flow. The flow-trap ratio for each K_4 is \(0.115 / 0.019 \approx 6\), six times the time inside per step that exits. The map equation should prefer splitting B at the bridge into two separate K_4 modules: the index-code saving from giving each K_4 its own module is the entropy of the two-symbol distribution \(\{0.5, 0.5\}\), times the inter-K_4 flow \(0.038\) (both halves of the bridge edge), totalling \(0.038\) bits per step. The within-module entropy cost of having two smaller K_4 codebooks instead of one merged-K_4 codebook is roughly two times the K_4 within-entropy minus one times the merged within-entropy, which works out to a smaller bonus than the index saving.</p>
+  <p>The walker's prediction therefore is: split B at the bridge, two modules of size 4 each. The page kernel reproduces this; so does the maintained binary on most seeds. A small fraction of seeds may fuse B's two K_4s due to the order in which the tuning sweep visits the bridge nodes, but the average partition across seeds shows the split.</p>
+
+  <h3 style="font-family:'Special Elite','Courier New',monospace;font-size:.9rem;letter-spacing:.1em;text-transform:uppercase;color:var(--paper-3);margin:1.2rem 0 .4rem">region C &middot; two disconnected 3-cycles</h3>
+  <p>C is two triangles with zero edges between them. The greedy join enumerates adjacent module pairs, so the two C-components are never proposed for merger (no shared edge). The tuning sweep cannot move a node between disconnected components for the same reason: the candidate set is built from neighbour modules, and neighbours by definition share an edge. C therefore comes out as two separate modules of size 3 each, regardless of seed. Planted ground-truth labels both 3-cycles with the same C-label, which means the algorithm-vs-truth ARI on the C nodes is exactly zero (the partitions agree on within-cycle pairs but disagree on between-cycle pairs). This is one of the canonical disagreements between flow-based and edge-count-based community-detection objectives, and the map equation gets it "wrong" from the planted-label perspective but "right" from the flow-compression perspective.</p>
+
+  <h3 style="font-family:'Special Elite','Courier New',monospace;font-size:.9rem;letter-spacing:.1em;text-transform:uppercase;color:var(--paper-3);margin:1.2rem 0 .4rem">region D &middot; two 2-cliques bridged</h3>
+  <p>D is two 2-cliques (each a single edge) bridged by one inter-edge. Total internal flow per 2-clique is 1/52 (one edge); bridge flow is 1/52. The flow-trap ratio is 1, meaning the walker exits as often as it stays. The map equation prediction is that D should not survive as a single module at the resolution Infomap operates at: the within-module bookkeeping cost outweighs any index-code saving. Some seeds split D into two singleton-pair modules; others merge it with adjacent A-periphery nodes. The planted ground-truth labels all four D nodes with the same D-label, so the ARI on D is consistently below the K_5 region.</p>
+
+  <h3 style="font-family:'Special Elite','Courier New',monospace;font-size:.9rem;letter-spacing:.1em;text-transform:uppercase;color:var(--paper-3);margin:1.2rem 0 .4rem">outliers &middot; nodes 30 and 31</h3>
+  <p>Nodes 30 and 31 each have degree 1, hanging off the A periphery. Their stationary mass is 1/104 \(\approx\) 0.0096 each, the smallest on the graph. The greedy join could merge each into its A-periphery neighbour's module, but the cost-benefit is close: the within-module entropy gain is one fresh symbol of weight 0.0096 (cost roughly 0.064 bits added to the within-codebook), and the index-code saving is one fewer module exit at flow 0.0096 (saving roughly 0.064 bits in the index). The two terms approximately cancel, and the actual decision depends on the specific other terms in the sum. The page kernel produces "outliers as singletons" most of the time; the maintained binary's output depends on seed.</p>
+
+</section>
+
+<!-- ─────────── Stage 10 · comparison with siblings ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 10 &middot; comparison with sibling algorithms</div>
+  <h2>What Infomap shares with Louvain and Leiden, and where they part ways.</h2>
+
+  <p>The comdet gallery hosts five flat-partition algorithms (Louvain, Leiden-Mod, Leiden-CPM, Infomap, SBM-Flat) and the family of cluster-improvers (CC, WCC, CM, VieCut, IKC) that read a flat partition and re-cluster it. Infomap is the only one in the flat-partition group whose objective is information-theoretic; the others are all combinatorial.</p>
+
+  <h3 style="font-family:'Special Elite','Courier New',monospace;font-size:.9rem;letter-spacing:.1em;text-transform:uppercase;color:var(--paper-3);margin:1.2rem 0 .4rem">shared with <a href="./louvain.html">Louvain</a></h3>
+  <p>Both algorithms run a per-vertex sweep with a closed-form \(\Delta\)-objective update, both consolidate into super-vertices and recurse. The page-level kernels under both pages share the same MT19937 implementation through the COMDET.COMMON module. Two differences. First, the objective: Louvain optimises modularity (an edge-count statistic with a configuration-model null), Infomap optimises the map equation (a description-length statistic with a random-walk flow). Second, the trajectory: Louvain has one per-vertex sweep and one consolidate per level, no outer refinement; the maintained Infomap binary wraps the same multi-level loop with the alternating fine-tune and coarse-tune outer phases described above. The two algorithms agree on the partition of dense graphs with well-separated communities and disagree on sparse or noisy graphs, where Infomap's flow view picks up structure modularity's edge count misses.</p>
+
+  <h3 style="font-family:'Special Elite','Courier New',monospace;font-size:.9rem;letter-spacing:.1em;text-transform:uppercase;color:var(--paper-3);margin:1.2rem 0 .4rem">shared with <a href="./leiden-cpm.html">Leiden</a></h3>
+  <p>Leiden replaces Louvain's full-pass sweep with a queue-based sweep (only re-visit nodes whose neighbourhood has changed) and adds a refinement phase between the moving phase and aggregation (each community gets internally re-partitioned, then aggregated, so the refinement-phase labels travel up the hierarchy). Infomap's maintained binary has its own version of both ideas: the dirty bit is the queue-equivalent, and the coarse-tune is the refinement-equivalent. The implementations differ in detail (Leiden's queue is FIFO across the graph, Infomap's dirty bit is per-node; Leiden's refinement is one-shot at each level, Infomap's coarse-tune iterates with the outer loop), but the structural idea is the same.</p>
+
+  <h3 style="font-family:'Special Elite','Courier New',monospace;font-size:.9rem;letter-spacing:.1em;text-transform:uppercase;color:var(--paper-3);margin:1.2rem 0 .4rem">contrast with SBM</h3>
+  <p>SBM (stochastic block model) takes the opposite framing. Rather than searching for a partition that minimises some cost, it fits a generative probabilistic model in which edges are drawn between nodes based on their block membership. The maximum-likelihood partition is the best fit. The objective is the negative log-likelihood, which under degree correction looks structurally similar to a map-equation evaluation (both involve sums of \(p \log p\) values), but the underlying interpretation is statistical inference, not compression. SBM is the only generative model in the comdet group; Infomap is the only information-theoretic model; Louvain and Leiden are combinatorial. The three views often agree on clean fixtures and diverge on noisy ones.</p>
+
+  <h3 style="font-family:'Special Elite','Courier New',monospace;font-size:.9rem;letter-spacing:.1em;text-transform:uppercase;color:var(--paper-3);margin:1.2rem 0 .4rem">contrast with the cluster-improvers</h3>
+  <p>CC, WCC, CM, VieCut, and IKC take a precomputed flat partition (often from Louvain, Leiden, or Infomap) and re-cluster it. They do not score partitions globally; they apply a local rule (minimum cut, well-connected component, conductance threshold, k-core, in-cluster-density) to each community in turn. The output is a refinement of the input partition: every output community is a subset of one input community. Infomap output is a frequent input to this pipeline, because its flat partitions tend to be coarse enough that the improvers have room to split badly-formed communities without dissolving cleanly-formed ones. The 32-node fixture is too small to need cluster-improvement (the planted communities are at the resolution limit already); on the dnc network and larger empirical fixtures the chain Infomap-then-CC or Infomap-then-WCC produces sharper partitions than Infomap alone.</p>
+
+</section>
+
+<!-- ─────────── Stage 11 · information-theory primer ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 11 &middot; information-theory primer</div>
+  <h2>Why the map equation has the form it does.</h2>
+  <p>The map equation looks like a sum of weighted entropies. The reason traces back to two classical results from Shannon's 1948 paper. This section gives the minimal background needed to see why \(L\) is the right objective for compression-based community detection, not just one of many possible objectives.</p>
+
+  <h3 style="font-family:'Special Elite','Courier New',monospace;font-size:.9rem;letter-spacing:.1em;text-transform:uppercase;color:var(--paper-3);margin:1.2rem 0 .4rem">source coding theorem</h3>
+  <p>Given a source emitting symbols from an alphabet \(\mathcal{X}\) with distribution \(\{p_x\}_{x \in \mathcal{X}}\), any uniquely-decodable code that names each symbol has expected codeword length at least \(H(P) = -\sum_x p_x \log_2 p_x\) bits per symbol. The bound is achieved (up to less than one bit per symbol) by Huffman coding, or exactly in the limit by arithmetic coding. The bound is the operational meaning of entropy: \(H(P)\) is the average number of bits needed to describe a draw from \(P\).</p>
+  <p>Apply this to the random walker. The walker's positions form a sequence with stationary distribution \(\{p_\alpha\}\). The cheapest one-level code (one codebook over all nodes) costs \(H(P)\) bits per step. Any community partition that aims to do better must save more on the index codebook than it spends on within-module bookkeeping. The map equation is the operational form of this trade-off.</p>
+
+  <h3 style="font-family:'Special Elite','Courier New',monospace;font-size:.9rem;letter-spacing:.1em;text-transform:uppercase;color:var(--paper-3);margin:1.2rem 0 .4rem">prefix-free codes and the Kraft inequality</h3>
+  <p>A code is prefix-free if no codeword is a prefix of another. Prefix-free codes are uniquely decodable in one pass: the decoder reads bits until it recognises a complete codeword, then starts the next. Kraft's inequality says a set of codeword lengths \(\{\ell_x\}\) is achievable by a prefix-free code iff \(\sum_x 2^{-\ell_x} \le 1\). The Shannon bound's optimal length \(\ell_x = -\log_2 p_x\) saturates Kraft exactly, because \(\sum_x p_x = 1\). Huffman coding produces integer lengths that violate the optimum by less than one bit per symbol; arithmetic coding produces fractional-length sequences that match the optimum asymptotically. The map equation assumes the fractional-length asymptote, which is why \(L\) can be a real number rather than an integer.</p>
+
+  <h3 style="font-family:'Special Elite','Courier New',monospace;font-size:.9rem;letter-spacing:.1em;text-transform:uppercase;color:var(--paper-3);margin:1.2rem 0 .4rem">conditional entropy and two-level codes</h3>
+  <p>A two-level code names the symbol in two stages. Stage 1 emits which "block" the symbol belongs to; stage 2 emits which symbol within that block. The expected cost is the unconditional entropy of the block plus the conditional entropy of the symbol given the block: \(H(X) = H(\text{block}) + H(X \mid \text{block})\). This is the chain rule of entropy. The map equation is a slight twist on this chain rule. The two stages do not happen on every step. The walker emits an index codeword only when crossing between modules, with probability \(q_\curvearrowright\); the within-codeword fires every step, with weight \(p_\circlearrowright^i\) for module \(i\). The weighted sum is the map equation.</p>
+
+  <p>The within-codeword has one extra symbol that the chain-rule form does not: the exit symbol. This is what marks the end of the within-module run, so the decoder knows to switch to the index codebook for the next step. Without the exit symbol the two-level code is not uniquely decodable (the decoder cannot tell when a within-run is over). Counting the exit symbol's contribution to \(p_\circlearrowright^i\) is what gives the map equation its slight asymmetry: \(\sum_i p_\circlearrowright^i = 1 + q_\curvearrowright\), not 1, because the exit symbol is "double-counted" (once inside, once outside).</p>
+
+  <h3 style="font-family:'Special Elite','Courier New',monospace;font-size:.9rem;letter-spacing:.1em;text-transform:uppercase;color:var(--paper-3);margin:1.2rem 0 .4rem">why two-level beats one-level</h3>
+  <p>A one-level code over all nodes costs \(H(P)\) bits per step. A two-level code costs \(L(M) = q_\curvearrowright H(\mathcal{Q}) + \sum_i p_\circlearrowright^i H(\mathcal{P}^i)\). When can two-level beat one-level? Algebraic manipulation gives \(H(P) - L(M) = D_{\text{KL}}(P \,\|\, P_{\text{compressed}})\), where \(P_{\text{compressed}}\) is the distribution induced by the two-level code's effective symbol weights. The KL divergence is non-negative, and strictly positive whenever the partition introduces information not present in the marginal \(\{p_\alpha\}\) alone. Communities that capture flow structure invisible to the marginal contribute strictly to the savings.</p>
+  <p>This is why a partition into purely random communities (no flow contrast between within and across) gives \(L(M) \approx H(P)\), no compression. A partition that respects flow contrast gives \(L(M) &lt; H(P)\). The strongest savings come from partitions where the inter-module flow is small relative to the within-module flow, because the index code fires rarely and the within-module codebooks are concentrated on few symbols.</p>
+
+  <div class="callout">
+    <div class="tag">arithmetic vs Huffman in practice</div>
+    <p>The map equation's bound is achievable only in the arithmetic-coding asymptote, but the maintained Infomap binary does not actually emit codewords; it computes the bound directly from \(p \log p\) sums. The fractional-length assumption is therefore harmless: the bound is what we want to score partitions by, not the actual code we want to ship over a wire. A practical compression application would use arithmetic coding to get within ulp of the bound; a community-detection application uses the bound itself as the objective.</p>
+  </div>
+
+  <div class="callout">
+    <div class="tag">why \(\log_2\), not \(\ln\)</div>
+    <p>Entropy is measured in bits when the logarithm is base 2, nats when it is base \(e\). The map equation uses \(\log_2\) by convention because the bound is reported as bits per step. The maintained binary's \(p \log p\) helper calls \(\log_2\); the page kernel does the same. A binary that used \(\log_e\) would produce the same partition (the argmin is base-invariant) but report \(L\) values that are 1/\(\log 2 \approx 1.443\) times larger. The base does not affect the algorithm's behaviour, only the units of the reported numbers.</p>
+  </div>
+
+</section>
+
+<!-- ─────────── Stage 12 · paper's empirical results ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 12 &middot; paper case studies</div>
+  <h2>What the 2008 paper found on real networks.</h2>
+  <p>The 2008 PNAS paper has two empirical figures the comdet reader should know about. The 32-node fixture is too small to exercise either case; the discussion below is a verbal summary of what the paper found on real-world data.</p>
+
+  <h3 style="font-family:'Special Elite','Courier New',monospace;font-size:.9rem;letter-spacing:.1em;text-transform:uppercase;color:var(--paper-3);margin:1.2rem 0 .4rem">case study 1 &middot; the flow-vs-edge contrast</h3>
+  <p>Paper Figure 2 constructs two carefully-designed graphs. The first has a directed flow structure: four "wells" arranged so the walker spends long stretches inside each well before crossing to another. The map equation finds the four wells (\(L \approx 2.67\) bits per step). Modularity stuffs the four wells into two coarse blocks (\(Q \approx 0.50\)) because the wells' boundary edges, while few in flow, are many in count. The second graph has the same boundary edge count but no flow contrast: the walker mixes freely across regions. The map equation collapses to one module (\(L \approx 2.73\)); modularity again picks the topological grouping (\(Q \approx 0.56\)). The two graphs have identical edge counts and block structures; only the directed flow differs. This is the paper's headline argument: on directed graphs with structured flow, the map equation captures something modularity does not.</p>
+
+  <h3 style="font-family:'Special Elite','Courier New',monospace;font-size:.9rem;letter-spacing:.1em;text-transform:uppercase;color:var(--paper-3);margin:1.2rem 0 .4rem">case study 2 &middot; the social-sciences map</h3>
+  <p>Paper Figure 4 applies the algorithm to a citation network of 1,431 journals connected by 217,000 directed citation links (data from Thomson Reuters JCR 2004). The map equation finds 88 top-level modules organised by discipline: economics, sociology, psychology, anthropology, political science, with sub-modules for sub-fields (development economics, comparative politics, etc.). The visualization in the paper colours each top-level module by discipline and uses an inter-module flow ribbon to show citation traffic between disciplines. The paper claims the partition is more "interpretable" than modularity's on the same data, in the sense that domain experts (the paper's authors and reviewers) recognise the modules as named sub-fields. Quantitative comparison: the map-equation partition has \(L\) about 7% lower than the singleton baseline, and modularity's partition has \(L\) about 4% lower; the gap is the structural advantage the paper reports.</p>
+
+  <h3 style="font-family:'Special Elite','Courier New',monospace;font-size:.9rem;letter-spacing:.1em;text-transform:uppercase;color:var(--paper-3);margin:1.2rem 0 .4rem">case study 3 &middot; Lancichinetti-Fortunato 2009 benchmark</h3>
+  <p>Lancichinetti and Fortunato 2009 (PRE 80:056117) ran a comparative benchmark across 12 community-detection algorithms on LFR-generated networks, where the planted community structure is known by construction. Infomap placed in the top tier across the benchmark, particularly on networks with strong community structure (mixing parameter \(\mu &lt; 0.5\)). On weaker community structure (\(\mu \approx 0.6 - 0.8\)) Infomap's advantage over modularity-based methods narrowed, and on very weak structure (\(\mu &gt; 0.8\)) all methods recovered communities at near-random. The benchmark is a useful sanity check that the paper's headline claim holds across many synthetic graphs, not just the two designed in Fig. 2.</p>
+
+  <div class="callout">
+    <div class="tag">when modularity matches the map equation</div>
+    <p>On an undirected unweighted graph, the random walk's stationary distribution is the normalised degree sequence. The map equation's first term (the index codebook cost) decomposes into a sum of \(p \log p\) values weighted by per-module degree; modularity's null hypothesis penalty term has the same structure. The two objectives end up agreeing on a wide class of undirected graphs: any partition that maximises modularity tends to also minimise the map equation, up to a logarithmic correction. The two diverge sharply on directed graphs (modularity's null is symmetric, the map equation's flow is not) and on weighted graphs with strong heterogeneity (modularity's null assumes edges weights are interchangeable, the map equation respects them). For the comdet 32-node fixture (undirected, unweighted) the divergence is mild and the partitions differ only on D and the outliers.</p>
+  </div>
+
+</section>
+
+<!-- ─────────── Stage 13 · common misunderstandings ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 13 &middot; common misunderstandings</div>
+  <h2>Things readers expect about the map equation that turn out to be false.</h2>
+
+  <div class="callout">
+    <div class="tag">"Infomap is the 2008 paper."</div>
+    <p>The 2008 PNAS paper describes a greedy pair-join with simulated-annealing refinement. The maintained binary describes a multi-level Louvain on the map equation with alternating fine-tune and coarse-tune outer phases. They optimise the same objective and produce comparable partitions on most graphs, but the trajectories are structurally different. This page walks the 2008 algorithm; the maintained binary is sketched in stage 7 above. The comdet pipeline uses the maintained binary, not the 2008 algorithm, in production.</p>
+  </div>
+
+  <div class="callout">
+    <div class="tag">"\(H(P)\) is the lower bound for any partition."</div>
+    <p>True only for one-module partitions. The lower bound on \(L\) across all partitions is the conditional entropy \(H(\text{walk} \mid \text{partition})\) under the best-possible partition, which can be strictly below \(H(P)\) when the graph has detectable community structure. The reason: the per-module within-codebooks can each have lower entropy than the full-graph codebook, because the within-module symbol distribution is more concentrated. On the social-sciences map the optimum sits about 7% below \(H(P)\); on the 32-node comdet fixture it sits about 27% below.</p>
+  </div>
+
+  <div class="callout">
+    <div class="tag">"Random visit order does not matter; the partition is unique."</div>
+    <p>Untrue. Different seeds produce different local optima. The standard mitigation is multi-trial: run the algorithm under several seeds and keep the best-\(L\) partition. The maintained binary's <em>numTrials</em> flag does this automatically; the default is 1. On clean graphs the trials usually agree; on noisy graphs they can produce partitions of similar \(L\) but different structure.</p>
+  </div>
+
+  <div class="callout">
+    <div class="tag">"\(p \log_2 p\) at \(p = 0\) is NaN."</div>
+    <p>On IEEE-754 arithmetic, \(\log_2 0 = -\infty\) and \(0 \cdot (-\infty) =\) NaN. A naive evaluator that propagates this NaN through the map equation accumulator poisons the entire codelength. The maintained binary's \(p \log p\) helper has a strict short-circuit at \(p \le 0\) that returns 0 directly. The convention \(0 \log 0 = 0\) is the standard information-theoretic extension and is the only sensible choice operationally.</p>
+  </div>
+
+  <div class="callout">
+    <div class="tag">"The two-level code emits the index symbol every step."</div>
+    <p>No: the index symbol fires only when the walker crosses between modules, with probability \(q_\curvearrowright\) per step. Inside a module the walker emits only within-codewords. This is why the index-codebook contribution to \(L\) is multiplied by \(q_\curvearrowright\) (often a small fraction), not by 1. A partition that captures community structure makes \(q_\curvearrowright\) small, which is the main savings mechanism.</p>
+  </div>
+
+  <div class="callout">
+    <div class="tag">"The map equation handles only undirected graphs."</div>
+    <p>The 2008 paper's headline experiment is on directed citation flow. The undirected case is a special case where the stationary distribution reduces to normalised degree; the directed case uses smart-teleportation PageRank to define the stationary distribution. The maintained binary supports both flow models and several others (mixed undirected-directed, raw directed without teleportation, weighted, multi-layer). The comdet pipeline restricts to undirected unweighted because the project's benchmarks are over that class.</p>
+  </div>
+
+  <div class="callout">
+    <div class="tag">"The map equation is the only information-theoretic objective for community detection."</div>
+    <p>Several alternatives exist. The minimum description length community detection family (Peixoto 2019 and later) fits stochastic block models with full likelihood-based scoring and reports a description length combining model and data. Surprise-based methods (Aldecoa 2011) score partitions against a hypergeometric null. The map equation is the most widely-deployed, but the field has other compression-based options. They produce similar partitions on clean fixtures and diverge on noisy ones, the same pattern that separates flow-based from edge-count-based methods.</p>
+  </div>
+
 </section>
 
 <div id="kin"></div>
