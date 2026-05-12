@@ -271,36 +271,6 @@
 .wcc-record-table tr.push td { color: var(--paper); }
 .wcc-record-table tr.future td { color: var(--paper-4); font-style: italic; }
 
-/* Edge case callouts --------------------------------------------- */
-.wcc-edge-cases {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: .75rem;
-  margin: 1.2rem 0 .4rem;
-}
-.wcc-edge-card {
-  background: var(--ink);
-  border-left: 3px solid var(--rule);
-  border-top: 1px solid var(--paper-4);
-  border-bottom: 1px solid var(--paper-4);
-  border-right: 1px solid var(--paper-4);
-  border-radius: 0 3px 3px 0;
-  padding: .55rem .75rem;
-}
-.wcc-edge-card .ec-title {
-  font-family: 'Special Elite', 'Courier New', monospace;
-  font-size: .7rem; letter-spacing: .1em;
-  text-transform: uppercase;
-  color: var(--cobalt);
-  margin-bottom: .25rem;
-}
-.wcc-edge-card p {
-  font-family: 'IBM Plex Sans', sans-serif;
-  font-size: .82rem; line-height: 1.5;
-  color: var(--paper-2);
-  margin: 0;
-}
-
 /* CC pre-pass mini grid ------------------------------------------ */
 .wcc-cc-grid {
   display: grid;
@@ -340,6 +310,56 @@
 }
 .wcc-cc-card .cc-comp.split { background: rgba(199, 128, 30, .15); border-color: var(--amber); }
 
+/* Threshold table (per-cluster fixture readout) ------------------ */
+.wcc-thr-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .8rem;
+  background: var(--ink-2);
+  border: 1px solid var(--paper-3);
+  border-radius: 3px;
+  margin: .6rem 0;
+}
+.wcc-thr-table th, .wcc-thr-table td {
+  padding: .35rem .65rem;
+  text-align: left;
+  border-bottom: 1px dotted var(--paper-4);
+}
+.wcc-thr-table th {
+  font-size: .66rem; letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--paper-3);
+}
+.wcc-thr-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.wcc-thr-table td.verdict-pass { color: var(--mint); font-weight: 500; }
+.wcc-thr-table td.verdict-fail { color: var(--signal); font-weight: 500; }
+
+/* Peel trace mini-table ------------------------------------------ */
+.wcc-peel-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .78rem;
+  background: var(--ink-2);
+  border: 1px solid var(--paper-3);
+  border-radius: 3px;
+  margin: .4rem 0 .2rem;
+}
+.wcc-peel-table th, .wcc-peel-table td {
+  padding: .3rem .55rem;
+  text-align: left;
+  border-bottom: 1px dotted var(--paper-4);
+}
+.wcc-peel-table th {
+  font-size: .64rem; letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--paper-3);
+}
+.wcc-peel-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.wcc-peel-table td.fail { color: var(--signal); }
+.wcc-peel-table td.pass { color: var(--mint); font-weight: 500; }
+
 /* Step-tip variants ---------------------------------------------- */
 .wcc-walker .step-tip { margin-top: .4rem; }
 .wcc-walker .step-tip.keep { border-left-color: var(--mint); }
@@ -357,26 +377,11 @@
   <div class="kicker">community detection &middot; post-proc &middot; well-connected components</div>
   <h1><em>WCC</em></h1>
   <p class="fullname">well-connected components &middot; Park 2025 / Vu-Le 2026, threshold per Park 2024</p>
-  <p class="sub">A step up from <a href="./cc.html">CC</a>. Each cluster has to clear a mincut threshold or it gets cut + recursed. Catches the case where a cluster is connected but only by a thin edge bridge: the kind of cluster that passes CC and still looks suspect to anyone who eyeballs it.</p>
+  <p class="sub">A size-scaled connectedness check on top of <a href="./cc.html">CC</a>. Clusters with a thin edge bridge pass CC and still look suspect; WCC rejects them with a log-scaled mincut threshold and recursively peels the cut until each survivor clears the bar.</p>
 </header>
 
 <section class="hook">
-  <p><a href="./cc.html">CC</a> only asks whether a cluster is connected. That misses the case where a cluster is connected but only just: two large dense halves linked by a single bridge edge are formally connected, yet anyone eyeballing the graph would call them two communities. The cluster's mincut is 1, and 1 is suspiciously small for a cluster of any meaningful size.</p>
-  <p><em>WCC</em> turns "is the cluster connected" into "is the cluster <em>well-</em>connected". The test replaces the binary connectedness check with a sliding threshold that scales with cluster size. A cluster passes iff its minimum edge cut strictly exceeds a size-dependent bound \(f(n)\), where \(n\) is the cluster's node count:</p>
-  <p style="text-align:center">\[ \text{mincut}(C) > f(|C|) \]</p>
-  <p>In plain terms: the smallest number of edges that splits the cluster into two pieces must outpace some growth curve in the cluster's size. Two interesting properties: the threshold uses the cluster's size, not the graph's size, so a cluster's verdict does not depend on what other clusters look like; and the inequality is strict, so a cluster whose mincut exactly equals the threshold fails (treated the same as a clean miss).</p>
-  <p>The shipped default in the <a href="https://github.com/MinhyukPark/constrained-clustering">constrained-clustering</a> binary picks \(f(n) = \log_{10}(n)\) following Park 2024. Other choices the binary accepts include \(C \log_x(n)\) for any base, \(C n^x\) for any exponent, and a piecewise schedule with constant cuts in three size bands and a square-root tail. The threshold stage below walks all four families.</p>
-  <p>If a cluster passes, leave it. If not, run the minimum cut, remove those edges, and recurse on each side. The recursion terminates because every cut strictly shrinks the cluster, and a cluster of one node short-circuits out.</p>
-  <div class="defs">
-    <div><span class="term">mincut</span> the smallest edge set whose removal disconnects the cluster. Computed exactly by <a href="https://github.com/VieCut/VieCut">VieCut's cactus algorithm</a> (Henzinger, Noe, Schulz, Strash 2018) in near-linear time per cluster, so the post-proc stays cheap even on graphs with thousands of clusters.</div>
-    <div><span class="term">balanced cut</span> when several edge sets share the minimum cut value, the binary picks the most balanced of those minimum cuts. Each recursive half then carries roughly half the cluster, so the recursion depth stays shallow. Without that tie-break, the cut could peel one node at a time and stall.</div>
-    <div><span class="term">threshold tie-handling</span> the comparison is strict, with a small numerical tolerance: cuts that match the threshold to within \(10^{-9}\) are treated as failures. Cluster sizes where \(\log_{10}(n)\) equals an integer (\(n=10, 100, 1000\)) hit this case exactly when the cut is 1, 2, 3 respectively.</div>
-  </div>
-  <div class="callout">
-    <div class="tag">why WCC over CC &middot; Vu-Le 2026</div>
-    <p>On the flat + nested stochastic block models tested in Vu-Le 2026 (every variant: degree-corrected, non-degree-corrected, planted-partition, plus PySBM), WCC's gain over the unprocessed clustering is uniformly larger than CC's. CC catches the disconnected-cluster case; WCC also catches the bridge-only case, which is the more common failure mode for SBMs that fit on between-block edge density rather than within-block cohesion. The cost: WCC may over-split a sparse-by-design cluster, the kind of tree-like community whose mincut is genuinely 1. The paper reports the gain holds when the input clustering is suspected to over-merge.</p>
-  </div>
-  <p>The <a href="./cm.html">CM</a> page covers the heavier sibling: same cut, plus a re-cluster of each half via the base algorithm. WCC just cuts. The minimum-cut work is delegated to <a href="./viecut.html">VieCut</a>, whose own page walks the cactus mincut step-by-step on this same fixture.</p>
+  <p><a href="./cc.html">CC</a> asks whether a cluster is connected. WCC asks whether it is <em>well-</em>connected. The binary check becomes a sliding threshold scaled to the cluster's size: the mincut of cluster \(C\) has to strictly exceed \(f(|C|)\). If yes, keep. If no, cut at the most balanced minimum cut and recurse on each connected side. The cheapest correction the family offers; <a href="./cm.html">CM</a> goes one step further and replays the base clustering on each half.</p>
 </section>
 
 <section class="algo-meta">
@@ -388,87 +393,82 @@
     <span><span class="ref-label">mincut</span><a href="https://github.com/VieCut/VieCut" target="_blank" rel="noopener">VieCut</a></span>
     <span><span class="ref-label">docs</span><a href="https://github.com/vltanh/community-detection/blob/main/docs/algorithms/wcc.md" target="_blank" rel="noopener">technical companion</a></span>
   </div>
-  <p class="algo-prov">Byte-equal versus the canonical binary across the L4 self-RNG stress matrix (12 fixtures, 9 seeds, 4 partition inputs, 3 criteria, 0 mismatches) and the bumped 3-tier panel chained through Leiden-Mod and SBM-Flat-PP partitioners.</p>
+  <p class="algo-prov">Byte-equal versus the canonical binary across the L4 self-RNG stress matrix (12 fixtures, 9 seeds, 4 partition inputs, 3 criteria) and the bumped 3-tier panel chained through Leiden-Mod, Leiden-CPM(0.5), Infomap, and SBM-Flat-PP.</p>
 </section>
 
-<!-- ─────────── Stage 0 · input fixture ─────────── -->
+<!-- ─────────── Stage 1 · input fixture + base clustering ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 0 &middot; input</div>
-  <h2>The planted partition.</h2>
-  <p>32 nodes, 52 edges. Four planted communities (A, B, C, D) and two outliers. Cluster B is two 4-cliques joined by a single bridge edge: connected, but only just. The criterion picker in the walker below defaults to \(f(n) = \log_{10}(n)\), the Park 2024 default. Picking a different threshold re-runs the kernel live, and the kernel is byte-equal to the canonical binary, so the partition emitted by any chosen criterion matches the partition the binary would produce.</p>
+  <div class="stage-num">stage 1 &middot; input</div>
+  <h2>The base clustering on the 32-node fixture.</h2>
+  <p>Four planted communities labelled A, B, C, D plus two unlabelled outliers (30, 31). A is a 12-node \(K_5\) core with seven periphery nodes attached. B is two \(K_4\)'s joined by one bridge edge. C is two disjoint 3-cycles sharing one label. D is a 4-node path. Shared with the <a href="./cc.html">CC</a> and <a href="./cm.html">CM</a> pages.</p>
   <div class="graph">
     <div class="graph-canvas" id="g-input-cy"></div>
   </div>
 </section>
 
-<!-- ─────────── Stage 0.5 · the threshold function ─────────── -->
+<!-- ─────────── Stage 2 · the threshold inequality ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 0.5 &middot; the threshold function</div>
-  <h2>What \(f(n)\) looks like, and why it grows slowly.</h2>
-  <p>The well-connectedness test is one inequality:</p>
+  <div class="stage-num">stage 2 &middot; the threshold</div>
+  <h2>One inequality, evaluated on each cluster.</h2>
+  <p>The well-connectedness test sits on a single inequality:</p>
   <p style="text-align:center">\[ \text{mincut}(C) \;>\; f(|C|) \]</p>
-  <p>In words: the smallest edge cut of cluster \(C\) must strictly exceed the threshold evaluated at the cluster's own size. The binary accepts three families of \(f\):</p>
-  <p style="text-align:center">\[ f(n) \;=\; C \log_x(n) \qquad f(n) \;=\; C\, n^{x} \qquad f(n) \;=\; \text{piecewise bands in } n \]</p>
-  <p>The default is \(C=1, x=10\), so \(f(n) = \log_{10}(n)\). In words: a 100-node cluster must survive at least one excess edge above the 2-cut floor; a 1000-node cluster, three. Two interesting properties: the threshold uses base-10 logs so a cluster ten times larger raises the bar by exactly 1 (a unit grade); and because logs grow slower than any positive power, the bar stays mild for clusters in the hundreds of thousands.</p>
-  <p>Why a log of cluster size, not a constant? Park 2024 argues from a tail bound on stochastic block models: a planted community drawn from an Erdős-Rényi-like block has, with high probability, no cut smaller than \(\Theta(\log n)\). Any cluster whose mincut falls below that threshold is, in this asymptotic sense, more likely to be two communities merged than one community badly drawn. A constant threshold (say, mincut ≥ 2) catches the bridge case at small \(n\), but at \(n=10{,}000\) any planted cluster has mincut growing without bound, so a constant bound stops being informative. The log family scales with that informativeness.</p>
-  <p>Why not a polynomial like \(n^{0.5}\)? The square-root family is harsher: at \(n=100\), \(0.2 \cdot \sqrt{n} = 2\) crosses the log floor (\(\log_{10}(100) = 2\)). For \(n &gt; 100\), the square root pulls ahead; for \(n &lt; 100\), the log family is the harsher of the two. The square root crosses earlier and bites harder on big clusters; small clusters are easier under it. Which family fits the input clustering depends on whether the analyst expects under-cohesive big clusters (sqrt is harsher) or under-cohesive small clusters (log is harsher).</p>
-  <div class="callout">
-    <div class="tag">three families &middot; concrete values</div>
-    <p style="text-align:center; margin: .35rem 0;"><span style="font-family:'Special Elite',monospace;font-size:.86rem">
-    f(3) = log<sub>10</sub>(3) ≈ 0.477, 0.2·√3 ≈ 0.346, piecewise = 1<br>
-    f(10) = log<sub>10</sub>(10) = 1.000, 0.2·√10 ≈ 0.632, piecewise = 1<br>
-    f(100) = log<sub>10</sub>(100) = 2.000, 0.2·√100 = 2.000, piecewise = 2<br>
-    f(1000) = log<sub>10</sub>(1000) = 3.000, 0.2·√1000 ≈ 6.325, piecewise = 3<br>
-    f(10000) = log<sub>10</sub>(10000) = 4.000, 0.2·√10000 = 20.000, piecewise = 10
-    </span></p>
-    <p>The log family and the sqrt family cross at \(n = 100\) (where both equal 2). The piecewise family hugs the log curve at small \(n\), then switches to a sqrt-with-coefficient-0.1 above \(n=999\). The piecewise schedule deliberately keeps the bar integer-valued, which sidesteps the \(10^{-9}\) tie tolerance the log path needs.</p>
-  </div>
-  <p>The threshold uses cluster size, not graph size. A 12-node cluster in a 32-node graph evaluates \(f(12)\), not \(f(32)\). Two interesting properties: the verdict on cluster \(C\) does not depend on what the rest of the graph looks like, so the same cluster has the same verdict whether it lives in a 100-node graph or a 100-million-node graph; and the recursion depth is bounded by the cluster's node count (worst case: a chain of 1-cut peels), not the size of the graph, so the walker terminates regardless of how big the input is.</p>
-  <p>One more property worth noting: the comparison sits strictly above the threshold. A cluster whose mincut exactly equals \(f(n)\) fails, not passes. The binary guards the log-family branch with a \(10^{-9}\) tolerance so floating-point round-off does not accidentally flip the verdict for clusters of integer-log size (where \(f(n)\) lands on an integer that the cut value can match exactly).</p>
-  <div class="callout">
-    <div class="tag">termination, in two sentences</div>
-    <p>Every push-back component has fewer nodes than the popped cluster, so cluster size is a strictly decreasing function of recursion depth. The base case is size 1, which the queue drops on push-back. So the recursion bottoms out, and the worst case is a cluster shredded to a few singletons in at most \(n\) pops.</p>
-  </div>
-  <p>The threshold name (well-connectedness) lines up with classical connectivity theory. A graph is \(k\)-edge-connected if every cut has at least \(k\) edges, which is the same as saying its mincut is at least \(k\). WCC's test reads as: "the cluster is \(\lceil f(n) \rceil + 1\)-edge-connected, or close enough to count as it under the tolerance band". Cluster B in the fixture is 1-edge-connected (the bridge), and the threshold at \(n=8\) sits below 1, so 1-edge-connectedness counts as well-connected at that size.</p>
+  <p>In words: the smallest edge cut of cluster \(C\) must strictly exceed the threshold evaluated at the cluster's own size \(|C|\). Two interesting properties: the verdict reads only the cluster's internal structure, so the same cluster lifted into a larger graph gets the same answer; and the comparison is strict, so a cluster whose mincut exactly meets the threshold fails, not passes.</p>
 </section>
 
-<!-- ─────────── Stage 1 · CC pre-pass ─────────── -->
+<!-- ─────────── Stage 3 · why log10(n) ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 1 &middot; pre-pass (CC)</div>
-  <h2>Drop inter-cluster edges, take connected components, seed the queue.</h2>
-  <p>WCC starts the same way as <a href="./cc.html">CC</a>: bucket nodes by cluster id, drop edges crossing cluster boundaries, run breadth-first search on each induced subgraph in node-id order. Components of size 1 are dropped from the work queue; the surviving components become the initial queue for the recursive cut loop below.</p>
-  <p>One subtlety here: the pre-pass treats every cluster the same way regardless of whether it was internally connected in the input. Two cases worth separating. If the input cluster is already one connected piece, the pre-pass produces one queue entry; the cut loop then decides whether to keep it or shred it. If the input cluster is two or more disconnected pieces (same label, different islands), the pre-pass produces one queue entry per island; each island then runs through the cut loop independently. The second case is what the fixture's cluster C shows: nodes 20-25 share one label but live in two disjoint 3-cycles, so the pre-pass splits them into C1 and C2 before any mincut work begins.</p>
-  <p>Why split first, then check well-connectedness? Because mincut is undefined on a disconnected graph (the cut value is trivially 0). Running the cut loop directly on a disconnected cluster would return cut 0 with an arbitrary bipartition, which is technically correct but wastes a recursion step. The pre-pass is the cheap shortcut: BFS once per cluster, hand the cut loop only connected pieces.</p>
+  <div class="stage-num">stage 3 &middot; why \(\log_{10}(n)\)</div>
+  <h2>The threshold scales with cluster size, slowly.</h2>
+  <p>Park 2024 argues the bar from a tail bound on stochastic block models: a planted community drawn from a block has, with high probability, no cut smaller than \(\Theta(\log n)\). A constant bound like "mincut at least 2" catches the bridge case at small \(n\) and then stops being informative once clusters reach the hundreds. Logs grow slower than any polynomial, so the bar stays mild even at \(|V| = 10^6\), where \(\log_{10}(n) = 6\). The default constants are \(C = 1, x = 10\), giving \(f(n) = \log_{10}(n)\).</p>
+</section>
+
+<!-- ─────────── Stage 4 · per-cluster threshold readout ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 4 &middot; thresholds on the fixture</div>
+  <h2>Read the bar against the mincut, cluster by cluster.</h2>
+  <p>Mincut values come from the planted topology; threshold values from \(f(n) = \log_{10}(n)\).</p>
+  <table class="wcc-thr-table">
+    <thead><tr><th>cluster</th><th>n</th><th>structure</th><th>mincut</th><th>\(\log_{10}(n)\)</th><th>verdict</th></tr></thead>
+    <tbody>
+      <tr><td>A</td><td class="num">12</td><td>\(K_5\) core + 7-node periphery</td><td class="num">1</td><td class="num">1.079</td><td class="verdict-fail">fail</td></tr>
+      <tr><td>B</td><td class="num">8</td><td>two \(K_4\) joined by a bridge</td><td class="num">1</td><td class="num">0.903</td><td class="verdict-pass">pass</td></tr>
+      <tr><td>C\(_1\)</td><td class="num">3</td><td>3-cycle</td><td class="num">2</td><td class="num">0.477</td><td class="verdict-pass">pass</td></tr>
+      <tr><td>C\(_2\)</td><td class="num">3</td><td>3-cycle</td><td class="num">2</td><td class="num">0.477</td><td class="verdict-pass">pass</td></tr>
+      <tr><td>D</td><td class="num">4</td><td>4-node path</td><td class="num">1</td><td class="num">0.602</td><td class="verdict-pass">pass</td></tr>
+    </tbody>
+  </table>
+  <p>B has mincut 1 (the bridge) and still passes: at \(n = 8\) the bar sits below 1, so a single-edge bridge counts as well-connected. D passes for the same reason at \(n = 4\). C entered as two disjoint 3-cycles; the connected-component pass below treats them as separate clusters before any mincut runs. A is the only cluster that fails on first sight.</p>
+</section>
+
+<!-- ─────────── Stage 5 · CC pre-pass ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 5 &middot; connected-component pre-pass</div>
+  <h2>Drop inter-cluster edges, split disconnected clusters, seed the queue.</h2>
+  <p>Same first step as <a href="./cc.html">CC</a>: bucket nodes by label, drop every edge whose endpoints carry different labels, breadth-first-search each induced subgraph, drop components of size 1. The surviving multi-node components become the initial queue for the cut loop. C's two 3-cycles split into C\(_1\) and C\(_2\) here; the cut loop never sees a single \(n = 6\) cluster.</p>
+  <p>Why split first, then test well-connectedness. Mincut is undefined on a disconnected graph: the cut value is trivially 0 and the bipartition is arbitrary. The pre-pass is the cheap shortcut, and it costs one breadth-first search per cluster.</p>
   <div id="g-cc-summary" class="wcc-cc-grid"></div>
 </section>
 
-<!-- ─────────── Stage 1.5 · per-pop mechanics ─────────── -->
+<!-- ─────────── Stage 6 · per-pop mechanics ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 1.5 &middot; per-pop mechanics</div>
+  <div class="stage-num">stage 6 &middot; per-pop mechanics</div>
   <h2>Five phases inside every queue pop.</h2>
-  <p>Once the queue is seeded, the cut loop drains it one cluster at a time. Each pop runs the same five-phase routine. The walker in stage 2 lights up each phase as it advances.</p>
+  <p>Once the queue is seeded, the cut loop drains it FIFO. Each pop runs the same five phases.</p>
   <div class="defs">
-    <div><span class="term">phase 1 &middot; pull</span> take the next cluster from the head of the queue. The queue is FIFO. Push-back order matters because clusters from later pops can interleave with the children of earlier pops, not strictly bracket them.</div>
-    <div><span class="term">phase 2 &middot; mincut</span> build the induced subgraph on the cluster's nodes, hand it to <a href="./viecut.html">VieCut's cactus mincut</a>, read back the cut value and the two-sided partition. VieCut returns the most balanced cut among the minimum cuts.</div>
-    <div><span class="term">phase 3 &middot; threshold</span> compute \(f(n)\) for this cluster's size. For the log family, this is \(f(n) = c / \ln(x) \cdot \ln(n)\), with \(c / \ln(x)\) precomputed once at startup so per-pop work is one logarithm and one multiplication.</div>
-    <div><span class="term">phase 4 &middot; verdict</span> compare the cut to the threshold under the strict-above rule with a \(10^{-9}\) tolerance for the log family. Pass means the cluster is well-connected; fail means it gets shredded.</div>
-    <div><span class="term">phase 5 &middot; action</span> on pass, the cluster moves to the survivor list. On fail, the cluster is split at the cut: the in-side connected components are pushed to the queue tail first, then the out-side. Components of size 1 are dropped from the push-back.</div>
+    <div><span class="term">pull</span> take the next cluster from the head of the queue.</div>
+    <div><span class="term">mincut</span> build the induced subgraph on the cluster's nodes, hand it to <a href="./viecut.html">VieCut's cactus mincut</a>, read back the cut value and the most balanced bipartition among the minimum cuts.</div>
+    <div><span class="term">threshold</span> compute \(f(n)\) for the cluster's size, using a precomputed \(C / \ln(x)\) so per-pop cost is one log call and one multiply.</div>
+    <div><span class="term">verdict</span> compare the cut to the threshold under the strict-above rule, with a \(10^{-9}\) tolerance band that treats near-ties as failures.</div>
+    <div><span class="term">action</span> on pass, the cluster joins the survivor list. On fail, push every size-greater-than-1 connected component of each side back onto the queue (in-side first, then out-side).</div>
   </div>
-  <p>Two properties of this routine matter for understanding the partition the algorithm emits. First, the cut loop never re-evaluates a cluster after it lands in the survivor list. A survivor is final the moment its verdict reads pass. Second, the cut loop never sees the inter-cluster edges that the pre-pass dropped; every mincut runs on the induced subgraph of the popped node set, so a cluster's verdict depends only on its own internal edges.</p>
-  <p>The threshold formula deserves a closer look because the order of operations matters for byte-equal reproducibility. The natural way to write \(C \log_x(n)\) is \(C \cdot \ln(n) / \ln(x)\): one log of \(n\), one log of \(x\), one multiply, one divide. The binary uses a different order: it precomputes \(p = C / \ln(x)\) once at startup, then per pop evaluates \(t = p \cdot \ln(n)\). Two floating-point operations per pop instead of four. Two interesting properties: the per-pop cost is one log call and one multiply, which is the floor for any size-dependent threshold; and the rounding behaviour is fixed at startup, so two runs on the same input return bit-identical thresholds even on platforms where the log function rounds slightly differently from the runtime's default.</p>
-  <p>The push-back ordering deserves the same care. After a fail, the cut loop walks the in-side first, runs a sub-BFS to find its connected components, pushes every component of size \(>1\) to the queue tail in component-id order. Then it walks the out-side identically. Components of size 1 are dropped. The recursion terminates because every push-back component is strictly smaller than the popped cluster, and the queue cannot grow past the cluster's node count.</p>
-  <div class="callout">
-    <div class="tag">what mincut returns vs what WCC does with it</div>
-    <p>VieCut's cactus mincut returns the minimum cut value plus a bipartition of the cluster into two sides. The bipartition is the consequence of removing those minimum-cut edges. WCC does not pick which edges to remove; it asks VieCut to do that and accepts the bipartition VieCut produces. The two sides may themselves be disconnected once the cut edges are gone, which is why the cut loop runs a sub-BFS on each side to find its connected components before pushing back. The cut edges themselves are not tracked: WCC only cares about the size and the partition.</p>
-  </div>
-  <p>One more design choice: the cut loop uses a single shared queue, not per-cluster sub-queues. Two interesting consequences. The walker's view of "which clusters remain to process" is the queue itself, in FIFO order, regardless of which input cluster they descended from. And a long-running cluster (one that splits and re-splits) can interleave with siblings, so the cluster popped right after a fail may not be a child of that fail but instead an older sibling waiting in the queue. The walker's queue panel shows this directly.</p>
+  <p>Three properties of this routine. Survivors are immutable: once a cluster passes, it leaves the queue and never returns. Push-back components are strictly smaller than the popped cluster, so the recursion terminates in at most \(n\) pops on a worst-case 1-cut chain. Survivors carry no input label; output ids run \(0, 1, 2, \dots\) in survivor pop order.</p>
 </section>
 
-<!-- ─────────── Stage 2 · recursive cut walker ─────────── -->
+<!-- ─────────── Stage 7 · the walker ─────────── -->
 <section class="stage wcc-walker">
-  <div class="stage-num">stage 2 &middot; recursive cut</div>
+  <div class="stage-num">stage 7 &middot; recursive cut walker</div>
   <h2>Mincut, threshold check, repeat.</h2>
-  <p>The walker advances one queue pop at a time. Each pop pulls a cluster, runs <a href="./viecut.html">VieCut cactus mincut</a> on its induced subgraph, computes the threshold for the cluster's size, then keeps the cluster (if cut clears threshold) or splits it into the two cut halves and pushes the connected components of each side back onto the queue.</p>
+  <p>The walker advances one queue pop at a time. The picker re-runs the kernel on the new criterion and re-mounts the walker with the same input partition. Default is \(f(n) = \log_{10}(n)\), the Park 2024 default.</p>
 
   <div class="wcc-criterion-row">
     <label for="wcc-criterion">threshold</label>
@@ -520,122 +520,76 @@
       <tbody></tbody>
     </table>
   </div>
-
-  <div class="wcc-edge-cases">
-    <div class="wcc-edge-card">
-      <div class="ec-title">cluster already well-connected</div>
-      <p>The cut value clears the threshold strictly. Cluster moves to the survivor list, no recursion. One pop, one phase pipeline, done.</p>
-    </div>
-    <div class="wcc-edge-card">
-      <div class="ec-title">cluster disconnected (mincut = 0)</div>
-      <p>VieCut returns cut = 0 with both sides non-empty. The threshold loses trivially. Each side's connected components push back to the queue. In practice the pre-pass already feeds only connected pieces, so this case is rare except after a previous split removes a vertex whose removal disconnects the residual.</p>
-    </div>
-    <div class="wcc-edge-card">
-      <div class="ec-title">cut equals threshold exactly</div>
-      <p>Within the \(10^{-9}\) tolerance, the cut counts as not well-connected: the inequality is strict, and tolerance only widens the failure band. Triggers at \(n=10\) with \(\log_{10}\) (threshold lands at exactly 1.000), and at \(n=100, 1000\) with the corresponding cut values. The walker shows this on cluster A as it peels down.</p>
-    </div>
-  </div>
 </section>
 
-<!-- ─────────── Stage 2.5 · worked example: cluster A on the fixture ─────────── -->
+<!-- ─────────── Stage 8 · cluster A initial state ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 2.5 &middot; worked example</div>
-  <h2>How the recursion plays out on the 32-node fixture.</h2>
-  <p>Cluster A is the only cluster on the fixture that fails the well-connectedness test under \(f(n) = \log_{10}(n)\). The other three clusters pass on first sight. Walking the test cluster by cluster, with mincut values read off the planted topology:</p>
-  <p style="text-align:center; font-family:'Special Elite',monospace; font-size:.86rem; margin: .6rem 0;">
-    A (n=12, K<sub>5</sub> core + 7-node periphery): mincut = 1, threshold ≈ 1.079, <b style="color:#c92a2a">fail</b><br>
-    B (n=8, two K<sub>4</sub> joined by a bridge): mincut = 1, threshold ≈ 0.903, <b style="color:#4e7a3a">pass</b><br>
-    C<sub>1</sub> (n=3, a 3-cycle): mincut = 2, threshold ≈ 0.477, <b style="color:#4e7a3a">pass</b><br>
-    C<sub>2</sub> (n=3, the other 3-cycle): mincut = 2, threshold ≈ 0.477, <b style="color:#4e7a3a">pass</b><br>
-    D (n=4, two 2-cliques + bridge): mincut = 1, threshold ≈ 0.602, <b style="color:#4e7a3a">pass</b>
-  </p>
-  <p>Three observations on this table. B passes despite having a mincut of 1: the threshold at \(n=8\) sits below 1, so a single-bridge cluster of size 8 is still considered well-connected by the log family. D passes for the same reason at a smaller size. C entered the queue as two separate 3-cycles because of stage 1's pre-pass, so the cut loop never sees a single n=6 cluster; each cycle stands on its own.</p>
-  <p>Cluster A is where the recursion does work. The K<sub>5</sub> core has four 1-edge periphery pendants attached (nodes 5, 6, 7, 11) and three 2-edge periphery nodes (nodes 8, 9, 10). VieCut returns a mincut of 1: any of the four single-edge pendants is a 1-edge cut. The most balanced of those 1-cuts is still imbalanced (1 node on one side, 11 on the other), since all four pendant cuts have the same shape. The cluster fails: \(\text{mincut} = 1 \le \log_{10}(12) \approx 1.079\).</p>
-  <p>The split pushes the size-11 side back to the queue (the singleton side is dropped). At \(n=11\), threshold ≈ 1.041, mincut still 1, fail again. Another pendant peels, leaving \(n=10\). At \(n=10\), the threshold lands at exactly 1.000, and the mincut is still 1. The tolerance guard treats cut equal to threshold as fail, so a third pendant peels. The 9-node residual finally clears: threshold ≈ 0.954, mincut still 1, but 1 strictly exceeds 0.954.</p>
-  <p style="text-align:center; font-family:'Special Elite',monospace; font-size:.86rem; margin: .6rem 0;">
-    pop 1: A, n=12, cut=1, thr≈1.079, <b style="color:#c92a2a">fail</b> → peel one pendant<br>
-    pop 2: residual, n=11, cut=1, thr≈1.041, <b style="color:#c92a2a">fail</b> → peel<br>
-    pop 3: residual, n=10, cut=1, thr=1.000, <b style="color:#c92a2a">fail</b> (tolerance band) → peel<br>
-    pop 4: residual, n=9, cut=1, thr≈0.954, <b style="color:#4e7a3a">pass</b> → keep
-  </p>
-  <p>The 9-node residual is the K<sub>5</sub> core plus four of the periphery nodes. Empirically (binary-verified, cactus mincut backend, single-threaded), the surviving set is nodes \(\{0, 1, 2, 3, 4, 8, 9, 10, 11\}\): the K<sub>5</sub> core plus periphery nodes 8, 9, 10 (each attached by two edges, so they were never the cheapest cut), plus periphery 11 (attached by one edge, but kept because by the time the recursion reaches it, the threshold has already dropped below 1). The three peeled pendants were 5, 6, and 7. Which exact pendant peels first is a tie-break inside VieCut; the order can differ between runs, but the survivor set is stable.</p>
-  <div class="callout">
-    <div class="tag">final partition under \(\log_{10}\) on this fixture</div>
-    <p>A becomes its 9-node residual (the K<sub>5</sub> core plus four periphery nodes: 8, 9, 10, 11). B is kept as-is (two K<sub>4</sub> joined by the bridge). C splits into two 3-cycles via the pre-pass, both kept. D is kept as-is. The two singleton outliers and the three peeled periphery pendants do not appear in the output: they passed through size-1 short-circuits or were filtered as singletons.</p>
-  </div>
-  <p>What does the sqrt threshold do on this same fixture? At \(0.2 \sqrt{n}\), A's threshold drops to ≈ 0.693, so the n=12 cut of 1 already passes. B is at 0.566, C₁/C₂ at 0.346, D at 0.4. Every cluster passes on first sight, no peeling. The two criteria agree on B, C, D and disagree on A. On a larger graph the disagreement reverses: above \(n=100\), the sqrt curve climbs past log and becomes the harsher of the two.</p>
-  <p>Under the piecewise schedule, the thresholds are integer-valued. For \(n &lt; 100\), the cluster only has to clear cut 1; for \(n\) in \([100, 500]\), cut 2; for \(n\) in \((500, 999]\), cut 3; and for \(n &gt; 999\), \(\lceil 0.1 \sqrt{n} \rceil\). Every cluster on the fixture sits in the first band, so the piecewise verdict is "cut \(\ge 1\) means pass". B, C₁, C₂, D pass for the same reason as the sqrt case. A passes too: mincut 1 clears the bar of 1. The piecewise schedule is the most permissive of the three families on small clusters and the harshest on the tail above \(n \approx 10{,}000\), where \(\lceil 0.1 \sqrt{n} \rceil\) leaves \(\log_{10}(n)\) behind.</p>
-  <p>Picking the doubled coefficient \(2 \log_{10}(n)\) reshuffles the fixture. At \(n=8\), threshold ≈ 1.806, so B (cut 1) now fails. The cut loop splits B at the 15-16 bridge into two K<sub>4</sub> of size 4. Each K<sub>4</sub> at \(n=4\) has mincut 3 (every edge participates in three triangles, so the smallest cut is the three edges incident to any single node). The threshold at \(n=4\) is \(2 \log_{10}(4) \approx 1.204\), and 3 strictly clears it, so both halves pass. B splits into its two K<sub>4</sub>; the bridge edge does not come back. This is the only criterion in the picker that splits B in the fixture, which is a useful illustration of how a coefficient bump shifts a single edge's significance.</p>
-  <div class="callout">
-    <div class="tag">a clarifying note on the sqrt criterion</div>
-    <p>The shipped sqrt option in the picker is \(0.2 \sqrt{n}\). Park 2024 also defines a stricter sqrt at \(\sqrt{n}/10\), which is the unit used inside the piecewise schedule's tail (above \(n=999\)). The two coincide except for the coefficient; both have the same crossover with \(\log_{10}\) at \(n=100\) when scaled, but only the 0.2 form is exposed as a top-level option here. The piecewise schedule embeds the \(\sqrt{n}/10\) form as a clamped tail.</p>
-  </div>
+  <div class="stage-num">stage 8 &middot; cluster A, initial state</div>
+  <h2>The only cluster that fails on first sight.</h2>
+  <p>A enters the cut loop at \(n = 12\): the \(K_5\) core on \(\{0, 1, 2, 3, 4\}\) plus four 1-edge pendants (5, 6, 7, 11) and three 2-edge periphery nodes (8, 9, 10). VieCut returns a mincut of 1 (any of the four 1-edge pendants). Among the four tied 1-cuts, all peel a single node, so the most-balanced rule picks one of them; the choice is a VieCut-internal tie-break. Threshold at \(n = 12\) is \(\log_{10}(12) \approx 1.079\). The verdict is fail: 1 is not strictly above 1.079.</p>
 </section>
 
-<!-- ─────────── Stage 2.75 · invariants + corners ─────────── -->
+<!-- ─────────── Stage 9 · A pop 1: first peel ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 2.75 &middot; invariants and corners</div>
-  <h2>What WCC promises and what it does not.</h2>
-  <p>A handful of invariants survive across every queue pop, regardless of input. Reading them in order makes the algorithm a little less mysterious when the walker emits a partition that looks surprising.</p>
-  <div class="defs">
-    <div><span class="term">cluster size strictly shrinks per recursion</span> every push-back component has fewer nodes than the popped cluster. A push-back of equal size would imply the cut had 0 edges, which only happens on a disconnected cluster (whose pre-pass would have split it first).</div>
-    <div><span class="term">survivors are immutable</span> once a cluster passes, it leaves the queue and never returns. WCC is monotone in survivorship; the partition only grows.</div>
-    <div><span class="term">survivors carry no input cluster id</span> the output ids run 0, 1, 2, ... in the order survivors are popped from the done-queue. A surviving fragment of the input cluster A does not keep the label "A"; it gets a fresh id. This differs from <a href="./cm.html">CM</a>, which preserves lineage through the recursion.</div>
-    <div><span class="term">threshold is local</span> two runs on different graphs containing the same cluster (same node set, same internal edges, same induced topology) produce the same verdict for that cluster. The threshold only sees the cluster's size and mincut.</div>
-    <div><span class="term">push-back order is in-side first</span> when a cluster fails, the components of the in-partition are pushed before the components of the out-partition. The verdict is identical regardless, but the survivor numbering depends on this order.</div>
-  </div>
-  <p>A few corner cases that the planted fixture does not stress but the algorithm has to handle:</p>
-  <div class="wcc-edge-cases">
-    <div class="wcc-edge-card">
-      <div class="ec-title">a sparse community by design</div>
-      <p>Tree-like clusters (a star, a path, a sparse tree) have genuine mincut 1. Under any non-trivial log or sqrt threshold, they fail and shred down to singletons or pairs. The output can lose every internal node of the cluster. This is the over-splitting failure mode Vu-Le 2026 calls out.</p>
-    </div>
-    <div class="wcc-edge-card">
-      <div class="ec-title">a cluster with weighted edges</div>
-      <p>VieCut accepts edge weights and computes the minimum weighted cut. The threshold treats the cut value as a real number; clusters with weights ≥ 1 on every edge behave essentially as unweighted. Clusters with sub-unit weights can be shredded much harder than the unweighted intuition suggests.</p>
-    </div>
-    <div class="wcc-edge-card">
-      <div class="ec-title">a cluster of size 2</div>
-      <p>Either the two nodes share an edge (mincut 1, threshold \(\log_{10}(2) \approx 0.301\), passes) or they do not (the pre-pass already split them as two singletons, both dropped). The size-2 case is the smallest non-trivial cluster the cut loop ever sees.</p>
-    </div>
-    <div class="wcc-edge-card">
-      <div class="ec-title">a cluster that exactly equals the graph</div>
-      <p>If the input partition has all nodes in one cluster, the pre-pass does no work (no inter-cluster edges to drop). The cut loop runs WCC on the whole graph. Useful as a sanity check: WCC then converges to the maximal well-connected subgraphs of the input graph.</p>
-    </div>
-    <div class="wcc-edge-card">
-      <div class="ec-title">a non-deterministic input partition</div>
-      <p>If the input partition came from a randomised algorithm (Louvain, Leiden), changing the seed changes the input, which changes which clusters WCC sees. The post-proc itself is deterministic given an input partition, but the joint pipeline is not.</p>
-    </div>
-    <div class="wcc-edge-card">
-      <div class="ec-title">two minimum cuts with the same value</div>
-      <p>VieCut breaks the tie by picking the most balanced of the tied cuts. The verdict is unaffected (both ties have the same cut value, so both lead to the same pass/fail decision). The push-back composition can differ: one tie peels a single node, another splits the cluster in half.</p>
-    </div>
-  </div>
+  <div class="stage-num">stage 9 &middot; A pop 1</div>
+  <h2>Peel one pendant. Push the 11-node side back to the queue.</h2>
+  <p>VieCut returns the bipartition (1 pendant, 11 rest). The 1-side fails the size-greater-than-1 push-back gate and vanishes. The 11-side joins the queue tail. The peeled pendant becomes one of nodes 5, 6, 7, 11; which one depends on VieCut's tie-break.</p>
 </section>
 
-<!-- ─────────── Stage 2.9 · what WCC does not do + pipeline ─────────── -->
+<!-- ─────────── Stage 10 · A pop 2: second peel ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 2.9 &middot; what WCC does not do</div>
-  <h2>The post-proc has a narrow remit.</h2>
-  <p>It is easy to read the recursive-split picture as "WCC re-clusters the graph". It does not. The remit is small enough that listing what falls outside it clarifies the picture.</p>
-  <div class="defs">
-    <div><span class="term">no re-clustering</span> WCC never re-runs the base clustering algorithm on the split halves. After a split, both halves are pushed back as-is. <a href="./cm.html">CM</a> is the sibling that re-runs Leiden (or whichever base) on each half; that is the headline difference between the two.</div>
-    <div><span class="term">no merging</span> the post-proc only splits; it never combines two input clusters into one. If the input under-splits a community (one ground-truth community labelled as two clusters), WCC cannot fix it.</div>
-    <div><span class="term">no node relabelling across clusters</span> a node assigned to input cluster A is either a survivor of a fragment of A, or unlabelled in the output. It never gets the label of cluster B.</div>
-    <div><span class="term">no global mincut</span> WCC computes per-cluster mincut, not graph-wide mincut. The cut found inside cluster A is the smallest cut that splits A; it might be much larger than the smallest cut of the residual graph.</div>
-    <div><span class="term">no use of edge attributes other than weight</span> the cut backend reads edge weights and ignores everything else. Edge timestamps, attributes, types: none of them feed the threshold.</div>
-    <div><span class="term">no parameter tuning</span> the threshold is a fixed string passed in once. WCC does not pick \(C\) and \(x\) per cluster, and does not adapt the criterion to local density. The single global criterion applies to every cluster.</div>
-  </div>
-  <p>In the chained pipeline, WCC sits downstream of a base clustering algorithm. The harness tests four bases in rotation: <a href="./leiden.html">Leiden</a> with modularity, Leiden with CPM at resolution 0.5, <a href="./infomap.html">Infomap</a>, and the planted-partition SBM. Each base produces an input partition, WCC post-processes it, and the survivor partition feeds downstream analysis. Two interesting properties of this composition: each base has its own failure mode (Leiden's resolution limit, Infomap's two-level coding, the SBM's between-block bias), and WCC catches the bridge-only and disconnected-cluster cases regardless of which base produced them; and the bit-equal verification matrix grids all four bases against the same WCC pipeline, so any base-specific tie-break that flips the WCC output gets surfaced.</p>
-  <div class="callout">
-    <div class="tag">why VieCut for the mincut, not Stoer-Wagner</div>
-    <p>Stoer-Wagner is the textbook minimum-cut algorithm, with one easy-to-state property: it runs in \(O(|V| |E| + |V|^2 \log |V|)\) and returns the global mincut. VieCut's cactus mincut is in expectation linear in graph size, much faster in practice, and returns not just the cut value but the cactus structure that encodes every minimum cut at once. WCC needs the most balanced minimum cut, which the cactus exposes for free; running Stoer-Wagner and then searching among ties would cost much more. The pedagogy walker can fall back to a Stoer-Wagner standin if VieCut is not loaded, but the canonical pipeline runs through VieCut.</p>
-  </div>
+  <div class="stage-num">stage 10 &middot; A pop 2</div>
+  <h2>Same shape, smaller cluster. \(n = 11\), cut 1, threshold 1.041.</h2>
+  <p>The 11-node residual still has 1-edge pendants in it, so the mincut is still 1. Threshold at \(n = 11\) is \(\log_{10}(11) \approx 1.041\). Fail again. Another pendant peels; the 10-node side returns to the queue.</p>
 </section>
 
-<!-- ─────────── Stage 3 · final ─────────── -->
+<!-- ─────────── Stage 11 · A pop 3: epsilon-band fail ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 3 &middot; final</div>
+  <div class="stage-num">stage 11 &middot; A pop 3</div>
+  <h2>Threshold lands on the integer. The epsilon band catches it.</h2>
+  <p>At \(n = 10\), \(\log_{10}(n) = 1.000\) exactly. Mincut is still 1. The strict-above rule says "1 is not strictly greater than 1, so fail"; the \(10^{-9}\) tolerance band confirms it (the gap is zero, well inside the band). A third pendant peels. The 9-node side returns to the queue.</p>
+</section>
+
+<!-- ─────────── Stage 12 · A pop 4: the survivor ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 12 &middot; A pop 4</div>
+  <h2>The 9-node residual clears the bar.</h2>
+  <p>At \(n = 9\), threshold drops to \(\log_{10}(9) \approx 0.954\). Mincut is still 1. The verdict is pass: 1 strictly exceeds 0.954. The 9-node side joins the survivor list. Binary-verified, the surviving set is \(\{0, 1, 2, 3, 4, 8, 9, 10, 11\}\): the \(K_5\) core, the three 2-edge periphery nodes, and the one 1-edge pendant whose threshold-fail moment never landed. The three peeled pendants are some permutation of \(\{5, 6, 7\}\); peel order varies with VieCut tie-breaks, but the survivor set is stable.</p>
+  <table class="wcc-peel-table">
+    <thead><tr><th>pop</th><th>n</th><th>cut</th><th>threshold</th><th>verdict</th></tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td class="num">12</td><td class="num">1</td><td class="num">1.079</td><td class="fail">fail &middot; peel</td></tr>
+      <tr><td class="num">2</td><td class="num">11</td><td class="num">1</td><td class="num">1.041</td><td class="fail">fail &middot; peel</td></tr>
+      <tr><td class="num">3</td><td class="num">10</td><td class="num">1</td><td class="num">1.000</td><td class="fail">fail &middot; epsilon band</td></tr>
+      <tr><td class="num">4</td><td class="num"> 9</td><td class="num">1</td><td class="num">0.954</td><td class="pass">pass &middot; keep</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ─────────── Stage 13 · B walkthrough ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 13 &middot; cluster B</div>
+  <h2>One bridge edge, passes on first sight.</h2>
+  <p>B is two \(K_4\)'s joined by the edge (15, 16). Mincut is 1 (the bridge). Threshold at \(n = 8\) is \(\log_{10}(8) \approx 0.903\). \(1 > 0.903\), so B passes. One pop, no peeling. The single-bridge cluster of size 8 counts as well-connected by the log family. Doubling the coefficient to \(2 \log_{10}(n)\) raises the bar at \(n = 8\) to 1.806 and flips B's verdict to fail; the picker in stage 7 exposes that flip.</p>
+</section>
+
+<!-- ─────────── Stage 14 · C and D walkthroughs ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 14 &middot; clusters C, D</div>
+  <h2>The disconnected one was already split. The path-shaped one passes.</h2>
+  <p>C entered the queue as two separate 3-cycles via the connected-component pre-pass. Each has mincut 2 and threshold 0.477 at \(n = 3\); both pass on first sight. D is a 4-node path with mincut 1; threshold at \(n = 4\) is 0.602, so D passes. Three small clusters, three single-pop survivors.</p>
+</section>
+
+<!-- ─────────── Stage 15 · prune phase ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 15 &middot; what falls off</div>
+  <h2>Size-1 components are dropped at every push-back gate.</h2>
+  <p>The push-back loop walks each side's connected components and pushes only the size-greater-than-1 ones. Size-1 fragments are filtered, both in the initial connected-component pre-pass and inside the cut loop. On this fixture, three peeled pendants from A and the two outliers (30, 31) all fall through this gate. The output has no entries for them; downstream tools read them as unlabelled.</p>
+</section>
+
+<!-- ─────────── Stage 16 · final ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 16 &middot; final partition</div>
   <h2>WCC output next to ground truth.</h2>
   <p id="g-final-summary">survivors: · &middot; nodes kept / dropped: ·</p>
   <div class="graph g-with-side">
@@ -645,39 +599,28 @@
       <div id="g-final-gt"></div>
     </div>
   </div>
-  <div class="callout">
-    <div class="tag">how to read this output</div>
-    <p>Under the \(\log_{10}\) criterion, WCC keeps five clusters: a 9-node residual of A, the full B, the two pre-split halves of C, and D unchanged. The three peeled periphery pendants and the two outliers are unlabelled in the output. The ground truth panel on the right shows the planted partition for comparison; the disagreement with WCC's output sits in A (peeled-down) and C (pre-split). Picking a different criterion in the walker above redraws the output live, so the disagreement set shifts with the threshold.</p>
-  </div>
-  <p>The sibling pages cover the rest of the family. <a href="./cc.html">CC</a> stops after the pre-pass: every connected piece is a survivor, no threshold, no recursion. <a href="./cm.html">CM</a> goes further than WCC: each split half is re-clustered by the base algorithm and the new partitions feed back into the queue. <a href="./viecut.html">VieCut</a>'s own page walks the cactus mincut at the inside of every WCC pop. The chained verification harness wires all four through a stress matrix; the technical companion below lists which base algorithms feed WCC's input partition in the test set.</p>
+  <p>Under the \(\log_{10}\) default, five survivors: A's 9-node residual, B intact, C\(_1\) and C\(_2\) separate, D intact. The three peeled pendants and the two outliers are unlabelled. Changing the criterion in stage 7 redraws this panel live; under \(0.2 \sqrt{n}\) every cluster passes on first sight (no peeling), and under \(2 \log_{10}(n)\) B splits into its two \(K_4\)'s.</p>
 </section>
 
-<!-- ─────────── Stage 4 · what changes at scale ─────────── -->
+<!-- ─────────── Stage 17 · comparison with CC and CM ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 4 &middot; what changes at scale</div>
-  <h2>From the 32-node fixture to networks with hundreds of thousands of nodes.</h2>
-  <p>The pedagogy fixture sits at 32 nodes for a reason: every queue pop is one of five or six, and the reader can hold the whole recursion in their head. The same algorithm at \(|V| = 100{,}000\) behaves differently in three ways worth flagging.</p>
-  <p>First, the work shifts from cluster bookkeeping to mincut. On the 32-node fixture, the cut loop does one cactus mincut per pop, with sub-microsecond cost; the bottleneck is the threshold compare. At a hundred thousand nodes split across a few hundred clusters, each cluster's mincut still runs in near-linear time, but the constants stop being negligible. VieCut's cactus build dominates the wall time, and the threshold compare becomes free in comparison. The chained verification harness uses fixtures up to \(|V| \approx 23{,}000\) to keep the test matrix tractable, with cells running in tens of seconds each.</p>
-  <p>Second, the recursion depth scales with the structure of the cluster, not the graph as a whole. A cluster with a balanced minimum cut shrinks by roughly half per recursion (log-depth in the cluster's size); a cluster with only 1-cut chains (a long path of pendants) peels one node at a time (linear-depth). Most empirical inputs are somewhere between, and the deepest cluster on a typical graph bottoms out in tens of pops, not thousands. The pre-pass already splits the input into per-cluster work, so the cut loop's total wall time is the sum across clusters rather than a single deep recursion.</p>
-  <p>Third, the threshold becomes nearly meaningless on huge clusters under the log family. A cluster of \(n = 10^6\) nodes evaluates \(f(n) = 6\), so it has to clear cut 7 to pass. On a typical block-model planted community of that size, the mincut is in the dozens at minimum (every node has expected degree growing with \(n\)). The log family essentially never rejects a huge cluster. The sqrt and piecewise families pull harder at the tail and reject more big clusters.</p>
-  <div class="callout">
-    <div class="tag">Vu-Le 2026 empirical findings</div>
-    <p>Across the SBM variants tested in the paper (graph-tool flat with degree correction, without degree correction, and planted-partition, plus the nested variants and PySBM), WCC consistently improves the recovery of planted communities. The improvement is uniformly larger than CC's. Where the input clustering produces internally disconnected clusters or bridge-only clusters, WCC catches both; CC catches only the first. The exception cases reported are sparse ground-truth communities, where the cluster's mincut is genuinely small and the threshold over-splits a cluster that was already correct. The picker on this page exposes the same tradeoff on the planted fixture.</p>
-  </div>
-  <p>One last note on the picker: the walker re-runs the kernel on every criterion change, with the same input partition. The number of pops varies with the criterion (harsher criteria split more clusters, which produces more pops). The cut backend is the same VieCut cactus build in every run; the seed is fixed by the URL parameter, so two runs with matching criterion and matching URL produce byte-identical traces. The picker is the only knob that changes behaviour from run to run on this fixture.</p>
+  <div class="stage-num">stage 17 &middot; siblings in the family</div>
+  <h2>WCC sits between CC and CM in cost and aggression.</h2>
+  <p><a href="./cc.html">CC</a> stops after the pre-pass. Every connected component of the residual graph is a survivor; no threshold, no recursion. <a href="./cm.html">CM</a> goes one step further than WCC: each failing cluster gets cut, and each side is re-clustered by the base algorithm (Leiden, in the shipped binary) before any survivors are accepted. WCC splits only; CM splits and re-clusters. On the fixture under \(\log_{10}\): CC keeps all five connected pieces (A intact at 12 nodes, C split into two cycles, B and D intact); WCC peels A to 9 nodes; CM peels A and then re-clusters the 9-node residual into whatever the inner Leiden call returns.</p>
 </section>
 
-<!-- ─────────── Stage 5 · verification posture ─────────── -->
+<!-- ─────────── Stage 18 · chain composition ─────────── -->
 <section class="stage">
-  <div class="stage-num">stage 5 &middot; verification posture</div>
-  <h2>What "byte-equal versus canonical" means here.</h2>
-  <p>The kernel on this page is a JavaScript port of the binary that ships with the constrained-clustering project. The port is verified against the canonical binary under matched seed and matched input: every cluster popped, every mincut value returned, every threshold computed, every push-back component, all bits identical. The verification matrix sweeps the parameters that drive the kernel's tie-break behaviour: seed (nine values), input partition source (four base algorithms), criterion (three families). Across the full matrix, the survivor sets and the per-pop record fields agree exactly.</p>
-  <p>Two technical points underpin that match. The threshold is computed in the same order on both sides: a precomputed \(C / \ln(x)\) at startup, then a single multiply with \(\ln(n)\) per pop. Computing it any other way (say, \(C \cdot \ln(n) / \ln(x)\) per pop) introduces a different rounding accumulation. The natural-log primitive itself differs by 1 ulp on a small fraction of inputs between the browser runtime and the system math library; the verification harness ports a faithful natural-log into the canonical binary so the bits line up across the linkage boundary. End readers of the page do not need to know about the port, but it is the reason the walker on this page produces the same partition the binary would.</p>
-  <p>The mincut backend is delegated to <a href="./viecut.html">VieCut</a>, which has its own verification matrix. The chained verification here wires VieCut through WCC: a failure at the VieCut layer would surface as a different mincut value or a different bipartition, which would cascade through the WCC verdict and push-back. The matrix grids both layers together, so divergence at either layer is caught.</p>
-  <div class="callout">
-    <div class="tag">three claims, three answers</div>
-    <p>The kernel on this page produces the same partition as the canonical binary, under matched seed and matched input. The canonical binary produces the same partition as the verification tracer (a build of the binary with structured probes that emit per-pop records). The kernel on this page produces the same per-pop trace as the verification tracer. Each of the three claims is checked independently; together they pin down the page as a faithful walker of the binary.</p>
-  </div>
+  <div class="stage-num">stage 18 &middot; chain composition</div>
+  <h2>WCC is post-processing; the base clustering feeds it.</h2>
+  <p>In the chained verification matrix, WCC sits downstream of four bases: <a href="./leiden.html">Leiden</a> with modularity, Leiden with CPM at resolution 0.5, <a href="./infomap.html">Infomap</a>, and SBM-Flat-PP. Each base produces an input partition; WCC reads that partition and emits a survivor partition. The bit-equal grid covers all four bases against three criteria (\(\log_{10}\), sqrt, piecewise) under nine seeds, and the survivor sets agree with the canonical binary to the bit.</p>
+</section>
+
+<!-- ─────────── Stage 19 · failure mode ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 19 &middot; failure mode</div>
+  <h2>Sparse-by-design clusters fragment.</h2>
+  <p>Tree-shaped clusters (a star, a path, any cluster whose natural mincut is genuinely 1) fail every non-trivial log or sqrt threshold and shred down to singletons or pairs. The output drops them entirely. Vu-Le 2026 reports this failure mode on benchmarks with sparse planted communities; the picker in stage 7 reproduces it by turning the bar up. The trade-off is global: WCC trusts the threshold against any cluster, so a planted community that happens to look tree-like is misread the same way an over-merged cluster is.</p>
 </section>
 
 <aside class="tech-companion">
