@@ -381,7 +381,7 @@
 </header>
 
 <section class="hook">
-  <p><a href="./cc.html">CC</a> asks whether a cluster is connected. WCC asks whether it is <em>well-</em>connected. The binary check becomes a sliding threshold scaled to the cluster's size: the mincut of cluster \(C\) has to strictly exceed \(f(|C|)\). If yes, keep. If no, cut at the most balanced minimum cut and recurse on each connected side. The cheapest correction the family offers; <a href="./cm.html">CM</a> goes one step further and replays the base clustering on each half.</p>
+  <p><a href="./cc.html">CC</a> asks whether a cluster is connected. WCC asks whether it is <em>well-</em>connected. The binary check becomes a sliding threshold scaled to the cluster's size: the mincut of cluster \(C\) has to strictly exceed \(f(|C|)\). If yes, keep. If no, cut at the most balanced minimum cut and recurse on each connected side. <a href="./cm.html">CM</a> sits one step heavier: same recursion, with a base-algorithm replay on each cut half.</p>
 </section>
 
 <section class="algo-meta">
@@ -461,7 +461,7 @@
     <div><span class="term">verdict</span> compare the cut to the threshold under the strict-above rule, with a \(10^{-9}\) tolerance band that treats near-ties as failures.</div>
     <div><span class="term">action</span> on pass, the cluster joins the survivor list. On fail, push every size-greater-than-1 connected component of each side back onto the queue (in-side first, then out-side).</div>
   </div>
-  <p>Three properties of this routine. Survivors are immutable: once a cluster passes, it leaves the queue and never returns. Push-back components are strictly smaller than the popped cluster, so the recursion terminates in at most \(n\) pops on a worst-case 1-cut chain. Survivors carry no input label; output ids run \(0, 1, 2, \dots\) in survivor pop order.</p>
+  <p>Three interesting properties of this routine. Survivors are immutable: once a cluster passes, it leaves the queue and never returns. Push-back components are strictly smaller than the popped cluster, so the recursion terminates in at most \(n\) pops on a worst-case 1-cut chain. Survivors carry no input label; output ids run \(0, 1, 2, \dots\) in survivor pop order.</p>
 </section>
 
 <!-- ─────────── Stage 7 · the walker ─────────── -->
@@ -547,14 +547,14 @@
 <section class="stage">
   <div class="stage-num">stage 11 &middot; A pop 3</div>
   <h2>Threshold lands on the integer. The epsilon band catches it.</h2>
-  <p>At \(n = 10\), \(\log_{10}(n) = 1.000\) exactly. Mincut is still 1. The strict-above rule says "1 is not strictly greater than 1, so fail"; the \(10^{-9}\) tolerance band confirms it (the gap is zero, well inside the band). A third pendant peels. The 9-node side returns to the queue.</p>
+  <p>At \(n = 10\), \(\log_{10}(n) = 1.000\) exactly. Mincut is still 1. Under the strict-above rule, 1 is not greater than 1, so the verdict is fail; the \(10^{-9}\) tolerance band confirms it (the gap is zero, well inside the band). A third pendant peels. The 9-node side returns to the queue.</p>
 </section>
 
 <!-- ─────────── Stage 12 · A pop 4: the survivor ─────────── -->
 <section class="stage">
   <div class="stage-num">stage 12 &middot; A pop 4</div>
   <h2>The 9-node residual clears the bar.</h2>
-  <p>At \(n = 9\), threshold drops to \(\log_{10}(9) \approx 0.954\). Mincut is still 1. The verdict is pass: 1 strictly exceeds 0.954. The 9-node side joins the survivor list. Binary-verified, the surviving set is \(\{0, 1, 2, 3, 4, 8, 9, 10, 11\}\): the \(K_5\) core, the three 2-edge periphery nodes, and the one 1-edge pendant whose threshold-fail moment never landed. The three peeled pendants are some permutation of \(\{5, 6, 7\}\); peel order varies with VieCut tie-breaks, but the survivor set is stable.</p>
+  <p>At \(n = 9\), threshold drops to \(\log_{10}(9) \approx 0.954\). Mincut is still 1. The verdict is pass: 1 strictly exceeds 0.954. The 9-node side joins the survivor list. Binary-verified, the surviving set is \(\{0, 1, 2, 3, 4, 8, 9, 10, 11\}\): the \(K_5\) core, the three 2-edge periphery nodes, and one 1-edge pendant that the peel sequence happened to leave behind. The three peeled pendants are some permutation of \(\{5, 6, 7\}\); peel order varies with VieCut tie-breaks, but the survivor set is stable.</p>
   <table class="wcc-peel-table">
     <thead><tr><th>pop</th><th>n</th><th>cut</th><th>threshold</th><th>verdict</th></tr></thead>
     <tbody>
@@ -605,7 +605,7 @@
 <!-- ─────────── Stage 17 · comparison with CC and CM ─────────── -->
 <section class="stage">
   <div class="stage-num">stage 17 &middot; siblings in the family</div>
-  <h2>WCC sits between CC and CM in cost and aggression.</h2>
+  <h2>WCC sits between CC and CM in cost and reach.</h2>
   <p><a href="./cc.html">CC</a> stops after the pre-pass. Every connected component of the residual graph is a survivor; no threshold, no recursion. <a href="./cm.html">CM</a> goes one step further than WCC: each failing cluster gets cut, and each side is re-clustered by the base algorithm (Leiden, in the shipped binary) before any survivors are accepted. WCC splits only; CM splits and re-clusters. On the fixture under \(\log_{10}\): CC keeps all five connected pieces (A intact at 12 nodes, C split into two cycles, B and D intact); WCC peels A to 9 nodes; CM peels A and then re-clusters the 9-node residual into whatever the inner Leiden call returns.</p>
 </section>
 
@@ -620,7 +620,7 @@
 <section class="stage">
   <div class="stage-num">stage 19 &middot; failure mode</div>
   <h2>Sparse-by-design clusters fragment.</h2>
-  <p>Tree-shaped clusters (a star, a path, any cluster whose natural mincut is genuinely 1) fail every non-trivial log or sqrt threshold and shred down to singletons or pairs. The output drops them entirely. Vu-Le 2026 reports this failure mode on benchmarks with sparse planted communities; the picker in stage 7 reproduces it by turning the bar up. The trade-off is global: WCC trusts the threshold against any cluster, so a planted community that happens to look tree-like is misread the same way an over-merged cluster is.</p>
+  <p>Tree-shaped clusters (a star, a path, any cluster whose mincut is structurally 1) fail every non-trivial log or sqrt threshold and break down to singletons or pairs. The output drops them entirely. Vu-Le 2026 reports this failure mode on benchmarks with sparse planted communities; the picker in stage 7 reproduces it by turning the bar up. The trade-off is global: the threshold applies to every cluster regardless of provenance, so a planted community that happens to look tree-like is misread the same way an over-merged cluster is.</p>
 </section>
 
 <aside class="tech-companion">
