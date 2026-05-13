@@ -228,11 +228,11 @@
 <section class="hook">
   <p><a href="./cc.html">CC</a> drops cross-cluster edges and splits each cluster into its connected pieces. <a href="./wcc.html">WCC</a> adds a threshold: a cluster has to clear a mincut bound or it gets cut and recursed. CM is the heaviest: WCC plus a Leiden recluster on each cut half before the recursion advances.</p>
 
-  <p>The word in "connectivity <em>modifier</em>" carries weight. CC and WCC are filters: the output labels are descendants of the input labels. CM <em>modifies</em>: post-cut halves are not stuck with the input partition. If the base algorithm sees an 80-node induced subgraph and decides it is really four communities, CM accepts that and feeds the four into the next round.</p>
+  <p>The <em>modifier</em> in the name is literal. CC and WCC are filters: the output labels descend from the input labels. CM rewrites them. Post-cut halves are not bound to the input partition; if the base algorithm returns four communities on an 80-node induced subgraph, CM feeds those four into the next round.</p>
 
   <p>The threshold uses the same parser as <a href="./wcc.html">WCC</a>:</p>
   <p style="text-align:center">\( f(n) = C \log_x(n) \quad \text{or} \quad f(n) = C\,n^x \)</p>
-  <p>In plain English: a cluster of \(n\) nodes passes iff its minimum edge cut is strictly larger than \(f(n)\). Two interesting properties: the threshold is monotone in \(n\), so as a cluster shrinks under repeated cuts the bar drops with it, which is why the recursion terminates; and the threshold is independent of cluster density, only of size.</p>
+  <p>In words: a cluster of \(n\) nodes passes iff its minimum edge cut is strictly larger than \(f(n)\). Two interesting properties: the threshold is monotone in \(n\), so as a cluster shrinks under repeated cuts the bar drops with it, which is why the recursion terminates; and the threshold depends only on size, not on cluster density.</p>
 
   <p>Park 2024 (<a href="https://doi.org/10.1371/journal.pcsy.0000009">PLOS Complex Systems 1(3):e0000009</a>) gives \( f(n) = \log_{10}(n) \) as the primary criterion. The pipeline wrapper ships \(0.2 \cdot n^{0.5}\) instead. The two cross at \(n = 100\); below that, the log criterion is stricter.</p>
 
@@ -287,7 +287,7 @@
 
   <p style="text-align:center">\( \text{if } |\text{component}| = |\text{original cluster}| \text{ then keep the original id, else mint a fresh id with parent } = \text{original} \)</p>
 
-  <p>In plain English: if a component covers its entire input cluster, the original id stands. If the component is a strict subset, CM mints a fresh id and records the parent link. The first fragment of each input cluster also records the row "(parent = root, child = original id)" exactly once. Two interesting properties: the root row records every input cluster that ever fragmented, so the cluster-fate analyzer finds the split inputs by scanning a single row; and ids are never re-used, so the tree is always acyclic.</p>
+  <p>In words: a component covering its entire input cluster keeps the original id; a strict subset gets a fresh id and a parent link. The first fragment of each input cluster also records the row "(parent = root, child = original id)" exactly once. Two interesting properties: the root row records every input cluster that ever fragmented, so the cluster-fate analyzer finds the split inputs by scanning a single row; and ids are never re-used, so the tree is always acyclic.</p>
 </section>
 
 <!-- ─────────── Stage 3 · the threshold function ─────────── -->
@@ -300,7 +300,7 @@
     \( \text{is\_close} = | \text{threshold} - \text{cut} | \leq 10^{-9} \)<br>
     \( \text{well\_connected} = (\text{not is\_close}) \wedge (\text{threshold} &lt; \text{cut}) \)
   </p>
-  <p>In plain English: a cluster is well-connected if its cut is strictly above the threshold AND the cut is not numerically tied with the threshold. The constant \(\text{pre\_log} = C / \log(x)\) is computed once at startup, so per-cluster work is one log call and one multiply. Two interesting properties: a smaller cluster always faces a smaller threshold (log is monotone), so a cluster that fails the bar once cannot recover by surviving a cut that just shrunk it; and the comparison sits strictly above the threshold, so a cluster sitting exactly at \(f(n)\) within tolerance fails, not passes.</p>
+  <p>In words: a cluster is well-connected when its cut is strictly above the threshold and not numerically tied to it. The constant \(\text{pre\_log} = C / \log(x)\) is computed once at startup, so per-cluster work is one log call and one multiply. Two interesting properties: a smaller cluster always faces a smaller threshold (log is monotone), so a cluster that fails the bar once cannot recover by surviving a cut that just shrunk it; and the comparison is strict, so a cluster sitting exactly at \(f(n)\) within tolerance fails, not passes.</p>
 
   <table class="profile-table dnc-stats" style="margin:.5rem 0 .8rem">
     <thead>
@@ -342,7 +342,7 @@
 <section class="stage">
   <div class="stage-num">stage 5 &middot; verdict and side filter</div>
   <h2>Pass means survivor; fail means re-cluster each side.</h2>
-  <p>The verdict reads the threshold check. Pass: the cluster is well-connected, push it to the survivor list, no further work. Fail: the bipartition is the place to cut, and CM hands each side of size \(&gt;1\) to the base algorithm. Sides of size 1 are filtered by the strict-greater-than-one gate and vanish; this is what makes singletons die after one extra round rather than loop forever.</p>
+  <p>The verdict reads the threshold check. Pass: the cluster is well-connected, push it to the survivor list, no further work. Fail: cut along the bipartition, and hand each side of size \(&gt;1\) to the base algorithm. Sides of size 1 are filtered by the strict-greater-than-one gate and drop out; that is what bounds singletons to one extra round instead of an unbounded loop.</p>
   <p>On cluster A under \(\log_{10}\): cut 1, threshold \(\log_{10}(12) \approx 1.079\), so \(1 &gt; 1.079\) is false, fail. VieCut returns a balanced cut peeling one periphery node. The 1-node side is filtered. The 11-node side goes through the re-cluster step.</p>
 </section>
 
@@ -350,8 +350,8 @@
 <section class="stage">
   <div class="stage-num">stage 6 &middot; Leiden replay on the failing side</div>
   <h2>What makes CM different from <a href="./wcc.html">WCC</a>.</h2>
-  <p>This is the step that lifts CM above WCC. After a failing cut, CM does not push the two cut halves directly back. Instead, for each side of size larger than one, CM builds the induced subgraph of that side alone and runs <a href="./leiden-cpm.html">Leiden CPM</a> on it for two iterations. Whatever communities Leiden returns become the new clusters; each one gets pushed back with the failing cluster's id as parent.</p>
-  <p>The implication: a single failing cluster can spawn many children, not just two. If Leiden finds three sub-communities in the 11-node side, all three get pushed back. The lineage tree branches accordingly. On the 32-node fixture under \(r = 0.0001\), Leiden returns one community on every side it sees, so the chain is linear; on \(r = 0.5\), Leiden returns multiple communities and the chain branches.</p>
+  <p>This is the step that separates CM from WCC. After a failing cut, CM does not push the two cut halves back directly. For each side of size larger than one, CM builds the induced subgraph of that side and runs <a href="./leiden-cpm.html">Leiden CPM</a> on it for two iterations. Whatever communities Leiden returns become the new clusters; each one is pushed back with the failing cluster's id as parent.</p>
+  <p>One failing cluster can therefore produce more than two children. If Leiden finds three sub-communities in the 11-node side, all three are pushed back, and the lineage tree branches accordingly. On the 32-node fixture at \(r = 0.0001\), Leiden returns one community on every side, so the chain is linear; at \(r = 0.5\), Leiden returns multiple communities and the chain branches.</p>
   <p>Two interesting properties: the re-cluster step is run on the induced subgraph of the side alone, not the full cluster, so Leiden's view is local; and Leiden's RNG is re-seeded to 0 at every call, so two re-cluster runs on the same induced subgraph produce the same partition regardless of where they sit in the pop sequence.</p>
 
   <div class="callout">
@@ -451,7 +451,7 @@
 <section class="stage cm-walker">
   <div class="stage-num">stage 9 &middot; lineage tree</div>
   <h2>Cluster history: parent &rarr; children across rounds.</h2>
-  <p>Each input cluster traces a tree as CM splits and re-clusters it. Roots are the initial connected components. Each internal edge is one cut + Leiden replay. Leaves are survivors (green), in-flight clusters (amber), or dropped singletons (grey). The cluster-fate label is reconstructable from this tree alone, which is why the binary writes it to disk.</p>
+  <p>Each input cluster traces a tree as CM splits and re-clusters it. Roots are the initial connected components. Each internal edge is one cut and one Leiden replay. Leaves are survivors (green), in-flight clusters (amber), or dropped singletons (grey). The cluster-fate label is reconstructable from this tree alone, which is why the binary writes it to disk.</p>
   <p>On the 32-node fixture under \(\log_{10}\): A's lineage is the linear chain \(0 \rightarrow 6 \rightarrow 7 \rightarrow 8\) (four ids, three rounds, leaf at the 9-node residual). Under the wrapper's sqrt default the tree is empty (no input cluster fragmented). Under \(2 \cdot \log_{10}\) B would also fail and produce a separate chain.</p>
   <div class="cm-lineage" id="cm-lineage">
     <div class="ln-legend">
@@ -468,7 +468,7 @@
 <section class="stage">
   <div class="stage-num">stage 10 &middot; worked example</div>
   <h2>Cluster A's three rounds, mincut by mincut.</h2>
-  <p>Cluster A is the only cluster that fails the \(\log_{10}\) threshold on this fixture. 12 nodes, K<sub>5</sub> core, four periphery pendants each attached by a single edge. Walking its trajectory exposes every moving part of the loop.</p>
+  <p>Cluster A is the only cluster that fails the \(\log_{10}\) threshold on this fixture. 12 nodes, K<sub>5</sub> core, seven periphery nodes each attached by a single edge. Its trajectory through the loop covers every operation CM performs.</p>
 
   <div class="cm-worked-strip">
     <div class="cm-worked-cell fail">
@@ -539,7 +539,7 @@
       <p>Every leaf descendant ended up below the post-CM size filter \(B\) (default 11). The cluster is effectively erased. Lives in the Python wrapper; not surfaced by the walker.</p>
     </div>
   </div>
-  <p>The four labels are exhaustive and disjoint per input cluster. Park 2024 §4.4 reports: under Leiden-CPM at low resolution, "split" + "reduced" dominate; under IKC at k=10, most clusters are "extant"; Leiden-Mod sits in between.</p>
+  <p>The four labels are exhaustive and disjoint per input cluster. Park 2024 §4.4 reports: under Leiden-CPM at low resolution, "split" and "reduced" dominate; under IKC at k=10, most clusters are "extant"; Leiden-Mod sits in between.</p>
 </section>
 
 <!-- ─────────── Stage 12 · edge cases ─────────── -->
@@ -557,11 +557,11 @@
     </div>
     <div class="callout">
       <div class="tag">threshold equals cut exactly</div>
-      <p>The strict comparison with a \(10^{-9}\) tolerance sends ties to fail. A cluster sitting exactly at \(f(n)\) gets re-cut. The bias is intentional: a post-proc looking for under-cohesive clusters treats equality as "fail".</p>
+      <p>The strict comparison with a \(10^{-9}\) tolerance sends ties to fail, so a cluster sitting exactly at \(f(n)\) gets re-cut. The asymmetry is by design: a post-proc that flags under-cohesive clusters treats equality as the conservative side.</p>
     </div>
     <div class="callout">
       <div class="tag">tree-shaped cluster</div>
-      <p>A tree has mincut 1 by construction, so every tree cluster fails the threshold under \(\log_{10}\) for any \(n \geq 2\). The recursion peels one edge at a time and the cluster effectively melts. The Python wrapper filters tree clusters before stage 3 to avoid spending compute on them.</p>
+      <p>A tree has mincut 1 by construction, so every tree cluster fails the threshold under \(\log_{10}\) for any \(n \geq 2\). The recursion peels one edge at a time, dissolving the cluster down to singletons. The Python wrapper filters tree clusters before stage 3 to avoid spending compute on them.</p>
     </div>
     <div class="callout">
       <div class="tag">multi-threading: ids vary, partition stable</div>
