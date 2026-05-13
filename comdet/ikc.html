@@ -124,7 +124,7 @@
 
   <p>Wedell, Park, Korobskiy, Warnow, and Chacko introduced IKC in 2022 as part of a four-stage clustering framework they call <em>kmp-clustering</em>. The whole framework guarantees three properties on each non-singleton output cluster: every node has at least \(k\) neighbours inside the cluster (k-validity), the cluster has positive Newman modularity (m-validity), and any node that joined as a periphery member has at least \(p\) attachments back to the core (p-validity). IKC is Stage 1, the part that builds the cores. Stages 2 through 4 are post-processing.</p>
 
-  <p>The objective IKC works against is the connectivity floor \(k\). A cluster is admissible iff every member has at least \(k\) other members as neighbours inside the cluster. Plain-English read: a cluster is "k-tight" when no member is loosely attached. Two properties worth keeping in mind. The threshold is a hard inequality, not a soft penalty, so a single under-connected node disqualifies the whole cluster. The threshold is intra-cluster, not intra-graph, so a node well-connected globally can still fail if its qualifying neighbours sit in different candidate clusters.</p>
+  <p>The objective IKC works against is the connectivity floor \(k\). A cluster is admissible iff every member has at least \(k\) other members as neighbours inside the cluster. Plain-English read: a cluster is "k-tight" when no member is loosely attached. Two consequences. The threshold is a hard inequality, not a soft penalty, so a single under-connected node disqualifies the whole cluster. The threshold is intra-cluster, not intra-graph, so a node well-connected globally can still fail if its qualifying neighbours sit in different candidate clusters.</p>
 
   <p>The structure that maximises tight clusters is the k-core. The k-core of a graph \(G\) is the maximal induced subgraph where every node has degree at least \(k\). It is unique and can be computed by repeatedly removing every node whose current degree is below \(k\) until none remain. IKC walks the cores from the top down. It extracts the densest core of the residual graph, splits it into connected components, accepts the components that still pass k-validity inside themselves, peels the accepted nodes off the residual, and repeats. The loop terminates when the residual's densest core drops below the user's floor.</p>
 
@@ -154,7 +154,7 @@ with \(L\) = total edges of the original graph, \(\ell_s\) = intra-cluster edges
 <section class="stage">
   <div class="stage-num">stage 1 &middot; input fixture + planted clustering</div>
   <h2>Painted by ground-truth, before any peeling runs.</h2>
-  <p>Same fixture every page in the gallery uses, so cross-algorithm comparisons sit on the same canvas. <em>A</em> (12 nodes, blue) is a \(K_5\) on nodes \(\{0,1,2,3,4\}\) with a 7-node periphery. <em>B</em> (8 nodes, ochre) is two \(K_4\)s joined by the single edge \((15, 16)\). <em>C</em> (6 nodes, green) is two disconnected 3-cycles, both labelled the same. <em>D</em> (4 nodes, plum) is two 2-cliques bridged by \((27, 28)\). Outliers 30 and 31 hang off A's periphery and carry the singleton label \(-1\).</p>
+  <p>Same fixture every page in the gallery uses, so cross-algorithm comparisons share a baseline. <em>A</em> (12 nodes, blue) is a \(K_5\) on nodes \(\{0,1,2,3,4\}\) with a 7-node periphery. <em>B</em> (8 nodes, ochre) is two \(K_4\)s joined by the single edge \((15, 16)\). <em>C</em> (6 nodes, green) is two disconnected 3-cycles, both labelled the same. <em>D</em> (4 nodes, plum) is two 2-cliques bridged by \((27, 28)\). Outliers 30 and 31 hang off A's periphery and carry the singleton label \(-1\).</p>
   <p>IKC takes either the raw graph or a prior clustering as input. In the Park 2024 pipeline the prior is a Leiden-CPM run at low \(\gamma\). The prior is used only as a starting block partition for downstream stages; the Stage-1 IKC core loop reads the graph alone and rebuilds clusters from scratch. The viz below shows the planted ground truth, which is what <a href="./leiden-cpm.html">Leiden-CPM</a> on this fixture targets.</p>
   <div class="graph" id="g-input">
     <div class="graph-chrome">
@@ -177,7 +177,7 @@ with \(L\) = total edges of the original graph, \(\ell_s\) = intra-cluster edges
 
   <p style="text-align:center">\(c(v) = \max\, \{\, k : v \in \mathrm{kcore}(G, k)\,\}\)</p>
 
-  <p>In plain terms: \(c(v)\) is the densest tier \(v\) clears. A node with \(c(v) = 4\) has at least four neighbours inside the 4-core (every node in the 4-core does, by definition), at least three inside the 3-core, and so on. Two properties worth keeping in mind. \(c(v) \le \deg(v)\), with equality only when \(v\) sits inside a clique on \(\deg(v) + 1\) nodes. And \(c(v)\) is invariant under graph isomorphism, so it does not depend on the order nodes were inserted or labelled.</p>
+  <p>In plain terms: \(c(v)\) is the densest tier \(v\) clears. A node with \(c(v) = 4\) has at least four neighbours inside the 4-core (every node in the 4-core does, by definition), at least three inside the 3-core, and so on. Two interesting properties. \(c(v) \le \deg(v)\), with equality only when \(v\) sits inside a clique on \(\deg(v) + 1\) nodes. And \(c(v)\) is invariant under graph isomorphism, so it does not depend on the order nodes were inserted or labelled.</p>
 
   <p>The graph's <em>degeneracy</em> \(d(G) = \max_v c(v)\) is a structural quantity that shows up in many places: bounding the number of edges in any subgraph (\(|E(H)| \le d(G)\,|V(H)|\) for any induced \(H\)), bounding chromatic number (\(\chi(G) \le d(G) + 1\) by greedy colouring of the peeling order), and bounding the size of the densest subgraph. IKC's iteration count is bounded by \(d(G)\). Every iteration that peels at least one cluster strictly decreases the residual's degeneracy, and the loop ends at degeneracy \(< k_{\mathrm{floor}}\).</p>
 
@@ -217,7 +217,7 @@ with \(L\) = total edges of the original graph, \(\ell_s\) = intra-cluster edges
 
   <p style="text-align:center">\(C \text{ is } k\text{-valid} \iff \forall u \in C,\; \big| \{v \in C : v \sim u \} \big| \ge k.\)</p>
 
-  <p>Plain-English read: every cluster member must have at least \(k\) of their kcore-neighbours sitting inside the same cluster. Two properties worth keeping in mind. A k-valid cluster always sits inside the k-core (sufficient direction of the implication), but the converse fails: a connected component of the k-core can still contain under-connected nodes if their qualifying neighbours sit elsewhere in the kcore subgraph. The predicate is monotone in \(C\), so removing nodes can never make a cluster more k-valid.</p>
+  <p>Plain-English read: every cluster member must have at least \(k\) of their kcore-neighbours sitting inside the same cluster. Two properties to note. A k-valid cluster always sits inside the k-core (sufficient direction of the implication), but the converse fails: a connected component of the k-core can still contain under-connected nodes if their qualifying neighbours sit elsewhere in the kcore subgraph. The predicate is monotone in \(C\), so removing nodes can never make a cluster more k-valid.</p>
 
   <p>On this fixture at \(k = 2\), the kcore subgraph contains A's \(K_5\), B's two \(K_4\)s plus the bridge \((15, 16)\), and C's two triangles. The connected components of this kcore subgraph are four candidate clusters. A, B, and C's two triangles all pass k-validity. D's two 2-cliques never enter the kcore at \(k = 2\) because their internal degree is 1, below the kcore floor. The viz below paints every node by its core number; nodes with \(c(v) \ge 2\) are the candidate set, and components of that subgraph are the candidate clusters.</p>
 
@@ -240,7 +240,7 @@ with \(L\) = total edges of the original graph, \(\ell_s\) = intra-cluster edges
   <div class="stage-num">stage 4 &middot; outer loop schema</div>
   <h2>One core tier per iteration, peeled off the residual.</h2>
 
-  <p>The outer loop is a fixed point of "compute the residual's core decomposition, take the components of the densest core, gate them, peel the survivors". Each iteration descends the core ladder by exactly one tier.</p>
+  <p>The outer loop repeats one step: compute the residual's core decomposition, take the components of the densest core, gate them, peel the survivors. Each iteration descends the core ladder by exactly one tier.</p>
 
   <ol>
     <li>Compute the core decomposition of the current residual. Read off \(K^*\), the largest core number that still has a member.</li>
@@ -261,7 +261,7 @@ with \(L\) = total edges of the original graph, \(\ell_s\) = intra-cluster edges
   </div>
 </section>
 
-<!-- ─────────── Stage 5: Iteration 0 — start ─────────── -->
+<!-- ─────────── Stage 5: Iteration 0, start ─────────── -->
 <section class="stage">
   <div class="stage-num">stage 5 &middot; iteration 0 &middot; start</div>
   <h2>Residual is the full graph; degeneracy is 4.</h2>
@@ -284,7 +284,7 @@ with \(L\) = total edges of the original graph, \(\ell_s\) = intra-cluster edges
   </div>
 </section>
 
-<!-- ─────────── Stage 6: Iteration 0 — k-core extraction ─────────── -->
+<!-- ─────────── Stage 6: Iteration 0, k-core extraction ─────────── -->
 <section class="stage">
   <div class="stage-num">stage 6 &middot; iteration 0 &middot; k-core extraction</div>
   <h2>Pull out the 4-core. One component, five nodes.</h2>
@@ -311,7 +311,7 @@ with \(L\) = total edges of the original graph, \(\ell_s\) = intra-cluster edges
   <div class="deg-rows" id="g-iter0-degs"></div>
 </section>
 
-<!-- ─────────── Stage 7: Iteration 0 — gate + accept ─────────── -->
+<!-- ─────────── Stage 7: Iteration 0, gate + accept ─────────── -->
 <section class="stage">
   <div class="stage-num">stage 7 &middot; iteration 0 &middot; gate + accept</div>
   <h2>Cluster A's \(K_5\) accepted with \(K^* = 4\).</h2>
@@ -334,7 +334,7 @@ with \(L\) = total edges of the original graph, \(\ell_s\) = intra-cluster edges
   </div>
 </section>
 
-<!-- ─────────── Stage 8: Iteration 1 — start ─────────── -->
+<!-- ─────────── Stage 8: Iteration 1, start ─────────── -->
 <section class="stage">
   <div class="stage-num">stage 8 &middot; iteration 1 &middot; start</div>
   <h2>Residual loses A's \(K_5\); degeneracy drops to 3.</h2>
@@ -355,7 +355,7 @@ with \(L\) = total edges of the original graph, \(\ell_s\) = intra-cluster edges
   </div>
 </section>
 
-<!-- ─────────── Stage 9: Iteration 1 — k-core extraction ─────────── -->
+<!-- ─────────── Stage 9: Iteration 1, k-core extraction ─────────── -->
 <section class="stage">
   <div class="stage-num">stage 9 &middot; iteration 1 &middot; k-core extraction</div>
   <h2>Pull out the 3-core. One component, eight nodes.</h2>
@@ -379,7 +379,7 @@ with \(L\) = total edges of the original graph, \(\ell_s\) = intra-cluster edges
   <div class="deg-rows" id="g-iter1-degs"></div>
 </section>
 
-<!-- ─────────── Stage 10: Iteration 1 — gate + accept ─────────── -->
+<!-- ─────────── Stage 10: Iteration 1, gate + accept ─────────── -->
 <section class="stage">
   <div class="stage-num">stage 10 &middot; iteration 1 &middot; gate + accept</div>
   <h2>Cluster B accepted with \(K^* = 3\).</h2>
@@ -400,7 +400,7 @@ with \(L\) = total edges of the original graph, \(\ell_s\) = intra-cluster edges
   </div>
 </section>
 
-<!-- ─────────── Stage 11: Iteration 2 — two clusters at once ─────────── -->
+<!-- ─────────── Stage 11: Iteration 2, two clusters at once ─────────── -->
 <section class="stage">
   <div class="stage-num">stage 11 &middot; iteration 2 &middot; two clusters in one tier</div>
   <h2>The 2-core splits into two components; both accept.</h2>
@@ -428,7 +428,7 @@ with \(L\) = total edges of the original graph, \(\ell_s\) = intra-cluster edges
   </div>
 </section>
 
-<!-- ─────────── Stage 12: Iteration 3 — bail ─────────── -->
+<!-- ─────────── Stage 12: Iteration 3, bail ─────────── -->
 <section class="stage">
   <div class="stage-num">stage 12 &middot; iteration 3 &middot; bail</div>
   <h2>Residual's degeneracy drops below the floor; the loop ends.</h2>
@@ -452,7 +452,7 @@ with \(L\) = total edges of the original graph, \(\ell_s\) = intra-cluster edges
 
   <div class="callout">
     <div class="tag">why the FP path exists at all if its result is dropped</div>
-    <p>The simplest reading is that the bail-branch FP score is a vestige of an earlier design where singletons were meant to carry their own modularity into the output. The shipped binary still computes the score on every bail. The score is the only floating-point arithmetic on the algorithm's deterministic path. Verifying byte-equal across the canonical Python implementation and the JavaScript port required matching this path exactly. Python's exponentiation operator routes through the standard library's pow function, which is faithfully rounded (within 1 ULP, computed as \(\exp(2 \log r)\)). V8's Math.pow(x, 2) short-circuits to plain multiplication, which is correctly rounded. The two values differ on roughly 0.09% of inputs by a single ULP. The byte-equal verification port uses plain multiplication on both sides, matching the principle (mathematical squaring) and avoiding the libm-vs-V8 divergence. One real divergence surfaced on the bumped 3-tier panel at a specific physics-collaboration fixture; the page's verification grid in the technical companion records the per-site fix.</p>
+    <p>The shipped binary still computes the score on every bail. The score is the only floating-point arithmetic on the algorithm's deterministic path. Verifying byte-equal across the canonical Python implementation and the JavaScript port required matching this path exactly. Python's exponentiation operator routes through the standard library's pow function, which is faithfully rounded (within 1 ULP, computed as \(\exp(2 \log r)\)). V8's Math.pow(x, 2) short-circuits to plain multiplication, which is correctly rounded. The two values differ on roughly 0.09% of inputs by a single ULP. The byte-equal verification port uses plain multiplication on both sides, matching the principle (mathematical squaring) and avoiding the libm-vs-V8 divergence. One real divergence surfaced on the bumped 3-tier panel at a specific physics-collaboration fixture; the page's verification grid in the technical companion records the per-site fix.</p>
   </div>
 </section>
 
@@ -549,7 +549,7 @@ with \(L\) = total edges of the original graph, \(\ell_s\) = intra-cluster edges
 
   <p style="text-align:center">\(\mathrm{mod}(s) = \dfrac{\ell_s}{L} - \left(\dfrac{d_s}{2L}\right)^2 > 0\)</p>
 
-  <p>Read the formula as the first term scoring the intra-cluster edges (one point per intra-cluster edge, normalised by total edges) and the second term subtracting the expected count under the configuration null. \(L\) is the full-graph edge count, not the residual's. Two properties worth keeping in mind. The formula needs only per-cluster running totals \(\ell_s\) and \(d_s\), so the cost is constant time given an edge sweep that bins each edge by \((c_u, c_v)\). The threshold is one-sided, so a candidate with exactly zero modularity is rejected (paper convention), not accepted.</p>
+  <p>Read the formula as the first term scoring the intra-cluster edges (one point per intra-cluster edge, normalised by total edges) and the second term subtracting the expected count under the configuration null. \(L\) is the full-graph edge count, not the residual's. Two implications. The formula needs only per-cluster running totals \(\ell_s\) and \(d_s\), so the cost is constant time given an edge sweep that bins each edge by \((c_u, c_v)\). The threshold is one-sided, so a candidate with exactly zero modularity is rejected (paper convention), not accepted.</p>
 
   <p>The shipped binary diverges here. The function that should compute \(\mathrm{mod}(s)\) opens with a hard-coded return of a constant positive value, then leaves the paper formula sitting as dead code below the return. Every k-valid candidate clears the modularity gate. The candidate's own modularity is never computed. The strict-gate toggle on the outer-loop walker switches the constant off and runs the formula in JavaScript for comparison; on the 32-node fixture every k-valid cluster has positive paper-modularity already, so the toggle leaves the partition unchanged.</p>
 
