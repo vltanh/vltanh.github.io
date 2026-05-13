@@ -22,12 +22,15 @@
     return L.optimisePartition(G, L.CPM(g), seed, { recordTrace: true });
   }
 
-  // Stage 0 + Stage 1: static input + singleton init.
+  // Stage 1 + Stage 2: static input + singleton init.
   P.renderFixture("g-input-cy", { useGT: true, pinned: true });
-  P.renderFixture("g-singleton-cy", {
-    membership: F.nodes.map(function (_, i) { return i; }),
-    pinned: true,
-  });
+  const singletonMem = F.nodes.map(function (_, i) { return i; });
+  P.renderFixture("g-singleton-cy", { membership: singletonMem, pinned: true });
+
+  // Stage 3: queue-init snapshot. Same singleton colouring as stage 2;
+  // the framing differs (this is the queue's initial content, not the
+  // partition's initial state). Page prose carries the contrast.
+  P.renderFixture("g-qinit-cy", { membership: singletonMem, pinned: true });
 
   function tagEvents(traces) {
     return traces.map(function (t, i) { return Object.assign({ idx: i }, t); });
@@ -36,6 +39,7 @@
   let moveEvents = tagEvents(result.levels[0].moveTraces);
   let refineEvents = tagEvents(result.levels[0].refineTraces);
 
+  // Stage 4: live move-phase walker.
   const moveWalker = P.mountMoveWalker({
     vizHostId: "g-move-cy",
     panelHostId: "g-move-panel",
@@ -45,6 +49,7 @@
     postMembership: Array.from(result.levels[0].finePostMove),
   });
 
+  // Stage 9: live refinement walker.
   const refineWalker = P.mountRefineWalker({
     vizHostId: "g-refine-cy",
     ctlPrefix: "g-refine",
@@ -52,6 +57,119 @@
     preMembership: Array.from(result.levels[0].finePostMove),
     postMembership: Array.from(result.levels[0].finePostRefine),
   });
+
+  function clearHost(id) {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = "";
+  }
+
+  function rebuildSnapshots() {
+    const postMove = Array.from(result.levels[0].finePostMove);
+    const postRefine = Array.from(result.levels[0].finePostRefine);
+
+    // Stage 5: re-queue worked example snapshot. Show post-move partition
+    // (the eventual state that re-queue dynamics produces inside A's K_5).
+    clearHost("g-restab-cy");
+    P.renderFixture("g-restab-cy", { membership: postMove, pinned: true });
+
+    // Stage 6: post-move snapshot.
+    clearHost("g-postmove-cy");
+    P.renderFixture("g-postmove-cy", { membership: postMove, pinned: true });
+    setText("g-postmove-k", new Set(postMove).size);
+    // ΔH cumulative at end of move phase + H_0=0:
+    setText("g-postmove-H", (+result.levels[0].moveImprov).toFixed(3));
+
+    // Stage 7: refinement-init snapshot. Each node coloured by its
+    // move-phase community label (the constraint), even though refinement
+    // restarts each as a singleton inside that boundary.
+    clearHost("g-refine-init-cy");
+    P.renderFixture("g-refine-init-cy", { membership: postMove, pinned: true });
+
+    // Stage 10: post-refine snapshot.
+    clearHost("g-postrefine-cy");
+    P.renderFixture("g-postrefine-cy", { membership: postRefine, pinned: true });
+    setText("g-postrefine-k", new Set(postRefine).size);
+
+    // Stage 12: level-1 super-graph schematic.
+    renderSuperGraph(postRefine);
+  }
+
+  function setText(id, v) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = v;
+  }
+
+  function renderSuperGraph(postRefine) {
+    const host = document.getElementById("g-l1-cy");
+    if (!host || typeof d3 === "undefined") return;
+    host.innerHTML = "";
+    // One super-node per distinct community id in postRefine.
+    // Compute super-edge weights between super-communities.
+    const idxById = {};
+    F.nodes.forEach(function (id, i) { idxById[id] = i; });
+    const comms = Array.from(new Set(postRefine));
+    const commIdx = {};
+    comms.forEach(function (c, i) { commIdx[c] = i; });
+    const K = comms.length;
+    const W = {};       // inter-edge weight, key = "i,j" with i<j
+    const Wself = new Array(K).fill(0); // intra-edge weight
+    F.edges.forEach(function (e) {
+      const ci = postRefine[idxById[e[0]]];
+      const cj = postRefine[idxById[e[1]]];
+      const a = commIdx[ci], b = commIdx[cj];
+      if (a === b) { Wself[a] += 1; return; }
+      const lo = Math.min(a, b), hi = Math.max(a, b);
+      const k = lo + "," + hi;
+      W[k] = (W[k] || 0) + 1;
+    });
+    // Circular layout for super-nodes.
+    const cx = 200, cy = 180, R = 130;
+    const POS = comms.map(function (_, i) {
+      const t = (i / K) * 2 * Math.PI - Math.PI / 2;
+      return { x: cx + R * Math.cos(t), y: cy + R * Math.sin(t) };
+    });
+    const vbW = 400, vbH = 360;
+    const svg = d3.select(host).append("svg")
+      .attr("class", "viz-svg")
+      .attr("viewBox", "0 0 " + vbW + " " + vbH)
+      .attr("preserveAspectRatio", "xMidYMid meet")
+      .style("width", "100%").style("height", "100%")
+      .style("display", "block");
+    const gE = svg.append("g");
+    const gN = svg.append("g");
+    Object.keys(W).forEach(function (k) {
+      const parts = k.split(","), i = +parts[0], j = +parts[1], w = W[k];
+      gE.append("line")
+        .attr("x1", POS[i].x).attr("y1", POS[i].y)
+        .attr("x2", POS[j].x).attr("y2", POS[j].y)
+        .attr("stroke", "#3a3f4a")
+        .attr("stroke-width", Math.min(8, 1 + w * 0.6))
+        .attr("opacity", 0.7);
+    });
+    // Super-nodes (radius scales with intra-weight + 1 for visibility).
+    POS.forEach(function (p, i) {
+      const r = 14 + Math.min(18, Math.sqrt(Wself[i]) * 3);
+      gN.append("circle")
+        .attr("cx", p.x).attr("cy", p.y).attr("r", r)
+        .attr("fill", (function () {
+          // Reuse partitionColor by querying via a temporary; just hash.
+          const palette = ["#5fa0b3","#c9a14a","#7fa15b","#a37ab8","#c97c7c","#7b9bd6","#b89a6a","#6b9c8d"];
+          return palette[i % palette.length];
+        })())
+        .attr("stroke", "#1b2033").attr("stroke-width", 1.5);
+      gN.append("text")
+        .attr("x", p.x).attr("y", p.y)
+        .attr("text-anchor", "middle").attr("dominant-baseline", "central")
+        .attr("font-family", "Special Elite, Courier New, monospace")
+        .attr("font-size", 11).attr("fill", "#1b2033")
+        .attr("pointer-events", "none")
+        .text(String(comms[i]));
+    });
+    setText("g-l1-k", K);
+    setText("g-l1-e", Object.keys(W).length);
+  }
+
+  rebuildSnapshots();
 
   function rebuildAggregation() {
     const host = document.getElementById("g-agg-cy");
@@ -102,6 +220,7 @@
         refineEvents = tagEvents(result.levels[0].refineTraces);
         refineWalker.controller.reconfigure(refineEvents.length + 1);
         refineWalker.controller.set(0);
+        rebuildSnapshots();
         rebuildAggregation();
         rebuildFinal();
         if (typeof MathJax !== "undefined" && MathJax.typesetPromise) {
@@ -111,194 +230,6 @@
     });
     gIn.value = Math.log10(gamma);
     gOut.textContent = gamma.toPrecision(2);
-  }
-
-  // ── Paper Fig 2: disconnected-community demo ────────────────────
-  mountFig2();
-
-  function mountFig2() {
-    const host = document.getElementById("g-fig2-cy");
-    const rightLabel = document.getElementById("g-fig2-right");
-    if (!host || typeof d3 === "undefined") return;
-    host.innerHTML = "";
-    // Geometry: 7 nodes (0..6), 0 in centre, 1-3 left fan, 4-6 right fan,
-    // a "rest of network" cluster below 0 with 5 dim nodes.
-    // Coordinates picked to match the paper's Fig 2 layout.
-    const NODES = [
-      { id: 0, x: 200, y: 130, label: "0" },
-      { id: 1, x: 110, y:  90, label: "1" },
-      { id: 2, x:  85, y: 140, label: "2" },
-      { id: 3, x: 110, y: 190, label: "3" },
-      { id: 4, x: 290, y:  90, label: "4" },
-      { id: 5, x: 315, y: 140, label: "5" },
-      { id: 6, x: 290, y: 190, label: "6" },
-      // "rest of network" — dim nodes below; 0 connects to several.
-      { id: 100, x: 130, y: 290, label: "", dim: true },
-      { id: 101, x: 175, y: 320, label: "", dim: true },
-      { id: 102, x: 220, y: 330, label: "", dim: true },
-      { id: 103, x: 265, y: 320, label: "", dim: true },
-      { id: 104, x: 305, y: 290, label: "", dim: true },
-    ];
-    // Edges within the red community + node 0's bridges to the rest.
-    const EDGES = [
-      // strong inter-side connections via node 0
-      { u: 0, v: 1, kind: "thick" },
-      { u: 0, v: 2, kind: "thick" },
-      { u: 0, v: 3, kind: "thick" },
-      { u: 0, v: 4, kind: "thick" },
-      { u: 0, v: 5, kind: "thick" },
-      { u: 0, v: 6, kind: "thick" },
-      // weak left-side internal
-      { u: 1, v: 2, kind: "thin" },
-      { u: 2, v: 3, kind: "thin" },
-      // weak right-side internal
-      { u: 4, v: 5, kind: "thin" },
-      { u: 5, v: 6, kind: "thin" },
-      // node 0 to rest of network
-      { u: 0, v: 100, kind: "ext" },
-      { u: 0, v: 101, kind: "ext" },
-      { u: 0, v: 102, kind: "ext" },
-      { u: 0, v: 103, kind: "ext" },
-      { u: 0, v: 104, kind: "ext" },
-      // rest of network internal
-      { u: 100, v: 101, kind: "rest" },
-      { u: 101, v: 102, kind: "rest" },
-      { u: 102, v: 103, kind: "rest" },
-      { u: 103, v: 104, kind: "rest" },
-    ];
-
-    const vbW = 400, vbH = 380;
-    const svg = d3.select(host).append("svg")
-      .attr("viewBox", "0 0 " + vbW + " " + vbH)
-      .attr("preserveAspectRatio", "xMidYMid meet")
-      .style("width", "100%").style("height", "auto").style("display", "block");
-
-    // Group hulls (red community + rest community + a "node 0 destination" cluster)
-    const hullG = svg.append("g").attr("class", "hulls");
-    const linkG = svg.append("g").attr("class", "links");
-    const nodeG = svg.append("g").attr("class", "nodes");
-
-    function strokeFor(e, state) {
-      if (e.kind === "thick") return "#1b2033";
-      if (e.kind === "thin")  return "#1b2033";
-      if (e.kind === "ext")   return state === "before" ? "#9a947a" : "#1b2033";
-      if (e.kind === "rest")  return "#9a947a";
-      return "#9a947a";
-    }
-    function widthFor(e) {
-      if (e.kind === "thick") return 3;
-      if (e.kind === "thin")  return 1.4;
-      return 1;
-    }
-    function dashFor(e, state) {
-      if (e.kind === "ext")  return state === "before" ? "3 3" : "0";
-      if (e.kind === "rest") return "3 3";
-      return "0";
-    }
-    function nodeFill(id, state) {
-      if (id >= 100) return "#d6cfb5";
-      if (state === "before") return "#c97c7c";
-      // After node-0-moves: 0 turns blue, rest stay red.
-      return id === 0 ? "#7b9bd6" : "#c97c7c";
-    }
-    function hullsFor(state) {
-      // Red community = nodes 1-6 always; node 0 is in red before, blue after.
-      // Blue community appears only in 'after' state; we draw it as a circle
-      // around the rest-of-network cluster + node 0.
-      const out = [];
-      // Red hull
-      const redIds = state === "before" ? [0,1,2,3,4,5,6] : [1,2,3,4,5,6];
-      out.push({ ids: redIds, fill: "rgba(201,124,124,0.18)", stroke: "rgba(201,124,124,0.55)" });
-      if (state === "after") {
-        // Blue hull: node 0 + rest-of-network
-        const blueIds = [0, 100, 101, 102, 103, 104];
-        out.push({ ids: blueIds, fill: "rgba(123,155,214,0.18)", stroke: "rgba(123,155,214,0.55)" });
-      }
-      return out;
-    }
-    function hullPath(ids) {
-      // Convex hull via d3.polygonHull; pad outward.
-      const pts = ids.map(function (id) {
-        const n = NODES.find(function (x) { return x.id === id; });
-        return [n.x, n.y];
-      });
-      if (pts.length < 3) {
-        // single edge or vertex → make a circle
-        const c = pts.reduce(function (a, p) { return [a[0]+p[0], a[1]+p[1]]; }, [0,0]);
-        c[0] /= pts.length; c[1] /= pts.length;
-        const r = 36;
-        return "M" + (c[0]+r) + "," + c[1]
-             + " A" + r + "," + r + " 0 1 0 " + (c[0]-r) + "," + c[1]
-             + " A" + r + "," + r + " 0 1 0 " + (c[0]+r) + "," + c[1] + " Z";
-      }
-      const hull = d3.polygonHull(pts);
-      const cx = d3.mean(hull, function (p) { return p[0]; });
-      const cy = d3.mean(hull, function (p) { return p[1]; });
-      // Inflate outward by ~22 units.
-      const padded = hull.map(function (p) {
-        const dx = p[0] - cx, dy = p[1] - cy;
-        const len = Math.hypot(dx, dy);
-        const k = (len + 22) / Math.max(len, 1);
-        return [cx + dx * k, cy + dy * k];
-      });
-      return d3.line().curve(d3.curveCardinalClosed.tension(0.6))(padded);
-    }
-    function render(state) {
-      // Hulls
-      const hulls = hullsFor(state);
-      const hSel = hullG.selectAll("path").data(hulls);
-      hSel.exit().remove();
-      hSel.enter().append("path").merge(hSel)
-        .transition().duration(450)
-        .attr("d", function (h) { return hullPath(h.ids); })
-        .attr("fill", function (h) { return h.fill; })
-        .attr("stroke", function (h) { return h.stroke; })
-        .attr("stroke-width", 1.5);
-      // Links
-      const lSel = linkG.selectAll("line").data(EDGES);
-      lSel.enter().append("line").merge(lSel)
-        .attr("x1", function (e) { return NODES.find(function (n) { return n.id === e.u; }).x; })
-        .attr("y1", function (e) { return NODES.find(function (n) { return n.id === e.u; }).y; })
-        .attr("x2", function (e) { return NODES.find(function (n) { return n.id === e.v; }).x; })
-        .attr("y2", function (e) { return NODES.find(function (n) { return n.id === e.v; }).y; })
-        .transition().duration(350)
-        .attr("stroke", function (e) { return strokeFor(e, state); })
-        .attr("stroke-width", widthFor)
-        .attr("stroke-dasharray", function (e) { return dashFor(e, state); })
-        .attr("opacity", 0.9);
-      // Nodes
-      const nSel = nodeG.selectAll("circle").data(NODES);
-      nSel.enter().append("circle").merge(nSel)
-        .attr("cx", function (n) { return n.x; })
-        .attr("cy", function (n) { return n.y; })
-        .attr("r", function (n) { return n.dim ? 6 : 11; })
-        .attr("stroke", "#1b2033").attr("stroke-width", 1.5)
-        .transition().duration(400)
-        .attr("fill", function (n) { return nodeFill(n.id, state); });
-      const tSel = nodeG.selectAll("text").data(NODES.filter(function (n) { return n.label; }));
-      tSel.enter().append("text").merge(tSel)
-        .attr("x", function (n) { return n.x; })
-        .attr("y", function (n) { return n.y; })
-        .attr("text-anchor", "middle").attr("dominant-baseline", "central")
-        .attr("font-family", "Special Elite, Courier New, monospace")
-        .attr("font-size", 9).attr("fill", "#1b2033")
-        .attr("pointer-events", "none")
-        .text(function (n) { return n.label; });
-      // Right label
-      if (rightLabel) {
-        rightLabel.textContent = state === "before"
-          ? "after · node 0 moved · the red community is now two pieces"
-          : "node 0 left · 1-3 and 4-6 no longer reach each other inside red";
-      }
-    }
-    let state = "before";
-    render(state);
-    document.getElementById("g-fig2-play").addEventListener("click", function () {
-      state = "after"; render(state);
-    });
-    document.getElementById("g-fig2-reset").addEventListener("click", function () {
-      state = "before"; render(state);
-    });
   }
 
   if (typeof MathJax !== "undefined" && MathJax.typesetPromise) {
