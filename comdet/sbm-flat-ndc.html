@@ -104,7 +104,7 @@
   <p>The NDC data fit explicitly is</p>
   <p style="text-align:center">\(S_{\text{NDC}} = \sum_r e_r \log n_r - \sum_{r < s} \log(e_{rs}!) - \sum_r \Big[ \log\!\big((e_{rr}/2)!\big) + (e_{rr}/2)\log 2 \Big]\).</p>
   <p>In plain terms: the first sum prices the per-stub block lookup under uniform-within-block placement (every internal stub picks one of the \(n_r\) members independently, paying \(\log n_r\) per stub); the second and third are identical to the DC form. The difference between DC and NDC is concentrated in the vertex factor: DC pays \(\log(e_r!)\), NDC pays \(e_r \log n_r\).</p>
-  <p>Two properties. The NDC vertex factor is the source of hub-leaf splitting; an internal edge incident to a degree-9 hub in a 12-member block pays \(9 \log 12 \approx 22.4\) nats, where DC under the same node pays \(\log(9!) \approx 12.8\) nats. The 9.6-nat-per-hub gap is the signature DC-vs-NDC \(\Delta\Sigma\) signal at hub-anchored partitions. And the NDC formula falls out of the Poisson stochastic block model in the dense-graph limit, so it is the form most pre-2011 papers use; DC is the principled correction introduced by Karrer and Newman (2011) for the heavy-tailed graphs the literature mostly studies.</p>
+  <p>Two properties. The NDC vertex factor is the source of hub-leaf splitting; an internal edge incident to a degree-9 hub in a 12-member block pays \(9 \log 12 \approx 22.4\) nats, where DC under the same node pays \(\log(9!) \approx 12.8\) nats. The 9.6-nat-per-hub gap is where the DC-vs-NDC \(\Delta\Sigma\) signal concentrates at hub-anchored partitions. And the NDC formula falls out of the Poisson stochastic block model in the dense-graph limit, so it is the form most pre-2011 papers use; DC is the correction Karrer and Newman (2011) introduced for the heavy-tailed graphs the literature mostly studies.</p>
   <p>Numerical anatomy on the fixture's planted partition is below. The viz lists every term that contributes to \(\Sigma_{\text{NDC}}\), evaluated under the ground-truth labelling.</p>
   <div class="graph" id="g-cost">
     <div class="graph-chrome">
@@ -141,7 +141,7 @@
       <span class="step-label">re-runs the chain &middot; init + 20 sweeps</span>
     </div>
   </div>
-  <p>\(\Sigma_0\) is large because the random partition is uninformative: edges cross block boundaries roughly uniformly, the data fit term gets no concentration discount, and the chain still pays the full edges DL plus partition DL. MCMC's job is to push \(\Sigma\) down by re-routing nodes; the NDC variant in particular has a strong incentive to either group hubs with other hubs or peel them into singletons, both of which lower the \(e_r \log n_r\) penalty.</p>
+  <p>\(\Sigma_0\) is large because the random partition is uninformative: edges cross block boundaries roughly uniformly, the data fit term gets no concentration discount, and the chain still pays the full edges DL plus partition DL. The chain lowers \(\Sigma\) by re-routing nodes. Under NDC, two routes lower the \(e_r \log n_r\) penalty: group hubs with other hubs, or peel them into singletons.</p>
 </section>
 
 <!-- ─────────── Stage 4 · MH proposal step ─────────── -->
@@ -150,7 +150,7 @@
   <h2>Pick a vertex, build the candidate pool, sample uniformly.</h2>
   <p>One sweep visits every vertex once in shuffled order. For each visited vertex \(v\), the kernel builds a candidate pool: every currently non-empty block, plus one fresh empty slot when \(v\)'s current block holds more than one member (a singleton cannot escape into a fresh block because that move is structurally a no-op).</p>
   <p>The target is drawn uniformly from the pool. This is the \(c \to \infty\) limit of Peixoto's local-neighbourhood proposal \(P(s \mid v, c)\); at finite \(c\) the proposal biases towards blocks the vertex's neighbours already inhabit, at \(c \to \infty\) the weights flatten into uniform. The uniform form is symmetric in the MH sense, so the acceptance ratio reduces to \(e^{-\beta \Delta\Sigma}\) with no Hastings correction.</p>
-  <p>Two properties. The proposal does not look at the data: every non-empty block has equal proposal mass regardless of how many of \(v\)'s neighbours sit in it. And the proposal is the same shape as the DC and PP variants use; only the \(\Delta\Sigma\) computation differs between variants. The candidate pool below is the one the kernel builds for a fixed vertex on the planted partition (default: vertex 0, the \(A\) hub).</p>
+  <p>Two properties. The proposal does not condition on the data: every non-empty block has equal proposal mass regardless of how many of \(v\)'s neighbours sit in it. And the proposal is the same shape as the DC and PP variants use; only the \(\Delta\Sigma\) computation differs between variants. The candidate pool below is the one the kernel builds for a fixed vertex on the planted partition (default: vertex 0, the \(A\) hub).</p>
   <div class="graph" id="g-propose">
     <div class="graph-chrome">
       <span><span id="g-propose-status">vertex 0 &middot; in block A &middot; pool of 4 + 1 fresh</span></span>
@@ -183,7 +183,7 @@
     </div>
     <div class="graph-canvas" id="g-delta-grid" style="padding: .7rem"></div>
   </div>
-  <p>The hub move trades a large drop in the data fit (the hub stops paying \(9 \log 12 \approx 22.4\) nats and starts paying \(9 \log 1 = 0\) nats) against a smaller rise in the edges DL (one extra block widens the \(\boldsymbol{e}\) matrix) plus a modest rise in the partition DL (one extra label to write down). Whether the trade is net negative depends on which periphery vertices \(A\) keeps; on most seeds the trade favours peeling.</p>
+  <p>The hub move trades a large drop in the data fit (the hub stops paying \(9 \log 12 \approx 22.4\) nats and starts paying \(9 \log 1 = 0\) nats) against a smaller rise in the edges DL (one extra block widens the \(\boldsymbol{e}\) matrix) plus a modest rise in the partition DL (one extra label to write down). Whether the trade is net negative depends on which periphery vertices remain in \(A\); on most seeds the trade favours peeling.</p>
 </section>
 
 <!-- ─────────── Stage 6 · MH acceptance ratio ─────────── -->
@@ -194,7 +194,7 @@
   <p style="text-align:center">\(\alpha(\boldsymbol{b} \to \boldsymbol{b}') = \min\!\big(1, \, e^{-\beta \, \Delta\Sigma}\big)\).</p>
   <p>In plain terms: any downhill move (\(\Delta\Sigma \le 0\)) accepts with certainty; any uphill move accepts with probability decaying exponentially in the cost. The walker runs at \(\beta = 1\), the posterior-sampling regime.</p>
   <p>Two properties. The chain has \(P(\boldsymbol{b} \mid \boldsymbol{A}) \propto e^{-\Sigma(\boldsymbol{b})}\) as its stationary distribution at \(\beta = 1\), so after equilibration the partitions visited are approximately draws from the posterior, not just one mode. And the inverse-temperature knob is a sampling-versus-optimisation dial: \(\beta = 0\) becomes a uniform random walk over partitions, \(\beta \to \infty\) becomes pure greedy descent. NDC's acceptance ratio uses the same form as DC and PP; only the \(\Delta\Sigma\) that feeds in differs.</p>
-  <p>The curve below plots \(\alpha\) against \(\Delta\Sigma\) at \(\beta = 1\). Small uphill moves are gambler-friendly; large uphill moves are almost always rejected.</p>
+  <p>The curve below plots \(\alpha\) against \(\Delta\Sigma\) at \(\beta = 1\). Small uphill moves accept with non-negligible probability; large uphill moves almost always reject.</p>
   <div class="graph" id="g-accept">
     <div class="graph-chrome">
       <span>acceptance probability \(\alpha\) versus \(\Delta\Sigma\) at \(\beta = 1\)</span>
@@ -240,11 +240,11 @@
       <span class="step-label">visit <b id="g-mcmc-cur">0</b> / <span id="g-mcmc-total">0</span></span>
     </div>
   </div>
-  <p>A negative \(\Delta\Sigma\) means the move improves \(\Sigma\); a small positive \(\Delta\Sigma\) is gambler-friendly; a large positive \(\Delta\Sigma\) is almost always rejected.</p>
+  <p>A negative \(\Delta\Sigma\) means the move improves \(\Sigma\); a small positive \(\Delta\Sigma\) has a non-negligible accept probability; a large positive \(\Delta\Sigma\) almost always rejects.</p>
   <div id="g-mcmc-panel"></div>
   <div class="callout">
     <div class="tag">why MH instead of greedy</div>
-    <p>A pure greedy step (always take the best candidate) collapses to a local minimum quickly; \(\Sigma\) plateaus within one sweep at a partition that is roughly right but stuck. The stochastic acceptance trades a small uphill cost for the freedom to walk over saddle points. Graph-tool's canonical multilevel sweep runs single-vertex MH alongside agglomerative merges that propose joining two whole blocks at once; the merges give the canonical sampler its fast convergence on large graphs. The walker on this page uses single-vertex moves only.</p>
+    <p>A pure greedy step (always take the best candidate) collapses to a local minimum quickly; \(\Sigma\) plateaus within one sweep at a partition that is roughly right but stuck. Stochastic acceptance pays a small uphill cost in exchange for crossing saddle points. Graph-tool's canonical multilevel sweep runs single-vertex MH alongside agglomerative merges that propose joining two whole blocks at once; the merges drive fast convergence on large graphs. The walker on this page uses single-vertex moves only.</p>
   </div>
 </section>
 
@@ -252,12 +252,12 @@
 <section class="stage">
   <div class="stage-num">stage 9 &middot; sweep \(k\) mid-chain</div>
   <h2>One full sweep at the midpoint, \(\Sigma\) tracked per visit.</h2>
-  <p>Each sweep is one pass over all \(N\) vertices in shuffled order. The shuffle order is redrawn every sweep so the same vertex does not always see the same chain history when it is visited. After early sweeps the chain has cleared the obvious moves; mid-chain sweeps mostly handle tie-break decisions near the posterior mode.</p>
-  <p>The per-visit \(\Sigma\) trajectory inside one mid-chain sweep is below. Drops correspond to accepted improving moves; flat segments are rejections; small upticks are accepted gambler-friendly moves at \(\Delta\Sigma > 0\). The horizontal line marks the sweep's starting \(\Sigma\).</p>
+  <p>Each sweep is one pass over all \(N\) vertices in shuffled order. The shuffle order is redrawn every sweep, so each vertex meets a different chain history across sweeps. By mid-chain the obvious moves are gone; what remains is tie-break decisions near the posterior mode.</p>
+  <p>The per-visit \(\Sigma\) trajectory inside one mid-chain sweep is below. Drops correspond to accepted improving moves; flat segments are rejections; small upticks are accepted uphill moves at \(\Delta\Sigma > 0\). The horizontal line marks the sweep's starting \(\Sigma\).</p>
   <div class="graph" id="g-midsweep">
     <div class="graph-chrome">
       <span><span id="g-midsweep-status">sweep 10 of 20 &middot; per-visit \(\Sigma\)</span></span>
-      <span class="right">flat = rejection &middot; downstep = accept improving &middot; upstep = accept gambler</span>
+      <span class="right">flat = rejection &middot; downstep = accept improving &middot; upstep = accept uphill</span>
     </div>
     <div class="graph-canvas" id="g-midsweep-cy" style="height: 200px"></div>
   </div>
@@ -308,8 +308,8 @@
 <section class="stage">
   <div class="stage-num">stage 12 &middot; NDC degree-pathology</div>
   <h2>The hub at node 0 peels into its own block.</h2>
-  <p>The signature NDC failure mode on heterogeneous graphs is hub peeling: a high-degree vertex inside a community of mostly-low-degree members lowers \(\Sigma_{\text{NDC}}\) by leaving the community for a singleton block. The arithmetic is direct. The hub's contribution to the vertex factor of its current block is \(k \log n_r\) nats per stub; as a singleton the same stubs cost \(k \log 1 = 0\). The trade is paid against the rise in the edges DL (one extra block widens the \(\boldsymbol{e}\) matrix) and the partition DL (one extra label).</p>
-  <p>Two properties. The pathology is signal, not noise: NDC reads node 0 as evidence the planted block is heterogeneous in degree and prefers to split it. This is the case Karrer and Newman 2011 used to motivate the DC correction; the DC variant absorbs the gap into the model conditioning and reads \(A\) as cohesive. And the pathology has a sharp boundary: it fires when the hub's degree is large enough that \(k \log n_r\) dominates the edges-DL + partition-DL penalty for adding one block. On this fixture the boundary sits at roughly \(k \ge 7\) inside a block of size \(\ge 10\); node 0 (degree 9, block size 12) is on the wrong side of it.</p>
+  <p>The NDC failure mode on heterogeneous graphs is hub peeling: a high-degree vertex inside a community of mostly-low-degree members lowers \(\Sigma_{\text{NDC}}\) by leaving the community for a singleton block. The arithmetic is direct. The hub's contribution to the vertex factor of its current block is \(k \log n_r\) nats per stub; as a singleton the same stubs cost \(k \log 1 = 0\). The trade is paid against the rise in the edges DL (one extra block widens the \(\boldsymbol{e}\) matrix) and the partition DL (one extra label).</p>
+  <p>Two properties. The peel is the model's posterior verdict on intra-block degree spread: NDC treats node 0 as evidence the planted block is heterogeneous in degree, so the posterior pulls it out. This is the case Karrer and Newman 2011 used to motivate the DC correction; DC absorbs the same degree spread into the model conditioning, so its posterior keeps \(A\) intact. And the boundary is sharp: the peel fires when the hub's degree is large enough that \(k \log n_r\) dominates the edges-DL + partition-DL penalty for adding one block. On this fixture the boundary sits at roughly \(k \ge 7\) inside a block of size \(\ge 10\); node 0 (degree 9, block size 12) is past it.</p>
   <p>The panel below shows the final NDC partition with node 0's block highlighted. On most seeds node 0 sits alone or with one or two periphery leaves, painted distinctly from the rest of \(A\).</p>
   <div class="graph" id="g-pathology">
     <div class="graph-chrome">
@@ -318,15 +318,15 @@
     </div>
     <div class="graph-canvas" id="g-pathology-cy" style="height: 280px"></div>
   </div>
-  <p>The seed slider on stage 3 reseeds the chain and updates this panel; rerolling shows the hub-peeling outcome holds across most seeds, with occasional runs where \(A\) survives intact through the run's randomness.</p>
+  <p>The seed slider on stage 3 reseeds the chain and updates this panel; rerolling shows the hub-peeling outcome holds across most seeds, with occasional runs where \(A\) stays intact through the chain's randomness.</p>
 </section>
 
 <!-- ─────────── Stage 13 · DC vs NDC contrast ─────────── -->
 <section class="stage">
   <div class="stage-num">stage 13 &middot; DC vs NDC on the same fixture</div>
   <h2>Same MCMC machinery, same seed, different vertex factor.</h2>
-  <p>Running the DC chain from the same shared random init exposes the gap directly. DC absorbs the hub-leaf degree spread into the model conditioning; NDC has to pay for it through the data fit. On this fixture the DC-vs-NDC gap at the respective mode partitions is consistently around 10 to 13 nats in favour of DC, which under Peixoto 2017 §VII.A is "decisive". The Bayes factor at \(\Delta\Sigma = 10\) is \(e^{10} \approx 22{,}026\), a strong posterior tilt towards DC.</p>
-  <p>Two properties. The verdict is not universal: DC wins on this fixture because the planted A community has wide degree spread. On a graph where every planted community has degree-homogeneous members, NDC's extra parameter count is a liability and DC can lose. And the comparison is pairwise, not absolute: \(\Sigma_{\text{DC}}\) and \(\Sigma_{\text{NDC}}\) are not directly commensurable in nats across all model classes; the gap on the same partition is the meaningful quantity.</p>
+  <p>Running the DC chain from the same shared random init makes the gap between the two partitions visible. DC absorbs the hub-leaf degree spread into the model conditioning and converges on a partition that keeps \(A\) intact; NDC peels node 0 out and converges on a partition with one extra block. The two settle on different mode partitions on this fixture across seeds.</p>
+  <p>Two properties. The picks are fixture-dependent: DC keeps \(A\) intact on this fixture because the planted \(A\) community has wide degree spread, and NDC peels the hub for the same reason. On a graph where every planted community has degree-homogeneous members the picks flip: NDC's lower parameter count makes its mode partition the parsimonious one, and DC's degree conditioning costs more than it saves. And the partitions are the comparable object, not the raw \(\Sigma\) values: the NDC and DC sparse entropies have systematic scale gaps (DC's \(\log(e_r!)\) versus NDC's \(e_r \log n_r\)), so raw \(\Sigma\) across variants does not read in the same nats. The Bayes-factor surrogate the literature uses is \(|\Delta\Sigma|\) along a matched partition under one variant, not the cross-variant scalar.</p>
   <div class="graph" id="g-contrast">
     <div class="graph-chrome">
       <span>DC final (left) vs NDC final (right) at matched seed</span>
@@ -351,7 +351,7 @@
     </div>
     <div class="graph-canvas" id="g-regime-svg" style="padding: .5rem 1rem"></div>
   </div>
-  <p>The schematic is qualitative; the actual crossover depends on graph size, edge count, and block size as well. The Peixoto 2017 recommendation on an unseen network is to run both variants and let the Bayes factor decide; the <a href="./sbm-flat-best.html">flat-best page</a> is that recipe surfaced.</p>
+  <p>The schematic is qualitative; the actual crossover depends on graph size, edge count, and block size as well. Peixoto 2017 on an unseen network runs both variants and reads the Bayes factor between them; the <a href="./sbm-flat-best.html">flat-best page</a> is that procedure wired up across all three flat variants.</p>
 </section>
 
 <!-- ─────────── Stage 15 · Cross-links ─────────── -->
