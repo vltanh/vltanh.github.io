@@ -317,8 +317,8 @@
 </header>
 
 <section class="hook">
-  <p>Some clustering algorithms emit a label per node and call it a day. They do not check whether the nodes carrying that label are actually reachable from each other. Stochastic block models are the usual offender: they fit edge density between blocks, not whether each block is internally connected. A cluster can end up as two disconnected halves under the same label, and the output looks like one community when it is really two.</p>
-  <p><em>CC</em> is the patch. For each cluster in the input partition, drop every edge that crosses out to a different cluster, run a breadth-first search on what remains, and replace the cluster with one new cluster per connected piece. If the cluster was already connected, nothing changes.</p>
+  <p>Some clustering algorithms emit a label per node without checking that the nodes carrying that label are reachable from each other. Stochastic block models are the most frequent source: they fit edge density between blocks, not whether each block is internally connected. A cluster can end up as two disconnected halves under the same label, and the output looks like one community when it is really two.</p>
+  <p><em>CC</em> is the correction. For each cluster in the input partition, drop every edge that crosses out to a different cluster, run a breadth-first search on what remains, and replace the cluster with one new cluster per connected piece. If the cluster was already connected, nothing changes.</p>
   <p>The cost is one breadth-first search per cluster, \(O(|V| + |E|)\) over the whole graph. In plain terms: every node and every intra-cluster edge gets touched once, no more. Two interesting properties: cost is independent of the number of input clusters (the search sweeps the residual graph in one pass over the whole node set); and there is no parameter to tune, no threshold to set, no model to fit.</p>
   <div class="defs">
     <div><span class="term">cross-cluster edge</span> an edge whose endpoints carry different input cluster labels. CC drops every such edge before the breadth-first search.</div>
@@ -413,8 +413,8 @@
 <!-- ─────────── Stage 4 · cluster scan ─────────── -->
 <section class="stage">
   <div class="stage-num">stage 4 &middot; cluster scan</div>
-  <h2>For each input cluster, ask one question.</h2>
-  <p>With the residual graph in hand, CC walks the input clusters in id order and runs a breadth-first search on each cluster's induced subgraph. The question per cluster: how many connected components does the residual hold?</p>
+  <h2>For each input cluster, count the residual components.</h2>
+  <p>With the residual graph in hand, CC walks the input clusters in id order and runs a breadth-first search on each cluster's induced subgraph. The quantity recorded per cluster is the number of connected components in the residual.</p>
   <p>The viz below shades each input cluster in turn, leaving the others dimmed. The fact row beneath lists the residual-graph component count per cluster as a preview of the verdict that the per-cluster walkthroughs below will confirm.</p>
   <div class="graph">
     <div class="graph-chrome">
@@ -457,7 +457,7 @@
 <section class="stage cc-walker-deep">
   <div class="stage-num">stage 5 &middot; the walker</div>
   <h2>Every read, every write, frame by frame.</h2>
-  <p>The walker below runs CC's five phases on the residual graph: spot the cross edges, drop them, run breadth-first search per cluster, filter singletons, assign output ids. Pick a phase chip or step through every frame in order. The graph and the state panels update together so the per-frame read and write are visible at the same time.</p>
+  <p>The walker below runs CC's five phases on the residual graph: spot the cross edges, drop them, run breadth-first search per cluster, filter singletons, assign output ids. A phase chip jumps to that phase; the frame controls step through every read and write in order. The graph and the state panels update together, so the per-frame read and write are visible at the same time.</p>
   <p>Two properties of the walker. Every frame is one step in the kernel that ships in the binary; the kernel that drives the walker is byte-equal to the canonical C++ implementation at every per-step record. And the walker is fully deterministic on this fixture: CC has no random number draws, no tie-break ambiguity, no thread interleaving. The same input produces the same trace on every browser.</p>
   <div class="phase-strip" id="g-walk-phases" role="tablist"></div>
   <div class="graph">
@@ -540,14 +540,14 @@
     </div>
     <div class="graph-canvas" id="g-cluC-cy"></div>
   </div>
-  <p>This is where CC does real work. The two components inherit fresh component ids during the breadth-first search itself: \(C_1 = \{20, 21, 22\}\) gets id 2 (the third component discovered overall, after A and B), and \(C_2 = \{23, 24, 25\}\) gets id 3. Both have size greater than one, so both survive the singleton filter and become two distinct output clusters. The original cluster label is not preserved: the surviving pieces get fresh output ids assigned in the order they were discovered.</p>
+  <p>C is the only cluster on the fixture whose verdict changes. The two components inherit fresh component ids during the breadth-first search itself: \(C_1 = \{20, 21, 22\}\) gets id 2 (the third component discovered overall, after A and B), and \(C_2 = \{23, 24, 25\}\) gets id 3. Both have size greater than one, so both survive the singleton filter and become two distinct output clusters. The original cluster label is not preserved: the surviving pieces get fresh output ids assigned in the order they were discovered.</p>
 </section>
 
 <!-- ─────────── Stage 9 · cluster D walkthrough ─────────── -->
 <section class="stage">
   <div class="stage-num">stage 9 &middot; cluster D walkthrough</div>
   <h2>A path-shaped cluster passes through.</h2>
-  <p>Cluster D is a 4-node path: edges \((26, 27)\), \((27, 28)\), \((28, 29)\). The breadth-first search opens at node 26, walks down the path one hop at a time, reaches every node, and terminates with one component of size 4. The bridge edge \((27, 28)\) is the cluster's whole connectivity; removing it would split D into two 2-cliques. CC does not care.</p>
+  <p>Cluster D is a 4-node path: edges \((26, 27)\), \((27, 28)\), \((28, 29)\). The breadth-first search opens at node 26, walks down the path one hop at a time, reaches every node, and terminates with one component of size 4. The bridge edge \((27, 28)\) is the cluster's whole connectivity; removing it would split D into two 2-cliques. The connected-component count is one regardless, so CC passes D through.</p>
   <div class="graph">
     <div class="graph-chrome">
       <span>cluster D residual &middot; 1 component &middot; 4 nodes along a path</span>
@@ -555,7 +555,7 @@
     </div>
     <div class="graph-canvas" id="g-cluD-cy"></div>
   </div>
-  <p>The pattern across A, B, C, D is the property worth keeping. CC's verdict per cluster depends only on how many connected pieces the residual subgraph holds. The cut value, the bridge count, the cluster density: none of those feed the test. A, B, D pass with one component each; C splits into two. That is the entire algorithm.</p>
+  <p>The pattern across A, B, C, D is the property worth keeping. CC's verdict per cluster depends only on how many connected pieces the residual subgraph holds. The cut value, the bridge count, the cluster density: none of those feed the test. A, B, D pass with one component each, and C splits into two; the whole algorithm reduces to that count.</p>
 </section>
 
 <!-- ─────────── Stage 10 · singleton filter + cluster ids ─────────── -->
@@ -598,7 +598,7 @@
 <section class="stage">
   <div class="stage-num">stage 12 &middot; why split-only</div>
   <h2>What CC does not do.</h2>
-  <p>It is easy to read CC's role as "fix the clustering". CC does less than that. The remit is narrow enough that listing what falls outside it clarifies the picture.</p>
+  <p>CC's role is narrower than "fix the clustering". The remit covers one structural fault and nothing else; listing what falls outside it clarifies the picture.</p>
   <div class="defs">
     <div><span class="term">no re-clustering</span> CC never re-runs the base community-detection algorithm on the split halves. After a split, both halves are emitted as-is. <a href="./cm.html">CM</a> is the sibling that re-runs Leiden (or whichever base) on each half; that is the headline difference between the two.</div>
     <div><span class="term">no merging</span> the post-proc only splits; it never combines two input clusters into one. If the input partition under-splits a community (one ground-truth community labelled as two clusters), CC cannot fix it.</div>
@@ -656,10 +656,10 @@
     </div>
     <div class="cc-case-card">
       <div class="case-q">Planted community with a 1-cut bridge.</div>
-      <div class="case-a">The bridge keeps the cluster as one connected piece, so CC passes it through unchanged. A reader who would prefer the bridge case to split has to escalate to <a href="./wcc.html">WCC</a>, where the size-dependent threshold catches the bridge case explicitly. CC has no setting for this.</div>
+      <div class="case-a">The bridge keeps the cluster as one connected piece, so CC passes it through unchanged. The size-dependent threshold in <a href="./wcc.html">WCC</a> is what catches the bridge case explicitly. CC has no setting that distinguishes it from a denser join.</div>
     </div>
   </div>
-  <p>Vu-Le 2026 reports CC's gain over the unprocessed clustering across both flat and nested stochastic block models. The aggregate gain holds, but on inputs whose planted communities include genuinely sparse or genuinely disconnected pieces (rare in the benchmark suite, more common in domain-specific real networks), CC can split a cluster that the ground truth keeps together. The mitigation is to skip the post-proc on those inputs, or to escalate to <a href="./cm.html">CM</a> whose re-clustering pass can recover a merged label after a fail.</p>
+  <p>Vu-Le 2026 reports CC's gain over the unprocessed clustering across both flat and nested stochastic block models. The aggregate gain holds, but on inputs whose planted communities include genuinely sparse or genuinely disconnected pieces (rare in the benchmark suite, more common in domain-specific real networks), CC splits a cluster that the ground truth keeps together. <a href="./cm.html">CM</a>'s re-clustering pass can recombine a merged label after such a split, so the chain behaves differently from CC alone on this class of input.</p>
 </section>
 
 <aside class="tech-companion">
