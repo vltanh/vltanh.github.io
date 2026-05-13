@@ -108,7 +108,35 @@
 </section>
 
 <section class="stage">
-  <div class="stage-num">stage 2 &middot; phase 1 (modularity sweep)</div>
+  <div class="stage-num">stage 2 &middot; phase 1 &middot; sweep 1</div>
+  <h2>One random-order pass over every node. Most moves land here.</h2>
+  <p>The first sweep walks every node once in a deterministic random order, fixed for the level. Each visit reads the current node, evaluates \(\Delta Q\) for every neighbour-community, and moves the node into the strictly-positive argmax (or leaves it where it is). Most of the partition's reorganisation happens during this pass: the closed-form gain is largest when every node sits alone, so the easy merges go first.</p>
+  <div class="graph" id="g-sweep1">
+    <div class="graph-chrome">
+      <span>after sweep 1 &middot; moves: <span id="g-sweep1-mv">·</span> &middot; Δ Q: <span id="g-sweep1-dq">·</span></span>
+      <span class="right" id="g-sweep1-meta">colour = community id at sweep-1 close</span>
+    </div>
+    <div class="graph-canvas" id="g-sweep1-cy"></div>
+  </div>
+  <p>The pass is monotone non-decreasing in \(Q\) because every accepted move clears the strict-positive cutoff. On this fixture the first pass already absorbs most periphery nodes into their core: nodes that touched the A core, the two B halves, the D 2-cliques, and the C 3-cycles all find a neighbour singleton to merge into. The leftovers are the structural ambiguities (D periphery, C interior) that the second sweep resolves.</p>
+</section>
+
+<section class="stage">
+  <div class="stage-num">stage 3 &middot; phase 1 &middot; sweep 2</div>
+  <h2>Same visit order, far fewer moves. The greedy heuristic settles in.</h2>
+  <p>Sweep 2 reuses the same visit permutation (the shuffle happens once per level in the canonical reference, mirroring Blondel et al. 2008 §2). The remaining moves are corrections to first-pass choices: nodes whose preferred neighbour-community changed because some neighbour migrated during sweep 1, or nodes whose local optimum opened up only after a neighbour stabilised.</p>
+  <div class="graph" id="g-sweep2">
+    <div class="graph-chrome">
+      <span>after sweep 2 &middot; moves: <span id="g-sweep2-mv">·</span> &middot; Δ Q: <span id="g-sweep2-dq">·</span></span>
+      <span class="right" id="g-sweep2-meta">cumulative Δ Q over both sweeps in caption</span>
+    </div>
+    <div class="graph-canvas" id="g-sweep2-cy"></div>
+  </div>
+  <p>The geometric decay of moves per sweep is a property of the strict-positive cutoff, not an empirical regularity. Once every node has reached a \(\Delta Q \le 0\) configuration locally, only changes elsewhere in the graph can re-open a gain at that node. Each subsequent pass touches only the nodes whose neighbourhood admin shifted. <a href="./leiden-cpm.html">Leiden</a>'s queue plus restabilisation captures exactly this set without the wasted sweep.</p>
+</section>
+
+<section class="stage">
+  <div class="stage-num">stage 4 &middot; phase 1 final &middot; live walker</div>
   <h2>One node at a time, full passes, repeat until quiet.</h2>
   <p>Louvain's local sweep is plain: shuffle the nodes, walk them in order, evaluate \(\Delta Q\) for moving the current node into every neighbour's community, pick the biggest <em>strictly positive</em> gain (paper §2: "only if this gain is positive"). If no candidate has \(\Delta Q &gt; 0\), the node stays. After one pass over every node, if anything moved, run another full pass. Stop when a full pass made zero moves, or when the increase in \(Q\) over the pass dropped below \(\varepsilon = 10^{-6}\).</p>
   <p>The closed form for the candidate gain (after substituting in the running sums each community keeps) collapses to:</p>
@@ -136,34 +164,50 @@
     </div>
   </div>
   <div id="g-move-panel"></div>
-  <div class="callout">
-    <div class="tag">a worked first visit</div>
-    <p>Concrete numbers help. Pick node 8, an A-periphery vertex with edges to A-core nodes 1 and 2 (degree 2). At singleton init, every other node sits alone, so \(\Sigma_{tot}(c) = k_c\) for every community \(c\). The candidate set for node 8 is \(\{1, 2, 8\}\) (the two neighbours' singletons plus its own). With \(2m = 104\) and the relevant strengths \(k_1 = 7, k_2 = 6, k_8 = 2\), the formula evaluates to \(\Delta Q(8 \to 1) = 1/52 - (2 \cdot 7) / 5408 \approx 0.01664\) and \(\Delta Q(8 \to 2) = 1/52 - (2 \cdot 6) / 5408 \approx 0.01701\). Community 2 wins. The sweep then carries node 8 into 2's singleton, and the next visit picks up that admin update through \(\Sigma_{in}\) and \(\Sigma_{tot}\) of community 2 before evaluating the next candidate. Every move feeds the running sums forward; the only state in the sweep is the partition and its admin tables.</p>
-  </div>
-  <div class="callout">
-    <div class="tag">tie-breaking and visit order</div>
-    <p>Blondel et al. flag in §2 of the paper that the output depends on the order in which nodes are visited. The dependence is weak on the final modularity but visible on the trajectory and on the running time. The kernel here shuffles using a deterministic seeded Mersenne Twister; a fresh seed yields a different partition of similar quality. The candidate iteration inside one visit follows the canonical convention exactly: the visited node's current community sits at the first slot of the candidate list with weight zero, then the rest are first-seen distinct neighbour communities in adjacency-edge order. The comparison is strict (\(&gt;\)) over the running maximum gain initialised at zero, so among equally-best moves the one encountered earliest in adjacency order wins. The "random step" and "random all" buttons re-spin the seed and re-run the whole multi-level pipeline; the URL accepts a seed parameter for reproducible deep links.</p>
-  </div>
   <div class="callout warn">
     <div class="tag">why the sweep keeps revisiting quiet nodes</div>
-    <p>The biggest cost in Louvain's inner loop is sweeping nodes that did not change. Once a node has stabilised in its locally optimal community, Louvain still revisits it on every subsequent sweep, recomputes \(\Delta Q\) for every neighbour-community, and discovers nothing moves. The reason the algorithm cannot skip is that moves elsewhere in the graph alter the running sums of nearby communities, which can reopen a gain at a previously-stable node. The trade-off is that quiet stretches of the graph still pay the per-node cost. <a href="./leiden-cpm.html">Leiden</a> replaces this with a queue plus neighbour restabilisation: only nodes whose neighbourhood changed get a second look, so the inner loop cost grows with moves performed rather than nodes times passes. On this small fixture the saving is unobservable; on a graph with tens of thousands of nodes and a few thousand moves per level, the savings are usually order-of-magnitude.</p>
-  </div>
-  <div class="callout">
-    <div class="tag">edge cases the sweep handles silently</div>
-    <p>Two boundary conditions matter for correctness and almost never surface visibly. First, after a move the source community can become empty; the admin marks it as eligible for reuse, but Louvain's sweep never picks empty communities for the candidate list, so the slot stays dormant until aggregation renumbers it away. Second, when no candidate has strictly positive gain, the formula passes the source community itself as the chosen target with a zero gain; the admin tables stay numerically consistent because remove and insert are inverses on the same community.</p>
+    <p>The biggest cost in Louvain's inner loop is sweeping nodes that did not change. Once a node has stabilised in its locally optimal community, Louvain still revisits it on every subsequent sweep, recomputes \(\Delta Q\) for every neighbour-community, and discovers nothing moves. The reason the algorithm cannot skip is that moves elsewhere in the graph alter the running sums of nearby communities, which can reopen a gain at a previously-stable node. The trade-off is that quiet stretches of the graph still pay the per-node cost. <a href="./leiden-cpm.html">Leiden</a> replaces this with a queue plus neighbour restabilisation: only nodes whose neighbourhood changed get a second look.</p>
   </div>
   <div class="callout">
     <div class="tag">monotonicity of the sweep</div>
-    <p>Modularity strictly increases on every accepted move because the strict-positive cutoff only accepts moves with \(\Delta Q &gt; 0\). The full sweep is therefore monotone-increasing in \(Q\), and the sequence of sweep-end values is monotone non-decreasing bounded above by 1, so the loop must converge. The convergence threshold \(\varepsilon = 10^{-6}\) breaks out before the loop reaches a fixed point in cases where the increments shrink below numerical noise; without it, the algorithm can spin on tiny ties past the point of useful improvement. The exit condition is \(\text{nb\_moves} = 0\) OR \(\Delta Q_{\text{pass}} \le \varepsilon\), expressed in the canonical loop body as <em>continue while moves and gain exceed epsilon</em>.</p>
-  </div>
-  <div class="callout">
-    <div class="tag">four places where ties can break differently</div>
-    <p>The algorithm has four ordered comparisons that decide outcomes when multiple options score equal. The candidate pick uses a strict \(\Delta Q &gt; \text{best}\) with running best initialised at zero, so among candidates with identical positive gain, the one encountered first in adjacency-iteration order wins (and the visited node's own community, sitting at the first slot with weight zero, is functionally dead in the comparison because its gain is non-positive). The convergence gate uses \(\Delta Q_{\text{pass}} &gt; \varepsilon\) at the same precision on both sides of the cutoff, so a pass that increases \(Q\) by exactly \(\varepsilon\) stops; one that increases by \(2\varepsilon\) continues. Level-transition renumbering walks community ids in ascending order, so survivors get new contiguous ids preserving the original-id ordering. The quality function itself skips communities with zero total strength, which has no effect on populated communities and avoids a divide-by-zero edge case on empty slots. None of these comparisons depend on randomness; the seed only affects the shuffle.</p>
+    <p>Modularity strictly increases on every accepted move because the strict-positive cutoff only accepts moves with \(\Delta Q &gt; 0\). The full sweep is therefore monotone-increasing in \(Q\), and the sequence of sweep-end values is monotone non-decreasing bounded above by 1, so the loop must converge. The convergence threshold \(\varepsilon = 10^{-6}\) breaks out before the loop reaches a fixed point in cases where the increments shrink below numerical noise. The exit condition is \(\text{nb\_moves} = 0\) OR \(\Delta Q_{\text{pass}} \le \varepsilon\), expressed in the canonical loop body as <em>continue while moves and gain exceed epsilon</em>.</p>
   </div>
 </section>
 
 <section class="stage">
-  <div class="stage-num">stage 3 &middot; phase 2 (aggregation)</div>
+  <div class="stage-num">stage 5 &middot; \(\Delta Q\) candidate enumeration</div>
+  <h2>One visit, every candidate community, one strictly-positive winner.</h2>
+  <p>The candidate set for a visited node \(v\) is built in adjacency-iteration order: slot 0 holds \(v\)'s current community with weight zero, then each first-seen distinct neighbour-community is appended. The kernel walks the set once, scoring every candidate with the closed-form gain, and updates a running best under a strict inequality:</p>
+  <p style="text-align:center">\(\text{best} \leftarrow c \quad \text{iff} \quad \Delta Q(v \to c) &gt; \text{best}_{\Delta Q}\)</p>
+  <p>In words: the running best starts at zero and only updates when a candidate beats it strictly. The current-community slot, sitting at index 0 with weight zero, scores at or below zero in the gain formula and never wins. If no candidate clears the cutoff, the visit ends with \(v\) staying where it was.</p>
+  <div class="graph" id="g-cand">
+    <div class="graph-chrome">
+      <span>worked example &middot; node <span id="g-cand-node">·</span> at singleton init &middot; <span id="g-cand-caption">·</span></span>
+      <span class="right">orange ring = visited node &middot; mint = pick</span>
+    </div>
+    <div class="graph-canvas" id="g-cand-cy"></div>
+    <div id="g-cand-table"></div>
+  </div>
+  <p>Two properties of the per-visit pick. The score is a closed-form constant-time read against the partition admin tables, so the per-visit cost is linear in the size of \(v\)'s neighbour-community set rather than in the size of \(v\)'s adjacency. And the winning candidate's identity depends on the order of first-seen neighbour-communities, which depends on the order edges appear in the input edge list. Two seeds that produce different first-seen orders can pick different winners on the same gain landscape.</p>
+</section>
+
+<section class="stage">
+  <div class="stage-num">stage 6 &middot; tie-break case</div>
+  <h2>Same \(\Delta Q\) across candidates. The earliest in adjacency order wins.</h2>
+  <p>Blondel et al. flag in §2 that the output depends on visit order. The dependence has two layers. The outer layer is the visit permutation: a fresh seed shuffles which node moves first and shifts the gain landscape every subsequent node sees. The inner layer is the per-visit tie-break: when two candidates score the same \(\Delta Q\), the comparison is strict \(&gt;\) against the running best, so among equally-best candidates the one encountered first in adjacency-iteration order wins. The walked node's current community never wins under either layer because its score is fixed at zero and the cutoff is strict.</p>
+  <div class="graph" id="g-tie">
+    <div class="graph-chrome">
+      <span>worked tie example &middot; node <span id="g-tie-node">·</span> &middot; <span id="g-tie-caption">·</span></span>
+      <span class="right">two candidates with identical Δ Q</span>
+    </div>
+    <div class="graph-canvas" id="g-tie-cy"></div>
+    <div id="g-tie-table"></div>
+  </div>
+  <p>The walker re-spins under the "random step" and "random all" controls in stage 4. The URL accepts a seed parameter for reproducible deep links. Level-transition renumbering walks community ids in ascending order, so survivors get new contiguous ids preserving the original-id ordering; the quality function skips communities with zero total strength to avoid a divide-by-zero edge case on empty slots. None of these comparisons depend on randomness; the seed only affects the shuffle.</p>
+</section>
+
+<section class="stage">
+  <div class="stage-num">stage 7 &middot; phase 2 &middot; aggregation level 0 to 1</div>
   <h2>Each community becomes a super-node; intra-edges become self-loops.</h2>
   <p>Phase 2 builds a smaller graph (paper Fig. 1, bottom). One super-node per community from Phase 1; one super-edge per pair of communities, with weight equal to the sum of inter-community edges between them; every intra-community edge folds into a self-loop on its super-node. The new graph has the same modularity as the post-Phase-1 partition (a check the paper makes explicit: it is the algebraic identity \(Q^{(\ell+1)}_{\text{singleton}} = Q^{(\ell)}_{\text{post-sweep}}\)), so Phase 1 on the super-graph is exactly the next round of bulk merges among original communities.</p>
   <p style="text-align:center">\(\text{super-edge}(c_1, c_2) = \sum_{(u, v) \in E,\ c(u) = c_1,\ c(v) = c_2,\ u \neq v} w_{uv}\)</p>
@@ -196,12 +240,40 @@
   </div>
   <div class="callout">
     <div class="tag">a worked level transition</div>
-    <p>Suppose Phase 1 at level 0 settles into 8 communities. The collapse builds a 8-node super-graph. Each super-node carries node weight equal to the count of original nodes in its community (12 for A in the most-recovered case, 8 for B, 6 for C, 4 for D, with smaller fragments for the rest). Self-loop weights add to twice the count of intra-community edges from level 0; super-edge weights are inter-community counts. Total weight of the new graph is 104, the same as the original, because every level-0 edge contributed exactly twice to the new sum (once for each endpoint, with intra-edges' two contributions both landing on the same super-self-loop). The next sweep starts from singletons on the 8-node super-graph; the candidates a super-node has are the super-communities at the other end of its super-edges, exactly as if it were a regular node in a smaller graph. The level table above tracks what happens next on this fixture.</p>
+    <p>Suppose Phase 1 at level 0 settles into 8 communities. The collapse builds a 8-node super-graph. Each super-node carries node weight equal to the count of original nodes in its community (12 for A in the most-recovered case, 8 for B, 6 for C, 4 for D, with smaller fragments for the rest). Self-loop weights add to twice the count of intra-community edges from level 0; super-edge weights are inter-community counts. Total weight of the new graph is 104, the same as the original, because every level-0 edge contributed exactly twice to the new sum. The next sweep starts from singletons on the 8-node super-graph.</p>
   </div>
 </section>
 
 <section class="stage">
-  <div class="stage-num">stage 4 &middot; iterate until the graph stops shrinking</div>
+  <div class="stage-num">stage 8 &middot; phase 1 on the level-1 super-graph</div>
+  <h2>The same sweep, smaller input, weighted edges, self-loops carry intra-mass.</h2>
+  <p>Phase 1 at level 1 walks the super-graph the collapse produced. Every super-node carries the intra-edge weight of its level-0 community as a self-loop; every super-edge carries the inter-community weight. The sweep starts from singletons on the super-graph (each super-node is alone), and the formula reads the same closed-form gain it did at level 0. The only difference is that operand magnitudes are larger: self-loops contribute to the visited node's strength on both endpoints, and super-edges weighted in the tens replace the level-0 unit weights.</p>
+  <div class="graph" id="g-sg1">
+    <div class="graph-chrome">
+      <span>super-graph at level 1 &middot; <span id="g-sg1-meta">·</span></span>
+      <span class="right">node area &prop; intra-weight; edge width &prop; inter-weight</span>
+    </div>
+    <div class="graph-canvas" id="g-sg1-cy"></div>
+  </div>
+  <p>The level-1 sweep tends to be short: only a few super-nodes, only a few candidates per visit. On this fixture the deepest sweep at level 1 either merges every super-node into one or leaves them in a small number of larger clusters, depending on the seed. The level table further down has the per-level move count.</p>
+</section>
+
+<section class="stage">
+  <div class="stage-num">stage 9 &middot; phase 2 &middot; aggregation level 1 to 2</div>
+  <h2>If level 1 reduces the node count, collapse again. If not, stop.</h2>
+  <p>The driver's exit gate is the geometric shrink. After level 1's sweep converges, the driver compares the super-graph's node count after collapse against the count before. If the new count is strictly smaller, the loop continues at level 2 with the smaller super-graph; if the count is unchanged, the loop exits and the partition at the deepest level is the output. The page reports both outcomes inline depending on what happens on the current seed.</p>
+  <div class="graph" id="g-sg2">
+    <div class="graph-chrome">
+      <span>level 2 outcome &middot; <span id="g-sg2-meta">·</span></span>
+      <span class="right" id="g-sg2-state">·</span>
+    </div>
+    <div class="graph-canvas" id="g-sg2-cy"></div>
+  </div>
+  <p>The driver does not impose a level cap. Termination is determined entirely by whether each successive sweep finds a positive-gain merge among super-nodes. On a small graph with a strong modularity-resolution attractor, this typically resolves in two or three levels; on larger benchmark graphs, six to ten levels are common.</p>
+</section>
+
+<section class="stage">
+  <div class="stage-num">stage 10 &middot; termination &middot; level table</div>
   <h2>Louvain's hierarchy on this fixture.</h2>
   <p>The table below shows one row per level. Each row corresponds to one pass through Phase 1 followed by one Phase 2 collapse. The columns track the super-graph node count entering the level, the number of communities Phase 1 found inside it, the super-graph node count after the collapse, the number of sweeps Phase 1 needed to quiet down, the total node-moves accumulated at the level, the modularity gain at the level, and absolute modularity at the level's exit.</p>
   <table class="level-stats">
@@ -227,12 +299,15 @@
 </section>
 
 <section class="stage">
-  <div class="stage-num">stage 5 &middot; final</div>
-  <h2>Louvain's deepest-level output vs planted ground-truth.</h2>
-  <p>The two graphs below put Louvain's final partition next to the planted ground-truth. They disagree everywhere on this fixture: Louvain has pushed every node into one community, while the ground-truth keeps four planted blocks plus the outliers. That mismatch is the resolution-limit story in a single picture.</p>
+  <div class="stage-num">stage 11 &middot; final partition vs planted</div>
+  <h2>Louvain's deepest-level output, with NMI and ARI against the planted blocks.</h2>
+  <p>The two graphs below put Louvain's final partition next to the planted ground-truth. They disagree on this fixture: Louvain has merged the small planted blocks into a few large communities, while the ground-truth keeps four planted blocks plus the outliers. That mismatch is the resolution-limit story in a single picture.</p>
+  <p>The agreement is summarised by two standard external measures (Vinh, Epps, Bailey 2010):</p>
+  <p style="text-align:center">\(\text{NMI}(X, Y) = \frac{2 I(X; Y)}{H(X) + H(Y)}, \quad \text{ARI}(X, Y) = \frac{\sum_{ij} \binom{n_{ij}}{2} - t_3}{\tfrac{1}{2}(t_1 + t_2) - t_3}\)</p>
+  <p>In words: NMI is twice the mutual information between the predicted and planted label vectors, normalised by the average of the two entropies; it lands in \([0, 1]\) with 1 meaning identical partitions up to relabelling. ARI is the pair-counting agreement corrected for chance, where \(t_1, t_2\) are row and column sums of the binomial contingency, and \(t_3\) is the chance baseline; it lands in roughly \([-0.5, 1]\) with 1 meaning identical pair structure.</p>
   <div class="gt-compare">
     <div class="panel-mini">
-      <div class="cap">Louvain output &middot; \(Q = \) <span id="g-final-Q">·</span></div>
+      <div class="cap">Louvain output &middot; \(Q = \) <span id="g-final-Q">·</span> &middot; NMI = <span id="g-final-nmi">·</span> &middot; ARI = <span id="g-final-ari">·</span></div>
       <div class="graph-canvas" id="g-final-louvain" style="height: 280px"></div>
     </div>
     <div class="panel-mini">
@@ -244,33 +319,55 @@
     <thead><tr><th>community</th><th>size</th><th>edges in</th><th>edges out</th><th>conductance</th></tr></thead>
     <tbody></tbody>
   </table>
-  <div class="callout warn">
-    <div class="tag">internal connectivity check (Traag et al. 2019)</div>
-    <p id="g-final-disconn">computing &hellip;</p>
-  </div>
   <div class="callout">
-    <div class="tag">how this compares to Leiden</div>
-    <p>The kernel under this page shares its graph, partition, and modularity primitives with the Leiden pages. The difference between the two algorithms is everything the outer driver does on top of those primitives. <a href="./leiden-cpm.html">Leiden</a> replaces Phase 1's full-sweep loop with a queue that touches each node only when its neighbourhood actually changed, and inserts a refinement step between Phase 1 and Phase 2 that re-partitions every community in isolation before the collapse. The <a href="./leiden-cpm.html">Leiden-CPM</a> and <a href="./leiden-mod.html">Leiden-Mod</a> pages walk the differences move by move on the same fixture. Leiden-Mod uses the same modularity objective as this page, so it shows the contrast cleanest; Leiden-CPM swaps the objective and shows what happens when the resolution limit goes away.</p>
-  </div>
-  <div class="callout">
-    <div class="tag">how this compares to SBM</div>
-    <p>The <a href="./sbm-flat-best.html">SBM-Flat-Best</a> page lands on the same fixture from a different direction. SBM fits a Bayesian generative model whose description length sets the number of blocks, so it does not optimise modularity at all and does not suffer the resolution limit in the same way. On the C component (two physically disconnected 3-cycles labelled the same), SBM keeps them merged because the generative model is happy with disconnected blocks; Louvain merges them through their neighbours; <a href="./leiden-cpm.html">Leiden</a> with refinement splits the disconnect on the refinement pass. Three algorithms, three different verdicts on the same six nodes, all reasonable under their respective objectives.</p>
-  </div>
-  <div class="callout">
-    <div class="tag">what the page actually runs</div>
-    <p>The JavaScript kernel under this page is a code-faithful port of the canonical gen-louvain v0.3 reference (Blondel et al. 2008): the graph-binary layer, the modularity quality function, and the per-level sweep. Every per-step computation lands on the same arithmetic operands in the same order as the canonical source. A separate C++ build of the same algorithm body runs alongside the JS port; under matching seed the two produce bit-identical per-visit records across a 17-fixture stress panel and a 6-input synthetic matrix. The reference cited above (long double precision, libc rand) remains the algorithm specification; the L4 build substitutes Float64 and the same Mersenne Twister the JS port uses so a JavaScript walker can reach exact byte-for-byte equality with the C++ tracer.</p>
+    <div class="tag">determinism notes</div>
+    <p>The shuffle is a Fisher-Yates pass using a seeded Mersenne Twister. The shuffle order is computed once per level and reused across every pass at that level, mirroring the canonical reference. The candidate iteration order inside a visit is the adjacency-iteration order, which depends on the order edges appear in the source edge list. Together, the seed and the input edge ordering fully determine the trajectory. The URL accepts a seed parameter; reload with a new value to inspect how a single bit of randomness fans out into a completely different sweep.</p>
   </div>
   <div class="callout">
     <div class="tag">history note</div>
-    <p>The Louvain paper appeared at the Journal of Statistical Mechanics in October 2008. The authors were a small team at UC Louvain in Belgium; the algorithm name comes from the city. The paper's headline result was wall-clock speed: 118 million nodes clustered in 152 minutes on a single machine. That headline aged well. As of 2025 the paper has over 30,000 citations and the algorithm ships inside graph-tool, igraph, NetworkX, Gephi, NetworKit, and most domain libraries that touch network science. Leiden (2019) and InfoMap (2008) eventually became the recommended replacements, but Louvain's role as the default modularity heuristic is the reason every other algorithm in this gallery refers back to it.</p>
+    <p>The Louvain paper appeared at the Journal of Statistical Mechanics in October 2008. The authors were a small team at UC Louvain in Belgium; the algorithm name comes from the city. The paper's headline result was wall-clock speed: 118 million nodes clustered in 152 minutes on a single machine. As of 2025 the paper has over 30,000 citations and the algorithm ships inside graph-tool, igraph, NetworkX, Gephi, NetworKit, and most domain libraries that touch network science. Leiden (2019) and InfoMap (2008) eventually became the recommended replacements, but Louvain's role as the default modularity heuristic is the reason every other algorithm in this gallery refers back to it.</p>
   </div>
   <div class="callout">
-    <div class="tag">determinism notes</div>
-    <p>The shuffle is a Fisher-Yates pass using a seeded Mersenne Twister. The shuffle order is computed once per level and reused across every pass at that level, mirroring the canonical reference. The candidate iteration order inside a visit is the adjacency-iteration order, which depends on the order edges appear in the source edge list. Together, the seed and the input edge ordering fully determine the trajectory. The URL accepts a seed parameter; reload with a new value to inspect how a single bit of randomness fans out into a completely different sweep. On this fixture the deepest-level modularity is usually within 0.01 of the displayed value across all seeds, but the level-0 partition can differ in which planted block each periphery node joins first.</p>
+    <div class="tag">verification matrix</div>
+    <p>The JavaScript kernel under this page is a code-faithful port of the canonical gen-louvain v0.3 reference (Blondel et al. 2008). A separate C++ build of the same algorithm body runs alongside the JS port; under matching seed the two produce bit-identical per-visit records across a 17-fixture stress panel and a 6-input synthetic matrix, cumulative records past 13 million per-visit comparisons with zero divergences. The canonical reference (libc rand + long double) produces a different partition under the same numeric seed and remains the algorithm's published specification.</p>
+  </div>
+</section>
+
+<section class="stage">
+  <div class="stage-num">stage 12 &middot; connectivity failure mode</div>
+  <h2>A community Louvain labelled as one piece, looked at as a graph.</h2>
+  <p>Louvain never asks whether a community is internally connected. The closed-form gain only sees the visited node and the target community's running sums; it does not inspect whether the rest of the target community holds together once the node is added. The failure mode is the one Traag, Waltman and van Eck (2019) opened the Leiden paper with: a community held together by a single bridge node, where the bridge eventually moves elsewhere for its own \(\Delta Q\), leaving the rest of the community in two physically disconnected pieces while still carrying one label.</p>
+  <div class="graph" id="g-disc">
+    <div class="graph-chrome">
+      <span>internal-connectivity audit on the final partition</span>
+      <span class="right" id="g-disc-state">·</span>
+    </div>
+    <div class="graph-canvas" id="g-disc-cy"></div>
+  </div>
+  <p id="g-final-disconn">computing &hellip;</p>
+  <p>The failure mode shows up at scale. Traag et al. measured this on six real-world networks and reported 1 to 17% of Louvain's communities literally disconnected, with up to 25% "badly connected" (held together by a cut of one or two edges). <a href="./leiden-cpm.html">Leiden</a>'s refinement phase reads each move-phase community in isolation, restarts its members as singletons, and rebuilds the community through constrained merges before the aggregation step. The constraint guarantees every community at every level is internally connected.</p>
+  <p>The post-processing pages exercise the same fix from a different angle. <a href="./cc.html">CC</a> walks the output and splits any disconnected community along its connected components. <a href="./wcc.html">WCC</a> goes further: any community whose internal edge cut would disconnect it under a single-edge removal is also split. <a href="./cm.html">CM</a> takes the post-processed output and re-clusters disconnected pieces under an algorithm-specific objective. The pages above the post-processing layer (this one, and <a href="./leiden-mod.html">Leiden-Mod</a>) are the inputs CC, WCC and CM clean up.</p>
+</section>
+
+<section class="stage">
+  <div class="stage-num">stage 13 &middot; cross-link &middot; how Louvain sits in the gallery</div>
+  <h2>The four algorithms the page glue routes to next.</h2>
+  <p>The gallery shares one fixture and one substrate so the four modularity-class and SBM-class algorithms land on the same canvas. Louvain is the ancestor of three of the four.</p>
+  <div class="callout">
+    <div class="tag">Leiden-CPM &middot; refinement plus a different objective</div>
+    <p><a href="./leiden-cpm.html">Leiden-CPM</a> keeps the multi-level pattern, swaps the per-move objective from modularity to constant-Potts, and inserts a refinement phase between the move phase and aggregation. The refinement phase guarantees every community at every level is internally connected; the constant-Potts objective is resolution-limit-free, so the small planted blocks on this fixture survive the merge pressure modularity does not. Same fixture, different objective, different verdict on C and D.</p>
   </div>
   <div class="callout">
-    <div class="tag">where the implementation sits in the gallery's verification matrix</div>
-    <p>The walker on this page is verified against a C++ port of the same algorithm body using a swap-build approach. The build replaces two pieces of the canonical (long-double arithmetic with double precision; libc rand with the same Mersenne Twister the JavaScript port uses) so that under matching seed the two builds produce bit-identical per-visit records: same visit order, same gain values, same accept-or-reject decisions, same partition trajectory at every collapse level. The verification grid covers a 3-tier panel of 17 graphs and a 6-input synthetic matrix; cumulative records cross 13 million per-visit comparisons with zero divergences in the most recent runs. The canonical reference (libc rand + long double) produces a different partition under the same numeric seed and remains the algorithm's published specification.</p>
+    <div class="tag">Leiden-Mod &middot; refinement on the same objective</div>
+    <p><a href="./leiden-mod.html">Leiden-Mod</a> keeps modularity as the objective and adds Leiden's refinement phase. The resolution limit still applies, so the deepest level still collapses; but every intermediate level is internally connected by construction, and the move phase touches only nodes whose neighbourhood changed. The contrast between Leiden-Mod and Louvain on the same fixture is the cleanest demonstration of what refinement adds (connectivity) and what it does not change (resolution).</p>
+  </div>
+  <div class="callout">
+    <div class="tag">SBM-Flat-Best &middot; a different objective entirely</div>
+    <p><a href="./sbm-flat-best.html">SBM-Flat-Best</a> fits a Bayesian degree-corrected stochastic block model whose description length sets the number of blocks. No \(\gamma\), no modularity, no resolution limit in the same sense. On C (the two physically disconnected 3-cycles labelled the same), SBM keeps them merged: the generative model is happy with disconnected blocks. Three algorithms, three different verdicts on the same six nodes, all reasonable under their respective objectives.</p>
+  </div>
+  <div class="callout">
+    <div class="tag">CC, WCC, CM &middot; post-processing on a community-detection output</div>
+    <p><a href="./cc.html">CC</a> walks any clustering and splits disconnected communities into their connected components. <a href="./wcc.html">WCC</a> goes further: any community whose internal cut would fall to a single edge removal is also split. <a href="./cm.html">CM</a> re-clusters the post-split pieces under an algorithm-specific objective. The three pages use Louvain (this page) and Leiden as inputs and demonstrate how the connectivity failure mode propagates through downstream analyses.</p>
   </div>
 </section>
 
