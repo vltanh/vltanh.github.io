@@ -232,13 +232,13 @@
 <section class="stage">
   <div class="stage-num">generation · assigning vertices to clusters</div>
   <h2>Big nodes to big clusters; small nodes fill the rest.</h2>
-  <p>The sampler assigns each vertex to exactly one cluster before any edges are drawn. The paper frames this as a uniform draw from the admissible permutations; the Julia code uses a sequential proxy that walks vertices in descending \(d_u\) and at each step samples one cluster from the admissible set with probability proportional to its remaining capacity. A vertex \(u\) is admissible for cluster \(j\) iff \(x_u \le s_j - 1\), where \(x_u\) is the per-vertex bound below: the expected number of neighbours of \(u\) that will end up in \(u\)'s own cluster.</p>
+  <p>The sampler assigns each vertex to exactly one cluster before any edges are drawn. The paper frames this as a uniform draw from the admissible permutations; the Julia code uses a sequential proxy that walks vertices in descending \(d_u\) and at each step samples one cluster from the admissible set with probability proportional to its remaining capacity. A vertex \(u\) is admissible for cluster \(j\) iff \(x_u \le s_j - 1\), where \(x_u\) is the per-vertex bound below: the integer ceiling of the expected number of neighbours of \(u\) that end up in \(u\)'s own cluster.</p>
   \[
     x_u \;=\; \bigl\lceil (1 - \xi \phi) \, d_u \bigr\rceil, \qquad
     \phi \;=\; 1 - \sum_{j=1}^{k} \left(\frac{s_j}{n}\right)^{\!2}.
   \]
   <p>Vertices are processed by \(d_u\) desc, so admissibility only loosens as the walk proceeds: once a cluster fits a vertex, it fits every later vertex too. The sequential procedure is not equivalent to a uniform draw over admissible permutations: earlier high-\(d_u\) picks bias which clusters retain capacity for later vertices.</p>
-  <p>\(\phi\) is the probability that two nodes drawn uniformly at random fall in different clusters, with \(\phi \in [0, 1)\): one mega-cluster gives \(\phi = 0\), and evenly-sized clusters push \(\phi \to 1\). It enters the bound because not all of \(u\)'s \(\xi d_u\) background-routed half-edges actually leave the cluster; only the \(\phi\) fraction does, and the remaining \((1-\phi)\xi d_u\) lands back inside \(u\)'s own cluster by chance. \(u\)'s expected intra-degree is therefore \((1-\xi)d_u + (1-\phi)\xi d_u = (1-\xi\phi)d_u\), and \(x_u\) is the integer ceiling of that quantity.</p>
+  <p>\(\phi\) is the probability that two nodes drawn uniformly at random fall in different clusters, with \(\phi \in [0, 1)\): one mega-cluster gives \(\phi = 0\), and many small evenly-sized clusters push \(\phi \to 1\) (with \(k\) equal clusters \(\phi = 1 - 1/k\)). It enters the bound because not all of \(u\)'s \(\xi d_u\) background-routed half-edges actually leave the cluster; only the \(\phi\) fraction does, and the remaining \((1-\phi)\xi d_u\) lands back inside \(u\)'s own cluster by chance. \(u\)'s expected intra-degree is therefore \((1-\xi)d_u + (1-\phi)\xi d_u = (1-\xi\phi)d_u\), and \(x_u\) is the integer ceiling of that quantity.</p>
   <p>The inequality \(\phi &lt; 1\) is what keeps the post-split degree inside the cluster: since \(1 - \xi\phi \ge 1 - \xi\), the bound \(x_u \ge \lceil y_u \rceil \ge \hat y_u\), where \(y_u = (1-\xi)d_u\) is the intra-funded degree and \(\hat y_u\) is its integer realisation after the stochastic rounding the next stage performs. Combined with \(x_u \le s_j - 1\) under admissibility, this gives \(\hat y_u \le s_j - 1\), so the node's intra degree fits inside its cluster's other-member count.</p>
   <div class="callout warn">
     <div class="tag">singletons break admissibility for any positive-degree vertex</div>
@@ -330,7 +330,7 @@
 <section class="stage">
   <div class="stage-num">generation · cluster rewire</div>
   <h2>Cut the collisions, swap into valid edges.</h2>
-  <p>Cluster-graph collisions (self-loops and parallels) move to a recycle list. Each recycle edge \(\{u_1, v_1\}\) is paired with a random other cluster edge \(\{u_2, v_2\}\) to make the swap (into \(\{u_1, u_2\}\) and \(\{v_1, v_2\}\), or \(\{u_1, v_2\}\) and \(\{v_1, u_2\}\)) and accepted if both new edges are simple. The rewire loop runs until the cluster graph is collision-free or runs out of moves; whatever is still on the recycle list at the end is dropped as an intra edge.</p>
+  <p>Cluster-graph collisions (self-loops and parallels) move to a recycle list. Each recycle edge \(\{u_1, v_1\}\) is paired with a random other cluster edge \(\{u_2, v_2\}\) (another placed edge, or one still on the recycle list) to make the swap (into \(\{u_1, u_2\}\) and \(\{v_1, v_2\}\), or \(\{u_1, v_2\}\) and \(\{v_1, u_2\}\)) and accepted if both new edges are simple. The rewire loop runs until the cluster graph is collision-free or runs out of moves; whatever is still on the recycle list at the end is dropped as an intra edge.</p>
   <p>The dropped edges are not gone for good. For each leftover collision \(\{u, v\}\), one stub at each endpoint never paired inside the cluster. Those stubs are forwarded to the background pool, joining whatever the bg-split already allocated, and re-pair anonymously in the next stage. The specific intra edge is gone; the stubs survive and may form new bg edges with anyone.</p>
   <div class="graph" id="g-crewire">
     <div class="graph-chrome">
@@ -480,7 +480,7 @@
       <tr><th># clusters</th><td class="val">87</td><td class="val">87</td><td class="desc">Preserved after <code>drop_singleton_clusters</code> strips the 355 outlier singletons.</td></tr>
       <tr><th># edges</th><td class="val">10,429</td><td class="val">10,150</td><td class="desc">Within 2.7%. Most edges are preserved; the cross-cluster final swap drops what no rewire stage could resolve.</td></tr>
       <tr><th>global \(\xi\)</th><td class="val">0.718</td><td class="val">0.715</td><td class="desc">Hits the target within a stub. The target is high because 355 of 906 input nodes are outliers and each sits in its own 1-node pseudo-cluster, so every outlier-incident edge is inter by definition.</td></tr>
-      <tr><th>global cc</th><td class="val">0.548</td><td class="val">0.307</td><td class="desc">Not targeted. Configuration-model pairing inside a cluster distributes intra-edges uniformly across admissible pairs; triangles happen only by coincidence.</td></tr>
+      <tr><th>global cc</th><td class="val">0.548</td><td class="val">0.307</td><td class="desc">Not targeted. Configuration-model pairing inside a cluster matches stubs uniformly, so a node-pair's probability scales with its endpoints' degrees; triangles happen only by coincidence.</td></tr>
       <tr><th>char. time</th><td class="val">40.41</td><td class="val">1.95</td><td class="desc">Random-walk mixing time. Background pairing wires the high-degree hubs across the whole vertex set, so the output mixes in roughly 1/20 of the input rate.</td></tr>
       <tr><th>pseudo-diameter</th><td class="val">8</td><td class="val">5</td><td class="desc">Same hub effect: bg edges shortcut walks across cluster boundaries, so most pairs are within five hops.</td></tr>
     </tbody>
@@ -500,7 +500,7 @@
   </div>
   <div class="callout warn">
     <div class="tag">caveat 2: node identity is not preserved</div>
-    <p>The sampler sorts the profile's degrees by descending \(d_u\) and re-assigns them to clusters uniformly over admissible permutations. "Node 5" in the output is not node 5 in the input; the two are unrelated. What <em>is</em> preserved across every seed: the degree <em>multiset</em> (up to rewire drift) and the cluster <em>size</em> multiset (exact).</p>
+    <p>The sampler sorts the profile's degrees by descending \(d_u\) and re-assigns them to clusters via the sequential capacity-weighted sweep above (a proxy for, not an exact, uniform draw over admissible permutations). "Node 5" in the output is not node 5 in the input; the two are unrelated. What <em>is</em> preserved across every seed: the degree <em>multiset</em> (up to rewire drift) and the cluster <em>size</em> multiset (exact).</p>
   </div>
 </section>
 
