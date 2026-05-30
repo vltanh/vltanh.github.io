@@ -73,10 +73,18 @@
   // objects so the spoke renderer can highlight which stub got consumed;
   // harness passes raw integers.
   function buildTraceFrom(urns, budget, blockPairs, seenPairs, rng) {
+    // Conditional byte-equal-tracer hook (inert in browser; installed only by
+    // the node verification harness in tools/viz_check/sbm/). The typeof guard
+    // keeps this zero-cost when no __HOOK is registered, so production page
+    // behaviour is byte-identical with or without the harness.
+    const HOOK = (typeof globalThis !== "undefined" && typeof globalThis.__HOOK === "function")
+      ? globalThis.__HOOK : null;
+    let __step = 0;
     const out = [];
     for (let bpi = 0; bpi < blockPairs.length; bpi++) {
       const [r, s] = blockPairs[bpi];
       let left = budget[`${r}|${s}`];
+      const mrs = left;          // budget already = floor(eRs/2) on diagonal
       // has_n check matching graph-tool's UrnSampler<_, false>::has_n
       // (kernel_check.cpp:168-175): the pair claims `ers` stubs from each
       // urn (ers = mrs off-diagonal, 2*mrs on-diagonal). Throw upfront so
@@ -84,6 +92,9 @@
       // truncated edge set.
       if (left > 0) {
         const ers = (r === s) ? 2 * left : left;
+        if (HOOK) HOOK({ tag: "PAIR", r, s, mrs, ers, same: r === s,
+                         urnR_size: urns[r].length,
+                         urnS_size: (r === s ? urns[r].length : urns[s].length) });
         if (urns[r].length < ers) {
           throw new Error(`SBM has_n: urn r=${r} size=${urns[r].length} < ers=${ers}`);
         }
@@ -92,6 +103,8 @@
         }
       }
       while (left > 0) {
+        const r_size_before = urns[r].length;
+        const s_size_before = (r === s) ? urns[r].length : urns[s].length;
         const [a, ia] = popRandomFromUrn(urns[r], rng);
         const [b, ib] = popRandomFromUrn(r === s ? urns[r] : urns[s], rng);
         const u = (a && a.node !== undefined) ? a.node : a;
@@ -102,8 +115,12 @@
         const prev = seenPairs.get(key) || 0;
         const multi = !loop && prev >= 1;
         seenPairs.set(key, prev + 1);
+        if (HOOK) HOOK({ tag: "DRAW", step: __step, r, s,
+                         urnR_before: r_size_before, ia, u,
+                         urnS_before: s_size_before, ib, v, loop });
         out.push({ bp: [r, s], a, b, aIdx: ia, bIdx: ib, u, v, intra: r === s, loop, multi });
         left -= 1;
+        __step += 1;
       }
     }
     return out;
@@ -160,7 +177,7 @@
     };
   }
 
-  window.SBMKernel = {
+  const API = {
     popRandomFromUrn,
     popAt,
     buildBlockPairs,
@@ -170,4 +187,8 @@
     replayTrace,
     sampleMicroSBM,
   };
+  // Browser: window.SBMKernel (production page). Node verification harness:
+  // globalThis.SBMKernel (tools/viz_check/sbm/ loads this file directly).
+  if (typeof window !== "undefined") window.SBMKernel = API;
+  else if (typeof globalThis !== "undefined") globalThis.SBMKernel = API;
 })();

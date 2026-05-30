@@ -39,34 +39,57 @@
 (function () {
   "use strict";
 
+  // ---- Guarded byte-equal-tracer hook (shared with abcd+o; do NOT remove) ----
+  // Zero-cost when no harness installs globalThis.__ABCD_HOOK. Emits
+  // [TRACE-ABCD-*] probes that mirror the Julia canonical-tracer
+  // (tools/viz_check/abcd/byte_equal/tracer/abcd_tracer.jl) tag-for-tag so the
+  // diff harness can byte-compare every primitive draw + intermediate float.
+  // The hook consumes no rng and mutates no kernel state, so hooked==unhooked
+  // final state (byte-equal-tracer equivalence test F).
+  const __H = (typeof globalThis !== "undefined" && typeof globalThis.__ABCD_HOOK === "function")
+    ? globalThis.__ABCD_HOOK : null;
+  function hook(tag, kv) { if (__H) __H(tag, kv); }
+
   function ekey(a, b) { return a < b ? `${a}-${b}` : `${b}-${a}`; }
   function epair(a, b) { return a < b ? [a, b] : [b, a]; }
 
   function randround(x, rng) {
     const d = Math.floor(x);
-    return d + (rng() < (x - d) ? 1 : 0);
+    const r = rng();
+    const frac = x - d;
+    const val = d + (r < frac ? 1 : 0);
+    hook("RR", { x, floor: d, draw: r, frac, value: val });
+    return val;
   }
 
-  function shuffleInPlace(arr, rng) {
+  function shuffleInPlace(arr, rng, ctx) {
+    hook("SHUF-IN", { ctx: ctx || "", n: arr.length, arr: arr.slice() });
     for (let i = arr.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1));
+      const r = rng();
+      const j = Math.floor(r * (i + 1));
       [arr[i], arr[j]] = [arr[j], arr[i]];
+      hook("SHUF-SWAP", { ctx: ctx || "", i, draw: r, j });
     }
+    hook("SHUF-OUT", { ctx: ctx || "", after: arr.slice() });
     return arr;
   }
 
   // Weighted sample with replacement, single draw. items + weights
   // arrays of equal length; weights non-negative; sum > 0.
-  function sampleWeighted(items, weights, rng) {
+  function sampleWeighted(items, weights, rng, ctx) {
     let total = 0;
     for (const w of weights) total += w;
-    if (total <= 0) return null;
-    let r = rng() * total;
+    if (total <= 0) { hook("WSAMP", { ctx: ctx || "", total, picked: -1, note: "empty" }); return null; }
+    const r0 = rng();
+    let r = r0 * total;
+    let picked = items[items.length - 1];
     for (let i = 0; i < items.length; i++) {
       r -= weights[i];
-      if (r < 0) return items[i];
+      if (r < 0) { picked = items[i]; break; }
     }
-    return items[items.length - 1];
+    hook("WSAMP", { ctx: ctx || "", total, draw: r0, r: r0 * total,
+      items: items.slice(), weights: weights.slice(), picked });
+    return picked;
   }
 
   // Uniform without-replacement sample of k items from a list. Mirrors
@@ -79,10 +102,12 @@
   }
 
   // Uniform pick from a Set of "lo-hi" string keys. Returns [lo, hi].
-  function sampleFromKeySet(set, rng) {
+  function sampleFromKeySet(set, rng, ctx) {
     const arr = Array.from(set);
-    if (arr.length === 0) return null;
-    const i = Math.floor(rng() * arr.length);
+    if (arr.length === 0) { hook("KSAMP", { ctx: ctx || "", n: 0, picked: "", note: "empty" }); return null; }
+    const r = rng();
+    const i = Math.floor(r * arr.length);
+    hook("KSAMP", { ctx: ctx || "", n: arr.length, draw: r, idx: i, picked: arr[i] });
     return arr[i].split("-").map(Number);
   }
 
@@ -111,6 +136,8 @@
       const fromRecycle = (2 * recycle.length) / Math.max(1, stubsLen);
       let success = false;
       let chosenP2 = null, chosenSrc = null, chosenNewp1 = null, chosenNewp2 = null;
+      hook("CL-RECYC", { cluster: state.clusterTag || 0, p1: p1.slice(), recyc_len: recycle.length,
+        fromRecycle, le_size: localEdges.size });
       if (!(recycle.length === 0 && localEdges.size === 0)) {
         const innerIters = Math.floor(stubsLen / 2);
         for (let inner = 0; inner < innerIters; inner++) {
@@ -118,11 +145,13 @@
           let usedRecycle, p2, recycleIdx = -1;
           if (coin1 < fromRecycle || localEdges.size === 0) {
             usedRecycle = true;
-            recycleIdx = Math.floor(rng() * recycle.length);
+            const ri = rng();
+            recycleIdx = Math.floor(ri * recycle.length);
+            hook("RIDX", { ctx: "cl=" + (state.clusterTag || 0), n: recycle.length, draw: ri, idx: recycleIdx });
             p2 = recycle[recycleIdx];
           } else {
             usedRecycle = false;
-            const pick = sampleFromKeySet(localEdges, rng);
+            const pick = sampleFromKeySet(localEdges, rng, "cl=" + (state.clusterTag || 0));
             p2 = epair(pick[0], pick[1]);
           }
           const coin2 = rng();
@@ -139,6 +168,8 @@
           else if (newp1[0] === newp1[1] || localEdges.has(ekey(newp1[0], newp1[1]))) goodChoice = false;
           else if (newp2[0] === newp2[1] || localEdges.has(ekey(newp2[0], newp2[1]))) goodChoice = false;
           else goodChoice = true;
+          hook("CL-INNER", { cluster: state.clusterTag || 0, coin1, used_recycle: usedRecycle,
+            p2: p2.slice(), coin2, newp1: newp1.slice(), newp2: newp2.slice(), good: goodChoice });
           if (goodChoice) {
             if (usedRecycle) {
               recycle[recycleIdx] = recycle[recycle.length - 1];
@@ -161,6 +192,7 @@
         src: chosenSrc, success,
       });
       if (!success) recycle.push(p1);
+      hook("CL-RECYC-END", { cluster: state.clusterTag || 0, success, recyc_len: recycle.length });
     }
     return ops;
   }
@@ -372,6 +404,7 @@
         let sumSq = 0;
         for (const sl of s) sumSq += (sl / n) ** 2;
         phi = 1.0 - sumSq;
+        hook("PC-MUL", { n, sumsq: sumSq, phi, mul: 1.0 - xi * phi });
       }
       mul = 1.0 - xi * phi;
     }
@@ -409,11 +442,13 @@
         if (mul * vw + 1 > s[j + 1 - 1]) badWeights.push(vw);
         j += 1;
         tmpWsum += slots[j - 1];
+        hook("PC-ADV0", { i: i + 1, vw, j, tmp_wsum: tmpWsum });
       }
       // Advance further while next cluster is large enough.
       while (j + 1 <= s.length && mul * vw + 1 <= s[j + 1 - 1]) {
         j += 1;
         tmpWsum += slots[j - 1];
+        hook("PC-ADV1", { i: i + 1, vw, j, tmp_wsum: tmpWsum });
       }
       if (j === j0) throw new Error(`no large-enough cluster for w=${vw}`);
       const items = [];
@@ -425,10 +460,11 @@
       let totalW = 0;
       for (const ww of weights) totalW += ww;
       if (totalW === 0) throw new Error(`no empty slot for w=${vw}`);
-      const loc = sampleWeighted(items, weights, rng); // 1-based cluster id
+      const loc = sampleWeighted(items, weights, rng, "i=" + (i + 1)); // 1-based cluster id
       clusters[i] = loc;
       slots[loc - 1] -= 1;
       tmpWsum -= 1;
+      hook("PC-ASSIGN", { i: i + 1, vw, loc, slots_loc: slots[loc - 1], tmp_wsum: tmpWsum });
     }
     if (badWeights.length > 0 && typeof console !== "undefined" && console.warn) {
       console.warn(
@@ -436,6 +472,7 @@
         + `${badWeights.join(",")}. Resulting ξ may be slightly biased.`
       );
     }
+    hook("PC-DONE", { clusters: clusters.slice(), bad_weights: badWeights.slice() });
     return clusters;
   }
 
@@ -470,6 +507,7 @@
         if (clusters[i] === 1) wInternalRaw[i] = 0;
       }
     }
+    hook("CM-WIR", { wInternalRaw: wInternalRaw.slice() });
     const clusterList = Array.from({ length: numClusters }, () => []);
     for (let i = 0; i < clusters.length; i++) {
       clusterList[clusters[i] - 1].push(i + 1); // 1-based vertex ids
@@ -483,6 +521,7 @@
     for (let cidx0 = 0; cidx0 < numClusters; cidx0++) {
       const cluster = clusterList[cidx0];
       if (cluster.length === 0) {
+        hook("CL-EMPTY", { cluster: cidx0 + 1 });
         if (stages) stages.perCluster.push({
           cluster: cidx0 + 1, members: [], stubsShuffled: [],
           prePairs: [], postEdges: [], residueForwarded: 0,
@@ -495,6 +534,7 @@
         const val = wInternalRaw[cluster[k] - 1];
         if (val > maxVal) { maxVal = val; maxIdx0 = k; }
       }
+      hook("CL-LEADER", { cluster: cidx0 + 1, members: cluster.slice(), maxIdx0, maxVal });
       let wsum = 0;
       for (let k = 0; k < cluster.length; k++) {
         if (k !== maxIdx0) {
@@ -505,6 +545,7 @@
           wsum += r;
         }
       }
+      let _maxw = 0, _bump = 0;
       if (wInOverride) {
         wInternal[cluster[maxIdx0] - 1] = wInOverride[cluster[maxIdx0] - 1];
       } else {
@@ -516,7 +557,10 @@
           bump = maxw % 2 !== 0 ? 1 : 0;
         }
         wInternal[cluster[maxIdx0] - 1] = maxw + bump;
+        _maxw = maxw; _bump = bump;
       }
+      hook("CL-LEADERW", { cluster: cidx0 + 1, wsum, maxw: _maxw, bump: _bump,
+        leaderw: wInternal[cluster[maxIdx0] - 1] });
       if (wInternal[cluster[maxIdx0] - 1] > w[cluster[maxIdx0] - 1]) {
         w[cluster[maxIdx0] - 1] = wInternal[cluster[maxIdx0] - 1];
       }
@@ -529,7 +573,7 @@
       // run; only THEN overwrite stubs with the caller-supplied order.
       // Skipping the shuffle when override is set would shift the rng
       // state and change wInternal for later clusters.
-      shuffleInPlace(stubs, rng);
+      shuffleInPlace(stubs, rng, "cl=" + (cidx0 + 1));
       const stubOverride = stubOverrides && stubOverrides[cidx0 + 1];
       if (stubOverride) {
         for (let i = 0; i < stubs.length; i++) stubs[i] = stubOverride[i];
@@ -553,6 +597,7 @@
         const multi = !loop && localEdges.has(k);
         if (loop || multi) recycle.push(e);
         else localEdges.add(k);
+        hook("CL-PAIR", { cluster: cidx0 + 1, a, b, loop, multi });
         if (stages) prePairsSnap.push([a, b, loop, multi]);
       }
       const rewireState = {
@@ -560,6 +605,7 @@
         lastRecycle: recycle.length,
         recycleCounter: recycle.length,
         stubsLen: stubs.length,
+        clusterTag: cidx0 + 1,
       };
       const loopOps = runClusterRewireLoop(rewireState, rng);
       const rewireOps = stages ? loopOps : null;
@@ -571,6 +617,8 @@
         wInternal[b - 1] -= 1;
         residueForwarded += 2;
       }
+      hook("CL-DONE", { cluster: cidx0 + 1, le_count: localEdges.size,
+        residue: recycle.length, edges_count: edges.size });
       if (stages) stages.perCluster.push({
         cluster: cidx0 + 1,
         members: cluster.slice(),
@@ -589,7 +637,7 @@
     for (let i = 0; i < w.length; i++) {
       for (let k = wInternal[i] + 1; k <= w[i]; k++) stubs.push(i + 1);
     }
-    shuffleInPlace(stubs, rng);
+    shuffleInPlace(stubs, rng, "global");
     const globalStubsSnap = stages ? stubs.slice() : null;
     if (stubs.length % 2 === 1) {
       let maxi = 0;
@@ -599,6 +647,7 @@
       const si = stubs[maxi];
       stubs.splice(maxi, 1);
       w[si - 1] -= 1;
+      hook("G-ODD", { removed: si, new_w: w[si - 1] });
     }
     const globalEdges = new Set();
     let recycle = [];
@@ -612,6 +661,7 @@
       const crossDup = !loop && !multi && edges.has(k);
       if (loop || multi || crossDup) recycle.push(e);
       else globalEdges.add(k);
+      hook("G-PAIR", { a, b, loop, multi, crossDup });
       if (stages) globalPrePairsSnap.push([a, b, loop, multi, crossDup]);
     }
     let lastRecycle = recycle.length;
@@ -630,14 +680,17 @@
       const coin1 = rng();
       let p2, chosenSrc;
       if (coin1 < fromRecycle) {
-        const i = Math.floor(rng() * recycle.length);
+        const ri = rng();
+        const i = Math.floor(ri * recycle.length);
+        hook("RIDX", { ctx: "global", n: recycle.length, draw: ri, idx: i });
         const tmp = recycle[i];
         recycle[i] = recycle[recycle.length - 1];
         recycle.pop();
         p2 = tmp; chosenSrc = "recycle";
       } else {
-        const pick = sampleFromKeySet(globalEdges, rng);
+        const pick = sampleFromKeySet(globalEdges, rng, "global");
         if (!pick) {
+          hook("G-NOPOOL", { p1: p1.slice() });
           if (globalRewireOps) globalRewireOps.push({
             p1: p1.slice(), p2: null, newp1: null, newp2: null,
             src: null, success: false, reason: "no-valid-pool",
@@ -657,6 +710,8 @@
         newp1 = epair(p1[0], p2[1]);
         newp2 = epair(p1[1], p2[0]);
       }
+      hook("G-INNER", { coin1, src: chosenSrc, p1: p1.slice(), p2: p2.slice(),
+        coin2, newp1: newp1.slice(), newp2: newp2.slice() });
       let placedNewp1 = false, placedNewp2 = false;
       for (const np of [newp1, newp2]) {
         const k = ekey(np[0], np[1]);
@@ -670,6 +725,7 @@
       });
     }
     for (const k of globalEdges) edges.add(k);
+    hook("G-DONE", { ge_count: globalEdges.size, residue: recycle.length, edges_count: edges.size });
     if (stages) {
       stages.global = {
         stubsShuffled: globalStubsSnap,
@@ -694,7 +750,7 @@
           else break;
         }
         const p1 = recycle.pop();
-        const pick = sampleFromKeySet(edges, rng);
+        const pick = sampleFromKeySet(edges, rng, "final");
         if (!pick) { recycle.push(p1); break; }
         const x = epair(pick[0], pick[1]);
         edges.delete(ekey(x[0], x[1]));
@@ -708,6 +764,8 @@
           newp1 = epair(p1[0], p2[1]);
           newp2 = epair(p1[1], p2[0]);
         }
+        hook("F-INNER", { p1: p1.slice(), p2: p2.slice(), coin,
+          newp1: newp1.slice(), newp2: newp2.slice() });
         let keep1, keep2;
         for (const np of [newp1, newp2]) {
           const k = ekey(np[0], np[1]);
@@ -729,6 +787,7 @@
 
     const edgeArr = Array.from(edges).map(k => k.split("-").map(Number))
       .sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
+    hook("CM-DONE", { edges_count: edgeArr.length, residue: recycle.length });
     if (stages) {
       stages.final = {
         edgesBefore: finalEdgesSnap,

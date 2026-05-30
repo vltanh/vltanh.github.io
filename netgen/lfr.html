@@ -456,7 +456,17 @@ window.MathJax = {
     onEdgeChanged.forEach(fn => fn());
   }
 
-  function seededRng(seed) { return d3.randomLcg(seed); }
+  // d3.randomLcg drives page-LOCAL layout shuffles only (not the byte-equal
+  // kernel path). For LFRKernel calls the closure also carries the integer
+  // seed via __seed: the kernel ignores the [0,1) closure and threads its own
+  // ran2 stream (Numerical Recipes) seeded from __seed, matching the canonical
+  // LFR binary bit-for-bit. (Live page RNG behaviour is now ran2, not LCG.)
+  function seededRng(seed) {
+    const s = (seed | 0);
+    const fn = d3.randomLcg(s);
+    fn.__seed = s;
+    return fn;
+  }
   function shuffled(arr, rng) {
     const a = arr.slice();
     for (let i = a.length - 1; i > 0; i--) {

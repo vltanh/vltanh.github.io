@@ -1,48 +1,64 @@
 // EC-SBM kernel: browser-loadable JS port of
-// externals/ec-sbm/src/gen_kec_core.py::generate_internal_edges.
+// externals/ec-sbm/src/gen_kec_core.py + gen_outlier.py + gen_pso_core.py +
+// graph_utils.py.
 //
-// Builds a k-edge-connected core per cluster via the canonical two-phase
-// scheme:
-//   phase 1: form a complete graph K_{k+1} on the top-(k+1) nodes by
-//     residual degree (tie-break iid asc),
-//   phase 2: each remaining node attaches to k earlier nodes,
-//     greedy-by-residual-degree first, then degree-weighted
-//     np.random.choice fallback.
+// CURRENT-CANONICAL kec-core (generateClusterBands / generateInternalEdgesBands):
+//   phase 1: form a complete graph K_{k+1} on the top-(k+1) nodes by residual
+//     degree (tie-break iid asc); each new node attaches to ALL already-
+//     processed nodes (`for v in sorted(processed)`).
+//   phase 2: each remaining node draws k distinct processed nodes in ONE
+//     sample_by_availability call: a single weighted-WITHOUT-replacement
+//     np.random.choice(size=weighted_count, replace=False, p=availability/sum)
+//     over positive-residual candidates, then a uniform-without-replacement
+//     fill over the exhausted ones. ensure_edge_capacity predicate is
+//     `cu==cv ? probs[cu,cv]<2 : (probs[cu,cv]==0 || probs[cv,cu]==0)`
+//     `|| int_deg[u]<=0 || int_deg[v]<=0`.
 // Mutates `deg` (residual after the constructive pass) and `probs` (the
-// block-pair edge budget after capacity inflation) in place, mirroring
-// canonical's mutation semantics so the caller can reuse them as the
-// input to the SBM overlay (v1) or the residual SBM (v2).
+// block-pair edge budget after capacity inflation) in place, so the caller
+// can reuse them as the input to the SBM overlay (v1) or the residual SBM
+// (v2/v3).
 //
-// Faithful divergence from canonical (documented):
-// - Phase 1's `for v in processed_nodes` iterates a Python set, which
-//   the canonical pipeline runs under PYTHONHASHSEED=0 for repro
-//   (per ec_sbm_externals_hash_bugs.md). The JS port uses an
-//   insertion-order Set; iteration order matches Python's
-//   PYTHONHASHSEED=0 by coincidence for small inputs but is not
-//   guaranteed. Acceptable since the page's bar is structural
-//   faithfulness, not byte-equality.
+// RNG family (audit A): the JS production walker uses ONE d3.randomLcg stream;
+// canonical chains five RNG families (np MT19937 kec-choice, python MT19937,
+// random.Random matcher, numpy PCG64 PSO, graph-tool internal). There is NO
+// bit-equal family map. Byte-equality on the EC-SBM-specific DETERMINISTIC
+// stages (kec-core, accumulate, rewire) is established by ORACLE-REPLAY: the
+// canonical tracer emits resolved picks, the kernel replays them via __ORACLE
+// (see tools/viz_check/ec_sbm/). The SBM-overlay leg defers to the SBM agent's
+// gt.generate_sbm byte-equal result.
 //
-// Randomness: caller passes a JS rng (() -> [0,1)). Phase 2 fallback
-// uses a degree-weighted draw equivalent to np.random.choice(p=weights).
+// Instrumentation: every state read/write/branch fires a guarded PROBE(tag,
+// payload) hook; oracle-driven kec-core reads picks from __ORACLE. Both are
+// zero-cost (short-circuit) when no harness installs globalThis.__HOOK /
+// __ORACLE, so the in-browser walker behaves identically to an un-hooked port.
 //
-// Exposed as window.ECSBMKernel:
-//   normalizeEdge(u, v) -> [a, b]                       (canonical edge form)
-//   sortByDegThenIid(nodes, deg) -> sorted copy
-//   weightedChoice(items, weights, rng) -> item         (np.random.choice port)
-//   generateCluster(args) -> { edges, trace }
-//     args = { clusterNodes, k, deg, probs, node2cluster, rng }
-//   generateInternalEdges(args) -> { edges, trace, perCluster }
-//     args = { clustering, mcs, deg, probs, node2cluster, rng }
+// LEGACY generateCluster / generateInternalEdges (greedy-then-single-pick) are
+// KEPT for the existing page step-walker but are NOT byte-equal to current
+// canonical (see ec_sbm_dossier.md). When the page is reworked, swap to
+// generateClusterBands / generateInternalEdgesBands.
 //
-// `trace` is a flat list of step descriptors used by the page step
-// walker:
-//   { stage: "phase1", cid, u, v }                       complete-graph rung
-//   { stage: "phase2-greedy", cid, u, v }               greedy attach
-//   { stage: "phase2-weighted", cid, u, v, candidates } np.random.choice fallback
-//   { stage: "phase2-skip-zero", cid, u, v }            int_deg[v]==0 skip
-//   { stage: "inflate", u, v, cu, cv }                  ensure_edge_capacity bumped budget
+// Exposed as window.ECSBMKernel: normalizeEdge, edgeKey, sortByDegThenIid,
+// weightedChoice, generateCluster + generateInternalEdges (legacy),
+// generateClusterBands + generateInternalEdgesBands (CORRECTED),
+// prepareV2SBMInputs (accumulate), rewireInvalidEdges,
+// psoClusterEdges / inducedGlobalCcoeff / searchTForCluster (v3 PSO).
 (function () {
   "use strict";
+
+  // ── Instrumentation hooks (zero-cost when no harness installs __HOOK) ──
+  // A verification harness sets globalThis.__HOOK = (tag, payload) => {...}
+  // before loading this file. Production (browser) never sets it, so PROBE
+  // short-circuits and the kernel behaves identically to the canonical
+  // vltanh.github.io/netgen/js/ec_sbm_kernel.js.
+  function PROBE(tag, payload) {
+    if (typeof globalThis.__HOOK === "function") globalThis.__HOOK(tag, payload);
+  }
+  // Oracle injection: when an oracle cursor is installed the corrected
+  // kec-core (generateClusterBands) reads recorded picks instead of drawing
+  // from rng. Default null ⇒ self-RNG behaviour unchanged.
+  function ORACLE() {
+    return (typeof globalThis.__ORACLE === "object") ? globalThis.__ORACLE : null;
+  }
 
   function normalizeEdge(u, v) { return u <= v ? [u, v] : [v, u]; }
   function edgeKey(u, v) { const [a, b] = normalizeEdge(u, v); return `${a},${b}`; }
@@ -195,6 +211,112 @@
     return { edges: allEdges, trace: allTrace, perCluster };
   }
 
+  // ── CORRECTED kec-core port (current canonical) ───────────────────────
+  // generate_cluster_bands as shipped TODAY in gen_kec_core.py: per
+  // attaching node ONE weighted-without-replacement np.random.choice over
+  // positive-residual processed candidates, then a uniform-without-
+  // replacement fill; ensure_edge_capacity predicate is the cu==cv ? <2 :
+  // (==0 or ==0) || int_deg<=0 form. The legacy generateCluster above is
+  // KEPT for the existing page step-walker but is NOT byte-equal to current
+  // canonical (see ec_sbm_dossier.md). Oracle-driven: __ORACLE supplies the
+  // resolved picks (RNG family swap is a sanctioned divergence).
+  function probsCGet(probs, r, c) {
+    return (probs.get(`${r},${c}`) || 0);
+  }
+  function probsCAdd(probs, r, c, d) {
+    const k = `${r},${c}`; probs.set(k, (probs.get(k) || 0) + d);
+  }
+  function generateClusterBands(args) {
+    const { clusterNodes, k: kRaw, deg, probs, node2cluster, cid } = args;
+    const n = clusterNodes.length;
+    if (n === 0 || kRaw === 0) return { clique: new Map(), attach: new Map() };
+    const k = Math.min(kRaw, n - 1);
+    const intDeg = deg.slice();
+    const ordered = clusterNodes.slice().sort((a, b) => {
+      const da = intDeg[a], db = intDeg[b];
+      if (da !== db) return db - da;
+      return a - b;
+    });
+    const processed = [];
+    const clique = new Map();
+    const attach = new Map();
+    let bucket = clique;
+    const oracle = ORACLE();
+
+    function ensureEdgeCapacity(u, v) {
+      const cu = node2cluster.get(u), cv = node2cluster.get(v);
+      let blockLow;
+      if (cu === cv) blockLow = probsCGet(probs, cu, cv) < 2;
+      else blockLow = probsCGet(probs, cu, cv) === 0 || probsCGet(probs, cv, cu) === 0;
+      const degLow = intDeg[u] <= 0 || intDeg[v] <= 0;
+      if (blockLow || degLow) {
+        intDeg[u] += 1; intDeg[v] += 1;
+        probsCAdd(probs, cu, cv, 1); probsCAdd(probs, cv, cu, 1);
+        PROBE("inflate", { cid, u, v, cu, cv, blockLow, degLow });
+      }
+    }
+    function applyEdge(u, v) {
+      const [a, b] = normalizeEdge(u, v);
+      bucket.set(`${a},${b}`, [a, b]);
+      intDeg[u] -= 1; intDeg[v] -= 1;
+      const cu = node2cluster.get(u), cv = node2cluster.get(v);
+      probsCAdd(probs, cu, cv, -1); probsCAdd(probs, cv, cu, -1);
+      PROBE("apply", { cid, u, v, idU: intDeg[u], idV: intDeg[v] });
+    }
+    function sampleByAvailability(candidates, sampleSize) {
+      const availability = candidates.map((c) => Math.max(intDeg[c], 0));
+      const nPos = availability.filter((a) => a > 0).length;
+      const selected = [];
+      const weightedCount = Math.min(sampleSize, nPos);
+      if (weightedCount) {
+        const rec = oracle.next("weighted_choice");
+        PROBE("weighted_choice", { cid, picked: rec.picked.slice() });
+        for (const p of rec.picked) selected.push(p);
+      }
+      const uniformCount = sampleSize - weightedCount;
+      if (uniformCount) {
+        const rec = oracle.next("uniform_choice");
+        PROBE("uniform_choice", { cid, picked: rec.picked.slice() });
+        for (const p of rec.picked) selected.push(p);
+      }
+      return selected;
+    }
+
+    let i = 0;
+    while (i <= k) {
+      const u = ordered[i];
+      const rec = oracle.next("set_order");
+      for (const v of rec.order) { ensureEdgeCapacity(u, v); applyEdge(u, v); }
+      processed.push(u);
+      i += 1;
+    }
+    bucket = attach;
+    while (i < n) {
+      const u = ordered[i];
+      for (const v of sampleByAvailability(processed, k)) {
+        ensureEdgeCapacity(u, v); applyEdge(u, v);
+      }
+      processed.push(u);
+      i += 1;
+    }
+    for (let j = 0; j < deg.length; j++) deg[j] = intDeg[j];
+    return { clique, attach };
+  }
+  function generateInternalEdgesBands(args) {
+    const { clustering, mcs, deg, probs, node2cluster } = args;
+    const all = new Map();
+    const cids = Array.from(clustering.keys()).sort((a, b) => a - b);
+    for (const cid of cids) {
+      const bands = generateClusterBands({
+        clusterNodes: clustering.get(cid), k: mcs[cid], deg, probs,
+        node2cluster, cid,
+      });
+      for (const [k, v] of bands.clique) all.set(k, v);
+      for (const [k, v] of bands.attach) all.set(k, v);
+    }
+    return all;
+  }
+
   // Faithful port of externals/ec-sbm/src/gen_outlier.py::_accumulate_all
   // for v2 residual-SBM input prep. Returns { probs, out_degs } where
   //   - probs is the inter-block edge-count matrix from orig (deduped),
@@ -251,17 +373,20 @@
       nodesInK.forEach(i => { dk += outDegs[i]; });
       const eInter = rowSums[k];
       const diff = dk - eInter;
+      PROBE("accum_block", { k, dk, eInter, diff });
       if (diff < 0) {
         const deficit = -diff;
         for (let i = 0; i < deficit; i++) {
           outDegs[nodesInK[i % nodesInK.length]] += 1;
         }
         probs[k][k] = 0;
+        PROBE("accum_deficit", { k, deficit });
       } else {
         probs[k][k] = diff;
         if (probs[k][k] % 2 !== 0) {
           probs[k][k] += 1;
           outDegs[nodesInK[0]] += 1;
+          PROBE("accum_parity_bump", { k, diag: probs[k][k] });
         }
       }
     }
@@ -282,6 +407,13 @@
     const validSet = new Set();
     const invalidEdges = [];
     const ops = traceOps ? [] : null;
+    // Oracle (audit A): under __ORACLE the per-step random.randrange(len(pool))
+    // index and the A==B random.random()<0.5 coin are read from the canonical
+    // tracer's recorded picks instead of drawing from rng, so the rewire
+    // matches the canonical random.Random stream byte-for-byte (the JS
+    // d3.randomLcg family is NOT bit-equal to python's MT19937). When no oracle
+    // is installed (in-browser walker) the self-RNG path runs unchanged.
+    const oracle = ORACLE();
 
     function bp(u, v) {
       const a = blocks[u] <= blocks[v] ? blocks[u] : blocks[v];
@@ -302,6 +434,9 @@
         validPool[k].push([a, b]);
       }
     });
+    // initial_valid_set snapshot (graph_utils.py:66) for the canonical
+    // (sbm_only, rewired) = (valid_set & initial, valid_set - initial) split.
+    const initialValidSet = new Set(validSet);
 
     function processOneEdge(rawEdge) {
       const [u, v] = rawEdge;
@@ -311,7 +446,10 @@
         invalidEdges.push([u, v]);
         return false;
       }
-      const idx = Math.floor(rng() * pool.length);
+      const idx = oracle
+        ? oracle.next("rewire_idx").idx
+        : Math.floor(rng() * pool.length);
+      PROBE("rewire_idx", { bp: k, idx, poolLen: pool.length });
       const [x, y] = pool[idx];
       const [A, B] = k.split("|").map(Number);
 
@@ -327,7 +465,9 @@
         new_e2 = [a2, b2];
       } else {
         let a1, b1, a2, b2;
-        if (rng() < 0.5) {
+        const coin = oracle ? oracle.next("rewire_coin").coin : (rng() < 0.5);
+        PROBE("rewire_coin", { u, v, x, y, bp: k, coin });
+        if (coin) {
           a1 = u < x ? u : x; b1 = u < x ? x : u;
           a2 = v < y ? v : y; b2 = v < y ? y : v;
         } else {
@@ -349,6 +489,8 @@
         pool.pop();
         validSet.add(k1); validSet.add(k2);
         pool.push(new_e1); pool.push(new_e2);
+        PROBE("rewire_swap", { p1: [u, v], p2: [x, y],
+          newp1: new_e1.slice(), newp2: new_e2.slice(), bp: k, success: true });
         if (ops) ops.push({
           p1: [u, v], p2: [x, y],
           newp1: new_e1.slice(), newp2: new_e2.slice(),
@@ -356,6 +498,8 @@
         });
       } else {
         invalidEdges.push([u, v]);
+        PROBE("rewire_swap", { p1: [u, v], p2: [x, y],
+          newp1: new_e1.slice(), newp2: new_e2.slice(), bp: k, success: false });
         if (ops) ops.push({
           p1: [u, v], p2: [x, y],
           newp1: new_e1.slice(), newp2: new_e2.slice(),
@@ -389,7 +533,20 @@
     Object.keys(validPool).forEach(k => {
       validPool[k].forEach(e => kept.push(e.slice()));
     });
-    return { kept, dropped: invalidEdges.slice(), ops: ops || [] };
+    // Canonical (graph_utils.py:123-124) partition: sbm_only = survivors that
+    // were in the initial valid_set; rewired = swap-introduced edges. validSet
+    // is the live final set (mutated in lockstep with the pools).
+    const sbmOnly = [];
+    const rewired = [];
+    for (const key of validSet) {
+      const [a, b] = key.split(",").map(Number);
+      (initialValidSet.has(key) ? sbmOnly : rewired).push([a, b]);
+    }
+    const byEdge = (p, q) => (p[0] - q[0]) || (p[1] - q[1]);
+    sbmOnly.sort(byEdge);
+    rewired.sort(byEdge);
+    return { kept, dropped: invalidEdges.slice(), ops: ops || [],
+             sbmOnly, rewired };
   }
 
   // ── PSO branch (v3) ─────────────────────────────────────────
@@ -599,12 +756,20 @@
     edgeKey,
     sortByDegThenIid,
     weightedChoice,
-    generateCluster,
-    generateInternalEdges,
+    generateCluster,            // legacy (stale vs current canonical)
+    generateInternalEdges,      // legacy
+    generateClusterBands,       // CORRECTED current-canonical kec-core
+    generateInternalEdgesBands, // CORRECTED
     prepareV2SBMInputs,
     rewireInvalidEdges,
     psoClusterEdges,
     inducedGlobalCcoeff,
     searchTForCluster,
+  };
+  // Expose the hook tag list for the coverage manifest / harness.
+  window.__ECSBM_HOOKS = {
+    tags: ["inflate", "apply", "weighted_choice", "uniform_choice",
+           "accum_block", "accum_deficit", "accum_parity_bump",
+           "rewire_idx", "rewire_swap", "rewire_coin"],
   };
 })();
