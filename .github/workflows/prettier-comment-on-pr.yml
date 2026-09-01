@@ -4,15 +4,50 @@ on:
   repository_dispatch:
     types: [prettier-failed-on-pr]
 
+permissions:
+  pull-requests: write
+
 jobs:
   comment:
     # available images: https://github.com/actions/runner-images#available-images
     runs-on: ubuntu-latest
     steps:
       - name: PR comment with html diff 💬
-        uses: thollander/actions-comment-pull-request@v2
+        uses: actions/github-script@v8
+        env:
+          PR_NUMBER: ${{ github.event.client_payload.pr_number }}
+          RUN_ID: ${{ github.event.client_payload.run_id }}
+          ARTIFACT_URL: ${{ github.event.client_payload.artifact_url }}
         with:
-          comment_tag: prettier-failed
-          pr_number: ${{ github.event.client_payload.pr_number }}
-          message: |
-            Failed [prettier code check](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.client_payload.run_id }}). Check [this file](${{ github.event.client_payload.artifact_url }}) for more information.
+          script: |
+            const prNumber = Number(process.env.PR_NUMBER);
+            if (!Number.isInteger(prNumber) || prNumber <= 0) {
+              core.setFailed("The repository dispatch payload does not contain a valid PR number.");
+              return;
+            }
+
+            const marker = "<!-- prettier-failed -->";
+            const checkUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${process.env.RUN_ID}`;
+            const body = `${marker}\nFailed [prettier code check](${checkUrl}). Check [this file](${process.env.ARTIFACT_URL}) for more information.`;
+            const { data: comments } = await github.rest.issues.listComments({
+              ...context.repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+            const existing = comments.find(
+              (comment) => comment.user?.type === "Bot" && comment.body?.includes(marker)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                ...context.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: prNumber,
+                body,
+              });
+            }
