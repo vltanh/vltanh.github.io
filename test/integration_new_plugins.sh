@@ -30,8 +30,39 @@ fail() {
 
 default_site="$(build default)"
 
-rtl_page="${default_site}/blog/2022/rtl/index.html"
-[ -f "${rtl_page}" ] || fail "RTL demo post was not built"
+# The upstream starter ships dedicated RTL and Marimo demo posts. Personal
+# sites commonly remove those demos, so create equivalent test-only posts in
+# an isolated source tree rather than requiring published fixture content.
+feature_source="${tmp_dir}/source"
+rsync -a \
+  --exclude '.git' \
+  --exclude '.jekyll-cache' \
+  --exclude '_site' \
+  --exclude 'node_modules' \
+  --exclude 'vendor' \
+  ./ "${feature_source}/"
+mkdir -p "${feature_source}/_posts"
+printf '%s\n' \
+  '---' \
+  'layout: post' \
+  'title: RTL integration fixture' \
+  'date: 2026-01-01 00:00:00' \
+  'lang: fa' \
+  'permalink: /test/rtl/' \
+  '---' \
+  'RTL integration fixture.' >"${feature_source}/_posts/2026-01-01-rtl-integration-fixture.md"
+printf '%s\n' \
+  '---' \
+  'layout: post' \
+  'title: Marimo integration fixture' \
+  'date: 2026-01-02 00:00:00' \
+  'marimo: true' \
+  'permalink: /test/marimo/' \
+  '---' \
+  'Marimo integration fixture.' >"${feature_source}/_posts/2026-01-02-marimo-integration-fixture.md"
+feature_site="$(build features --source "${feature_source}" --config "${feature_source}/_config.yml")"
+rtl_page="${feature_site}/test/rtl/index.html"
+[ -f "${rtl_page}" ] || fail "RTL integration fixture was not built"
 
 # dir must sit on <html>, not on a wrapper: that is what the browser's bidi
 # algorithm and CSS logical properties key off.
@@ -49,17 +80,17 @@ grep -q 'assets/al_rtl/css/rtl.css' "${default_site}/index.html" && fail "home p
 
 # --- al_marimo --------------------------------------------------------------
 
-marimo_page="${default_site}/blog/2025/marimo/index.html"
-[ -f "${marimo_page}" ] || fail "marimo demo post was not built"
+marimo_page="${feature_site}/test/marimo/index.html"
+[ -f "${marimo_page}" ] || fail "Marimo integration fixture was not built"
 
 grep -q 'assets/al_marimo/js/marimo-snippets.js' "${marimo_page}" || fail "marimo post does not load the runtime"
-[ -f "${default_site}/assets/al_marimo/js/marimo-snippets.js" ] || fail "marimo runtime is referenced but not published"
+[ -f "${feature_site}/assets/al_marimo/js/marimo-snippets.js" ] || fail "marimo runtime is referenced but not published"
 
 # The stylesheet matters on its own: it hides .al-marimo-inline until the runtime
 # has moved the code blocks into place. Without it a reader sees the raw source
 # before initialization, while the script hook still looks healthy.
 grep -q 'assets/al_marimo/css/marimo.css' "${marimo_page}" || fail "marimo post does not load the stylesheet"
-[ -f "${default_site}/assets/al_marimo/css/marimo.css" ] || fail "marimo stylesheet is referenced but not published"
+[ -f "${feature_site}/assets/al_marimo/css/marimo.css" ] || fail "marimo stylesheet is referenced but not published"
 
 # Vendored, not fetched: no third-party origin may execute script in the page.
 grep -q 'cdn.jsdelivr.net/npm/@marimo-team' "${marimo_page}" && fail "marimo runtime is being loaded from a CDN"
