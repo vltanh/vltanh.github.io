@@ -48,6 +48,41 @@
 .delta-stack .panel-mini .ledger .row { display: grid; grid-template-columns: 1fr 5rem; gap: .4rem; padding: .1rem 0; }
 .delta-stack .panel-mini .ledger .row .v { text-align: right; }
 .delta-stack .panel-mini .ledger .row.tot { border-top: 1px solid var(--rule); font-weight: 600; }
+.algo-box, .flow-box { border: 1px solid var(--rule); background: rgba(255,255,255,.58); border-radius: 6px; }
+.algo-box .label, .flow-box .label {
+  font-family: 'Special Elite','Courier New',monospace;
+  font-size: .68rem;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+  color: var(--paper-3);
+}
+.flow-box p { font-size: .82rem; line-height: 1.45; margin: .24rem 0; }
+.flow-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .6rem; margin: 1rem 0; align-items: stretch; }
+@media (max-width: 900px) { .flow-strip { grid-template-columns: 1fr; } }
+.flow-box { padding: .65rem .75rem; position: relative; }
+.flow-box:not(:last-child)::after {
+  content: ">";
+  position: absolute;
+  right: -.45rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: 'Special Elite','Courier New',monospace;
+  color: var(--paper-3);
+}
+@media (max-width: 900px) { .flow-box:not(:last-child)::after { content: ""; } }
+.algo-box { padding: .75rem .9rem; margin: 1rem 0; }
+.algo-box ol { margin: .45rem 0 0 1.15rem; padding: 0; }
+.algo-box li { margin: .28rem 0; font-size: .86rem; }
+.algo-box code { font-family: 'Special Elite','Courier New',monospace; font-size: .82rem; }
+.micro-table { width: 100%; border-collapse: collapse; margin: .8rem 0 1rem; font-size: .84rem; }
+.micro-table th, .micro-table td { border-bottom: 1px solid var(--rule); padding: .42rem .55rem; text-align: left; vertical-align: top; }
+.micro-table th { font-family: 'Special Elite','Courier New',monospace; font-size: .68rem; letter-spacing: .13em; color: var(--paper-3); text-transform: uppercase; }
+.micro-table td:first-child { font-family: 'Special Elite','Courier New',monospace; color: var(--paper); white-space: nowrap; }
+.local-ledger { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .6rem; margin: 1rem 0; }
+@media (max-width: 800px) { .local-ledger { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 520px) { .local-ledger { grid-template-columns: 1fr; } }
+.local-ledger .flow-box { min-height: 6.3rem; }
+.example-pill { display: inline-block; font-family: 'Special Elite','Courier New',monospace; font-size: .78rem; background: rgba(78,203,111,.16); border: 1px solid rgba(78,203,111,.45); border-radius: 999px; padding: .18rem .55rem; color: var(--paper); }
 </style>
 </head>
 <body>
@@ -73,11 +108,18 @@
   <p>four terms in nats. \(S_{\text{DC}}\) is the DC sparse entropy (data fit under degree conditioning); \(L_e\) is the cost of writing the edge-count matrix; \(L_p\) is the cost of writing the labelling; \(L_d\) is the uniform degree DL that prices the per-block degree sums. The DC variant is the only flat variant that pays \(L_d\), which is the price for conditioning on \(\boldsymbol{k}\).</p>
   <p>Two properties. Every term is the log of a counting problem on the graph or the partition, so the four are commensurable inside DC and their sum is the negative log of the joint microcanonical posterior. \(S_{\text{DC}}\) is exact and lgamma-based, not a sparse-Stirling approximation, so DC's per-partition ranking is the principled MAP under the chosen prior; absolute \(\Sigma\) is not directly comparable across DC, NDC, and PP, and the <a href="./sbm-flat-best.html">flat-best page</a> handles cross-variant ranking via pairwise gaps.</p>
   <div class="defs">
-    <div><span class="term">DC sparse entropy</span> \(S_{\text{DC}} = \sum_r \log(e_r!) - \sum_{r<s} \log(e_{rs}!) - \sum_r [\log((e_{rr}/2)!) + (e_{rr}/2)\log 2]\). The data-fit term under degree conditioning.</div>
+    <div><span class="term">DC sparse entropy</span> \(S_{\text{DC}} = \sum_r \log(e_r!) - \sum_{r\lt s} \log(e_{rs}!) - \sum_r [\log((e_{rr}/2)!) + (e_{rr}/2)\log 2]\). The data-fit term under degree conditioning.</div>
     <div><span class="term">edges DL</span> \(L_e = \log\binom{B(B+1)/2 + E - 1}{E}\). Cost of writing \(\boldsymbol{e}\) given \(B\). Grows with \(B\), penalises over-splitting.</div>
     <div><span class="term">partition DL</span> \(L_p = \log(N!) - \sum_r \log(n_r!) + \log\binom{N - 1}{B - 1} + \log N\). Cost of the labelling under a hierarchical prior.</div>
     <div><span class="term">degree DL (uniform)</span> \(L_d = \sum_r \log\binom{n_r + e_r - 1}{e_r}\). Cost of per-node degrees given block sums. Only present in the DC variant.</div>
     <div><span class="term">\(\beta\)</span> inverse temperature in the MH acceptance ratio \(e^{-\beta \Delta\Sigma}\). The page runs at \(\beta = 1\) (posterior sampling); \(\beta \to \infty\) recovers greedy descent.</div>
+  </div>
+  <p>The page reads in the same order as the kernel. First the graph and degree sequence are fixed: <code>Graph</code> stores the edge list, neighbour lists, and vertex strengths \(k_i\). A <code>BlockState</code> then carries the current partition \(b_v\), block sizes \(n_r\), block degrees \(e_r\), and the matrix \(e_{rs}\). From those cached counts, <code>entropyBreakdown()</code> reports the four costs that sum to \(\Sigma\).</p>
+  <p>The walker then visits one vertex at a time. <code>candidatePool()</code> names the legal targets, <code>virtualMove()</code> computes the local \(\Delta\Sigma\), and <code>moveVertex()</code> commits only accepted proposals. Downhill moves always enter the chain; uphill moves enter with probability \(e^{-\Delta\Sigma}\) at \(\beta=1\), consuming one uniform RNG draw only in that uphill case. One sweep is one shuffled pass over all vertices; <code>equilibrate()</code> records per-sweep \(\Sigma\), \(B\), and accepted moves until the trace stops drifting.</p>
+  <p>The final panels should be read as a partition, not as numeric block ids. Colours are stable for readability, but co-membership is the output. The DC-vs-NDC contrast at the end uses the same seed and walker skeleton to isolate the modelling choice: degree heterogeneity as nuisance variation under DC, or degree heterogeneity as evidence under NDC.</p>
+  <div class="callout">
+    <div class="tag">how to read the common fixture</div>
+    <p>Follow region A's degree-9 hub through the degree bars, \(e_{rs}\) matrix, four DL terms, proposal pool, local \(\Delta\Sigma\), and accept/reject commits. The informative difference is co-membership around node 0: DC keeps the hub with the hub-plus-leaf block because degrees are conditioned on, while the NDC contrast shows the same fixture without that conditioning. This page remains Draft; the live walker is the uniform-proposal JS/cpp trace, and the canonical graph-tool cross-check stays flagged below.</p>
   </div>
 </section>
 
@@ -131,7 +173,7 @@
     <tbody>
       <tr class="dc-only">
         <td class="term">sparse entropy (DC vertex factor)</td>
-        <td>\(S_{\text{DC}} = \sum_r \log(e_r!) - \sum_{r < s} \log(e_{rs}!) - \sum_r \log\!\big((e_{rr}/2)!\big) - (e_{rr}/2)\log 2\)</td>
+        <td>\(S_{\text{DC}} = \sum_r \log(e_r!) - \sum_{r \lt s} \log(e_{rs}!) - \sum_r \log\!\big((e_{rr}/2)!\big) - (e_{rr}/2)\log 2\)</td>
         <td>orderings of the \(e_r\) half-stubs at every block, discounted by the redundancy from pairing them inside and across pairs</td>
       </tr>
       <tr>
@@ -151,6 +193,33 @@
       </tr>
     </tbody>
   </table>
+  <div class="flow-strip">
+    <div class="flow-box">
+      <div class="label">assignment</div>
+      <p>\(\boldsymbol{b}\) says which vertices share a block.</p>
+      <p>Example statistic: \(n_r\), the number of vertices in block \(r\).</p>
+    </div>
+    <div class="flow-box">
+      <div class="label">degree correction</div>
+      <p>The observed degrees \(k_i\) are conditioned on.</p>
+      <p>Example statistic: \(e_r=\sum_{i:b_i=r} k_i\), the total half-stubs owned by block \(r\).</p>
+    </div>
+    <div class="flow-box">
+      <div class="label">block matrix</div>
+      <p>\(e_{rs}\) counts how many edge ends connect block \(r\) to block \(s\).</p>
+      <p>Only this matrix, not the raw adjacency, enters the sparse entropy.</p>
+    </div>
+    <div class="flow-box">
+      <div class="label">description length</div>
+      <p>The four terms price the likelihood, the edge-count matrix, the labels, and the degree allocation.</p>
+      <p>Lower \(\Sigma\) means a shorter Bayesian code.</p>
+    </div>
+    <div class="flow-box">
+      <div class="label">posterior weight</div>
+      <p>The sampler targets partitions with weight proportional to \(e^{-\Sigma}\).</p>
+      <p>Equal-size \(\Sigma\) gaps are equal posterior odds inside the DC model.</p>
+    </div>
+  </div>
   <p>The DC-only terms together encode the model's stance on degrees. The vertex factor \(\log(e_r!)\) prices the orderings of the half-stubs inside a block when the per-node degrees are already given; it replaces NDC's \(e_r \log n_r\) which prices the per-stub block lookup under uniform-within-block placement. The uniform degree DL pays the constant cost (over all block-level degree compositions) of locating the per-node degrees inside the block-level totals.</p>
   <p>The four bars below show the absolute contribution of each term at the random init the walker starts from (seed 7, \(B_0 = 8\)). The two DC-only terms are highlighted; the partition DL and the edges DL are shared with NDC. The bars rebuild whenever the seed reroll on the random-init stage fires.</p>
   <div class="dl-stack">
@@ -171,6 +240,7 @@
   <div class="stage-num">stage 3 &middot; random init</div>
   <h2>Random partition with \(B_0\) blocks; \(\Sigma_0\) on display.</h2>
   <p>MCMC starts from any valid partition. The chain initialises with \(B_0 = \) <span id="g-init-B0">8</span> blocks: the kernel shuffles the identity permutation under MT19937 and assigns block \(i \bmod B_0\) to vertex \(\sigma(i)\). The shuffle is backward Fisher-Yates, matching the std::shuffle direction in the cpp tracer. Rerolling the seed redraws this partition and re-runs the entire chain on the new init; every downstream stage refreshes from the same run.</p>
+  <p class="step-desc">Only the labels \(\boldsymbol{b}\) change at init; the graph, degrees, and edge list stay fixed for the entire page. The initial membership is a shuffled round-robin assignment over \(B_0 = 8\) blocks. A random start prevents the story from baking in the planted labels or a greedy heuristic, and changing the seed tests whether the same posterior basin is found again. A high \(\Sigma_0\) means the random partition wastes code length by scattering edges across many block pairs; the next stages lower \(\Sigma\) by moving vertices whose edge neighbourhoods fit another block better.</p>
   <div class="graph" id="g-init">
     <div class="graph-chrome">
       <span>random init &middot; \(\Sigma_0 = \) <span id="g-init-S0">·</span> nats</span>
@@ -196,6 +266,15 @@
   <p>An MH visit runs in four substages, this stage being the first. The walker on stage 7 below runs all four in sequence on every vertex of every sweep; the next four stages take one substage at a time on a single visit so the structure of each step is visible. The example visit shown here is the first MH visit of sweep 1 at seed 7 (vertex <span id="g-step-v">·</span>, current block <span id="g-step-from">·</span>).</p>
   <p>The candidate pool is the set of target blocks the vertex can propose to. Every currently non-empty block is included, and when the vertex's current block holds more than one member, one fresh empty slot is added; the fresh slot is what lets the chain change \(B\). The c→∞ limit of Peixoto's local-neighbourhood proposal then samples one target uniformly from the pool.</p>
   <p>Two properties. The proposal is symmetric in the Hastings sense, so the acceptance ratio reduces to \(e^{-\beta \Delta\Sigma}\) with no correction term. Convergence is slower than under the canonical \(c = 1\) proposal, but the trajectories are easier to read because the bias toward a vertex's neighbour blocks is absent.</p>
+  <div class="algo-box">
+    <div class="label">proposal recipe for the displayed visit</div>
+    <ol>
+      <li>Read the current vertex \(v=<span id="g-prop-v">·</span>\) and source block \(r=<span id="g-prop-r">·</span>\).</li>
+      <li>List every non-empty block. These are legal targets because every move must end in a live block.</li>
+      <li>If \(n_r \gt 1\), append one fresh empty block id. This is how the sampler can increase \(B\).</li>
+      <li>Draw one target uniformly from the <span class="example-pill"><span id="g-pool-size">·</span> candidates</span>.</li>
+    </ol>
+  </div>
   <div class="graph" id="g-step-pool">
     <div class="graph-chrome">
       <span>candidate pool for vertex <span id="g-step-v2">·</span> &middot; current block highlighted</span>
@@ -211,6 +290,28 @@
   <div class="stage-num">stage 5 &middot; MH step 2 &middot; entropy delta with DC terms</div>
   <h2>What changes in \(\Sigma\) when one vertex moves from \(r\) to \(s\).</h2>
   <p>Computing \(\Delta\Sigma\) from scratch on every proposal would be quadratic in the partition size and prohibitive past a few thousand vertices. The kernel uses the closed-form subset-entropy delta instead: moving vertex \(v\) from block \(r\) to block \(s\) changes only the entropy terms that involve row \(r\), column \(r\), row \(s\), or column \(s\) of the \(\boldsymbol{e}\) matrix, plus the per-block sums \(n_r\), \(n_s\), \(e_r\), \(e_s\). The kernel maintains a running tracker of these quantities and computes the before-after difference directly, never recomputing the full entropy. Per visit the cost is \(O(\deg(v) + B_{\text{ne}})\) on the comdet fixture.</p>
+  <div class="local-ledger">
+    <div class="flow-box">
+      <div class="label">remove from r</div>
+      <p>Decrease \(n_r\) and subtract \(v\)'s incident half-stubs from row/column \(r\).</p>
+      <p>Example: \(r=<span id="g-local-r">·</span>\).</p>
+    </div>
+    <div class="flow-box">
+      <div class="label">add to s</div>
+      <p>Increase \(n_s\) and add the same half-stubs to row/column \(s\).</p>
+      <p>Example: \(s=<span id="g-local-s">·</span>\).</p>
+    </div>
+    <div class="flow-box">
+      <div class="label">re-score subset</div>
+      <p>Only terms touching \(r\) or \(s\) can change; all other block pairs cancel.</p>
+      <p>Example vertex: \(v=<span id="g-local-v">·</span>\).</p>
+    </div>
+    <div class="flow-box">
+      <div class="label">take the difference</div>
+      <p>\(\Delta\Sigma=\Sigma_{\text{after}}-\Sigma_{\text{before}}\). Negative means the move shortens the code.</p>
+      <p>Example: \(\Delta\Sigma=<span id="g-local-ds">·</span>\).</p>
+    </div>
+  </div>
   <p>The two panels below show the contribution of each of DC's four terms to \(\Delta\Sigma\) for the example visit. The left panel is the partition before the move (with vertex <span id="g-delta-v">·</span> in block <span id="g-delta-from">·</span>); the right panel is the partition after the move (with vertex in the proposed target block <span id="g-delta-to">·</span>). The ledger below each panel breaks the entropy into its four DC components.</p>
   <div class="delta-stack">
     <div class="panel-mini">
@@ -238,6 +339,15 @@
   <p>Once \(\Delta\Sigma\) is known, the chain accepts the proposed move with probability</p>
   <p style="text-align:center">\(\alpha(\boldsymbol{b} \to \boldsymbol{b}') = \min\!\big(1, \, e^{-\beta \Delta\Sigma}\big)\),</p>
   <p>where \(\beta\) is the inverse temperature. The page runs at \(\beta = 1\). In plain terms: any move that lowers \(\Sigma\) is accepted with probability 1; any move that raises \(\Sigma\) is accepted with probability decaying exponentially in the cost.</p>
+  <table class="micro-table">
+    <thead><tr><th>case</th><th>posterior read</th><th>implementation rule</th></tr></thead>
+    <tbody>
+      <tr><td>\(\Delta\Sigma \lt 0\)</td><td>The candidate compresses the graph better.</td><td>Accept immediately; no uniform draw is consumed.</td></tr>
+      <tr><td>\(\Delta\Sigma = 0\)</td><td>The candidate has equal posterior weight.</td><td>Accept immediately to keep tie handling deterministic.</td></tr>
+      <tr><td>\(\Delta\Sigma \gt 0\)</td><td>The candidate is worse, but still has non-zero posterior mass.</td><td>Draw \(u\), accept iff \(u \lt e^{-\Delta\Sigma}\).</td></tr>
+    </tbody>
+  </table>
+  <p class="accept-curve">example visit: \(\Delta\Sigma = \)<span id="g-accept-example-ds">·</span>, \(\alpha = \)<span id="g-accept-example-alpha">·</span>, rule = <span id="g-accept-example-rule">·</span>.</p>
   <p>Two properties. At \(\beta = 1\) the chain's stationary distribution is \(P(\boldsymbol{b} \mid \boldsymbol{A}) \propto e^{-\Sigma(\boldsymbol{b})}\), so long enough runs sample the posterior, not just the mode. \(\beta = 0\) reduces the chain to a uniform random walk, \(\beta \to \infty\) reduces it to pure greedy descent; the kernel exposes \(\beta\) as a parameter, and the page is fixed at 1.</p>
   <div class="graph" id="g-accept">
     <div class="graph-chrome">
@@ -246,7 +356,7 @@
     </div>
     <div class="graph-canvas" id="g-accept-cy" style="height: 220px"></div>
   </div>
-  <p>Two thresholds matter for tie-break. At \(\Delta\Sigma \le 0\) the kernel accepts without drawing the uniform random sample (the RNG stream stays aligned with the cpp tracer at exact ties); the curve is flat at 1 for the entire negative half-line. At \(\Delta\Sigma > 0\) the kernel draws \(u \sim \text{Uniform}(0, 1)\) and accepts iff \(u < e^{-\Delta\Sigma}\); the strict less-than is what makes the boundary deterministic at exact equality. The example visit's location on the curve is marked.</p>
+  <p>Two thresholds matter for tie-break. At \(\Delta\Sigma \le 0\) the kernel accepts without drawing the uniform random sample (the RNG stream stays aligned with the cpp tracer at exact ties); the curve is flat at 1 for the entire negative half-line. At \(\Delta\Sigma \gt 0\) the kernel draws \(u \sim \text{Uniform}(0, 1)\) and accepts iff \(u \lt e^{-\Delta\Sigma}\); the strict less-than is what makes the boundary deterministic at exact equality. The example visit's location on the curve is marked.</p>
 </section>
 
 <!-- ─────────── Stage 7 · MH accept/reject ─────────── -->
@@ -254,6 +364,7 @@
   <div class="stage-num">stage 7 &middot; MH step 4 &middot; accept or reject, commit or revert</div>
   <h2>One sweep, every vertex, the walker on the fixture.</h2>
   <p>This is the working walker. Each click of "next visit" runs the four steps end-to-end on one vertex: build the pool, sample a target, compute \(\Delta\Sigma\), draw the uniform sample, accept or reject. The status line shows the current visit's vertex, source block, proposed target, \(\Delta\Sigma\), and verdict. The side panel lists every candidate block considered for the current vertex with its exact \(\Delta\Sigma\); the picked target shows mint when accepted, dim grey when rejected. The vertex's current block is marked "current".</p>
+  <p class="step-desc">If the proposal is accepted and \(s \ne r\), the tracker mutates the partition and all affected \(n_r\), \(e_r\), and \(e_{rs}\) entries; the graph redraws with the accepted target colour on the next visit. If the proposal is rejected, the state remains exactly where it was, but the candidate table still shows the rejected target so the probability calculation is visible. Strongly negative \(\Delta\Sigma\) rows reveal obvious local improvements, while small positive rows are posterior wiggle room; the table is sorted by \(\Delta\Sigma\), so the best candidate sits near the top.</p>
   <div class="graph" id="g-mcmc">
     <div class="graph-chrome">
       <span><span id="g-mcmc-status">visit · &middot; · &middot;</span></span>
@@ -280,6 +391,28 @@
   <div class="stage-num">stage 8 &middot; sweep \(k\) mid-chain</div>
   <h2>The chain at \(k = 0, 5, 10, 20\) sweeps. Same seed.</h2>
   <p>One MH visit is the atomic step; one full sweep visits every vertex once in shuffled order. The four snapshots below show the partition at the end of sweep 0 (the random init), sweep 5 (early transient), sweep 10 (near equilibrium on this fixture), and sweep 20 (the run's terminal). The block labels are stable across snapshots so colours track the same blocks over the chain.</p>
+  <div class="flow-strip">
+    <div class="flow-box">
+      <div class="label">sweep 0</div>
+      <p>Random labels. \(B\) is fixed by the initializer, not by evidence.</p>
+    </div>
+    <div class="flow-box">
+      <div class="label">sweep 1-5</div>
+      <p>Large local improvements are harvested; \(\Sigma\) usually drops quickly.</p>
+    </div>
+    <div class="flow-box">
+      <div class="label">sweep 5-10</div>
+      <p>The chain tests splits and merges around ambiguous regions.</p>
+    </div>
+    <div class="flow-box">
+      <div class="label">sweep 10-20</div>
+      <p>Small fluctuations dominate; blocks with nearly equal code lengths may trade vertices.</p>
+    </div>
+    <div class="flow-box">
+      <div class="label">terminal</div>
+      <p>The displayed final partition is one posterior sample/mode from this finite run, not a proof of uniqueness.</p>
+    </div>
+  </div>
   <div class="three-frame" style="grid-template-columns: 1fr 1fr 1fr 1fr">
     <div class="panel-mini">
       <div class="cap">sweep 0 &middot; \(\Sigma\) = <span id="g-snap-s0">·</span></div>
@@ -313,6 +446,14 @@
     </div>
     <div class="graph-canvas" id="g-eq-cy" style="height: 240px"></div>
   </div>
+  <table class="micro-table">
+    <thead><tr><th>trace shape</th><th>what it means</th><th>what to do</th></tr></thead>
+    <tbody>
+      <tr><td>falling</td><td>The chain is still finding shorter descriptions.</td><td>Run more sweeps before reading the partition.</td></tr>
+      <tr><td>flat with wobble</td><td>The chain is exploring nearby posterior mass.</td><td>Read the final partition together with the trace and metrics.</td></tr>
+      <tr><td>\(B\) jumps</td><td>A fresh block opened or a singleton block disappeared.</td><td>Check whether the jump also changed \(\Sigma\) materially.</td></tr>
+    </tbody>
+  </table>
   <p>A still-falling trace at the right edge means the chain has not equilibrated and the sweep count is too low. On this fixture 20 sweeps usually settle the chain; rerolling the seed shows the equilibrium \(\Sigma\) is roughly stable but the equilibrium \(B\) wobbles by one or two. The wobble is the posterior assigning non-trivial probability to both merging and splitting a marginal block, which is the expected behaviour of a posterior sampler on a small fixture.</p>
 </section>
 
@@ -332,6 +473,7 @@
     </div>
   </div>
   <p class="accept-curve" style="margin: .5rem 0">vs. ground-truth: NMI = <span id="g-final-nmi">·</span> &middot; ARI = <span id="g-final-ari">·</span> &middot; \(B_{\text{found}}\) = <span id="g-final-Bf">·</span> &middot; \(B_{\text{gt}}\) = 5 (4 + outliers)</p>
+  <p class="step-desc">Block ids can permute without changing the partition, so compare co-membership rather than the numeric label; the renderer keeps colours stable within a run so motion is readable. The SBM is not trying to recover the planted labels directly, but to minimise Bayesian code length. NMI and ARI are diagnostics against the fixture, not terms in \(\Sigma\). When the two disagree, inspect the model assumptions: disconnected planted pieces split, weak bridges merge, and degree heterogeneity is absorbed by DC. The per-block table gives size, internal edges, external edges, and conductance for that read.</p>
   <p>NMI is the normalised mutual information between found and planted labellings; ARI is the adjusted Rand index. Both are 1 at exact match (modulo label permutation) and 0 at random; ARI can go negative on worse-than-random partitions. On this fixture the two outliers and C's disconnected components are the predictable disagreements; the gap to perfect match is small in nats but visible in both metrics. The NMI calculation here uses the natural-log variant for commensurability with the entropy units used elsewhere on the page.</p>
   <table class="cluster-stats" id="g-final-stats">
     <thead><tr><th>community</th><th>size</th><th>edges in</th><th>edges out</th><th>conductance</th></tr></thead>
@@ -362,7 +504,7 @@
       <div class="graph-canvas" id="g-cmp-ndc-cy" style="height: 260px"></div>
     </div>
   </div>
-  <p class="accept-curve">on this run: \(\Sigma_{\text{DC}}\) and \(\Sigma_{\text{NDC}}\) at the two mode partitions differ by <span id="g-cmp-dsigma">·</span> nats. <strong>Caveat:</strong> absolute \(\Sigma\) is not directly comparable across DC and NDC in this JS port; the two sparse-entropy formulas live on different scales (DC's \(\log(e_r!)\) and NDC's \(e_r \log n_r\) do not match unit-by-unit). The right comparison is which partition each model picks, not which absolute \(\Sigma\) is lower. The <a href="./sbm-flat-best.html">flat-best page</a> walks through this caveat under the Bayes-factor reading.</p>
+  <p class="accept-curve">on this run: \(\Sigma_{\text{DC}}\) and \(\Sigma_{\text{NDC}}\) at the two mode partitions differ by <span id="g-cmp-dsigma">·</span> nats. Absolute \(\Sigma\) is not directly comparable across DC and NDC in this JS port; the two sparse-entropy formulas live on different scales (DC's \(\log(e_r!)\) and NDC's \(e_r \log n_r\) do not match unit-by-unit). The right comparison is which partition each model picks, not which absolute \(\Sigma\) is lower. The <a href="./sbm-flat-best.html">flat-best page</a> walks through this caveat under the Bayes-factor reading.</p>
   <table class="flip-table" id="g-cmp-flips">
     <thead><tr><th>node</th><th>degree</th><th>planted</th><th>DC block</th><th>NDC block</th><th>why it flipped</th></tr></thead>
     <tbody></tbody>
@@ -413,6 +555,7 @@
   <p class="tools">drawn with <a href="https://d3js.org" target="_blank" rel="noopener">d3</a></p>
   <p class="credit">typed by vltanh, doodled with Claude</p>
 </footer>
+</main>
 
 <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 <script>
@@ -753,6 +896,9 @@ window.MathJax = {
     setText("g-step-v", String(t.v));
     setText("g-step-v2", String(t.v));
     setText("g-step-from", String(t.fromR));
+    setText("g-prop-v", String(t.v));
+    setText("g-prop-r", String(t.fromR));
+    setText("g-pool-size", String(cands.size));
   }
 
   // ── Stage 5 · entropy-delta frames + bars ────────────────────────
@@ -796,6 +942,9 @@ window.MathJax = {
     setText("g-delta-v", String(t.v));
     setText("g-delta-from", String(t.fromR));
     setText("g-delta-to", String(t.toS));
+    setText("g-local-v", String(t.v));
+    setText("g-local-r", String(t.fromR));
+    setText("g-local-s", String(t.toS));
 
     function ledger(brk) {
       const rows = [
@@ -826,7 +975,8 @@ window.MathJax = {
       total: brkAfter.total - brkBefore.total,
     };
     renderDLBars("g-delta-bars", deltaBrk, { totalLabel: "ΔΣ total" });
-    return { ds: deltaBrk.total };
+    setText("g-local-ds", deltaBrk.total.toFixed(2));
+    return { ds: deltaBrk.total, accept: t.accept, accepted: t.accepted };
   }
 
   // ── Stage 6 · acceptance curve ───────────────────────────────────
@@ -879,6 +1029,16 @@ window.MathJax = {
         .attr("fill", "#4ecb6f").attr("stroke", "#1b2033").attr("stroke-width", 1.4);
     }
     setText("g-accept-ds", (dsMark != null && isFinite(dsMark)) ? dsMark.toFixed(2) : "·");
+    if (dsMark != null && isFinite(dsMark)) {
+      const alpha = dsMark <= 0 ? 1 : Math.exp(-dsMark);
+      setText("g-accept-example-ds", dsMark.toFixed(2));
+      setText("g-accept-example-alpha", alpha.toFixed(3));
+      setText("g-accept-example-rule", dsMark <= 0 ? "accept without RNG draw" : "draw u and compare");
+    } else {
+      setText("g-accept-example-ds", "·");
+      setText("g-accept-example-alpha", "·");
+      setText("g-accept-example-rule", "·");
+    }
   }
 
   // ── Stage 8 · sweep-k snapshots ──────────────────────────────────

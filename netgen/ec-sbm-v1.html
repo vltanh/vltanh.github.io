@@ -145,6 +145,31 @@
   <p>This is v1, the first version of EC-SBM, published in <a href="https://doi.org/10.1007/s41109-025-00701-2" target="_blank" rel="noopener">Vu-Le et al. 2025</a>. The gen side has four phases and two separate SBM calls. <a href="./ec-sbm-v2.html">v2</a> is the rewrite: constructive-only seed, one SBM over all blocks, a block-preserving rewire, a logged true_greedy matcher.</p>
 </section>
 
+<section class="stage">
+  <div class="stage-num">algorithm map · v1 ledger</div>
+  <h2>Follow the edges by ownership, not just by final count.</h2>
+  <p>v1 is easiest to understand as a ledger. The profile records what the output should resemble; each generation phase spends part of that ledger; the last phase tries to patch whatever earlier phases lost through duplicate removal or gridlock. The sections below zoom into each line item.</p>
+  <p><strong>Step 1.</strong> Profile first gives the protected clusters a clean contract. With <code>outlier_mode=excluded</code>, singleton outliers and every incident edge are removed before <code>assignment.csv</code>, <code>degree.csv</code>, <code>edge_counts.csv</code>, and <code>mincut.csv</code> are written. That keeps the mincut promise meaningful, but the outlier-incident degrees and block counts now have to be rebuilt later.</p>
+  <p><strong>Step 2.</strong> The \(K_{k+1}\) core reserves the mincut floor. Nodes are ranked by target degree, the first \(k+1\) become a complete graph, and every seed edge immediately decrements the residual degree and block-count budget. When \(k\) is large, this clique can dominate the cluster's triangle count and consume most of its diagonal budget.</p>
+  <p><strong>Step 3.</strong> The remaining clustered nodes attach by availability. Each arrival samples \(k\) processed partners without replacement, weighted by \(a_v=\max(\texttt{int_deg}[v],0)\). If fewer than \(k\) processed nodes have positive availability, the guarantee wins and <code>ensure_edge_capacity</code> inflates the residual ledger so the required edge can still be placed.</p>
+  <p><strong>Step 4.</strong> The SBM overlay spends the mutated residual matrix. graph-tool samples from the leftover <code>probs</code> and <code>deg</code> arrays, then v1 overlays those sampled edges onto the already committed core. If the SBM hits a core pair, simplification drops the duplicate after the budget has already been charged.</p>
+  <p><strong>Step 5.</strong> The outlier rescue re-reads the original edgelist and makes each outlier a singleton block. A second SBM runs only on outlier-incident cells, recovering clustered-outlier and outlier-outlier counts without giving those singletons any connectivity guarantee or shared outlier structure.</p>
+  <p><strong>Step 6.</strong> <code>combine_edgelists.py</code> merges the clustered and outlier bands into one simple edge file. It canonicalizes undirected pairs, keeps the first copy it sees, and writes <code>sources.json</code> row ranges; those ranges record surviving ownership, not every duplicate proposal that lost.</p>
+  <p><strong>Step 7.</strong> The final <code>match_degree --algorithm greedy</code> pass drains residual degree deficits. It pops the largest deficit, scans legal non-neighbours, and adds top-up edges until partners run out. If a node gridlocks, v1 leaves those stubs out of the graph without an explicit warning.</p>
+  <table class="profile-table">
+    <thead>
+      <tr><th>stage</th><th>ledger action</th><th>risk to watch</th></tr>
+    </thead>
+    <tbody>
+      <tr><th>profile</th><td class="desc">Writes clustered-only assignment, degree, block matrix, and \(k(C)\).</td><td class="desc">Outlier-incident mass disappears until the rescue pass.</td></tr>
+      <tr><th>core + attach</th><td class="desc">Spends diagonal degree and block budget to guarantee edge-connectivity.</td><td class="desc">Large \(k\) can inflate budgets and force dense cores.</td></tr>
+      <tr><th>SBM overlay</th><td class="desc">Samples leftover clustered block counts from mutated arrays.</td><td class="desc">Duplicate core pairs are charged twice and kept once.</td></tr>
+      <tr><th>outlier SBM</th><td class="desc">Samples only cells touching singleton outlier blocks.</td><td class="desc">Outlier labels are incidence targets, not structure targets.</td></tr>
+      <tr><th>combine + match</th><td class="desc">Dedups bands, records provenance, and tops up degree deficits.</td><td class="desc">First-seen provenance hides rejected duplicates; greedy gridlock is silent.</td></tr>
+    </tbody>
+  </table>
+</section>
+
 <!-- ─────────── Profiling · the shared fixture ─────────── -->
 <section class="stage">
   <div class="stage-num">profiling · outliers as singletons</div>
@@ -165,6 +190,17 @@
   <h2>Per-node block label. v1 forces outliers out.</h2>
   <p>Profile reads the empirical edgelist + clustering and writes seven CSVs. Two are lookups (<code>node_id.csv</code>, <code>cluster_id.csv</code>). Four carry the quantities the gen stages try to match, one per subsection below: <code>assignment.csv</code>, <code>degree.csv</code>, <code>edge_counts.csv</code>, <code>mincut.csv</code>. The seventh, <code>com.csv</code>, is the full (node, cluster) ledger and passes through to the final output unchanged.</p>
   <p>v1 forces <code>outlier_mode=excluded</code> at profile time: any node not in a size-2+ cluster drops out, along with every edge incident to it. Those nodes come back later through a separate SBM call. v2 folds them into one combined pseudo-block instead; the rest of this page follows v1.</p>
+  <p><strong>Step 1.</strong> The profiler starts from the empirical edgelist and community assignment. At this point outliers are still visible because the graph is still the original input.</p>
+  <p><strong>Step 2.</strong> The protected domain is then filtered down to size-2+ clusters. EC-SBM's connectivity guarantee is per real cluster, so edges touching outliers are not counted in these ledgers.</p>
+  <p><strong>Step 3.</strong> The profile emits the four generation targets below. Everything after profiling either spends one of these ledgers or repairs a deficit caused by earlier spending.</p>
+  <table class="profile-table">
+    <tbody>
+      <tr><th>assignment</th><td class="desc">which block each clustered node belongs to</td></tr>
+      <tr><th>degree</th><td class="desc">how many clustered-side stubs the generator should hit</td></tr>
+      <tr><th>edge counts</th><td class="desc">half-edge budget per block pair</td></tr>
+      <tr><th>mincut</th><td class="desc">the EC-SBM scalar \(k(C)\) for each protected cluster</td></tr>
+    </tbody>
+  </table>
   <div class="graph" id="g-assign">
     <div class="graph-chrome">
       <span>input G after <code>outlier_mode=excluded</code> &middot; dashed rects enclose each block</span>
@@ -240,13 +276,19 @@
   <div class="stage-num">generation · the \(K_{k+1}\) core</div>
   <h2>Build a \(K_{k+1}\) seed clique. Attach the rest with \(k\) edges each.</h2>
   <p>Per cluster \(C\), sort nodes by target degree desc (id-asc tiebreak). Take the top \(k+1\) and wire them into a complete subgraph \(K_{k+1}\): that is \(\binom{k+1}{2}\) edges, with each node at degree exactly \(k\). A complete graph on \(k+1\) vertices is \(k\)-edge-connected, so any cluster that contains this \(K_{k+1}\) as a subgraph is \(k\)-edge-connected regardless of what the SBM layer does next.</p>
-  <p>Phase 2 walks the remaining cluster nodes in descending target-degree order. Each new node \(u\) attaches to exactly \(k\) already-processed partners, preferring the ones with the highest <em>residual</em> (remaining) target degree. The paper's equivalent rule is "make \(u\) adjacent to \(\min\{k, |N_0|\}\) partners with probability proportional to availability"; during the first \(k+1\) iterations \(|N_0| < k\), so the new vertex joins everything in \(N_0\), and the result of those iterations is the \((k+1)\)-clique.</p>
+  <p><strong>Step 1.</strong> Rank by target degree using <code>(-degree, node_id)</code>. The construction spends guaranteed edges on the nodes with the largest residual capacity first, and the id tie-break keeps the trace deterministic when degrees match.</p>
+  <p><strong>Step 2.</strong> Emit every clique edge. When the processed set has at most \(k\) nodes, the new node connects to all processed nodes, so the first \(k+1\) arrivals form exactly \(K_{k+1}\).</p>
+  <p><strong>Step 3.</strong> Charge the residual ledger as each constructive edge is placed: <code>int_deg[u] -= 1</code>, <code>int_deg[v] -= 1</code>, and the relevant <code>probs[b_u,b_v]</code> cell is decremented where possible. If a required edge has no remaining budget, v1 inflates the cell so the guarantee wins.</p>
+  <p>Phase 2 walks the remaining cluster nodes in descending target-degree order. Each new node \(u\) draws exactly \(k\) already-processed partners in one weighted-without-replacement sample, with each candidate \(v\) weighted by its <em>availability</em> \(a_v = \max(\texttt{int\_deg}[v], 0)\), the remaining residual degree. This is <code>gen_kec_core.sample_by_availability</code>: it picks \(\min(k,\,\#\{a_v > 0\})\) partners by weight, then if fewer than \(k\) candidates still have positive availability it fills the remainder uniformly from the exhausted ones (capacity inflation lets those edges still go in). There is no greedy "take the top-\(k\)" rule: a high-availability node is more likely to be picked, not certain to be. During the first \(k+1\) arrivals \(|N_0| \le k\), so the new vertex joins everything already processed, and the result of those arrivals is the \((k+1)\)-clique.</p>
+  <p><strong>Attach step 1.</strong> Look only backward. The arriving node may connect only to nodes already processed in its cluster, which keeps the proof simple: each new node receives \(k\) independent paths into the already protected component.</p>
+  <p><strong>Attach step 2.</strong> Sample by availability, not rank. Positive-residual candidates are in the weighted pool, while exhausted candidates enter only as a uniform fallback if too few positive candidates remain. A candidate with twice the availability is twice as likely in a single draw, but not guaranteed.</p>
+  <p><strong>Attach step 3.</strong> Inflate only when forced. If the sampled partner would violate residual degree or block budget, v1 increases that residual budget by one and still places the edge. This preserves edge-connectivity but weakens exact degree matching.</p>
   <p>When a partner's residual or the block-pair budget would block a required edge, <code>ensure_edge_capacity</code> inflates both by 1 so the edge can still go in:</p>
   \[
     \texttt{int\_deg}[v] \mathrel{+}= 1, \quad \texttt{probs}[b_u, b_v] \mathrel{+}= 1.
   \]
   <p>Inflation is the only reason the output's degree sequence ends up approximate. The walker below mirrors <code>gen_kec_core.generate_cluster</code> arrival by arrival, in the same cluster-major order the shipped Python uses (clusters by size desc, nodes within each by post-exclusion target degree desc, id-asc tiebreak).</p>
-  <p>At each arrival the caption lists every already-processed candidate's residual <code>int_deg</code> with the picked partners marked. Phase-1 arrivals (those with \(|V_t| \leq k\)) auto-attach to every predecessor and grow the \(K_{k+1}\) seed; phase-2 arrivals greedy-pick \(k\) partners by residual desc. Realization 1 is byte-verified against the shipped Python at <code>PYTHONHASHSEED=0</code>. <code>random step</code> re-samples partner picks at the current arrival only, leaving every other arrival frozen; <code>random all</code> draws a fresh universe across every greedy arrival.</p>
+  <p>At each arrival the caption lists every already-processed candidate's availability \(a_v\) with the picked partners marked. Phase-1 arrivals (those with \(|V_t| \leq k\)) auto-attach to every predecessor and grow the \(K_{k+1}\) seed; phase-2 arrivals draw \(k\) partners by the availability-weighted sample above. The shipped Python draws from <code>np.random.choice</code> (MT19937); the walker reproduces the same weighting with a seeded LCG, so the marginals match but the exact picks are one realisation among many. <code>random step</code> re-samples the draw at the current arrival and downstream, leaving the locked prefix frozen; <code>random all</code> re-spins every phase-2 arrival.</p>
   <div class="graph" id="g-core">
     <div class="graph-chrome">
       <span id="g-core-stage">step 0 &middot; stripped</span>
@@ -277,6 +319,9 @@
   <div class="stage-num">generation · SBM overlay + dedup</div>
   <h2>Sample an SBM on the mutated residual, overlay the cores, drop duplicates.</h2>
   <p>After the constructive pass, <code>probs</code> and <code>deg</code> have been decremented by every edge the core + attach placed and inflated wherever the budget was too tight. v1 feeds those mutated arrays to graph-tool, overlays the constructive edges on top, and simplifies:</p>
+  <p><strong>Step 1.</strong> Freeze the constructive band. The \(K_{k+1}\) core and attach edges are already committed; they are not suggestions to the SBM.</p>
+  <p><strong>Step 2.</strong> Sample the residual SBM using the mutated <code>deg</code> vector, the mutated <code>probs</code> matrix, and graph-tool's <code>micro_ers</code> + <code>micro_degs</code> constraints. This restores remaining block-pair counts without reasoning about the mincut proof.</p>
+  <p><strong>Step 3.</strong> Simplify after overlay. Dedup makes the final graph simple, but it can erase an edge the residual SBM already charged to the ledger; that is the v1 source of under-spent cells.</p>
   <div style="font-family:'Special Elite','Courier New',monospace;color:var(--paper);background:var(--ink-3);border:1px solid var(--rule);padding:.8rem;border-radius:3px;margin:.6rem 0;font-size:.85rem">
     g = gt.generate_sbm(b, probs.tocsr(), out_degs=deg,<br>
     &nbsp;&nbsp;&nbsp;&nbsp;micro_ers=True, micro_degs=True, directed=False)<br>
@@ -318,7 +363,9 @@
   <div class="stage-num">generation · the outlier rescue</div>
   <h2>Outliers get their own SBM pass.</h2>
   <p>The constructive + overlay phase never saw outliers because the profile excluded them. This phase re-reads the original (pre-exclusion) edgelist, flags every node that is in the edgelist but not in the clustering, and treats each outlier as a size-1 block of its own. It then samples an SBM on the outlier-incident edges only (<code>--scope outlier-incident</code>); the SBM does not touch clustered-side pairs.</p>
-  <p>The <code>combine_edgelists.py</code> merge is first-seen-wins with the constructive + overlay output as input 1. Two pure bands, undirected-deduped, written to a fresh <code>edge.csv</code> plus <code>sources.json</code> mapping each band to an inclusive 1-based row range.</p>
+  <p><strong>Step 1.</strong> Return to the original graph. The stage reads the pre-exclusion edge list so it can recover edges touching nodes 19 and 20 in this toy graph; the clustered-only profile no longer contains those edges.</p>
+  <p><strong>Step 2.</strong> Make singleton blocks. Clustered nodes keep C1, C2, or C3, while outliers 19 and 20 each become a new one-node block. That converts "unclustered" vertices into ordinary SBM blocks for this pass.</p>
+  <p><strong>Step 3.</strong> Sample only incident cells. The second SBM is scoped to cells with at least one singleton endpoint, and it does not resample any clustered-clustered pair that the previous stages already handled.</p>
   <div class="graph" id="g-outlier">
     <div class="graph-chrome">
       <span>core + overlay + outlier rescue</span>
@@ -332,11 +379,36 @@
   </div>
 </section>
 
+<!-- ─────────── Generation · combine edgelists ─────────── -->
+<section class="stage">
+  <div class="stage-num">generation · combine the bands</div>
+  <h2>Merge sampled bands into one simple edge file and keep provenance.</h2>
+  <p>At this point v1 has two independently sampled bands: the clustered band (constructive core, attach, residual SBM, and its dedup) and the outlier SBM band. <code>combine_edgelists.py</code> concatenates them in that order, applies undirected first-seen-wins dedup, then writes the final <code>edge.csv</code> plus <code>sources.json</code>.</p>
+  <table class="profile-table">
+    <tbody>
+      <tr><th>band 1</th><td class="val">clustered</td><td class="desc">Core + attach + residual SBM, already simple after overlay dedup, written first.</td></tr>
+      <tr><th>band 2</th><td class="val">outlier</td><td class="desc">Singleton-block SBM on outlier-incident edges; duplicate pairs lose if seen before.</td></tr>
+      <tr><th>output</th><td class="val">edge.csv</td><td class="desc"><code>sources.json</code> row ranges record which band produced each surviving edge.</td></tr>
+    </tbody>
+  </table>
+  <p><strong>Step 1.</strong> Canonicalize every row as \((\min(u,v), \max(u,v))\), so <code>7,19</code> and <code>19,7</code> are the same candidate edge.</p>
+  <p><strong>Step 2.</strong> Keep the first copy. The clustered band is input 1, so it has priority if a later outlier-band row repeats an existing pair; the target is a simple graph, not a multigraph.</p>
+  <p><strong>Step 3.</strong> Record row ownership. <code>sources.json</code> maps each generator band to an inclusive 1-based row interval in the final file, which lets diagnostics separate clustered, outlier, and degree-matching edges.</p>
+  <div class="callout">
+    <div class="tag">why combine is a real algorithm step</div>
+    <p>The two SBMs are independent, but the final graph cannot contain duplicate undirected pairs. The combine step is where independent bands become one simple graph and where v1 preserves just enough provenance to audit the final edge mix.</p>
+  </div>
+</section>
+
 <!-- ─────────── Generation · match_degree, with pile viz ─────────── -->
 <section class="stage">
   <div class="stage-num">generation · match the residual degree</div>
   <h2>Heap-greedy top-up. The deficit accumulates; match_degree drains it.</h2>
   <p>Dedup and the outlier pass together remove some edges from each node's degree. The final phase tops that shortfall back up with <code>src/match_degree.py --algorithm greedy</code> (hardcoded in v1):</p>
+  <p><strong>Step 1.</strong> Compute residual stubs: for each node, subtract its current degree after combine from the original <code>degree.csv</code> target, then keep <code>max(target-current, 0)</code> as the heap load.</p>
+  <p><strong>Step 2.</strong> Pop the largest deficit. The heap prioritizes nodes with the most missing stubs, with node id as the deterministic tie-break; this is local repair, not a global matching solver.</p>
+  <p><strong>Step 3.</strong> Add legal non-neighbour edges. The matcher scans candidates that are not already adjacent and adds edges until the popped node is satisfied or no legal partner remains.</p>
+  <p><strong>Step 4.</strong> Accept gridlock silently. If legal partners run out, v1 drops the leftover stubs without a warning, which is why the bars below show both placed top-up and any remaining red deficit.</p>
   <ol style="margin-left:1.1rem;color:var(--paper-2);font-size:.95rem;line-height:1.6">
     <li>Build a max-heap of <code>(-residual, node_id)</code> over nodes still short of their target.</li>
     <li>Pop \(u\). Compute \(u\)'s non-neighbours (live nodes minus \(u\) and its current neighbours).</li>
@@ -953,35 +1025,57 @@ window.MathJax = {
     ];
     const TOTAL_ARRIVALS = ARRIVAL_SEQ.length;
 
-    const ATTACH_VARIANTS = {
-      3:  [[1, 4],    [1, 2],    [2, 4]],
-      5:  [[1, 2],    [1, 4],    [2, 3]],
-      6:  [[1, 4],    [3, 4],    [1, 5]],
-      7:  [[3, 5],    [5, 6],    [1, 5]],
-      8:  [[1, 4],    [4, 7],    [1, 7]],
-      12: [[9, 11],   [10, 11],  [9, 10]],
-      13: [[9, 11],   [9, 12],   [10, 11]],
-      14: [[10, 12],  [10, 11],  [12, 13]],
-      17: [[15],      [16],      [15]],
-      18: [[16],      [15],      [17]],
-    };
-    const INTRO_ARRIVAL = {};
-    ARRIVAL_SEQ.forEach((a, i) => { INTRO_ARRIVAL[a.node] = i + 1; });
-    const ATTACH_IDX = {};
-    Object.keys(ATTACH_VARIANTS).forEach(n => { ATTACH_IDX[n] = 0; });
-    function currentAttach() {
-      const a = {};
-      Object.keys(ATTACH_VARIANTS).forEach(n => {
-        a[n] = ATTACH_VARIANTS[n][ATTACH_IDX[n] % ATTACH_VARIANTS[n].length];
-      });
-      return a;
-    }
+    // Per-arrival draw seed. random step / random all bump these so the
+    // weighted-without-replacement draw re-spins; the prefix the user
+    // already watched stays frozen (matcher-reroll cascade convention).
+    const DRAW_SEED = {};
+    ARRIVAL_SEQ.forEach((a) => { DRAW_SEED[a.node] = a.node; });
     let rollCount = 0;
 
+    // Faithful port of gen_kec_core.sample_by_availability: draw `k` distinct
+    // processed candidates without replacement, weighted by availability
+    // a_v = max(int_deg[v], 0). First pick min(k, #positive) by weight, then
+    // fill the rest uniformly from the exhausted (a_v == 0) candidates. The
+    // canonical np.random.choice (MT19937) is reproduced here with a seeded
+    // d3 LCG: same weighting, one realisation among many.
+    function weightedWORDraw(candidates, avail, count, rng) {
+      const pool = candidates.slice();
+      const picks = [];
+      for (let s = 0; s < count && pool.length; s++) {
+        let total = 0;
+        for (const c of pool) total += Math.max(avail[c], 0);
+        let idx;
+        if (total <= 0) {
+          idx = Math.floor(rng() * pool.length);
+        } else {
+          let r = rng() * total, acc = 0;
+          idx = pool.length - 1;
+          for (let i = 0; i < pool.length; i++) {
+            acc += Math.max(avail[pool[i]], 0);
+            if (r < acc) { idx = i; break; }
+          }
+        }
+        picks.push(pool[idx]);
+        pool.splice(idx, 1);
+      }
+      return picks;
+    }
+
+    function sampleByAvailability(processed, k, avail, rng) {
+      const positive = processed.filter(p => avail[p] > 0);
+      const exhausted = processed.filter(p => avail[p] <= 0);
+      const weightedCount = Math.min(k, positive.length);
+      const sel = weightedWORDraw(positive, avail, weightedCount, rng);
+      const uniformCount = k - weightedCount;
+      if (uniformCount > 0) {
+        sel.push(...weightedWORDraw(exhausted, avail, uniformCount, rng));
+      }
+      return sel;
+    }
+
     // Replay the linear arrival sequence to capture per-arrival picks
-    // and the residual int_deg snapshot just before each arrival's pull.
+    // and the availability snapshot just before each arrival's pull.
     function buildTrace() {
-      const ATTACH = currentAttach();
       const intDeg = {};
       NODES.forEach(n => { intDeg[n] = DEGREES_EXCL[n] || 0; });
       const trace = [];
@@ -999,8 +1093,9 @@ window.MathJax = {
           partners = preds.slice();
           mode = "auto-all";
         } else {
-          partners = (ATTACH[u] || []).slice();
-          mode = "greedy";
+          const rng = d3.randomLcg(DRAW_SEED[u] / 0xffffffff);
+          partners = sampleByAvailability(preds, k, residualsBefore, rng);
+          mode = "weighted";
         }
         const newEdges = partners.map(p => [Math.min(u, p), Math.max(u, p)]);
         newEdges.forEach(([x, y]) => {
@@ -1056,12 +1151,12 @@ window.MathJax = {
       } else {
         const sortedPreds = t.preds.slice().sort((a, b) =>
           (t.residualsBefore[b] - t.residualsBefore[a]) || (a - b));
-        const fmt = (p) => `${p}&nbsp;(\\(r=${t.residualsBefore[p]}\\))`;
+        const fmt = (p) => `${p}&nbsp;(\\(a=${Math.max(t.residualsBefore[p], 0)}\\))`;
         const pickedSet = new Set(t.partners);
         const picksStr = t.partners.map(fmt).join(", ");
         const others = sortedPreds.filter(p => !pickedSet.has(p)).map(fmt);
         const othersStr = others.length ? "{" + others.join(", ") + "}" : "&empty;";
-        body = `\\(|V_t|=${v} > k=${t.k}\\); greedy picks top-\\(k\\) by residual \\(\\texttt{int\\_deg}\\): \\(S_t\\) = {${picksStr}}. Skipped: ${othersStr}.`;
+        body = `\\(|V_t|=${v} > k=${t.k}\\); availability-weighted draw of \\(k=${t.k}\\) partners: \\(S_t\\) = {${picksStr}}. Not drawn: ${othersStr}.`;
       }
       return { stage, html: `${head} ${body}` };
     }
@@ -1084,7 +1179,9 @@ window.MathJax = {
     function currentStepHasVariant(step) {
       if (step < 1) return false;
       const t = TRACE[step - 1];
-      return t.mode === "greedy" && ATTACH_VARIANTS[t.node] !== undefined;
+      // A phase-2 arrival has a re-rollable draw only when more than k
+      // candidates are available (otherwise the draw is forced).
+      return t.mode === "weighted" && t.preds.length > t.k;
     }
 
     function render(step) {
@@ -1103,19 +1200,32 @@ window.MathJax = {
       stageEl.textContent = sd.stage;
       let realText;
       if (rollCount === 0) {
-        realText = "initial realization · random step re-rolls this arrival; random all re-rolls every greedy arrival";
+        realText = "initial realization · random step re-rolls this arrival onward; random all re-rolls every phase-2 arrival";
       } else if (rollMode === "all") {
-        realText = `reroll #${rollCount} · all greedy arrivals re-sampled`;
+        realText = `reroll #${rollCount} · all phase-2 arrivals re-sampled`;
       } else {
-        realText = `reroll #${rollCount} · current arrival re-sampled; others frozen`;
+        realText = `reroll #${rollCount} · this arrival onward re-sampled; locked prefix frozen`;
       }
       realEl.textContent = realText;
-      // Random step has nothing to reroll on auto-all (phase-1) arrivals;
-      // step controller already handles step 0.
+      // Random step has nothing to reroll on auto-all (phase-1) arrivals
+      // or when the draw is forced; step controller already handles step 0.
       if (step >= 1 && !currentStepHasVariant(step)) {
         randStepBtn.disabled = true;
       }
       NETGEN.retypeset(descEl);
+    }
+
+    // Re-spin the availability-weighted draw for a suffix of phase-2 arrivals.
+    // fromArrival = 1-based arrival index; every phase-2 node at or after it
+    // gets a fresh draw seed, so the locked prefix stays put (reroll cascade).
+    function bumpDrawSeeds(fromArrival) {
+      ARRIVAL_SEQ.forEach((a, i) => {
+        if (i + 1 < fromArrival) return;
+        const k = KS[a.cluster];
+        const predsCount = ARRIVAL_SEQ.slice(0, i)
+          .filter(p => p.cluster === a.cluster).length;
+        if (predsCount > k) DRAW_SEED[a.node] = (DRAW_SEED[a.node] * 1103515245 + 12345) >>> 0;
+      });
     }
 
     controller = NETGEN.rerollWalker({
@@ -1127,16 +1237,13 @@ window.MathJax = {
       onRender:   render,
       onRandStep: (S) => {
         if (S < 1 || !currentStepHasVariant(S)) return;
-        const u = TRACE[S - 1].node;
-        ATTACH_IDX[u] = (ATTACH_IDX[u] + 1) % ATTACH_VARIANTS[u].length;
+        bumpDrawSeeds(S);
         rollCount += 1;
         rollMode = "step";
         TRACE = buildTrace();
       },
       onRandAll: () => {
-        Object.keys(ATTACH_VARIANTS).forEach(n => {
-          ATTACH_IDX[n] = (ATTACH_IDX[n] + 1) % ATTACH_VARIANTS[n].length;
-        });
+        bumpDrawSeeds(1);
         rollCount += 1;
         rollMode = "all";
         TRACE = buildTrace();

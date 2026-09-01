@@ -41,7 +41,7 @@
       // 1812433253 = 0x6c078965. Multiply via low/high 16-bit split.
       const lo = (xored & 0xffff) * 0x6c078965;
       const hi = ((xored >>> 16) * 0x6c078965) & 0xffff;
-      this.mt[i] = ((((hi << 16) >>> 0) + lo + i) >>> 0);
+      this.mt[i] = (((hi << 16) >>> 0) + lo + i) >>> 0;
     }
     this.idx = N;
   };
@@ -52,14 +52,14 @@
       let kk;
       for (kk = 0; kk < N - M; kk++) {
         const y = ((this.mt[kk] & UPPER_MASK) | (this.mt[kk + 1] & LOWER_MASK)) >>> 0;
-        this.mt[kk] = (this.mt[kk + M] ^ (y >>> 1) ^ ((y & 1) ? MATRIX_A : 0)) >>> 0;
+        this.mt[kk] = (this.mt[kk + M] ^ (y >>> 1) ^ (y & 1 ? MATRIX_A : 0)) >>> 0;
       }
       for (; kk < N - 1; kk++) {
         const y = ((this.mt[kk] & UPPER_MASK) | (this.mt[kk + 1] & LOWER_MASK)) >>> 0;
-        this.mt[kk] = (this.mt[kk + (M - N)] ^ (y >>> 1) ^ ((y & 1) ? MATRIX_A : 0)) >>> 0;
+        this.mt[kk] = (this.mt[kk + (M - N)] ^ (y >>> 1) ^ (y & 1 ? MATRIX_A : 0)) >>> 0;
       }
       const y = ((this.mt[N - 1] & UPPER_MASK) | (this.mt[0] & LOWER_MASK)) >>> 0;
-      this.mt[N - 1] = (this.mt[M - 1] ^ (y >>> 1) ^ ((y & 1) ? MATRIX_A : 0)) >>> 0;
+      this.mt[N - 1] = (this.mt[M - 1] ^ (y >>> 1) ^ (y & 1 ? MATRIX_A : 0)) >>> 0;
       this.idx = 0;
     }
     let y = this.mt[this.idx++];
@@ -97,7 +97,7 @@
     const r = (hi - lo + 1) >>> 0;
     if (r === 0) {
       // r overflowed to 0 -> covers full 2^32 range.
-      return ((rng.next() + lo) >>> 0);
+      return (rng.next() + lo) >>> 0;
     }
     if (r === 1) return lo;
     const rB = BigInt(r);
@@ -114,10 +114,11 @@
 
   // ---- random_functions facade matching VieCut's static API ------------
   // [UPSTREAM tools/random_functions.h:27-28] static MersenneTwister m_mt;
-  // libstdc++ std::mt19937() default-constructs with seed=5489 (default_seed).
-  // Mirror so chained mincut calls (CM/WCC) without explicit setSeed produce
-  // bit-equal RNG stream vs canonical (where mincut_custom.cpp:37 leaves
-  // setSeed COMMENTED OUT and m_mt stays default-constructed for the run).
+  // libstdc++ std::mt19937() default-constructs with seed=5489 (default_seed),
+  // so the reusable module starts there too. The complete constrained-
+  // clustering executable calls random_functions::setSeed(0) once in
+  // main.cpp before WCC/CM starts; page glue must do the same for production
+  // parity. mincut_custom.cpp does not re-seed between cluster pops.
   let m_seed = 5489;
   let m_mt = new MT19937(5489);
   // Oracle queue: when set, next/nextInt/etc. consume from this queue
@@ -135,20 +136,29 @@
   function setSeed(seed) {
     m_seed = seed;
     m_mt = new MT19937(seed);
-    if (m_observer !== null) m_observer({ kind: "setSeed", seed: (seed >>> 0) });
+    if (m_observer !== null) m_observer({ kind: "setSeed", seed: seed >>> 0 });
   }
-  function setOracle(queue) { m_oracle = queue; }
-  function clearOracle() { m_oracle = null; }
-  function setObserver(cb) { m_observer = cb; }
-  function clearObserver() { m_observer = null; }
+  function setOracle(queue) {
+    m_oracle = queue;
+  }
+  function clearOracle() {
+    m_oracle = null;
+  }
+  function setObserver(cb) {
+    m_observer = cb;
+  }
+  function clearObserver() {
+    m_observer = null;
+  }
 
-  function getSeed() { return m_seed; }
+  function getSeed() {
+    return m_seed;
+  }
   function next() {
     let val;
     if (m_oracle !== null) {
       const e = m_oracle.shift();
-      if (!e || e.kind !== "next")
-        throw new Error(`oracle exhausted/wrong kind for next(): ${JSON.stringify(e)}`);
+      if (!e || e.kind !== "next") throw new Error(`oracle exhausted/wrong kind for next(): ${JSON.stringify(e)}`);
       val = e.val >>> 0;
     } else {
       val = m_mt.next();
@@ -160,8 +170,7 @@
     let val;
     if (m_oracle !== null) {
       const e = m_oracle.shift();
-      if (!e || e.kind !== "nextInt")
-        throw new Error(`oracle exhausted/wrong kind for nextInt(): ${JSON.stringify(e)}`);
+      if (!e || e.kind !== "nextInt") throw new Error(`oracle exhausted/wrong kind for nextInt(): ${JSON.stringify(e)}`);
       if (e.lb !== lb || e.rb !== rb) {
         throw new Error(`oracle nextInt range mismatch: oracle=(${e.lb},${e.rb}) caller=(${lb},${rb})`);
       }
@@ -176,8 +185,7 @@
     let val;
     if (m_oracle !== null) {
       const e = m_oracle.shift();
-      if (!e || e.kind !== "nextBool")
-        throw new Error(`oracle wrong kind for nextBool(): ${JSON.stringify(e)}`);
+      if (!e || e.kind !== "nextBool") throw new Error(`oracle wrong kind for nextBool(): ${JSON.stringify(e)}`);
       val = e.val;
     } else {
       val = uniformInt(m_mt, 0, 1) === 1;
@@ -189,14 +197,13 @@
     let val;
     if (m_oracle !== null) {
       const e = m_oracle.shift();
-      if (!e || e.kind !== "nextDouble")
-        throw new Error(`oracle wrong kind for nextDouble(): ${JSON.stringify(e)}`);
+      if (!e || e.kind !== "nextDouble") throw new Error(`oracle wrong kind for nextDouble(): ${JSON.stringify(e)}`);
       val = e.val;
     } else {
       // libstdc++ uniform_real picks 53-bit fraction via two uint32 draws;
       // not used by cactus path. Provide a simple version for completeness.
-      const a = m_mt.next() >>> 5;        // 27 bits
-      const b = m_mt.next() >>> 6;        // 26 bits
+      const a = m_mt.next() >>> 5; // 27 bits
+      const b = m_mt.next() >>> 6; // 26 bits
       const u = (a * Math.pow(2, 26) + b) / Math.pow(2, 53);
       val = lb + u * (rb - lb);
     }
@@ -241,7 +248,7 @@
   // every shuffle draw is visible to diff_harness lockstep.
   function uniformIntViaNext(lo, hi) {
     const r = (hi - lo + 1) >>> 0;
-    if (r === 0) return ((next() + lo) >>> 0);
+    if (r === 0) return (next() + lo) >>> 0;
     if (r === 1) return lo;
     const rB = BigInt(r);
     const URB = BigInt(MT_RANGE);
@@ -259,18 +266,24 @@
     let i = lo + 1;
     if ((urange & 1) === 0) {
       const pos = uniformIntViaNext(0, 1);
-      const tmp = vec[i]; vec[i] = vec[lo + pos]; vec[lo + pos] = tmp;
+      const tmp = vec[i];
+      vec[i] = vec[lo + pos];
+      vec[lo + pos] = tmp;
       i++;
     }
     while (i < hi) {
-      const swap_range = (i - lo) + 1;
+      const swap_range = i - lo + 1;
       const hi2 = swap_range * (swap_range + 1) - 1;
       const x = uniformIntViaNext(0, hi2);
       const pp_first = Math.floor(x / (swap_range + 1));
       const pp_second = x % (swap_range + 1);
-      let tmp = vec[i]; vec[i] = vec[lo + pp_first]; vec[lo + pp_first] = tmp;
+      let tmp = vec[i];
+      vec[i] = vec[lo + pp_first];
+      vec[lo + pp_first] = tmp;
       i++;
-      tmp = vec[i]; vec[i] = vec[lo + pp_second]; vec[lo + pp_second] = tmp;
+      tmp = vec[i];
+      vec[i] = vec[lo + pp_second];
+      vec[lo + pp_second] = tmp;
       i++;
     }
   }
@@ -292,8 +305,16 @@
   NS.MT19937 = MT19937;
   NS.uniformInt = uniformInt;
   NS.random_functions = {
-    setSeed, getSeed, setOracle, clearOracle, setObserver, clearObserver,
-    next, nextInt, nextBool, nextDouble,
+    setSeed,
+    getSeed,
+    setOracle,
+    clearOracle,
+    setObserver,
+    clearObserver,
+    next,
+    nextInt,
+    nextBool,
+    nextDouble,
     permutate_vector_local,
     getMT: () => m_mt,
   };

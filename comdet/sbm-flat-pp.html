@@ -132,6 +132,120 @@
   font-family: 'Fraunces', serif; font-style: italic;
   color: var(--paper);
 }
+
+.pp-rate-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .85rem;
+  margin: .9rem 0 1.1rem;
+}
+@media (max-width: 720px) { .pp-rate-grid { grid-template-columns: 1fr; } }
+.pp-rate-card {
+  border: 1px solid var(--rule);
+  border-left: 4px solid var(--cobalt);
+  border-radius: 2px;
+  background: rgba(237, 228, 201, .5);
+  padding: .7rem .85rem .8rem;
+}
+.pp-rate-card.out { border-left-color: var(--amber); }
+.pp-rate-card .cap {
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .68rem;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+  color: var(--paper-3);
+  margin-bottom: .4rem;
+}
+.pp-rate-card .big {
+  font-family: 'Fraunces', serif;
+  font-size: 1.45rem;
+  line-height: 1;
+  color: var(--paper);
+  margin: .2rem 0 .35rem;
+}
+.pp-rate-card .line {
+  display: flex;
+  justify-content: space-between;
+  gap: .8rem;
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .78rem;
+  color: var(--paper-3);
+  margin: .15rem 0;
+}
+.pp-rate-card .line b { color: var(--paper); font-weight: 600; }
+.pp-rate-bar {
+  height: 12px;
+  background: rgba(27, 32, 51, .08);
+  border: 1px solid rgba(27, 32, 51, .16);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: .55rem;
+}
+.pp-rate-bar > span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--cobalt);
+  transition: width .25s ease;
+}
+.pp-rate-card.out .pp-rate-bar > span { background: var(--amber); }
+
+.pp-ledger-table,
+.pp-contrast-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: .85rem 0 1.1rem;
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: .9rem;
+}
+.pp-ledger-table th,
+.pp-ledger-table td,
+.pp-contrast-table th,
+.pp-contrast-table td {
+  border-bottom: 1px solid var(--rule);
+  padding: .5rem .65rem;
+  text-align: left;
+  vertical-align: top;
+}
+.pp-ledger-table th,
+.pp-contrast-table th {
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .68rem;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+  color: var(--paper-3);
+}
+.pp-ledger-table td.term,
+.pp-contrast-table td.term {
+  font-family: 'Fraunces', serif;
+  font-style: italic;
+  color: var(--paper);
+  white-space: nowrap;
+}
+.pp-ledger-table td.val {
+  font-family: 'Special Elite', 'Courier New', monospace;
+  color: var(--paper);
+  text-align: right;
+  white-space: nowrap;
+}
+.pp-ledger-table tr.total td {
+  border-top: 2px solid var(--rule-2);
+  font-weight: 600;
+}
+.pp-ledger-table td.note,
+.pp-contrast-table td.note {
+  color: var(--paper-2);
+  font-size: .86rem;
+  line-height: 1.45;
+}
+.pp-mini-note {
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .76rem;
+  color: var(--paper-3);
+  margin: .2rem 0 0;
+}
+.pp-mini-note b { color: var(--paper); }
+
 </style>
 </head>
 <body>
@@ -152,6 +266,33 @@
 
 <section class="hook">
   <p>The planted-partition variant collapses the SBM's full per-pair edge-count matrix \(\boldsymbol{e}\) into two scalars: \(E_{\text{in}}\) is the total intra-block edge count (the sum of \(e_{rr}/2\) over all non-empty blocks), and \(E_{\text{out}}\) is the inter-block count (\(E - E_{\text{in}}\)). In plain terms: instead of asking "how do edges distribute across all \(B(B{+}1)/2\) block pairs", the PP model asks only "how do edges distribute between inside-block and outside-block placements". The DC and NDC sisters (<a href="./sbm-flat-dc.html">flat-dc</a>, <a href="./sbm-flat-ndc.html">flat-ndc</a>) carry the full matrix; PP is the most parsimonious of the three.</p>
+  <p>Step 1 fixes a candidate partition: every vertex carries a block label \(b_i\), and the state stores that label array plus the live block list. Step 2 turns the labels into \(M_{\text{in}}=\sum_r \binom{n_r}{2}\), the number of possible within-block slots. Step 3 scans the edge list to get \(E_{\text{in}}\), the observed edges whose endpoints share a label. Step 4 takes complements: \(M_{\text{out}}=\binom{N}{2}-M_{\text{in}}\) and \(E_{\text{out}}=E-E_{\text{in}}\).</p>
+  <p>The chain then prices the explanation with the PP likelihood, one-scalar edges DL, and partition DL. Single-vertex MH proposals move \(b_i\) through the same uniform proposal skeleton as the DC and NDC pages, but the likelihood is global: a move changes the two-rate totals, not a local matrix row. The raw PP partition is inspected against A, B, C, and D, then passed through CC, WCC, and CM because PP optimises two-rate assortativity rather than internal connectivity. This page remains Draft and keeps the PPBlockState divergence visible.</p>
+  <table class="pp-contrast-table">
+    <thead><tr><th>question</th><th>general flat SBM</th><th>planted-partition PP</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="term">what is counted?</td>
+        <td class="note">A full block-pair matrix \(e_{rs}\). Each pair of blocks may have its own edge count.</td>
+        <td class="note">Only \(E_{\text{in}}\) and \(E_{\text{out}}\). All within-block slots share one rate; all between-block slots share one rate.</td>
+      </tr>
+      <tr>
+        <td class="term">what can it express?</td>
+        <td class="note">Assortative, disassortative, core-periphery, and multipartite patterns if the matrix supports them.</td>
+        <td class="note">Assortative community structure: blocks should be denser internally than externally.</td>
+      </tr>
+      <tr>
+        <td class="term">where is the regularisation?</td>
+        <td class="note">The edges DL must encode \(B(B+1)/2\) matrix entries, so extra blocks are expensive.</td>
+        <td class="note">The edges DL encodes one integer, \(E_{\text{in}}\), so the model is cheaper but less expressive.</td>
+      </tr>
+      <tr>
+        <td class="term">what changes in code?</td>
+        <td class="note">DC/NDC use sparse entropy plus a full-matrix edges DL and can compute local subset deltas.</td>
+        <td class="note">PP uses <code>ppLikelihood()</code> + <code>ppEdgesDl()</code> + <code>partitionDl()</code> and recomputes the global PP term for each candidate move.</td>
+      </tr>
+    </tbody>
+  </table>
   <p>The description length the chain minimises is</p>
   <p style="text-align:center">\(\Sigma_{\text{PP}}(\boldsymbol{b}) = S_{\text{PP}}(E_{\text{in}}, E_{\text{out}}, M_{\text{in}}, M_{\text{out}}) + L_e^{\text{PP}}(E_{\text{in}}, M_{\text{in}}) + L_p(\boldsymbol{b})\),</p>
   <p>where the PP likelihood \(S_{\text{PP}}\) is a sum of two log-binomial terms (one for the intra-block placement, one for the inter-block placement), the PP edges DL \(L_e^{\text{PP}}\) prices the single scalar \(E_{\text{in}}\) under a uniform prior, and the partition DL \(L_p\) is identical to the DC and NDC variants. In plain terms: PP pays less in the edges DL than DC or NDC do, because there is one number to write down instead of a \(B(B{+}1)/2\)-entry matrix; in exchange, the data-fit term encodes an assortative prior (denser inside than between). Two properties. The PP likelihood is global: it depends on the totals \(E_{\text{in}}\) and \(M_{\text{in}}\) only, not on the per-pair entries; the model is parsimonious for the same reason it has no closed-form subset-entropy delta. And the PP form has no nested counterpart in graph-tool, so the <a href="./sbm-nested-best.html">nested-best page</a> compares only the nested-DC and nested-NDC variants.</p>
@@ -182,7 +323,24 @@
     </div>
     <div class="graph-canvas" id="g-input-cy"></div>
   </div>
-  <p>The fixture is dominantly assortative: A's \(K_5\) is dense (10 internal edges among 5 nodes), B's two \(K_4\)s are dense (6 internal each), and the inter-block edges are sparse. A clean planted-partition split produces \(p_{\text{in}} \approx 0.35\) and \(p_{\text{out}} \approx 0.02\), a 17-fold contrast that PP's likelihood resolves cleanly. C is the structural case: zero edges between two disconnected 3-cycles labelled identically means \(p_{\text{in}}\) is zero on that pair, and PP reads C as two separate blocks. Of the three flat variants, PP is the one whose data-fit term tracks the same assortativity signal the CC, WCC, and CM post-processors check structurally.</p>
+  <div class="pp-rate-grid">
+    <div class="pp-rate-card">
+      <div class="cap">within-block evidence under planted labels</div>
+      <div class="big">\(p_{\text{in}} = \)<span id="g-pp-gt-pin">·</span></div>
+      <div class="line"><span>slots \(M_{\text{in}}\)</span><b id="g-pp-gt-Min">·</b></div>
+      <div class="line"><span>edges \(E_{\text{in}}\)</span><b id="g-pp-gt-Ein">·</b></div>
+      <div class="pp-rate-bar"><span id="g-pp-gt-pin-fill"></span></div>
+    </div>
+    <div class="pp-rate-card out">
+      <div class="cap">between-block evidence under planted labels</div>
+      <div class="big">\(p_{\text{out}} = \)<span id="g-pp-gt-pout">·</span></div>
+      <div class="line"><span>slots \(M_{\text{out}}\)</span><b id="g-pp-gt-Mout">·</b></div>
+      <div class="line"><span>edges \(E_{\text{out}}\)</span><b id="g-pp-gt-Eout">·</b></div>
+      <div class="pp-rate-bar"><span id="g-pp-gt-pout-fill"></span></div>
+    </div>
+  </div>
+  <p class="pp-mini-note">Evidence read: planted labels with the two outliers treated as singleton blocks give a within/between density ratio of <b id="g-pp-gt-ratio">·</b>. The bars use raw edge density, so the outside bar is intentionally tiny.</p>
+  <p>The fixture is dominantly assortative: A's \(K_5\) is dense (10 internal edges among 5 nodes), B's two \(K_4\)s are dense (6 internal each), and the inter-block edges are sparse. A clean planted-partition split produces \(p_{\text{in}} \approx 0.36\) and \(p_{\text{out}} \approx 0.03\), about a 14-fold contrast that PP's likelihood resolves cleanly. C is the structural case: zero edges between two disconnected 3-cycles create no direct inside evidence between the halves, but PP has no explicit connectivity test, so the keep-vs-split decision is still made by the global \(\Sigma\) tradeoff. Of the three flat variants, PP is the one whose data-fit term tracks the same assortativity signal the CC, WCC, and CM post-processors check structurally.</p>
 </section>
 
 <!-- ─────────── Stage 1 · Random init ─────────── -->
@@ -205,7 +363,38 @@
       <span class="step-label">re-runs the chain &middot; init + 20 sweeps</span>
     </div>
   </div>
-  <p>\(\Sigma_0\) is large because the random partition produces near-equal \(p_{\text{in}}\) and \(p_{\text{out}}\): the two Bernoulli rates have no contrast, the likelihood is at its uniform maximum, and the chain still pays the partition DL cost. MCMC drives \(\Sigma\) down by re-routing nodes until the within-block pairs are denser than the between-block pairs.</p>
+  <p>The ledger below decomposes the same \(\Sigma\) into the three PP terms. The random-init column is the partition drawn by the current seed; the final column is the 20-sweep endpoint from that same seed.</p>
+  <table class="pp-ledger-table">
+    <thead><tr><th>term</th><th>random init</th><th>after 20 sweeps</th><th>what it is doing</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="term">\(S_{\text{PP}}\)</td>
+        <td class="val" id="g-pp-dl-init-lik">·</td>
+        <td class="val" id="g-pp-dl-final-lik">·</td>
+        <td class="note">counts ways to place \(E_{\text{in}}\) edges into \(M_{\text{in}}\) slots and \(E_{\text{out}}\) edges into \(M_{\text{out}}\) slots</td>
+      </tr>
+      <tr>
+        <td class="term">\(L_e^{\text{PP}}\)</td>
+        <td class="val" id="g-pp-dl-init-edge">·</td>
+        <td class="val" id="g-pp-dl-final-edge">·</td>
+        <td class="note">writes down the one unknown scalar \(E_{\text{in}}\); \(E_{\text{out}}\) follows from \(E-E_{\text{in}}\)</td>
+      </tr>
+      <tr>
+        <td class="term">\(L_p\)</td>
+        <td class="val" id="g-pp-dl-init-part">·</td>
+        <td class="val" id="g-pp-dl-final-part">·</td>
+        <td class="note">writes down the block sizes and the vertex labels; this is the over-splitting penalty</td>
+      </tr>
+      <tr class="total">
+        <td class="term">\(\Sigma_{\text{PP}}\)</td>
+        <td class="val" id="g-pp-dl-init-total">·</td>
+        <td class="val" id="g-pp-dl-final-total">·</td>
+        <td class="note">the quantity the MH chain lowers in expectation, measured in nats</td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="pp-mini-note">Current seed <b id="g-pp-dl-seed">·</b>: final aggregate readout \(p_{\text{in}}=\)<b id="g-pp-final-pin">·</b>, \(p_{\text{out}}=\)<b id="g-pp-final-pout">·</b>, ratio <b id="g-pp-final-ratio">·</b>. Read this with the ledger: PP optimises total \(\Sigma\), so a short run can trade assortativity against a cheaper partition.</p>
+  <p>\(\Sigma_0\) is large because the random partition produces near-equal \(p_{\text{in}}\) and \(p_{\text{out}}\): the two Bernoulli rates have little contrast, and the chain still pays the partition DL cost. MCMC drives \(\Sigma\) down by re-routing nodes toward partitions that either sharpen the two-rate evidence or save enough partition DL to compensate.</p>
 </section>
 
 <!-- ─────────── Stage 2 · MCMC walker ─────────── -->
@@ -219,6 +408,7 @@
     <li>Compute \(\Delta\Sigma\) for the move. PP's likelihood depends on the global aggregates \(E_{\text{in}}\), \(M_{\text{in}}\), so the kernel falls back to a full PP recompute rather than the analytic subset path DC and NDC use.</li>
     <li>Accept with probability \(\min(1, e^{-\beta\Delta\Sigma})\) at \(\beta = 1\). On accept, commit; on reject, leave the partition unchanged.</li>
   </ol>
+  <div class="step-desc"><span class="st">walker read</span> &middot; The visible visit follows <code>candidatePool(state, v)</code>, a uniform <code>rng.int(0, cands.length - 1)</code> target draw, <code>state.virtualMove(v, target)</code> to compare the before/after \(\Sigma\), and the usual <code>u &lt; exp(-beta * dS)</code> uphill acceptance rule.</div>
   <p>The PP variant's lack of a closed-form subset-entropy delta is structural, not an implementation gap. In plain terms: the PP likelihood involves binomial coefficients of the aggregates \(M_{\text{in}}\) and \(E_{\text{in}}\), both of which depend on every block's \(n_r\) sum; moving one vertex shifts both aggregates by a known amount, but the log-binomial does not decompose into a sum of per-block contributions the way DC and NDC do. The kernel computes the full PP likelihood twice (before and after the candidate move) and takes the difference. Two properties. The PP per-visit work is \(O(B_{\text{ne}})\) instead of DC's \(O(\deg(v) + B_{\text{ne}})\); the difference is dominated by the small constant in the binomial computation, so PP is roughly the same wall-clock speed as DC on the comdet fixture. And the PP per-visit \(|\Delta\Sigma|\) values tend to be smaller in absolute size than DC and NDC because the model collapses fine-grained matrix information into two scalars; a move that shifts \(E_{\text{in}}\) by 1 and \(M_{\text{in}}\) by a few has a sub-1-nat effect on the likelihood at most non-trivial partitions.</p>
   <p>Moves with \(\Delta\Sigma \le 0\) always commit and the kernel does not draw the uniform random sample (the RNG stream stays aligned with the cpp tracer at exact ties). Moves with \(\Delta\Sigma > 0\) commit with probability that decays exponentially in the cost. Over enough sweeps the chain samples from the posterior \(P(\boldsymbol{b} \mid \boldsymbol{A}) \propto e^{-\Sigma}\); on the 32-node fixture, 20 sweeps reach the mode under most seeds.</p>
   <div class="graph" id="g-mcmc">
@@ -251,6 +441,7 @@
     </div>
     <div class="graph-canvas" id="g-eq-cy" style="height: 240px"></div>
   </div>
+  <div class="step-desc"><span class="st">reading the trace</span> &middot; Early drops usually mean misplaced vertices are moving into assortative blocks, so \(S_{\text{PP}}\) falls as \(p_{\text{in}}\) separates from \(p_{\text{out}}\). Ochre jumps mark a block opening or emptying. A flat right edge means later visits mostly reject or trade small uphill/downhill moves; if the blue trace is still falling at sweep 20, the run has not equilibrated and the final partition should not be read yet.</div>
   <p>A still-falling trace at the right edge means the chain has not equilibrated and the sweep count is too low. On this fixture 20 sweeps usually settle the chain; rerolling the seed shows the equilibrium \(\Sigma\) is roughly stable but the equilibrium \(B\) wobbles by 1 or 2.</p>
 </section>
 
@@ -471,7 +662,7 @@
   <div class="stage-num">stage 12 &middot; sibling pages</div>
   <h2>Where to look next.</h2>
   <ul>
-    <li><a href="./sbm-flat-best.html">SBM-flat-best</a>. The flat-family anchor; lecture-style coverage of the Bayesian framing, all three variants in one place, the cross-algorithm contrasts.</li>
+    <li><a href="./sbm-flat-best.html">SBM-flat-best</a>. The flat-family anchor; full Bayesian framing, all three variants in one place, and the cross-algorithm contrasts.</li>
     <li><a href="./sbm-flat-dc.html">SBM-flat-dc</a>. The DC sister with full per-pair edge matrix and degree conditioning.</li>
     <li><a href="./sbm-flat-ndc.html">SBM-flat-ndc</a>. The NDC sister with full per-pair edge matrix and no degree conditioning.</li>
     <li><a href="./cc.html">CC</a>. The connected-component split. Walks the per-frame mechanics of stage A on this page.</li>
@@ -564,6 +755,92 @@ window.MathJax = {
     let k = 0;
     for (let i = 0; i < arr.length; i++) if (arr[i] != null && arr[i] >= 0) k++;
     return k;
+  }
+  function gtAsPpMembership() {
+    let maxLabel = -1;
+    for (let i = 0; i < F.gt.length; i++) if (F.gt[i] > maxLabel) maxLabel = F.gt[i];
+    const out = new Int32Array(F.gt.length);
+    let next = maxLabel + 1;
+    for (let i = 0; i < F.gt.length; i++) {
+      out[i] = F.gt[i] >= 0 ? F.gt[i] : next++;
+    }
+    return out;
+  }
+  function ppAggregates(membership) {
+    const idxById = {};
+    F.nodes.forEach(function (id, i) { idxById[id] = i; });
+    const sizes = new Map();
+    let nTot = 0;
+    for (let i = 0; i < membership.length; i++) {
+      const c = membership[i];
+      if (c == null || c < 0) continue;
+      sizes.set(c, (sizes.get(c) || 0) + 1);
+      nTot++;
+    }
+    let Min = 0;
+    sizes.forEach(function (n) { Min += n * (n - 1) / 2; });
+    const Mtot = nTot * (nTot - 1) / 2;
+    const Mout = Mtot - Min;
+    let E = 0, Ein = 0;
+    for (let e = 0; e < F.edges.length; e++) {
+      const a = idxById[F.edges[e][0]];
+      const b = idxById[F.edges[e][1]];
+      if (membership[a] == null || membership[b] == null
+          || membership[a] < 0 || membership[b] < 0) continue;
+      E++;
+      if (membership[a] === membership[b]) Ein++;
+    }
+    const Eout = E - Ein;
+    const pin = Min > 0 ? Ein / Min : 0;
+    const pout = Mout > 0 ? Eout / Mout : 0;
+    return {
+      B: clusterCount(membership), N: nTot, E: E,
+      Min: Min, Mout: Mout, Ein: Ein, Eout: Eout,
+      pin: pin, pout: pout, ratio: pout > 0 ? pin / pout : Infinity,
+    };
+  }
+  function fmtFixed(x, digits) {
+    return Number.isFinite(x) ? x.toFixed(digits == null ? 2 : digits) : "inf";
+  }
+  function fmtRate(x) {
+    return Number.isFinite(x) ? x.toFixed(3) : "inf";
+  }
+  function fmtRatio(x) {
+    return Number.isFinite(x) ? x.toFixed(1) + "x" : "inf";
+  }
+  function setBar(id, frac) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const pct = Math.max(0, Math.min(100, frac * 100));
+    el.style.width = pct.toFixed(1) + "%";
+  }
+  function renderGtEvidence() {
+    const agg = ppAggregates(gtAsPpMembership());
+    setText("g-pp-gt-Min", agg.Min);
+    setText("g-pp-gt-Ein", agg.Ein);
+    setText("g-pp-gt-Mout", agg.Mout);
+    setText("g-pp-gt-Eout", agg.Eout);
+    setText("g-pp-gt-pin", fmtRate(agg.pin));
+    setText("g-pp-gt-pout", fmtRate(agg.pout));
+    setText("g-pp-gt-ratio", fmtRatio(agg.ratio));
+    setBar("g-pp-gt-pin-fill", agg.pin);
+    setBar("g-pp-gt-pout-fill", agg.pout);
+  }
+  function renderPpLedger(run, seed) {
+    const init = run.initialBreakdown;
+    const fin = run.finalBreakdown;
+    setText("g-pp-dl-seed", seed);
+    setText("g-pp-dl-init-lik", fmtFixed(init.pp_lik, 2));
+    setText("g-pp-dl-init-edge", fmtFixed(init.pp_edges, 2));
+    setText("g-pp-dl-init-part", fmtFixed(init.partition_dl, 2));
+    setText("g-pp-dl-init-total", fmtFixed(init.total, 2));
+    setText("g-pp-dl-final-lik", fmtFixed(fin.pp_lik, 2));
+    setText("g-pp-dl-final-edge", fmtFixed(fin.pp_edges, 2));
+    setText("g-pp-dl-final-part", fmtFixed(fin.partition_dl, 2));
+    setText("g-pp-dl-final-total", fmtFixed(fin.total, 2));
+    setText("g-pp-final-pin", fmtRate(run.finalAgg.pin));
+    setText("g-pp-final-pout", fmtRate(run.finalAgg.pout));
+    setText("g-pp-final-ratio", fmtRatio(run.finalAgg.ratio));
   }
 
   // ── NMI / ARI (arithmetic-mean NMI, standard ARI) ───────────
@@ -675,8 +952,18 @@ window.MathJax = {
     const N = F.nodes.length;
     const init = SBM.UTIL.makeBlockInit(rng, N, 8);
     const state = SBM.BlockState(G, { mode: "pp", init: init });
+    const initialMembership = state.blockMembership();
+    const initialBreakdown = state.entropyBreakdown();
     SBM.equilibrate(state, rng, { sweeps: 20, beta: 1.0, recordCandidates: false });
-    return state.blockMembership();
+    const finalMembership = state.blockMembership();
+    return {
+      initialMembership: initialMembership,
+      finalMembership: finalMembership,
+      initialBreakdown: initialBreakdown,
+      finalBreakdown: state.entropyBreakdown(),
+      initialAgg: ppAggregates(initialMembership),
+      finalAgg: ppAggregates(finalMembership),
+    };
   }
 
   // ── chain step runners ──────────────────────────────────────
@@ -838,9 +1125,11 @@ window.MathJax = {
       return;
     }
     const gt = gtArray();
+    renderGtEvidence();
     function rerunForSeed(seed) {
-      const ppMem = ppRunForSeed(seed);
-      const chain = runChain(ppMem);
+      const ppRun = ppRunForSeed(seed);
+      const chain = runChain(ppRun.finalMembership);
+      renderPpLedger(ppRun, seed);
       renderAll(chain, gt);
       if (C.retypeset) C.retypeset();
     }

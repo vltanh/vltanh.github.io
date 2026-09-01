@@ -179,6 +179,19 @@
   <p>Every edge is owned by exactly one stage, and nothing disappears without a log line. The per-cluster edge-connectivity proof is inherited verbatim from v1.</p>
 </section>
 
+<section class="stage">
+  <div class="stage-num">algorithm map · v2 contract</div>
+  <h2>One owner per edge, one repair path per invalid sample.</h2>
+  <p>v2 keeps v1's mincut guarantee but changes the accounting discipline. Each stage receives a residual problem, writes only its own edges, and hands explicit leftovers to the next stage.</p>
+  <p><strong>Step 1.</strong> Profile measures the clustered core. Outliers are excluded while assignment, degree, block counts, and mincut are measured on real clusters; stage 3 later adds OUT back before the residual SBM, so outlier-incident stubs are absent only from the early vectors.</p>
+  <p><strong>Step 2.</strong> Construct only the \(K_{k+1}\) core. The stage spends intra-cluster degree and block budget on required connectivity edges, then attaches later nodes by availability-weighted sampling. <code>--no-sbm-overlay</code> means no second sampler writes into the same cell, though large \(k\) can still overspend a diagonal that residual accounting must clamp later.</p>
+  <p><strong>Step 3.</strong> Fold outliers into one block. The residual stage re-reads the empirical graph, maps nodes 19 and 20 in the shared example into a combined OUT block, and builds the 4x4 ledger. OUT is pooled: individual outlier labels are not a structural target beyond their node degrees.</p>
+  <p><strong>Step 4.</strong> Compute the residual SBM problem. <code>prepare_sbm_inputs</code> subtracts stage-2 edges from node degrees and block counts, recomputes <code>out_degs</code>, fills <code>probs</code>, bumps odd diagonals when graph-tool needs even half-edge mass, and zeroes overspent diagonals because the SBM can only add.</p>
+  <p><strong>Step 5.</strong> Repair invalid residual samples by swapping, not dropping. A loop or duplicate proposal picks a valid edge from the same block-pair bucket and tests the two swapped pairs before committing; if retry limits strand it, v2 drops that edge with a warning.</p>
+  <p><strong>Step 6.</strong> Top up with budget gates. The block-aware <code>true_greedy</code> matcher accepts an edge only if both endpoints have positive deficit, the pair is a non-neighbor, and the relevant block-pair counter still has room. The block gates can gridlock earlier than a global matcher, but the shortfall is logged.</p>
+  <p><strong>Step 7.</strong> Keep provenance visible. Final diagnostics color surviving edge pairs by producing stage, which explains whether a shared <code>dnc</code> edge came from the core, residual SBM, rewire repair, match-degree, or only one version.</p>
+</section>
+
 <!-- ─────────── Profiling · the shared fixture ─────────── -->
 <section class="stage">
   <div class="stage-num">profiling · outliers as singletons</div>
@@ -198,6 +211,9 @@
   <div class="stage-num">profiling · block assignment</div>
   <h2>Per-node block label. Outliers excluded now, folded back at stage 3.</h2>
   <p>Profile writes the same seven CSVs as v1: <code>node_id</code>, <code>cluster_id</code>, <code>assignment</code>, <code>degree</code>, <code>edge_counts</code>, <code>mincut</code>, and <code>com</code>. v2 also forces <code>outlier_mode=excluded</code>, so profile's tables cover only the clustered sub-network. The difference shows up later: at stage 3, v2 re-reads the empirical edgelist and folds every outlier into one combined pseudo-block, while v1 creates one singleton block per outlier.</p>
+  <p><strong>Step 1.</strong> Profile records clustered vertices only. The profile-time assignment has C1, C2, and C3; outliers receive no block id in this pass.</p>
+  <p><strong>Step 2.</strong> Exclusion keeps the mincut promise focused on real clusters. Singleton outliers would only add zero-connectivity rows, so <code>ProfileKernel.runProfile(... outlier_mode: "excluded")</code> writes the profile CSVs first.</p>
+  <p><strong>Step 3.</strong> Stage 3 later re-runs the assignment with <code>combined</code>, mapping every outlier iid to the fourth block before building <code>probs</code>.</p>
   <div class="graph" id="g-assign">
     <div class="graph-chrome">
       <span>input G after <code>outlier_mode=excluded</code> &middot; 18 nodes across three clusters</span>
@@ -209,6 +225,7 @@
     <div class="tag">why combined, not singleton</div>
     <p>A size-1 cluster has no internal edges (no partner inside), so giving each outlier its own block adds rows and columns to the block matrix without filling any diagonal. Under <code>combined</code>, every outlier shares one block; the outlier-outlier diagonal cell captures the real edges they have among themselves, and clustered-outlier cells capture the cross edges. One block means one residual-SBM cell per relation, which is all v2's stage 3 needs.</p>
   </div>
+  <p>In the combined view, nodes 19 and 20 share OUT when residual edges are sampled. That keeps the matrix learnable: outlier-outlier and cluster-outlier relations are represented as counts, not as many sparse singleton cells.</p>
 </section>
 
 <!-- ─────────── Profiling · degree sequence ─────────── -->
@@ -273,7 +290,10 @@
   <div class="stage-num">generation · the \(K_{k+1}\) core</div>
   <h2>Same \(K_{k+1}\) seed as v1. Nothing else samples here.</h2>
   <p>Stage 2 calls exactly the same <code>gen_kec_core.generate_cluster</code> as v1, with one change: v2 passes <code>--no-sbm-overlay</code>, so the constructive pass ends with the cores + attach-by-availability and nothing more. No <code>gt.generate_sbm</code> here, no overlay, no dedup. <code>probs</code> and <code>deg</code> carry exactly the budget the construction used.</p>
-  <p>The walker below is the same per-arrival walk used on the <a href="./ec-sbm-v1.html#g-core">v1 page</a>: cluster-major sort, phase-1 arrivals auto-attach, phase-2 arrivals greedy-pick \(k\) partners by residual <code>int_deg</code> desc. Realization 1 is byte-verified against the shipped Python at <code>PYTHONHASHSEED=0</code>. <code>random step</code> re-samples partner picks at the current arrival only, leaving every other arrival frozen; <code>random all</code> draws a fresh universe across every greedy arrival.</p>
+  <p>The walker below follows the current <code>gen_kec_core</code> rule: sort each cluster by residual degree, form the first \(K_{k+1}\) by connecting each phase-1 arrival to all processed predecessors, then attach each later node to \(k\) distinct processed nodes with <code>sample_by_availability</code>. That sampler is weighted without replacement over positive residual <code>int_deg</code> values; only if fewer than \(k\) candidates have positive availability does it fill the rest uniformly from exhausted candidates. <code>random step</code> re-samples the current attach draw only; <code>random all</code> re-samples every attach draw.</p>
+  <p><strong>Step 1.</strong> Guarantee first. Each cluster gets a \(K_{k+1}\) seed plus \(k\) edges from every later vertex back into the processed set.</p>
+  <p><strong>Step 2.</strong> Sample by availability because residual degree is capacity. Nodes with more remaining <code>int_deg</code> are more likely partners, but no partner can be selected twice for the same arrival.</p>
+  <p><strong>Step 3.</strong> <code>np.random.choice(... replace=False, p=availability/sum)</code> draws the positive-availability partners. <code>ensure_edge_capacity</code> inflates degree and block budget before any mandatory edge that would underflow.</p>
   <div class="graph" id="g-core">
     <div class="graph-chrome">
       <span id="g-core-stage">step 0 &middot; stripped</span>
@@ -281,9 +301,9 @@
     </div>
     <div class="graph-canvas" id="g-core-cy"></div>
     <div class="widget-row tight">
-      <button class="btn" id="g-core-rand-step" type="button" title="re-sample partner picks at the current arrival only">random step</button>
-      <button class="btn" id="g-core-rand-all" type="button" title="re-sample partner picks for every greedy arrival">random all</button>
-      <span class="step-label" id="g-core-real">initial realization &middot; random step re-rolls this arrival; random all re-rolls every greedy arrival</span>
+      <button class="btn" id="g-core-rand-step" type="button" title="re-sample the availability-weighted draw at the current arrival only">random step</button>
+      <button class="btn" id="g-core-rand-all" type="button" title="re-sample the availability-weighted draw for every attach arrival">random all</button>
+      <span class="step-label" id="g-core-real">initial realization &middot; random step re-rolls this arrival; random all re-rolls every attach arrival</span>
     </div>
     <div class="widget-row tight">
       <button class="btn" id="g-core-start" type="button">to start</button>
@@ -304,6 +324,9 @@
   <div class="stage-num">generation · residual accounting</div>
   <h2>Compute what the SBM still owes each block.</h2>
   <p>Before the SBM call, <code>prepare_sbm_inputs</code> re-reads the original edgelist and rebuilds <code>out_degs</code> + <code>probs</code> on all four blocks (three real clusters + one combined outlier block). It subtracts the constructive contribution from <code>out_degs</code> and populates <code>probs</code> inter-cells from the original edge list. Finally it reconciles each diagonal against the block's residual stub budget:</p>
+  <p><strong>Step 1.</strong> Reconcile node deficits and block-pair counts. Stage 2 already spent some stubs, so the SBM receives only the remaining half-edges and cells.</p>
+  <p><strong>Step 2.</strong> Do this before the SBM so one sampler owns the residual. Without the ledger, a later sampler can place an edge the core already owns and dedup would erase budget silently.</p>
+  <p><strong>Step 3.</strong> <code>prepare_sbm_inputs</code> computes \(D_k\), subtracts inter-block commitments, writes the diagonal residual, and applies the even-parity bump if required.</p>
   \[
     D_k \;=\; \sum_{u \,:\, b_u = k} \bigl(k^{\text{empirical}}_u - k^{\text{constructive}}_u\bigr),
     \quad
@@ -338,6 +361,9 @@
   <h2>One SBM call. Block-preserving swaps repair invalid edges without losing the block count.</h2>
   <p>With the residual <code>probs</code>, <code>out_degs</code>, and the combined-outlier block assignment ready, v2 calls <code>gt.generate_sbm(b, probs, out_degs, micro_ers=True, micro_degs=True)</code> once. The sampler can still emit self-loops (two of a node's stubs pair together) and parallel edges (the same pair drawn twice). v1 dedupped both and accepted the degree loss. v2 tries to fix each one via a block-preserving 2-opt swap.</p>
   <p>The swap: bucket every valid edge by its unordered block-pair \((A, B)\); for each invalid edge, pick a random valid edge in the same bucket and swap endpoints so each node stays in its home block. That preserves both the block-pair count and every node's block membership. Up to 10 retry passes with a stagnation detector. Edges still invalid after that are dropped with a <code>WARN</code>.</p>
+  <p><strong>Step 1.</strong> The SBM proposes a residual multigraph. The sample matches the residual degree and block matrix in expectation, but it may include loops or duplicate pairs.</p>
+  <p><strong>Step 2.</strong> Rewire instead of dedup because a duplicate still consumed one block-pair draw. Swapping tries to keep that draw alive as a simple edge.</p>
+  <p><strong>Step 3.</strong> <code>rewireInvalidEdges</code> queues invalid edges, samples a same-bucket partner, tests the two swapped edges, and commits only if both are simple.</p>
   <p>Step through; hit <code>random</code> to resample stage 3.</p>
   <div class="graph" id="g-rewire">
     <div class="graph-chrome">
@@ -374,6 +400,9 @@
   <div class="stage-num">generation · match the residual degree</div>
   <h2>Block-aware top-up by default. Logs gridlock; does not silently drop.</h2>
   <p>After the residual SBM + rewire, some nodes may still be short of their target. v2 hands the leftovers to a block-aware top-up that spends edges out of a per-block-pair budget read from the reference clustering, rather than letting stubs leak across cluster boundaries. Anything still unplaced is logged, never silently dropped the way <a href="./ec-sbm-v1.html">v1's plain greedy</a> does. The viz below runs the simpler global sibling so the heap mechanics stay readable; see the <a href="./matcher.html">degree matcher page</a> for the full menu.</p>
+  <p><strong>Step 1.</strong> <code>true_greedy</code> always tries the largest deficits first. A dynamic heap repeatedly picks the node with the most remaining stubs and pairs it with the best valid partner.</p>
+  <p><strong>Step 2.</strong> The block gates keep degree repair from rewriting communities. The cluster-preserving version rejects any candidate edge whose block-pair budget is already full.</p>
+  <p><strong>Step 3.</strong> The production default is block-aware <code>true_greedy</code>: candidate edges must be non-neighbors, consume positive deficits, and pass the per-block-pair counter before acceptance.</p>
   <p>Toggle <code>apply match_degree</code> to watch the per-node deficit pile shrink. Click <code>random</code> for a different realization.</p>
   <div class="graph" id="g-match">
     <div class="graph-chrome">
@@ -417,6 +446,9 @@
     </tbody>
   </table>
   <p>v1 and v2 share the same \(K_{k+1}\) cores edge-for-edge; everything else gets reshuffled. The flow chart below pairs each edge with the stage that placed it on each side.</p>
+  <p><strong>Step 1.</strong> Provenance records stage ownership per edge: every final edge is tagged as core, residual SBM, or match-degree, and one-sided edges become marginals.</p>
+  <p><strong>Step 2.</strong> This matters because metrics alone hide mechanisms. The same edge count can come from preserved core edges, repaired SBM edges, or late degree top-up.</p>
+  <p><strong>Step 3.</strong> Read the ribbons from the v1 stage that owned an edge to the v2 stage that owns the same pair; bottom segments are edges present in only one version.</p>
   <div class="disk-panel provenance-bar">
     <div class="step-desc" style="margin-bottom:.55rem"><span class="st">edge provenance flow · v1 &rarr; v2</span> &middot; ribbons join edges by their stage on each side. Top-to-bottom on each bar follows pipeline stage order: kec_core, then the SBM phase (overlay vs residual), then match_degree. Bottom segments are marginals: edges that exist on one side only.</div>
     <svg id="prov-bar" viewBox="0 0 720 420" preserveAspectRatio="xMidYMid meet"></svg>
@@ -508,6 +540,18 @@ window.MathJax = {
     return COL.edge_intra[c] || COL.edge_inter;
   }
   function edgeKey(u, v) { return Math.min(u, v) + "-" + Math.max(u, v); }
+  const CORE_ATTACH_VARIANTS = {
+    3:  [[1, 4],    [1, 2],    [2, 4]],
+    5:  [[1, 2],    [1, 4],    [2, 3]],
+    6:  [[1, 4],    [3, 4],    [1, 5]],
+    7:  [[3, 5],    [5, 6],    [1, 5]],
+    8:  [[1, 4],    [4, 7],    [1, 7]],
+    12: [[9, 11],   [10, 11],  [9, 10]],
+    13: [[9, 11],   [9, 12],   [10, 11]],
+    14: [[10, 12],  [10, 11],  [12, 13]],
+    17: [[15],      [16],      [15]],
+    18: [[16],      [15],      [17]],
+  };
 
   // Shared input fixture: input graph + singleton-mode 5-cluster colour
   // Shared input opener · excluded mode (ec-sbm v2's profile default).
@@ -573,55 +617,47 @@ window.MathJax = {
     };
   }
 
-  // Constructive edges live via ECSBMKernel.generateInternalEdges (same
-  // kernel as v1). Mutates KEC_DEG + KEC_PROBS in place; downstream
-  // residual SBM and rewire stages can read those for live accounting.
-  const KEC_RNG_SEED = 0x57f1c4ec;
-  const PROF_KEC = ProfileKernel.runProfile({
-    gen: "ec-sbm",
-    edgelist: EDGES.map(e => [String(e.u), String(e.v)]),
-    clustering: NODES
-      .filter(n => CLUSTER_OF[n] !== "OUT")
-      .map(n => [String(n), CLUSTER_OF[n]]),
-    outlier_mode: "excluded",
-    drop_oo: false,
-  });
-  const KEC_NODE_IDS = PROF_KEC.files["node_id.csv"].trim().split("\n");
-  const KEC_CLUSTER_LABELS = PROF_KEC.files["cluster_id.csv"].trim().split("\n");
-  const KEC_DEG = PROF_KEC.files["degree.csv"].trim().split("\n").map(Number);
-  const KEC_ASSIGN = PROF_KEC.files["assignment.csv"].trim().split("\n").map(Number);
-  const KEC_NUM_CLUSTERS = KEC_CLUSTER_LABELS.length;
-  const KEC_NODE2CLUSTER = new Map();
-  const KEC_CLUSTERING = new Map();
-  KEC_ASSIGN.forEach((c, iid) => {
-    if (c === -1) return;
-    KEC_NODE2CLUSTER.set(iid, c);
-    if (!KEC_CLUSTERING.has(c)) KEC_CLUSTERING.set(c, []);
-    KEC_CLUSTERING.get(c).push(iid);
-  });
-  const KEC_MCS = KEC_CLUSTER_LABELS.map(name => MINCUTS[name] || 0);
-  const KEC_PROBS = Array.from({length: KEC_NUM_CLUSTERS},
-    () => new Array(KEC_NUM_CLUSTERS).fill(0));
-  PROF_KEC.files["edge_counts.csv"].trim().split("\n").forEach(row => {
-    if (!row) return;
-    const [r, c, w] = row.split(",").map(Number);
-    KEC_PROBS[r][c] = w;
-  });
-  const KEC_RESULT = ECSBMKernel.generateInternalEdges({
-    clustering: KEC_CLUSTERING,
-    mcs: KEC_MCS,
-    deg: KEC_DEG,
-    probs: KEC_PROBS,
-    node2cluster: KEC_NODE2CLUSTER,
-    rng: d3.randomLcg(KEC_RNG_SEED),
-  });
-  const CORE_PLUS_ATTACH = Array.from(KEC_RESULT.edges.values()).map(
-    ([a, b]) => {
-      const u = parseInt(KEC_NODE_IDS[a], 10);
-      const v = parseInt(KEC_NODE_IDS[b], 10);
-      return u <= v ? [u, v] : [v, u];
-    },
-  );
+  // Constructive edges for the page's initial realization. This mirrors the
+  // current gen_kec_core structure: sorted K_{k+1} clique, then resolved
+  // sample_by_availability attach draws. The same edge set feeds the core
+  // walker, residual SBM, rewire, and match-degree panels.
+  function buildCorePlusAttach(choiceIndexByNode = {}) {
+    const out = [];
+    const add = (u, v) => out.push([Math.min(u, v), Math.max(u, v)]);
+    function clusterSorted(nodes) {
+      return nodes.slice().sort((a, b) =>
+        (DEGREES_EXCL[b] - DEGREES_EXCL[a]) || (a - b));
+    }
+    [["C1", C1], ["C2", C2], ["C3", C3]].forEach(([name, nodes]) => {
+      const ordered = clusterSorted(nodes);
+      const k = Math.min(MINCUTS[name] || 0, ordered.length - 1);
+      const processed = [];
+      let i = 0;
+      while (i <= k && i < ordered.length) {
+        const u = ordered[i];
+        processed.slice().sort((a, b) => a - b).forEach(v => add(u, v));
+        processed.push(u);
+        i += 1;
+      }
+      while (i < ordered.length) {
+        const u = ordered[i];
+        const variants = CORE_ATTACH_VARIANTS[u] || [];
+        const idx = choiceIndexByNode[u] || 0;
+        const partners = variants[idx % variants.length] || [];
+        partners.forEach(v => add(u, v));
+        processed.push(u);
+        i += 1;
+      }
+    });
+    const seen = new Set();
+    return out.filter(([u, v]) => {
+      const key = edgeKey(u, v);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+  const CORE_PLUS_ATTACH = buildCorePlusAttach();
 
   // ── Profile · block assignment ──
   (function () {
@@ -841,10 +877,10 @@ window.MathJax = {
     viz.sim.on("tick.blockRects", () => syncRects(viz));
   })();
 
-  // ── Generation · K_{k+1} per-arrival walker (shared with v1) ──
-  // gen_kec_core is byte-identical between v1 and v2; the walker matches.
-  // See ec-sbm-v1.html for the per-arrival framing prose; here we keep
-  // the implementation in step.
+  // ── Generation · K_{k+1} per-arrival walker ──
+  // The current gen_kec_core attach phase samples k processed nodes by
+  // residual availability, without replacement. The page keeps a small set
+  // of resolved samples so learners can reroll one attach draw at a time.
   (function () {
     const KS = { C1: MINCUTS.C1, C2: MINCUTS.C2, C3: MINCUTS.C3 };
     function clusterSorted(nodes) {
@@ -858,18 +894,7 @@ window.MathJax = {
     ];
     const TOTAL_ARRIVALS = ARRIVAL_SEQ.length;
 
-    const ATTACH_VARIANTS = {
-      3:  [[1, 4],    [1, 2],    [2, 4]],
-      5:  [[1, 2],    [1, 4],    [2, 3]],
-      6:  [[1, 4],    [3, 4],    [1, 5]],
-      7:  [[3, 5],    [5, 6],    [1, 5]],
-      8:  [[1, 4],    [4, 7],    [1, 7]],
-      12: [[9, 11],   [10, 11],  [9, 10]],
-      13: [[9, 11],   [9, 12],   [10, 11]],
-      14: [[10, 12],  [10, 11],  [12, 13]],
-      17: [[15],      [16],      [15]],
-      18: [[16],      [15],      [17]],
-    };
+    const ATTACH_VARIANTS = CORE_ATTACH_VARIANTS;
     const INTRO_ARRIVAL = {};
     ARRIVAL_SEQ.forEach((a, i) => { INTRO_ARRIVAL[a.node] = i + 1; });
     const ATTACH_IDX = {};
@@ -903,7 +928,7 @@ window.MathJax = {
           mode = "auto-all";
         } else {
           partners = (ATTACH[u] || []).slice();
-          mode = "greedy";
+          mode = "weighted-attach";
         }
         const newEdges = partners.map(p => [Math.min(u, p), Math.max(u, p)]);
         newEdges.forEach(([x, y]) => {
@@ -957,14 +982,24 @@ window.MathJax = {
           if (v === t.k) body += ` ${t.cluster}'s \\(K_{${t.k + 1}}\\) seed is now complete.`;
         }
       } else {
-        const sortedPreds = t.preds.slice().sort((a, b) =>
-          (t.residualsBefore[b] - t.residualsBefore[a]) || (a - b));
-        const fmt = (p) => `${p}&nbsp;(\\(r=${t.residualsBefore[p]}\\))`;
+        const weights = t.preds.map(p => Math.max(t.residualsBefore[p], 0));
+        const posSum = weights.reduce((a, b) => a + b, 0);
+        const positiveCount = weights.filter(w => w > 0).length;
+        const weightedCount = Math.min(t.k, positiveCount);
+        const sortedPreds = t.preds.slice().sort((a, b) => a - b);
+        const fmt = (p) => {
+          const r = Math.max(t.residualsBefore[p], 0);
+          const w = posSum > 0 ? (r / posSum).toFixed(2) : "0.00";
+          return `${p}&nbsp;(\\(r=${t.residualsBefore[p]}\\), \\(w=${w}\\))`;
+        };
         const pickedSet = new Set(t.partners);
         const picksStr = t.partners.map(fmt).join(", ");
         const others = sortedPreds.filter(p => !pickedSet.has(p)).map(fmt);
         const othersStr = others.length ? "{" + others.join(", ") + "}" : "&empty;";
-        body = `\\(|V_t|=${v} > k=${t.k}\\); greedy picks top-\\(k\\) by residual \\(\\texttt{int\\_deg}\\): \\(S_t\\) = {${picksStr}}. Skipped: ${othersStr}.`;
+        const fill = weightedCount < t.k
+          ? ` Only ${weightedCount} positive candidate${weightedCount === 1 ? "" : "s"} exist, so the remaining ${t.k - weightedCount} pick${t.k - weightedCount === 1 ? "" : "s"} come uniformly from exhausted candidates.`
+          : "";
+        body = `\\(|V_t|=${v} > k=${t.k}\\); <code>sample_by_availability</code> draws ${t.k} distinct predecessor${t.k === 1 ? "" : "s"} without replacement. Availability weights are proportional to positive residual \\(\\texttt{int\\_deg}\\): \\(S_t\\) = {${picksStr}}. Not selected: ${othersStr}.${fill}`;
       }
       return { stage, html: `${head} ${body}` };
     }
@@ -987,7 +1022,7 @@ window.MathJax = {
     function currentStepHasVariant(step) {
       if (step < 1) return false;
       const t = TRACE[step - 1];
-      return t.mode === "greedy" && ATTACH_VARIANTS[t.node] !== undefined;
+      return t.mode === "weighted-attach" && ATTACH_VARIANTS[t.node] !== undefined;
     }
 
     function render(step) {
@@ -1006,9 +1041,9 @@ window.MathJax = {
       stageEl.textContent = sd.stage;
       let realText;
       if (rollCount === 0) {
-        realText = "initial realization · random step re-rolls this arrival; random all re-rolls every greedy arrival";
+        realText = "initial realization · random step re-rolls this arrival; random all re-rolls every attach arrival";
       } else if (rollMode === "all") {
-        realText = `reroll #${rollCount} · all greedy arrivals re-sampled`;
+        realText = `reroll #${rollCount} · all attach arrivals re-sampled`;
       } else {
         realText = `reroll #${rollCount} · current arrival re-sampled; others frozen`;
       }

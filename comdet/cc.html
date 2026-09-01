@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>CC &middot; connected-component split | Community Detection Algorithms</title>
 <link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐖</text></svg>">
 <meta name="description" content="CC (connected-component split). Walked stage by stage on the shared 32-node fixture.">
@@ -155,6 +155,8 @@
 }
 .cc-walker-deep .counter-row .item { display: inline-flex; gap: .25rem; }
 .cc-walker-deep .counter-row .item .v { color: var(--paper); font-weight: 600; }
+.cc-walker-deep .counter-row.tight { margin-top: .5rem; }
+.cc-walker-deep .panel-grid.comp-panel { margin-top: .4rem; }
 
 /* Per-cluster panel grid: small per-stage cards. Each card holds
    one cluster's residual BFS state on its own viz frame. */
@@ -198,35 +200,6 @@
 }
 .cc-cluster-card .verdict.split {
   background: rgba(199,128,30,.18); color: var(--amber); border: 1px solid var(--amber);
-}
-
-/* Edge cases card grid (kept from prior CC build, lightly relabelled). */
-.cc-case-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 1rem;
-  margin: 1rem 0;
-}
-@media (max-width: 800px) { .cc-case-grid { grid-template-columns: 1fr; } }
-.cc-case-card {
-  background: var(--ink-2);
-  border: 1px solid var(--rule);
-  border-left: 3px solid var(--azure);
-  border-radius: 3px;
-  padding: .7rem .85rem;
-}
-.cc-case-card .case-q {
-  font-family: 'Caveat Brush', cursive;
-  font-size: 1.1rem;
-  color: var(--paper);
-  margin-bottom: .35rem;
-  line-height: 1.2;
-}
-.cc-case-card .case-a {
-  font-family: 'IBM Plex Sans', sans-serif;
-  font-size: .82rem;
-  color: var(--paper-2);
-  line-height: 1.55;
 }
 
 .cc-mini-canvas {
@@ -300,6 +273,35 @@
 }
 .cc-fact-row .item .v { color: var(--paper); font-weight: 600; }
 .cc-fact-row .item .k { color: var(--paper-3); margin-right: .25rem; }
+
+.cc-walker-deep .phase-note .cap {
+  font-family: 'Special Elite','Courier New',monospace;
+  font-size: .64rem;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--azure);
+  margin-bottom: .35rem;
+}
+.cc-equation { text-align: center; }
+
+.cc-walker-deep .cc-phase-digest {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: .55rem;
+  margin: .85rem 0 .75rem;
+}
+.cc-walker-deep .phase-note {
+  background: var(--ink-2);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: .55rem .65rem;
+}
+.cc-walker-deep .phase-note p {
+  margin: .15rem 0 0;
+  color: var(--paper-2);
+  font-size: .78rem;
+  line-height: 1.45;
+}
 </style>
 </head>
 <body>
@@ -316,15 +318,16 @@
   <p class="sub">Cheapest of the three connectivity post-procs. One breadth-first sweep per cluster; every connected piece becomes its own output cluster. No threshold, no parameters: a sanity pass that catches partitions whose clusters are not actually connected.</p>
 </header>
 
+<div class="uc-banner">
+  <strong>Draft.</strong> Under-construction trace for the CC post-processor on the shared 32-node fixture. The page keeps under-construction status until reviewed; read the walker as an explanatory trace of the shipped BFS split.
+</div>
+
 <section class="hook">
   <p>Some clustering algorithms emit a label per node without checking that the nodes carrying that label are reachable from each other. Stochastic block models are the most frequent source: they fit edge density between blocks, not whether each block is internally connected. A cluster can end up as two disconnected halves under the same label, and the output looks like one community when it is really two.</p>
   <p><em>CC</em> is the correction. For each cluster in the input partition, drop every edge that crosses out to a different cluster, run a breadth-first search on what remains, and replace the cluster with one new cluster per connected piece. If the cluster was already connected, nothing changes.</p>
   <p>The cost is one breadth-first search per cluster, \(O(|V| + |E|)\) over the whole graph. In plain terms: every node and every intra-cluster edge gets touched once, no more. Two interesting properties: cost is independent of the number of input clusters (the search sweeps the residual graph in one pass over the whole node set); and there is no parameter to tune, no threshold to set, no model to fit.</p>
-  <div class="defs">
-    <div><span class="term">cross-cluster edge</span> an edge whose endpoints carry different input cluster labels. CC drops every such edge before the breadth-first search.</div>
-    <div><span class="term">residual graph</span> the subgraph that survives after the cross-cluster edges are dropped. Same node set as the input; only intra-cluster edges remain.</div>
-    <div><span class="term">singleton component</span> a connected component of size one in the residual. CC drops these from the output; nodes that fall into a singleton end up unlabelled.</div>
-  </div>
+  <p>On the shared fixture, the only structural repair is cluster C: its two 3-cycles share one input label, but no residual path connects them. A, B, and D stay intact. The pass keeps the node set fixed, drops cross-label edges, runs BFS inside each label, drops size-one components, and assigns fresh dense output ids to whatever connected pieces survive.</p>
+  <p>Connected is not the same as well-connected. Cluster B's one-edge bridge and D's path both pass CC, because each is still a single connected piece. Those weak-cut cases belong to <a href="./wcc.html">WCC</a> and <a href="./cm.html">CM</a>, which put a minimum-cut threshold on top.</p>
   <div class="callout">
     <div class="tag">why this matters &middot; Park 2025 / Vu-Le 2026</div>
     <p>On graph-tool's flat and nested stochastic block models (every variant tested: degree-corrected, non-degree-corrected, planted-partition, plus PySBM), internally disconnected clusters show up across both real and synthetic benchmarks. Splitting them with CC improves accuracy on most of those benchmarks. <a href="./wcc.html">WCC</a> adds a connectedness threshold on top and gains more; <a href="./cm.html">CM</a> adds a re-clustering pass on top of that and gains the most. CC is the cheapest correction of the three.</p>
@@ -340,6 +343,19 @@
     <span><span class="ref-label">docs</span><a href="https://github.com/vltanh/community-detection/blob/main/docs/algorithms/cc.md" target="_blank" rel="noopener">technical companion</a></span>
   </div>
   <p class="algo-prov">Byte-equal versus the shipped binary on 306 cells across partition-synth and SBM-Flat-PP panels (429,192 records, 0 mismatches), plus the bumped 3-tier panel chained through four base partitioners.</p>
+</section>
+
+<!-- ─────────── Reader map · algorithm trace ─────────── -->
+<section class="stage">
+  <div class="stage-num">reader map &middot; algorithm trace</div>
+  <h2>Read CC as one residual graph and one BFS ledger.</h2>
+  <p>Connected-component split is short enough to fit in one screen of code, but the important part is the order. <strong>Step 1.</strong> Read the input membership vector; the colours in stage 0 are exactly those labels. <strong>Step 2.</strong> Build the residual graph by keeping only edges whose two endpoints carry the same label. Connectivity has to be tested inside a cluster, not through other clusters, so a path through A or B cannot make the two halves of C connected.</p>
+  <p><strong>Step 3.</strong> For each label, start BFS at the lowest unvisited node and drain the queue. One queue drain equals one connected component: when the queue empties, every reachable node from that root has been marked. If the label still has an unvisited node, that node starts the next component under the same input label.</p>
+  <p><strong>Step 4.</strong> Write a component id to every node as soon as it is reached. Multiple component ids under one input label are exactly the split case. <strong>Step 5.</strong> After discovery, drop size-one components and renumber the survivors densely in discovery order. This is why the output ids need not preserve the input label names, even when the node set survives unchanged.</p>
+  <div class="callout">
+    <div class="tag">the whole kernel in one paragraph</div>
+    <p>Initialise every node's component id to \(-1\). For each input label, collect its nodes and its residual intra-label adjacency. While that label still has an unvisited root, run BFS, write one component id to the reached set, and append that set to the component ledger. Finally, walk the ledger in discovery order: components of size one stay unlabelled; every larger component gets the next dense output id.</p>
+  </div>
 </section>
 
 <!-- ─────────── Stage 0 · input fixture + base clustering ─────────── -->
@@ -383,10 +399,17 @@
 <!-- ─────────── Stage 2 · the rule ─────────── -->
 <section class="stage">
   <div class="stage-num">stage 2 &middot; the rule</div>
-  <h2>One inequality, two regions.</h2>
-  <p>CC's test, written explicitly:</p>
-  <p style="text-align:center">\[ |\{\text{connected components of } G[C]\}| \;\ge\; 1 \]</p>
-  <p>where \(G[C]\) is the subgraph of \(G\) induced by the cluster's node set, restricted to intra-cluster edges. In plain terms: if the cluster's residual induced subgraph breaks into more than one connected piece, CC emits one output cluster per piece; if it stays as one piece, the cluster passes unchanged. The inequality is loose at one (the trivial case where the cluster is connected) and tight when the cluster has been split.</p>
+  <h2>Count components, then branch.</h2>
+  <p>CC's test is not a score. It is a count followed by a branch:</p>
+  <p class="cc-equation">\[
+    k_C = |\{\text{connected components of } G[C]\}|,\qquad
+    \begin{cases}
+      k_C = 1 &amp;\Rightarrow \text{emit the cluster unchanged}\\
+      k_C > 1 &amp;\Rightarrow \text{emit one cluster per component}
+    \end{cases}
+  \]</p>
+  <p>Here \(G[C]\) is the subgraph induced by the cluster's node set after cross-cluster edges are removed. In plain terms: if the residual induced subgraph breaks into more than one connected piece, CC emits one output cluster per piece; if it stays as one piece, the cluster passes unchanged.</p>
+  <p>Operationally, \(k_C\) is the number of BFS sweeps needed to visit every node that carries label \(C\) in the residual graph. A connected cluster needs exactly one sweep. A disconnected cluster forces the outer loop to start again from another unvisited node. The kernel never computes a cut, density, or score here; it writes a component id when each node is first reached, then counts component sizes.</p>
   <p>Two interesting properties of this rule. It says nothing about the strength of the connection: a cluster joined by a single bridge edge is still one connected piece, so CC passes it through. The harder test that catches the bridge case is the <a href="./wcc.html">WCC threshold</a>, which compares the cluster's minimum cut against a size-dependent bound. And the test is local to the cluster: the verdict on cluster \(C\) depends only on the edges between \(C\)'s own nodes, not on what the rest of the graph looks like, so the same cluster has the same verdict regardless of the partition's other contents.</p>
   <div class="callout">
     <div class="tag">where CC stops and WCC begins</div>
@@ -459,6 +482,28 @@
   <h2>Every read, every write, frame by frame.</h2>
   <p>The walker below runs CC's five phases on the residual graph: spot the cross edges, drop them, run breadth-first search per cluster, filter singletons, assign output ids. A phase chip jumps to that phase; the frame controls step through every read and write in order. The graph and the state panels update together, so the per-frame read and write are visible at the same time.</p>
   <p>Two properties of the walker. Every frame is one step in the kernel that ships in the binary; the kernel that drives the walker is byte-equal to the canonical C++ implementation at every per-step record. And the walker is fully deterministic on this fixture: CC has no random number draws, no tie-break ambiguity, no thread interleaving. The same input produces the same trace on every browser.</p>
+  <div class="cc-phase-digest">
+    <div class="phase-note">
+      <div class="cap">phase 1 &middot; read edge</div>
+      <p>Compare the two endpoint labels. The only question is whether the edge belongs inside one claimed cluster.</p>
+    </div>
+    <div class="phase-note">
+      <div class="cap">phase 2 &middot; build residual</div>
+      <p>Keep same-label edges in the adjacency lists and skip cross-label edges. Nodes are never removed here.</p>
+    </div>
+    <div class="phase-note">
+      <div class="cap">phase 3 &middot; run BFS</div>
+      <p>Queue, pop, visit, and push neighbors. A new root starts only after the previous queue is empty.</p>
+    </div>
+    <div class="phase-note">
+      <div class="cap">phase 4 &middot; size filter</div>
+      <p>Count how many nodes each component id owns. Size-one components become unlabelled output nodes.</p>
+    </div>
+    <div class="phase-note">
+      <div class="cap">phase 5 &middot; output ids</div>
+      <p>Map surviving component ids to dense cluster ids in discovery order, then write the final partition.</p>
+    </div>
+  </div>
   <div class="phase-strip" id="g-walk-phases" role="tablist"></div>
   <div class="graph">
     <div class="graph-chrome">
@@ -483,10 +528,10 @@
     <div class="state-panel">
       <div class="cap">BFS queue and counters</div>
       <div class="queue-row" id="g-walk-queue">&middot;</div>
-      <div class="counter-row" id="g-walk-counters" style="margin-top:.5rem"></div>
+      <div class="counter-row tight" id="g-walk-counters"></div>
     </div>
   </div>
-  <div class="panel-grid" style="margin-top:.4rem">
+  <div class="panel-grid comp-panel">
     <div class="state-panel">
       <div class="cap">component id per node</div>
       <table class="comp-table" id="g-walk-comp"><thead><tr><th>node</th><th>cid</th><th>node</th><th>cid</th></tr></thead><tbody></tbody></table>
@@ -598,14 +643,8 @@
 <section class="stage">
   <div class="stage-num">stage 12 &middot; why split-only</div>
   <h2>What CC does not do.</h2>
-  <p>CC's role is narrower than "fix the clustering". The remit covers one structural fault and nothing else; listing what falls outside it clarifies the picture.</p>
-  <div class="defs">
-    <div><span class="term">no re-clustering</span> CC never re-runs the base community-detection algorithm on the split halves. After a split, both halves are emitted as-is. <a href="./cm.html">CM</a> is the sibling that re-runs Leiden (or whichever base) on each half; that is the headline difference between the two.</div>
-    <div><span class="term">no merging</span> the post-proc only splits; it never combines two input clusters into one. If the input partition under-splits a community (one ground-truth community labelled as two clusters), CC cannot fix it.</div>
-    <div><span class="term">no label preservation</span> the original input cluster id is not carried into the output. Surviving pieces get fresh ids assigned in breadth-first-discovery order. Code that needs to track the lineage from input cluster id to output cluster id has to maintain the mapping externally.</div>
-    <div><span class="term">no cut work</span> the breadth-first search counts components; it does not measure or use minimum-cut values. The bridge case (one connected piece joined by a single edge) passes through unchanged. The cut-based test is <a href="./wcc.html">WCC</a>'s.</div>
-    <div><span class="term">no parameter</span> there is no threshold, no resolution, no minimum cluster size. The output partition on a given input is uniquely determined.</div>
-  </div>
+  <p>CC's role is narrower than "fix the clustering". It never re-runs the base community-detection algorithm on the split halves; after a split, both halves are emitted as-is. <a href="./cm.html">CM</a> is the sibling that re-runs Leiden or Louvain on each failing side. CC also never merges two input clusters into one, so an input partition that under-splits a community cannot be repaired here.</p>
+  <p>The original input cluster id is not carried into the output. Surviving pieces get fresh ids assigned in breadth-first-discovery order, so code that needs lineage has to keep that mapping separately. The pass also does no cut work: a one-edge bridge is still a connected component and passes unchanged. There is no threshold, no resolution, and no minimum cluster-size parameter, so the output partition on a given input is uniquely determined.</p>
   <p>Two properties of "split-only". The output partition is a refinement of the input partition restricted to the labelled nodes: every output cluster's node set is a subset of some input cluster's node set. So no inter-cluster edge in the output exists between two pieces of one input cluster: the cross-cluster edges that the residual cut dropped are exactly the edges that would lie inside such a pair in the output. And the count of output clusters is at least the count of input clusters (modulo singleton drops): CC can leave the count unchanged or grow it, never shrink it.</p>
 </section>
 
@@ -645,20 +684,9 @@
   <h2>Where CC over-splits a planted community.</h2>
   <p>CC's failure mode is the small planted cluster with low internal connectivity. If a planted community is two dense pieces with no edge between them, CC splits correctly; the base algorithm under-merged and CC fixes it. But if the planted community is genuinely sparse, with two near-isolated pieces that happen to share a label because the analyst designed it that way, CC still splits and the output disagrees with the planted partition by exactly that split.</p>
   <p>Reading this as a failure or a fix depends on what the analyst wants. CC's invariant is structural: the output partition has no internally-disconnected cluster. The planted partition may carry semantic content that the topology cannot see (two pieces are "one community" because they share an attribute, a label, an origin). CC has no access to that semantic content; the post-proc only reads edges.</p>
-  <div class="cc-case-grid">
-    <div class="cc-case-card">
-      <div class="case-q">A cluster with no internal edges.</div>
-      <div class="case-a">Every cross-cluster edge gets dropped, so the cluster's residual subgraph has no edges left. Each node sits on its own. The breadth-first search reaches nothing past its starting node. Every node becomes a singleton, the singleton filter drops them all, and the cluster vanishes from the output. The pre-CC count of nodes in this cluster goes to zero in the post-CC count.</div>
-    </div>
-    <div class="cc-case-card">
-      <div class="case-q">A single-node cluster.</div>
-      <div class="case-a">One root, one component of size one, dropped at the filter. CC treats outliers and singletons identically: gone from the output. The fixture's nodes 30 and 31 share the singleton outlier label and form one size-2 piece via their pendant edge, so they survive as one output cluster; the failure mode here is the opposite of what the planted partition expected.</div>
-    </div>
-    <div class="cc-case-card">
-      <div class="case-q">Planted community with a 1-cut bridge.</div>
-      <div class="case-a">The bridge keeps the cluster as one connected piece, so CC passes it through unchanged. The size-dependent threshold in <a href="./wcc.html">WCC</a> is what catches the bridge case explicitly. CC has no setting that distinguishes it from a denser join.</div>
-    </div>
-  </div>
+  <p><strong>Cluster with no internal edges.</strong> Every cross-cluster edge gets dropped, so the residual subgraph has no edges left. Each BFS root reaches only itself, every node becomes a singleton, the singleton filter drops them all, and the cluster vanishes from the output.</p>
+  <p><strong>Single-node cluster.</strong> One root produces one component of size one, and the filter drops it. CC treats outliers and singletons identically. The fixture's nodes 30 and 31 are different: they share the singleton outlier label and have an edge between them, so they form one size-2 piece and survive as an output cluster.</p>
+  <p><strong>Planted community with a 1-cut bridge.</strong> The bridge keeps the cluster as one connected piece, so CC passes it through unchanged. The size-dependent threshold in <a href="./wcc.html">WCC</a> is what catches the bridge case explicitly. CC has no setting that distinguishes it from a denser join.</p>
   <p>Vu-Le 2026 reports CC's gain over the unprocessed clustering across both flat and nested stochastic block models. The aggregate gain holds, but on inputs whose planted communities include genuinely sparse or genuinely disconnected pieces (rare in the benchmark suite, more common in domain-specific real networks), CC splits a cluster that the ground truth keeps together. <a href="./cm.html">CM</a>'s re-clustering pass can recombine a merged label after such a split, so the chain behaves differently from CC alone on this class of input.</p>
 </section>
 
@@ -669,6 +697,7 @@
   <p class="tools">drawn with <a href="https://d3js.org" target="_blank" rel="noopener">d3</a></p>
   <p class="credit">typed by vltanh, doodled with Claude</p>
 </footer>
+</main>
 
 <script>
 window.MathJax = {

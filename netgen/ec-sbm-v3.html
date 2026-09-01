@@ -179,6 +179,19 @@
   <p>Stages 3 (residual SBM over all blocks + block-preserving 2-opt rewire) and 4 (block-aware degree matcher with per-block-pair budget) are unchanged from v2. The per-cluster edge-connectivity floor still holds: \(m \ge k\) so the \(K_{m+1}\) seed plus \(m\) attachments per arrival is at least \(k\)-edge-connected by construction.</p>
 </section>
 
+<section class="stage">
+  <div class="stage-num">algorithm map · v3 stage split</div>
+  <h2>v3 changes the cluster interior, then hands off to v2.</h2>
+  <p>The page has two ideas to keep separate. Stage 2 is a per-cluster PSO learner for triangle density; stages 3 and 4 are the same residual accounting and matcher pipeline used by v2.</p>
+  <p><strong>Step 1.</strong> Profile carries both the robustness floor and the triangle-density target for each real cluster. <code>mincut.csv</code> gives \(k(C)\); under <code>--method pso</code>, <code>cluster_ccoeff.csv</code> gives \(\hat c(C)\). Tiny or triplet-free clusters carry little shape information, so \(\hat c(C)\) is most useful where the induced cluster has enough internal paths.</p>
+  <p><strong>Step 2.</strong> Stage 2 builds one hyperbolic disk per cluster. Degree rank fixes arrival order and \(r_i=2\log i\); iid angles locate nodes; PSO weights choose older partners. This replaces the fixed v2 core shape with geometry that can express different triangle densities, though each cluster realization is still a sample.</p>
+  <p><strong>Step 3.</strong> \(m = \min(\max(k, m_\text{floor}), n-1)\) keeps the v1/v2 edge-connectivity guarantee while changing partner selection. The \(K_{m+1}\) seed and \(m\) back-attachments make the stage-2 cluster at least \(m\)-edge-connected; when \(k\) is large, \(m\) can still force a dense seed even if the cc search would prefer a sparser shape.</p>
+  <p><strong>Step 4.</strong> The T search chooses the evaluated realization whose stage-2 cluster is closest to the empirical \(\hat c(C)\). Bisection/secant proposals stay inside the bracket, but the target is stochastic and per-cluster; it does not guarantee the final global cc.</p>
+  <p><strong>Step 5.</strong> The downstream handoff is v2's ledger with a different debit. Stage 3 subtracts exactly the chosen PSO edges before building <code>out_degs</code> and <code>probs</code>; PSO can over- or under-spend a diagonal relative to v2, so the residual signs can change by block.</p>
+  <p><strong>Step 6.</strong> The matcher is inherited too. v3 reuses v2's block-aware <code>true_greedy</code> acceptance checks and gridlock logging, so remaining degree deficits are repaired only where the block-pair budget permits.</p>
+  <p><strong>Step 7.</strong> Provenance separates what changed in v3 from what was inherited. Stage colors and walker labels distinguish PSO, residual SBM, rewire partners, and matcher top-up edges; the rewire partner color is a diagnostic moment, while final ownership remains with the residual or matcher stage.</p>
+</section>
+
 <!-- ─────────── Profiling · the shared fixture ─────────── -->
 <section class="stage">
   <div class="stage-num">profiling · outliers as singletons</div>
@@ -283,6 +296,9 @@
     </thead>
     <tbody id="g-ccoeff-tbody"></tbody>
   </table>
+  <p><strong>Step 1.</strong> \(k(C)\) remains a floor, not a shape. It measures the minimum number of intra-cluster edges whose removal can disconnect \(G[C]\), writes one row per cluster to <code>mincut.csv</code>, and prevents the generator from making a cluster easier to cut than the empirical one.</p>
+  <p><strong>Step 2.</strong> \(\hat c(C)\) is the PSO target. It records the global clustering coefficient of the induced subgraph \(G[C]\); two clusters can have the same \(k(C)\) but very different triangle density, so v3 needs this second signal. <code>cluster_ccoeff.csv</code> is emitted only for <code>--method pso</code>, then each row feeds that cluster's T search.</p>
+  <p><strong>Step 3.</strong> The old v2 ledger stays intact. <code>node_id</code>, <code>assignment</code>, <code>degree</code>, and <code>edge_counts</code> stay on the outlier-excluded clustered graph because stage 2 only needs real clusters; stage 3 later re-introduces outliers as one combined block. The same profile files become the index map for converting local PSO edges back to page/global node ids.</p>
 </section>
 
 <!-- ─────────── Generation · PSO + T-search ─────────── -->
@@ -290,12 +306,18 @@
   <div class="stage-num">generation · per-cluster PSO + T-search</div>
   <h2>One PSO build per cluster. T tuned to match \(\hat c(C)\).</h2>
   <p>Stage 2 dispatches one independent PSO build per cluster. Each cluster's nodes are sorted by descending profile-time degree (id-asc tiebreak), giving each node a 1-based <em>arrival rank</em> that fixes its radial coordinate \(r_i = 2\log i\). Angular coordinates are drawn iid from \(\mathrm{Uniform}[0, 2\pi)\). Attachment count is \(m = \min(\max(k, m_\text{floor}), n - 1)\) with default \(m_\text{floor} = 1\), so \(m \ge k\) — the per-cluster mincut floor still holds.</p>
-  <p>The first \(m+1\) arrivals connect to all predecessors (a \(K_{m+1}\) clique seed). Each later arrival \(t\) computes hyperbolic distances \(d(t, j)\) to every \(j < t\) and picks \(m\) partners. At \(T = 0\) the picks are the \(m\) closest predecessors (deterministic). At \(T &gt; 0\) the picks are an Efraimidis-Spirakis weighted draw from</p>
+  <p>The first \(m+1\) arrivals connect to all predecessors (a \(K_{m+1}\) clique seed). Each later arrival \(t\) computes hyperbolic distances \(d(t, j)\) to every \(j &lt; t\) and picks \(m\) partners. At \(T = 0\) the picks are the \(m\) closest predecessors (deterministic). At \(T &gt; 0\) the picks are an Efraimidis-Spirakis weighted draw from</p>
   \[
     p_{tj} \;=\; \frac{1}{1 + \exp\bigl((d(t,j) - R_t) / 2T\bigr)},
   \]
   <p>where \(R_t\) is the temperature-dependent connection radius from the canonical PSO formula. Lower \(T\) concentrates picks on the closest predecessors (high cc); higher \(T\) flattens the distribution toward random (low cc).</p>
   <p>Around the PSO build, stage 2 runs a 1-D bisection-and-secant search over \(T \in [t_\text{min}, t_\text{max}]\). Each iteration evaluates PSO at one \(T\), measures the cluster's induced global cc, and shrinks the bracket using the sign of \(c - \hat c(C)\). The walker below steps through every search iteration across every cluster; the chosen \(T\) per cluster is whichever evaluated PSO realisation came closest to \(\hat c(C)\).</p>
+  <p><strong>PSO step 1.</strong> Sort nodes by profile degree; rank \(i\) fixes \(r_i = 2\log i\).</p>
+  <p><strong>PSO step 2.</strong> The first \(m+1\) arrivals form \(K_{m+1}\), the durable base for the cluster.</p>
+  <p><strong>PSO step 3.</strong> Every later arrival draws \(m\) older partners from PSO weights, then the realized cluster cc is measured against \(\hat c(C)\).</p>
+  <p><strong>T-search step 1.</strong> Start at the initial candidate \(T\), then choose bisection or secant proposals inside the bracket. Each candidate runs the full cluster build at that \(T\) with the cluster's fixed rank order.</p>
+  <p><strong>T-search step 2.</strong> Compute \(c - \hat c(C)\). The sign says which side of the bracket is too high or too low, and \([t_\text{min}, t_\text{max}]\) shrinks until error or step size is small enough.</p>
+  <p><strong>T-search step 3.</strong> Keep the best evaluated realization even if the bracket stops early; the chosen stage-2 edge list is the one whose cc is closest to the target.</p>
   <div class="graph" id="g-pso">
     <div class="graph-chrome">
       <span id="g-pso-stage">cluster C1 &middot; iter 0</span>
@@ -318,6 +340,7 @@
     <div class="tag">same edge-connectivity floor</div>
     <p>The \(K_{m+1}\) seed plus \(m\)-attachments-per-arrival construction is at least \(m\)-edge-connected: every later arrival contributes \(m\) new incident edges, and \(m \ge k\). The cluster's induced subgraph stays at least as edge-connected as the empirical \(k(C)\), so v3 inherits v1's mincut proof under a different family of cores.</p>
   </div>
+  <p>The proof is the same induction as the \(K_{k+1}\) pages. \(K_{m+1}\) has edge connectivity \(m\), adding a new vertex with \(m\) edges to an \(m\)-edge-connected graph keeps every cut at size at least \(m\), and \(m \ge k(C)\) makes the PSO interior satisfy the empirical mincut lower bound. The \(\min(\cdot, n-1)\) cap is harmless because no simple \(n\)-node cluster can have \(k(C) &gt; n-1\).</p>
 </section>
 
 <!-- ─────────── Generation · residual accounting ─────────── -->
@@ -325,6 +348,9 @@
   <div class="stage-num">generation · residual accounting</div>
   <h2>Compute what the SBM still owes each block.</h2>
   <p>Stage 3 is unchanged from v2. Before the SBM call, <code>prepare_sbm_inputs</code> re-reads the original edgelist and rebuilds <code>out_degs</code> + <code>probs</code> on all four blocks (three real clusters + one combined outlier block). It subtracts the stage-2 PSO contribution from <code>out_degs</code> and populates <code>probs</code> inter-cells from the original edge list. Finally it reconciles each diagonal against the block's residual stub budget:</p>
+  <p><strong>Step 1.</strong> Re-read all nodes. The stage switches from the profile's three real clusters to a four-block universe because outlier edges were excluded from stage 2 but still belong in the final graph. Every outlier is folded into one combined pseudo-block before <code>probs</code> is built.</p>
+  <p><strong>Step 2.</strong> Subtract PSO first. Every stage-2 edge is charged against endpoint degrees and its diagonal block-pair budget; the residual SBM should sample only edges that are still owed. The PSO edge list is passed as <code>exist_edgelist</code>, the same handoff v2 used for its constructive core.</p>
+  <p><strong>Step 3.</strong> Reconcile each block. The code compares remaining stub mass with inter-block commitments and sets <code>probs[k,k]</code> from \(\text{diff}_k\), using the same evenness and overspend fixes as v2 so <code>gt.generate_sbm</code> receives a consistent half-edge ledger.</p>
   \[
     D_k \;=\; \sum_{u \,:\, b_u = k} \bigl(k^{\text{empirical}}_u - k^{\text{pso}}_u\bigr),
     \quad
@@ -374,7 +400,7 @@
     </div>
     <div class="step-desc" id="g-rewire-desc"></div>
     <div class="provenance-legend">
-      <span><span class="sw" style="background:#567ad8"></span>core + attach</span>
+      <span><span class="sw" style="background:#567ad8"></span>stage 2 PSO</span>
       <span><span class="sw" style="background:#7e468f"></span>residual SBM</span>
       <span><span class="sw" style="background:#c92a2a"></span>invalid edge (before rewire)</span>
       <span><span class="sw" style="background:#c7801e"></span>partner (picked for swap)</span>
@@ -391,6 +417,14 @@
   <div class="stage-num">generation · match the residual degree</div>
   <h2>Block-aware top-up by default. Logs gridlock; does not silently drop.</h2>
   <p>After the residual SBM + rewire, some nodes may still be short of their target. v2 hands the leftovers to a block-aware top-up that spends edges out of a per-block-pair budget read from the reference clustering, rather than letting stubs leak across cluster boundaries. Anything still unplaced is logged, never silently dropped the way <a href="./ec-sbm-v1.html">v1's plain greedy</a> does. The viz below runs the simpler global sibling so the heap mechanics stay readable; see the <a href="./matcher.html">degree matcher page</a> for the full menu.</p>
+  <table class="matcher-table">
+    <tbody>
+      <tr class="pref"><th>default</th><td class="desc"><code>match_degree_block_aware</code> pairs deficit nodes only when the empirical block-pair budget still permits that edge type.</td></tr>
+      <tr><th>why inherit it</th><td class="desc">v3 changes stage 2's intra-cluster construction, but degree deficits after the residual SBM have the same meaning as in v2.</td></tr>
+      <tr><th>failure mode</th><td class="desc">If every legal partner is already saturated or already adjacent, the remaining deficit is logged as gridlock rather than hidden.</td></tr>
+      <tr><th>page simplification</th><td class="desc">The live widget shows the global heap sibling so the add-edge mechanics are visible; the production default keeps the same heap idea inside block-pair budgets.</td></tr>
+    </tbody>
+  </table>
   <p>Toggle <code>apply match_degree</code> to watch the per-node deficit pile shrink. Click <code>random</code> for a different realization.</p>
   <div class="graph" id="g-match">
     <div class="graph-chrome">
@@ -408,7 +442,7 @@
       <span class="step-label" id="g-match-real">realization 1 of 3</span>
     </div>
     <div class="provenance-legend">
-      <span><span class="sw" style="background:#567ad8"></span>clustered (core + attach)</span>
+      <span><span class="sw" style="background:#567ad8"></span>stage 2 PSO</span>
       <span><span class="sw" style="background:#7e468f"></span>residual SBM</span>
       <span><span class="sw" style="background:#6b6a54"></span>match_degree</span>
       <span><span class="sw" style="background:#c92a2a"></span>residual deficit</span>
@@ -422,6 +456,14 @@
   <h2>Same downstream stages, different stage-2 family.</h2>
   <p>v3's pipeline diverges from v2 only in stage 2 (and the matching profile artifact). Everything that follows — residual SBM, block-preserving rewire, block-aware degree matcher — is the same code under the same flags. What changes is the stage-2 budget v3 hands stage 3: PSO can place more or fewer intra-cluster edges than v2's \(K_{k+1}\) + greedy attach, depending on the chosen \(T\) and on each cluster's empirical cc target.</p>
   <p>The cluster-level effect is that v3's intra-cluster triangle distribution tracks the input's, while v2's is fixed by \(k(C)\) alone. The block-pair-level effect on the residual-SBM is harder to read: v3 may underspend or overspend each diagonal relative to v2, and the resulting \(\text{diff}_k\) can flip sign per block. The downstream rewire + matcher then absorb whatever stage 2 left on the table.</p>
+  <table class="profile-table">
+    <tbody>
+      <tr><th>stage 2</th><td class="val">PSO</td><td class="desc">Owns every intra-cluster edge placed by the chosen per-cluster \(T\) realization.</td></tr>
+      <tr><th>stage 3</th><td class="val">residual SBM</td><td class="desc">Owns sampled edges from the residual block ledger after PSO has been debited.</td></tr>
+      <tr><th>stage 3</th><td class="val">rewire</td><td class="desc">Temporarily marks the valid partner edge used to repair a loop or duplicate.</td></tr>
+      <tr><th>stage 4</th><td class="val">matcher</td><td class="desc">Owns final degree top-up edges that fit the remaining legal block-pair budget.</td></tr>
+    </tbody>
+  </table>
   <div class="callout warn">
     <div class="tag">caveat: cc target is per-cluster, not global</div>
     <p>The T-search drives each cluster's induced cc toward \(\hat c(C)\), but the final output's <em>global</em> cc still depends on the residual SBM and the matcher's edge placements. Stage 2 hits its cluster-by-cluster target; stages 3 + 4 then add edges that influence the global statistic without re-checking it.</p>

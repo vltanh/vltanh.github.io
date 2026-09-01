@@ -60,6 +60,8 @@
 .resample-row{ cursor:default; }
 .resample-row rect.in{ fill: var(--azure); opacity: 0.85; }
 .resample-row rect.out{ fill: var(--orchid); opacity: 0.9; }
+.split-int{ fill:var(--azure); opacity:.88; }
+.split-ext{ fill:var(--orchid); opacity:.9; }
 </style>
 </head>
 <body>
@@ -82,8 +84,23 @@
 <section class="hook">
   <p>LFR's design choice is the opposite of <a href="./abcd.html">ABCD</a>'s. ABCD takes your degree sequence and cluster sizes verbatim; LFR refuses to. It assumes the <em>shapes</em> are power laws and distils your input to two scalar exponents plus a handful of range parameters.</p>
   <p>Stage 2 resamples new degrees from a truncated power law with the fitted exponent and range, and new cluster sizes from a second power law under LFR's size-floor constraints. The output graph shares statistics with the input but not identity: node 5 in the output is not node 5 in the input; cluster 3 is not cluster 3.</p>
-  <p>Mixing is controlled by a scalar \(\mu\) per node: LFR tries to arrange each node's neighbours so \(\mu_i = d^{\text{out}}_i / d_i \approx \mu\). A several-hundred-rewire loop reshuffles edge endpoints (never nodes) until each node's internal/external split is within a small tolerance of \(\mu\). The paper's Fig. 3 shows the resulting \(\mu_i\) distribution as bell-shaped around \(\mu\), not a delta.</p>
+  <p>Mixing is controlled by a scalar \(\mu\) per node: each node's internal/external degree split is fixed up front by rounding \(d^{\text{int}}_i = (1-\mu)\,d_i\) (with a coin flip on the fractional part), so \(\mu_i = d^{\text{out}}_i / d_i \approx \mu\) by construction. A rewire loop then reshuffles edge endpoints (never nodes) until no external edge accidentally lands inside its own cluster, keeping each node's split intact. The paper's Fig. 3 shows the resulting \(\mu_i\) distribution as bell-shaped around \(\mu\), not a delta.</p>
   <p>LFR targets graphs with controlled degree + size distributions, sweepable across \(\mu\). ABCD fits when the input itself is the target. The two models share a configuration-model-plus-rewire backbone but differ on what counts as input.</p>
+</section>
+
+<section class="stage">
+  <div class="stage-num">generation · LFR pipeline</div>
+  <h2>Fit shapes first; build a new graph second.</h2>
+  <p>LFR is not a degree-sequence copier. It compresses the input into distribution parameters, draws a new synthetic instance, and then enforces the internal/external split implied by \(\mu\).</p>
+  <p><strong>Step 1.</strong> Profile degrees without copying node identities. The wrapper keeps \(N\), \(\langle k\rangle\), \(k_{\max}\), and fitted \(t_1\) from <code>degree.csv</code>; small inputs make the power-law fit noisy, and output degrees are always a fresh sample.</p>
+  <p><strong>Step 2.</strong> Profile community sizes under LFR's size floor. The fit keeps \(c_{\min} = \max(\min c, 3)\), \(c_{\max}\), and fitted \(t_2\); size-1/2 communities and singleton outliers cannot survive as generated communities.</p>
+  <p><strong>Step 3.</strong> Compute \(\mu\) as the mean of node-level ratios \(d_i^{out}/d_i\). This is not ABCD's stub-weighted \(\xi\): leaves and hubs get equal votes.</p>
+  <p><strong>Step 4.</strong> Draw a fresh benchmark instance from the fitted laws. Degree draws use inverse-CDF lookup, size draws run until their adjusted sum is \(N\), and a parity repair makes the degree sum pairable; IDs, exact degrees, and exact cluster sizes are intentionally not preserved.</p>
+  <p><strong>Step 5.</strong> Reserve same-community and cross-community stubs before any edges exist. LFR stochastically rounds \(d_i^{int} \approx (1-\mu)d_i\) and sets \(d_i^{out}=d_i-d_i^{int}\), so low-degree nodes realise only coarse \(\mu_i\) ratios.</p>
+  <p><strong>Step 6.</strong> Place nodes where their internal degree can fit. The assignment requires \(d_i^{int} \le c_q - 1\); independently sampled degrees and sizes can be incompatible, so the binary may resize and restart.</p>
+  <p><strong>Step 7.</strong> Pair the legal stub bags: internal stubs inside each community, external stubs globally. Random pairings can create loops, parallels, and same-community external mates.</p>
+  <p><strong>Step 8.</strong> Repair loops and duplicates by endpoint swaps that preserve degrees as much as possible. Irreparable collisions can still leave a small degree loss.</p>
+  <p><strong>Step 9.</strong> Rewire mate edges so every external stub actually leaves its community. The operation swaps endpoints, not budgets, which is why final \(\mu_i\) values concentrate around \(\mu\) instead of matching it exactly node by node.</p>
 </section>
 
 <!-- ─────────── Profiling · the shared fixture ─────────── -->
@@ -106,6 +123,7 @@
   <h2>Extract the shape; throw away the identity.</h2>
   <p>Profile writes <code>degree.csv</code> (per-node integer degrees) the same way ABCD does, but LFR's stage 2 reads only four derived scalars from it: \(N\), \(\langle k \rangle\), \(k_{\max}\), and the power-law exponent \(t_1\) from <code>powerlaw.Fit</code> with auto-selected \(x_{\min}\). The sequence itself is discarded.</p>
   <p>On the synthetic the fit is coarse because only 20 points feed it; the curve below shows the degree histogram and the fitted \(k^{-t_1}\) line. On <code>dnc</code> the fit lands at \(t_1 \approx 1.45\) with auto \(x_{\min} = 1\), which is a poor fit by the strict-KS test but the best the <code>powerlaw</code> package can do.</p>
+  <p>What survives is the empirical scale and tail profile: \(N\), \(\langle k\rangle\), \(k_{\max}\), and \(t_1\). What disappears is identity. Node IDs and their original degrees are not carried forward, so a high-degree input vertex does not become a specific high-degree output vertex; the sampler reconstructs a new sorted sequence from the fitted law.</p>
   <div class="disk-panel">
     <svg id="deg-fit" viewBox="0 0 640 300" preserveAspectRatio="xMidYMid meet"></svg>
     <div class="step-desc"><span class="st">reading the chart</span> &middot; dots are the input degree histogram (log-log axes); azure line is the fitted \(k^{-t_1}\) power law. The tail shape matters for the stage-2 resampler; the specific counts do not.</div>
@@ -117,7 +135,8 @@
   <div class="stage-num">profiling · cluster sizes</div>
   <h2>A second power law, with a size floor.</h2>
   <p>Profile writes <code>cluster_sizes.csv</code> the same way ABCD does. Stage 2 derives \(c_{\min}, c_{\max}\), and the exponent \(t_2\) fitted with <code>xmin = max(min(cluster_sizes), 3)</code>. The floor of 3 is a hard LFR requirement: the C++ binary refuses to build clusters smaller than 3. If the input has size-1 or size-2 clusters (such as the wrapper's singleton outliers), the floor absorbs them; the fitted exponent is estimated only from sizes \(\ge 3\).</p>
-  <p>On the synthetic: <code>cluster_sizes = [8, 6, 4, 1, 1]</code> → \(c_{\min} = 3\) (floor applies), \(c_{\max} = 8\), \(t_2 \approx 2.23\). On <code>dnc</code>: 442 entries ending in 355 singletons → \(c_{\min} = 3\), \(c_{\max} = 52\), \(t_2 \approx 2.01\).</p>
+  <p>On the synthetic: <code>cluster_sizes = [8, 6, 4, 1, 1]</code> → \(c_{\min} = 3\) (floor applies), \(c_{\max} = 8\), \(t_2 \approx 2.23\). On <code>dnc</code>: 374 entries, 309 of them singletons → \(c_{\min} = 3\), \(c_{\max} = 78\), \(t_2 \approx 1.72\).</p>
+  <p>The generator keeps only a distributional profile: \(c_{\min}\), \(c_{\max}\), and \(t_2\), with \(c_{\min}\) clipped to 3. A community of size 1 or 2 cannot host many internal stubs, so LFR refuses to generate it; stage 2 ignores those below-floor sizes and draws new sizes until their adjusted total is exactly \(N\).</p>
   <div class="disk-panel">
     <svg id="cs-fit" viewBox="0 0 640 300" preserveAspectRatio="xMidYMid meet"></svg>
     <div class="step-desc"><span class="st">reading the chart</span> &middot; dots are the input cluster-size histogram (log-log). Singletons (size 1) on the synthetic and on <code>dnc</code> appear in red; they are below the fit's \(x_{\min}\) floor and do not influence \(t_2\). The fit line starts at \(c_{\min}\).</div>
@@ -132,7 +151,14 @@
   \[
     \mu \;=\; \frac{1}{|V|} \sum_{u \in V} \frac{d^{\text{out}}_u}{d_u}.
   \]
-  <p>Each node contributes equally regardless of degree. A degree-1 node with one inter-cluster edge contributes \(1/1 = 1\); a degree-1000 hub with 500 inter-cluster edges contributes \(500/1000 = 0.5\). On skewed degrees the two conventions drift by a few percent. On <code>dnc</code> LFR's \(\mu = 0.686\) while ABCD's \(\xi = 0.718\); they are close but not equal.</p>
+  <p>Each node contributes equally regardless of degree. A degree-1 node with one inter-cluster edge contributes \(1/1 = 1\); a degree-1000 hub with 500 inter-cluster edges contributes \(500/1000 = 0.5\). On skewed degrees the two conventions drift by a few percent. On <code>dnc</code> LFR's \(\mu = 0.622\) while ABCD's \(\xi = 0.718\); they are close but not equal.</p>
+  <table class="profile-table">
+    <tbody>
+      <tr><th>leaf</th><td class="val">\(1/1 = 1.00\)</td><td class="desc">One external edge on a leaf contributes the full value 1 to the average.</td></tr>
+      <tr><th>medium</th><td class="val">\(2/5 = 0.40\)</td><td class="desc">The node contributes its own fraction, not its two external stubs as separate votes.</td></tr>
+      <tr><th>hub</th><td class="val">\(50/100 = 0.50\)</td><td class="desc">The hub gets one vote too, so it does not dominate \(\mu\) by degree.</td></tr>
+    </tbody>
+  </table>
   <table class="profile-table">
     <tbody>
       <tr><th>N</th><td class="val" id="prof-N">&middot;</td><td class="desc">Vertex count.</td></tr>
@@ -154,8 +180,9 @@
 <section class="stage">
   <div class="stage-num">generation · resample degrees and cluster sizes</div>
   <h2>Draw fresh sequences from the fitted power laws.</h2>
-  <p>The C++ binary samples a new degree sequence from \(P(k) \propto k^{-t_1}\) truncated to \([1, k_{\max}]\) with mean constrained to \(\langle k \rangle\), and a new cluster-size list from \(P(c) \propto c^{-t_2}\) with floor \(c_{\min}\) and sum constrained to \(N\). The upper cap \(c_{\max}\) is best-effort: when the fitted exponent is poor, the binary's truncation drifts and output sizes can exceed \(c_{\max}\). Both samples differ from the input.</p>
-  <p>Press <em>re-roll sequences</em> to draw a new pair. The bars below overlay input (azure) vs resampled (plum) for each rank position. On the synthetic the resampled degree sequence tends to have a flatter tail: with only 20 points, the rejection sampler has little room to reproduce the input's heavy hubs.</p>
+  <p>The C++ binary samples a new degree sequence from \(P(k) \propto k^{-t_1}\) truncated to \([d_{\min}, k_{\max}]\), where \(d_{\min}\) is chosen by a bisection (<code>solve_dmin</code> + integer-average parity) so the distribution's mean lands at \(\langle k \rangle\) in expectation. It then draws \(N\) degrees in one pass via inverse-CDF lookup (no rejection loop), sorts them, and decrements the single largest if the total is odd so the configuration model can close. Cluster sizes come from a second power law \(P(c) \propto c^{-t_2}\) with floor \(c_{\min}\); they are drawn until they sum past \(N\), then the smallest entry absorbs the remainder so the total is exactly \(N\). The upper cap \(c_{\max}\) only bounds the sampler's range and is best-effort: when the fitted exponent is poor, output sizes can drift above \(c_{\max}\). Both samples differ from the input.</p>
+  <p>Press <em>re-roll sequences</em> to draw a new pair. The bars below overlay input (azure) vs resampled (plum) for each rank position. On the synthetic the resampled degree sequence tends to have a flatter tail: with only 20 points, the single-pass sampler rarely reproduces the input's heavy hubs.</p>
+  <p><strong>Step 1.</strong> Solve \(d_{\min}\), build the truncated CDF once, and use lower-bound lookup for each random degree draw. <strong>Step 2.</strong> If the sampled degree sum is odd, decrement the largest degree by one so stubs can be paired. <strong>Step 3.</strong> Draw community sizes from \(c^{-t_2}\), then adjust the smallest entry so the sizes sum to exactly \(N\).</p>
   <div class="disk-panel">
     <div class="widget-row tight">
       <button class="btn primary" id="resample-reroll" type="button">re-roll sequences</button>
@@ -168,12 +195,42 @@
   </div>
 </section>
 
+<!-- ─────────── Generation · internal/external stub split ─────────── -->
+<section class="stage">
+  <div class="stage-num">generation · internal/external stub split</div>
+  <h2>Convert the target \(\mu\) into integer stub counts.</h2>
+  <p>After resampling degrees, LFR decides each node's internal budget before it knows the final edge set. For node \(i\), the target is \(d_i^{int} \approx (1-\mu)d_i\); a stochastic rounding step handles fractional values, and the external budget is whatever remains. This is why the final \(\mu_i\) distribution is spread around \(\mu\): integer stubs are coarse, especially on low-degree nodes.</p>
+  <p>The split turns each degree into two coloured piles: internal stubs reserved for same-community edges and external stubs reserved for cross-community edges. Assignment and rewiring both need those counts fixed; later swaps can move endpoints, but they cannot change a node's total internal/external budget. In code, <code>sampleInternalDegrees</code> rounds \((1-\mu)d_i\), then balances excess or defect so the requested split is feasible.</p>
+  <div class="disk-panel">
+    <div class="widget-row tight">
+      <div class="scrub">
+        <label>μ</label>
+        <input type="range" id="split-mu-slider" min="0" max="0.8" step="0.005" value="0.4">
+        <output id="split-mu-val">0.40</output>
+      </div>
+      <span class="step-label">same target used by the generation walkers below</span>
+    </div>
+    <svg id="stub-split" viewBox="0 0 640 270" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="step-desc"><span class="st">reading the chart</span> &middot; each bar is one resampled node degree. Azure = internal stubs; plum = external stubs. Increasing \(\mu\) moves mass from internal to external without changing the sampled total degree.</div>
+    <div class="readout" style="justify-content:center">
+      <span class="item target">target \(\mu\) <b id="split-target">&middot;</b></span>
+      <span class="item">internal stubs <b id="split-int-stubs">&middot;</b></span>
+      <span class="item">external stubs <b id="split-ext-stubs">&middot;</b></span>
+      <span class="item">mean observed <b id="split-mean">&middot;</b></span>
+    </div>
+  </div>
+</section>
+
 <!-- ─────────── Generation · node-to-cluster assignment ─────────── -->
 <section class="stage">
   <div class="stage-num">generation · node-to-cluster assignment</div>
   <h2>Iterate until no homeless node remains.</h2>
   <p>The paper's step 4: walk the degree sequence and place each node in a random community whose remaining slot count exceeds the node's internal degree \(d^{\text{int}} = (1-\mu) d\). If the binary fails to place a node within \(3N\) retries, it calls <code>change_community_size</code> to reshuffle the cluster-size sequence and restarts the assignment from scratch. Most realistic parameter settings converge on the first attempt.</p>
   <p>Step through the iterations below. Home position is random each time; re-roll draws a new permutation.</p>
+  <p>A node assigned to community \(q\) must satisfy \(d_i^{int} \le c_q - 1\); otherwise it asks for more internal neighbours than exist. Degree and size sequences are sampled independently, so a hub can be too large for the first sampled community layout. The binary handles that by building a node-community bipartite assignment, running swap passes, and remapping nodes by degree feasibility.</p>
+  <table class="profile-table" id="assign-constraint-table">
+    <tbody></tbody>
+  </table>
   <div class="graph" id="g-assign">
     <div class="graph-chrome">
       <span id="g-assign-stage">iter 0 · all nodes homeless</span>
@@ -199,8 +256,9 @@
 <section class="stage">
   <div class="stage-num">generation · configuration model + \(\mu\) rewire</div>
   <h2>Configuration model to seed, targeted rewire to match \(\mu_i\).</h2>
-  <p>With assignment fixed, the binary builds the edge set in two halves: a per-cluster configuration model on the internal-degree sub-sequence in each cluster, then a cross-cluster configuration model on the leftover external stubs. After the seed, a mate-rewire phase walks every same-cluster external edge and swaps an endpoint with a random outside node, dragging each node's \(\mu_i\) toward the target \(\mu\). Every swap preserves node degrees, only re-pairing endpoints.</p>
+  <p>With assignment fixed, the binary builds the edge set in two halves: a per-cluster configuration model on the internal-degree sub-sequence in each cluster, then a cross-cluster configuration model on the leftover external stubs. The external config model is blind to cluster membership, so some external edges land between two nodes of the same cluster (a "mate" edge). After the seed, a mate-rewire phase walks every such edge and swaps an endpoint with a random outside node, so the external edge truly leaves the cluster while each node keeps its pre-set internal/external split. Every swap preserves node degrees, only re-pairing endpoints.</p>
   <p>The walker below decomposes the seed phase: each step pairs two stubs uniformly at random; collisions (self-loops, parallels) flag red-dashed and feed a 2-opt cleanup pass that swaps endpoints with a random valid edge. Highlighted nodes mark the up to 4 endpoints touched by each swap; everything else dims. The distribution of \(\mu_i\) at the end is bell-shaped around \(\mu\), not a delta: small-degree nodes have few possible ratios (degree-1 only 0 or 1; degree-2 only 0, 0.5, 1) so they cluster at discrete points. The bars below the walker plot the \(\mu_i\) distribution from a finalised sample; the slider moves the target \(\mu\), re-roll resamples the edge generation.</p>
+  <p><strong>Step 1.</strong> Randomly pair stubs while keeping each node's sampled degree budget fixed; internal and external stubs are paired in different bags. <strong>Step 2.</strong> Repair self-loops and parallel edges with endpoint swaps that preserve degrees. <strong>Step 3.</strong> When an external pair accidentally stays inside one community, the mate pass swaps one endpoint outward while preserving every node's split.</p>
 
   <div class="graph" id="g-cm">
     <div class="graph-chrome">
@@ -241,6 +299,7 @@
   </div>
 
   <p>Before the mate-rewire kicks in, each cluster runs its own configuration-model build via <code>buildSubgraph</code>: a deterministic multimap seed places intra-cluster edges first, then 10 randomization passes 4-way-swap the local adjacency, and finally a multi-edge rewire breaks any duplicates that surface when each cluster is merged into the global edge set. The walker below steps through every Phase-2 swap and every Phase-3 multi-edge rewire across all clusters in cluster order. Each step boldfaces the up to 4 endpoints touched, dims everything else, then animates the cut + place.</p>
+  <p><strong>Step 1.</strong> Place a simple internal scaffold inside each community using the assigned nodes and their internal-degree targets. <strong>Step 2.</strong> Randomize the local adjacency by cutting two internal edges and placing two replacement edges that keep degrees unchanged. <strong>Step 3.</strong> When duplicate internal edges appear after merging clusters into the global set, repair them with another degree-preserving swap.</p>
 
   <div class="graph" id="g-bs">
     <div class="graph-chrome">
@@ -263,6 +322,7 @@
   </div>
 
   <p>The mate-rewire phase is what turns LFR's μ from a target into the bell-shaped distribution above. After per-cluster internal edges are placed, the binary builds a global external-edge config model and runs a phase-3 loop: for any same-cluster external edge, pick a random outside node, do a 4-way swap that pulls one endpoint out of the cluster. The walker below steps op-by-op through that loop on the current sample. Per-cluster internal edges render as faded backdrop; mate edges still inside a cluster surface red-dashed; each step ghost-flashes the cuts before settling on the placements.</p>
+  <p><strong>Step 1.</strong> Scan the external-edge set for a pair whose endpoints are assigned to the same community; that pair is a mate violation. <strong>Step 2.</strong> Cut the bad external edge and one other external edge, then reconnect crosswise through an outside endpoint. <strong>Step 3.</strong> Keep the budgets fixed: the operation changes edge partners, not degrees or internal/external counts.</p>
 
   <div class="graph" id="g-mr">
     <div class="graph-chrome">
@@ -289,20 +349,20 @@
 <section class="stage">
   <div class="stage-num">case study · dnc</div>
   <h2>What you get on the shipped example.</h2>
-  <p>Default run on <code>dnc</code> + <code>sbm-flat-best+cc</code> at <code>--seed 1</code> (\(N = 906\), \(\langle k \rangle = 23.02\), \(t_1 = 1.45\), \(t_2 = 2.01\), \(c_{\min} = 3\), \(c_{\max} = 52\), \(\mu = 0.686\)):</p>
+  <p>Default run on <code>dnc</code> + <code>sbm-flat-best+cc</code> at <code>--seed 1</code> (\(N = 906\), \(\langle k \rangle = 23.02\), \(t_1 = 1.45\), \(t_2 = 1.72\), \(c_{\min} = 3\), \(c_{\max} = 78\), \(\mu = 0.622\)):</p>
   <table class="profile-table">
     <thead>
       <tr><th>stat</th><th>input</th><th>lfr output</th><th>note</th></tr>
     </thead>
     <tbody>
       <tr><th>N</th><td class="val">906</td><td class="val">906</td><td class="desc">Exact match (CLI arg).</td></tr>
-      <tr><th>edges</th><td class="val">10,429</td><td class="val">10,370</td><td class="desc">Off by 0.6%. LFR's rewire + resample lose only a handful of edges.</td></tr>
-      <tr><th>mean degree</th><td class="val">23.02</td><td class="val">22.89</td><td class="desc">Close but not exact: the truncated power-law sampler hits the mean in expectation only.</td></tr>
-      <tr><th>max degree</th><td class="val">368</td><td class="val">&lt;368</td><td class="desc">The input's heavy tail (368, 312, 256, 225, 202, ...) is often cut short: sampling from \(k^{-1.45}\) with \(k_{\max} = 368\) rarely draws the extreme quantiles without many tries.</td></tr>
-      <tr><th>\(\mu\)</th><td class="val">0.686</td><td class="val">~0.686</td><td class="desc">Hit via the rewire loop within the paper's tolerance; small per-node drift.</td></tr>
+      <tr><th>edges</th><td class="val">10,429</td><td class="val">10,352</td><td class="desc">Off by 0.7%. LFR's rewire + resample lose only a handful of edges.</td></tr>
+      <tr><th>mean degree</th><td class="val">23.02</td><td class="val">22.85</td><td class="desc">Close but not exact: the truncated power-law sampler hits the mean in expectation only.</td></tr>
+      <tr><th>max degree</th><td class="val">368</td><td class="val">362</td><td class="desc">The input's heavy tail (368, 312, 256, 225, 202, ...) is often cut short: sampling from \(k^{-1.45}\) with \(k_{\max} = 368\) rarely draws the extreme quantiles without many tries.</td></tr>
+      <tr><th>\(\mu\)</th><td class="val">0.622</td><td class="val">~0.622</td><td class="desc">Hit via the rewire loop within the paper's tolerance; small per-node drift.</td></tr>
       <tr><th>global cc</th><td class="val">0.548</td><td class="val">0.252</td><td class="desc">Not targeted.</td></tr>
-      <tr><th>clusters</th><td class="val">87</td><td class="val">10</td><td class="desc">LFR resamples cluster sizes from \(c^{-2.01}\) with floor 3 summing to 906. With \(t_2 = 2.01\) the sampler concentrates mass on the tail, so fewer larger clusters cover \(N\); 10 clusters for <code>dnc</code> is typical.</td></tr>
-      <tr><th>com.csv rows</th><td class="val">551</td><td class="val">906</td><td class="desc">Every node gets a cluster in LFR (no singletons to strip). Clustered count shoots up to all of \(N\) because the floor-3 constraint disallows 1-node clusters.</td></tr>
+      <tr><th>clusters</th><td class="val">65</td><td class="val">8</td><td class="desc">LFR resamples cluster sizes from \(c^{-1.72}\) with floor 3 summing to 906. With \(t_2 = 1.72\) the sampler concentrates mass on the tail, so fewer larger clusters cover \(N\); 8 clusters for <code>dnc</code> is typical.</td></tr>
+      <tr><th>com.csv rows</th><td class="val">597</td><td class="val">906</td><td class="desc">Every node gets a cluster in LFR (no singletons to strip). Clustered count shoots up to all of \(N\) because the floor-3 constraint disallows 1-node clusters.</td></tr>
     </tbody>
   </table>
   <div class="callout warn">
@@ -311,7 +371,7 @@
   </div>
   <div class="callout warn">
     <div class="tag">caveat 2: cluster count shifts</div>
-    <p>On <code>dnc</code>, input has 87 real clusters (plus 355 singletons the wrapper counts separately); LFR output has 10 clusters. This is not a bug: LFR samples \(c^{-t_2}\) with floor \(c_{\min}\) and sum fixed to \(N\). With \(t_2\) near 2, the sampler draws a handful of large clusters that sum to 906 quickly, leaving no room for the many small clusters the input had. The fitted \(c_{\max} = 52\) does not constrain the output here: empirically every output cluster on <code>dnc</code> lands in [67, 116], so the upper bound is best-effort, not enforced. LFR is the wrong tool when a specific cluster count is required.</p>
+    <p>On <code>dnc</code>, input has 65 real clusters (plus 309 singletons the wrapper counts separately); LFR output has 8 clusters. This is not a bug: LFR samples \(c^{-t_2}\) with floor \(c_{\min}\) and sum fixed to \(N\). With \(t_2 \approx 1.72\) the sampler draws a handful of large clusters that sum to 906 quickly, leaving no room for the many small clusters the input had. The fitted \(c_{\max} = 78\) does not constrain the output here: empirically every output cluster on <code>dnc</code> lands in [85, 151], so the upper bound is best-effort, not enforced. LFR is the wrong tool when a specific cluster count is required.</p>
   </div>
   <div class="callout warn">
     <div class="tag">caveat 3: outliers disappear</div>
@@ -727,6 +787,104 @@ window.MathJax = {
     update();
   })();
 
+  // ── Generation · internal/external stub split ──
+  (function () {
+    const svg = d3.select("#stub-split");
+    if (svg.empty()) return;
+    svg.selectAll("*").remove();
+    const W = 640, H = 270;
+    const PAD = { top: 22, right: 20, bottom: 42, left: 46 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+    const x = d3.scaleBand().domain(d3.range(N_).map(String)).range([0, iw]).padding(0.12);
+    const y = d3.scaleLinear().domain([0, K_MAX + 1]).range([ih, 0]);
+
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).tickFormat("").tickSize(0));
+    g.append("g").call(d3.axisLeft(y).ticks(5))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10px");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+    svg.append("text").attr("x", W / 2).attr("y", H - 10)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px")
+      .text("resampled node rank");
+
+    const rows = g.selectAll(".split-row").data(d3.range(N_)).join("g")
+      .attr("class", "split-row")
+      .attr("transform", i => `translate(${x(String(i))},0)`);
+    rows.append("rect").attr("class", "split-ext")
+      .attr("x", 0).attr("width", x.bandwidth()).attr("y", ih).attr("height", 0);
+    rows.append("rect").attr("class", "split-int")
+      .attr("x", 0).attr("width", x.bandwidth()).attr("y", ih).attr("height", 0);
+
+    const splitSlider = document.getElementById("split-mu-slider");
+    const mainSlider = document.getElementById("mu-slider");
+    if (splitSlider && mainSlider) splitSlider.value = mainSlider.value;
+
+    function currentMu() {
+      if (mainSlider) return parseFloat(mainSlider.value);
+      if (splitSlider) return parseFloat(splitSlider.value);
+      return MU_MEAN;
+    }
+
+    function update() {
+      const mu = currentMu();
+      if (splitSlider) {
+        splitSlider.value = mu.toFixed(3);
+        document.getElementById("split-mu-val").textContent = mu.toFixed(2);
+      }
+      const degs = resampleDegrees(RESAMPLE_SEED);
+      const split = LFRKernel.sampleInternalDegrees({
+        degrees: degs,
+        mu,
+        rng: seededRng(RESAMPLE_SEED * 41 + 5),
+      });
+      const data = degs.map((d, i) => {
+        const din = Math.max(0, Math.min(d, split.internal[i] || 0));
+        return { degree: d, internal: din, external: d - din };
+      });
+      rows.data(data).each(function (d) {
+        d3.select(this).select(".split-ext")
+          .transition().duration(220)
+          .attr("y", y(d.degree))
+          .attr("height", ih - y(d.degree));
+        d3.select(this).select(".split-int")
+          .transition().duration(220)
+          .attr("y", y(d.internal))
+          .attr("height", ih - y(d.internal));
+      });
+      const intStubs = data.reduce((s, d) => s + d.internal, 0);
+      const extStubs = data.reduce((s, d) => s + d.external, 0);
+      const meanObserved = data.reduce((s, d) => s + (d.degree ? d.external / d.degree : 0), 0) / data.length;
+      document.getElementById("split-target").textContent = mu.toFixed(3);
+      document.getElementById("split-int-stubs").textContent = intStubs;
+      document.getElementById("split-ext-stubs").textContent = extStubs;
+      document.getElementById("split-mean").textContent = meanObserved.toFixed(3);
+    }
+
+    if (splitSlider) {
+      splitSlider.addEventListener("input", () => {
+        if (mainSlider) {
+          mainSlider.value = splitSlider.value;
+          mainSlider.dispatchEvent(new Event("input", { bubbles: true }));
+        } else {
+          update();
+        }
+      });
+    }
+    if (mainSlider) {
+      mainSlider.addEventListener("input", () => {
+        if (splitSlider) splitSlider.value = mainSlider.value;
+        update();
+      });
+    }
+    onResampleChanged.push(update);
+    update();
+  })();
+
   // ── Generation · assignment step-through ──
   // Live via LFRKernel.assignNodesToClusters: faithful port of
   // benchm.cpp's bipartite greedy seed (build_bipartite_network) +
@@ -762,15 +920,34 @@ window.MathJax = {
         result.phases.remap.slice(),
         result.assignment.slice(),
       ];
-      return { iters, sizes, degs, assignment: result.assignment, ok: result.ok };
+      return { iters, sizes, degs, internal: split.internal, assignment: result.assignment, ok: result.ok };
     }
 
     let lastRun = runAssignment(ASSIGN_SEED, 0.4);
+
+    function renderConstraintGrid(run) {
+      const host = document.getElementById("assign-constraint-table");
+      if (!host || !run) return;
+      const body = host.querySelector("tbody") || host;
+      const rows = run.sizes.map((size, cid) => {
+        const assigned = [];
+        run.assignment.forEach((c, i) => { if (c === cid) assigned.push(i); });
+        const maxInt = assigned.length ? Math.max(...assigned.map(i => run.internal[i] || 0)) : 0;
+        const ok = maxInt <= size - 1;
+        return '<tr>' +
+          '<th>community ' + (cid + 1) + '</th>' +
+          '<td class="val">' + maxInt + ' / ' + (size - 1) + '</td>' +
+          '<td class="desc">max d_int vs capacity; size ' + size + ' · ' + assigned.length + ' assigned node' + (assigned.length === 1 ? "" : "s") + (ok ? "" : " · retry needed") + '</td>' +
+          '</tr>';
+      }).join("");
+      body.innerHTML = rows || '<tr><th>no assignment</th><td class="val">retry</td><td class="desc">The sampled sizes could not host the internal-degree sequence.</td></tr>';
+    }
 
     function render(step) {
       const xi = parseFloat(document.getElementById("mu-slider").value);
       const run = runAssignment(ASSIGN_SEED, xi);
       lastRun = run;
+      renderConstraintGrid(run);
       const ass = run.iters[Math.min(step, run.iters.length - 1)];
       viz.nodesData.forEach((n, idx) => {
         const nid = parseInt(n.id, 10);
@@ -1468,7 +1645,7 @@ window.MathJax = {
     slider.addEventListener("input", update);
     document.getElementById("mu-snap").addEventListener("click", () => {
       slider.value = MU_MEAN.toFixed(3);
-      update();
+      slider.dispatchEvent(new Event("input", { bubbles: true }));
     });
     document.getElementById("mu-reroll").addEventListener("click", rerollEdges);
     onResampleChanged.push(update);
@@ -1617,9 +1794,13 @@ window.MathJax = {
         label = "mate-rewire op " + step + " / " + r.mateOps.length;
         const cuts = op.cuts.map(c => "<code>" + (c[0] + 1) + "&ndash;" + (c[1] + 1) + "</code>").join(" + ");
         const places = op.places.map(p => "<code>" + (p[0] + 1) + "&ndash;" + (p[1] + 1) + "</code>").join(" + ");
+        // The kernel records var_mate as it stood when this op fired
+        // (varMateBefore); the post-op tally is recomputed by the loop on
+        // the next sweep, so the trace carries only the before-count.
         desc = '<span class="st">op ' + step + '</span> &middot; ' +
-          "Cut " + cuts + "; place " + places + ". var_mate " +
-          op.varMateBefore + " &rarr; " + op.varMateAfter + ".";
+          "Cut " + cuts + "; place " + places + ". " +
+          op.varMateBefore + " mate edge" + (op.varMateBefore === 1 ? "" : "s") +
+          " still inside a cluster when this swap fired.";
       }
       labelEl.textContent = label;
       descEl.innerHTML = desc;

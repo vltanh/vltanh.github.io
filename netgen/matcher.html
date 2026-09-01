@@ -132,9 +132,17 @@
   <p>Every generator in this project ends close to the input degree sequence, not exactly on it. Dedup, rewire, and outlier handling each strip a few stubs. The matcher closes the gap: pop the most-needy node, pick a partner that still has room, drop the edge in, repeat. Pick rules, tie-breaks, and what to do when nothing legal is left differ across the four algorithm families. Each family has a cluster-preserving twin that gates partner choice on a per-(block, block) edge budget. Algorithms also stack: a comma-separated list runs each in turn on the residual the previous one left behind.</p>
 </section>
 
+<section class="stage">
+  <div class="stage-num">top-up · common state</div>
+  <h2>Every matcher walker shows the same bookkeeping.</h2>
+  <p>The algorithms differ in how they choose the next partner, but every panel is driven by the same residual state. The graph shows which edge is being placed, the bars show what each node still needs, and the optional block-budget table shows how much cluster-preserving capacity remains.</p>
+  <p>The walkers are tied to one shared 20-node deficit. Re-roll the input once, and every algorithm below restarts from the same missing-stub state so the family comparisons are apples-to-apples. A placed edge decrements both endpoint bars; an abandoned stub stays visible as unplaced residual. Captions name the source, the accepted partner, and the ordering rule: id sort, largest residual, weighted draw, or shuffled stub pair.</p>
+  <p>All families reject self-loops and existing edges. Cluster-preserving twins also reject exhausted block-pair buckets. When no legal partner remains, modern algorithms log the stuck residual; legacy <code>greedy</code> silently drops it.</p>
+</section>
+
 <!-- ─────────── input deficit ─────────── -->
 <section class="stage">
-  <div class="stage-num">input · the residual deficit</div>
+  <div class="stage-num">top-up · residual deficit</div>
   <h2>Where the deficit comes from. Re-roll for a fresh draw.</h2>
   <p>The deficit drawn here drives every walker on this page. Source: configuration-model pairing on the 20-node fixture's degree sequence, then drop self-loops and parallel edges (the same dedup pass the SBM generator runs). Hubs lose more stubs because collisions scale with degree squared; leaves rarely lose any. Re-roll redraws the shuffle and resets every walker.</p>
   <div class="graph" id="g-input">
@@ -152,13 +160,14 @@
 
 <!-- ─────────── input contract ─────────── -->
 <section class="stage">
-  <div class="stage-num">input contract</div>
+  <div class="stage-num">top-up · input contract</div>
   <h2>Two edgelists in. Top-up edges out.</h2>
   <p>Two inputs sharing a node set: the current graph and a reference graph. The per-node residual deficit is</p>
   \[
     r_u \;=\; \max\bigl(0, \,d_u^{\text{ref}} - d_u^{\text{input}}\bigr).
   \]
   <p>The matcher adds edges to drive \(d_u^{\text{out}} \to d_u^{\text{ref}}\). It only adds; never removes. Cluster-preserving steps additionally consume the reference clustering plus a derived per-(block, block) edge budget. Pipelines attach the clustering files automatically when any step in the stack is cluster-preserving.</p>
+  <p><strong>Step 1.</strong> Measure the missing stubs by building <code>residual[u]</code> from degree differences and discarding non-positive entries. <strong>Step 2.</strong> Choose a source with residual, using the active family's heap, weighted draw, or shuffled stub list. <strong>Step 3.</strong> Filter legal partners with <code>v != u</code>, <code>residual[v] &gt; 0</code>, and an absent edge key. <strong>Step 4.</strong> Add the edge and decrement both bars, or move the source's remaining mass into <code>unplaced[u]</code> when no legal partner exists.</p>
   <div class="callout">
     <div class="tag">when each generator calls it</div>
     <p>EC-SBM-v1 uses <code>greedy</code> for byte-stable output against its reference implementation. EC-SBM-v2 and EC-SBM-v3 default to <code>cluster_preserving_true_greedy</code>. The standalone SBM generator defaults to the same. ABCD, ABCD+o, LFR, and nPSO leave the matcher off by default; their pipelines turn it on as an opt-in step, usually paired with the <em>--remap</em> mode covered at the bottom of the page (their output node IDs do not align with the input's).</p>
@@ -167,9 +176,21 @@
 
 <!-- ─────────── overview table ─────────── -->
 <section class="stage">
-  <div class="stage-num">the four families · overview</div>
+  <div class="stage-num">top-up · matcher families</div>
   <h2>Different ways to drain the same deficit pile.</h2>
   <p>All four families share the same outer loop: pick a node with positive deficit, pick a partner that also still has room and is not already adjacent, add the edge, decrement both. They differ on the picking order, on whether the partner is chosen deterministically or by a weighted random draw, and on what they do when the loop stalls.</p>
+  <p>Before a matcher compares scores or draws a random number, it applies the same legality screen. This screen is what makes degree matching a simple-graph post-processor rather than a free stub-pairing exercise.</p>
+  <table class="matcher-table">
+    <thead>
+      <tr><th>test</th><th>rejection</th></tr>
+    </thead>
+    <tbody>
+      <tr><th>self-loop</th><td class="desc">Reject \(u = v\). A top-up edge must connect two distinct nodes.</td></tr>
+      <tr><th>parallel edge</th><td class="desc">Reject a pair already present in the current graph or already placed by this matcher pass.</td></tr>
+      <tr><th>partner residual</th><td class="desc">Reject \(v\) when \(r_v = 0\). Otherwise the matcher would overshoot the target degree.</td></tr>
+      <tr><th>block budget</th><td class="desc">Cluster-preserving variants also reject pairs whose (block, block) bucket has no remaining capacity.</td></tr>
+    </tbody>
+  </table>
   <table class="matcher-table">
     <thead>
       <tr><th>family</th><th>how it picks pairs</th><th>failure mode</th></tr>
@@ -199,14 +220,16 @@
   </table>
   <p>Greedy and true_greedy are deterministic; random_greedy and rewire sample fresh draws per seed. Plain <code>true_greedy</code> is the bare-CLI default; clustered generators (<code>sbm</code>, <code>ec-sbm-v2</code>, <code>ec-sbm-v3</code>) override to <code>cluster_preserving_true_greedy</code>, the practical default whenever a clustering is available.</p>
   <p>Each family has a <strong>cluster-preserving twin</strong>. The twin runs the same outer loop but rejects any candidate whose (block, block) bucket is exhausted. The bucket budget is the per-(block, block) deficit: how many extra edges each (r, s) pair is expected to absorb if the residual stubs paired up uniformly at random. Built once from the reference clustering at frame start; decrements on every accept. Family sections below show each algorithm's walker followed by its twin's walker; the stacking section composes them.</p>
+  <p><strong>Step 1.</strong> Aggregate residual by block, \(\sigma_r = \sum_{u:b_u=r} r_u\), to find where the missing degree mass lives. <strong>Step 2.</strong> Convert that stub mass into an upper-triangular <code>bpBudget</code> table. <strong>Step 3.</strong> Gate every accepted edge on that budget, even when the edge is excellent by degree priority. <strong>Step 4.</strong> Spend exactly one <code>(min(blocks), max(blocks))</code> key whenever an edge lands.</p>
   <p class="muted small">Computation: total residual stubs in block \(r\) is \(\sigma_r = \sum_{u : b_u = r} r_u\). Expected new-edge count per bp under configuration-model pairing is \(\sigma_r \sigma_s / \sigma_{\text{tot}}\) for \(r \neq s\) and \((\sigma_r(\sigma_r - 1)) / (2\sigma_{\text{tot}})\) for \(r = s\), rounded with a floor of one on any bp the deficit can land in. The pipeline reads its bp budget straight off the reference edgelist on real inputs; this small fixture has no separate reference, so the page estimates the budget from the residual mass.</p>
 </section>
 
 <!-- ─────────── family · greedy + cluster_preserving_greedy ─────────── -->
 <section class="stage">
-  <div class="stage-num">family · greedy</div>
+  <div class="stage-num">top-up · greedy</div>
   <h2>Take the most-needy node. Drain it against an id-sorted partner list.</h2>
   <p>Pop the node with the largest deficit. Build its candidate list (every other deficit-positive node that is not already adjacent), sort by id ascending, walk down adding edges until the source is drained or the list runs out. Move on to the next source. Source order, partner sort, and tie-break are fixed; output is deterministic. Stubs left when no partner is available drop without logging (silent gridlock).</p>
+  <p><strong>Step 1.</strong> Freeze the source order from largest initial residual downward. <strong>Step 2.</strong> For the active source, scan legal partners and sort them by node id rather than current need. <strong>Step 3.</strong> Add the first legal pairs from that list until the source bar reaches zero or the list runs out. <strong>Step 4.</strong> If the source still needs degree, legacy greedy abandons those stubs without a warning.</p>
   <div class="graph" id="g-greedy">
     <div class="graph-chrome">
       <span id="g-greedy-stage">step 0 &middot; initial deficit</span>
@@ -222,7 +245,7 @@
     </div>
     <div class="step-desc" id="g-greedy-desc">click <em>next</em> to advance.</div>
   </div>
-  <p class="muted small"><strong>Caveat.</strong> Silent gridlock: dropped stubs leave no log line. The other three families log gridlock as a warning.</p>
+  <p class="muted small">Silent gridlock leaves no log line when stubs drop. The other three families log gridlock as a warning.</p>
 
   <h3>cluster-preserving twin</h3>
   <p>Same outer loop, plus one filter: candidates whose (block, block) bucket is empty drop out of the partner list. Each accepted edge decrements its bucket. Budget exhaustion is amplified by greedy's silent gridlock, so this twin can lose a noticeable number of stubs on inputs whose deficit lands in a few blocks. The walker captions name the bucket touched and the remaining budget.</p>
@@ -241,13 +264,15 @@
     </div>
     <div class="step-desc" id="g-cpgreedy-desc">click <em>next</em> to advance.</div>
   </div>
+  <p class="muted small">The bucket gate can make greedy's silent leftovers larger: a source may have degree-positive partners, but none in an unspent block-pair bucket.</p>
 </section>
 
 <!-- ─────────── family · true_greedy + cluster_preserving_true_greedy ─────────── -->
 <section class="stage">
-  <div class="stage-num">family · true_greedy</div>
+  <div class="stage-num">top-up · true_greedy</div>
   <h2>Take the most-needy node. Pair it with the partner that itself is most needy.</h2>
   <p>Same source pick as greedy. Partner choice is the deficit-positive candidate with the largest residual, ties broken by id ascending. Both endpoints' updated residuals go back into the priority order before the next pick. Greedy commits to one source until drained or stuck; true_greedy re-shuffles after every edge, so it always works on the currently neediest pair. On uneven deficits the gap closes with fewer dropped stubs. Gridlock is logged as a warning.</p>
+  <p><strong>Step 1.</strong> Pop the current neediest source from the live residual state. <strong>Step 2.</strong> Score all legal partners and take the one with the largest current residual, with id as the tie-break. <strong>Step 3.</strong> Reinsert both endpoints after every edge, because their bars have changed. <strong>Step 4.</strong> When a source has residual but no legal partner, transfer that mass to <code>unplaced</code> and log gridlock.</p>
   <div class="graph" id="g-truegreedy">
     <div class="graph-chrome">
       <span id="g-truegreedy-stage">step 0 &middot; initial deficit</span>
@@ -281,13 +306,15 @@
     </div>
     <div class="step-desc" id="g-cptruegreedy-desc">click <em>next</em> to advance.</div>
   </div>
+  <p class="muted small">Budget exhaustion can gridlock a source even when a plain true-greedy partner exists. Chain a plain pass afterward only when degree closure matters more than strict block-budget fidelity.</p>
 </section>
 
 <!-- ─────────── family · random_greedy + cluster_preserving_random_greedy ─────────── -->
 <section class="stage">
-  <div class="stage-num">family · random_greedy</div>
+  <div class="stage-num">top-up · random_greedy</div>
   <h2>Pick both endpoints by weighted random draw.</h2>
   <p>Source and partner are independent weighted draws over current deficits. Useful as a control: running across several seeds reveals which output features come from the input deficit and which come from greedy / true_greedy's tie-break rules. Gridlock is logged. Step count varies between seeds since the order in which nodes get starved shifts.</p>
+  <p><strong>Step 1.</strong> Draw a source by residual weight, so a node with twice the residual has twice the chance of being selected. <strong>Step 2.</strong> Draw a legal partner by the same residual weighting after legality filters remove impossible choices. <strong>Step 3.</strong> Use repeated seeds to separate robust closures from deterministic ordering effects. <strong>Step 4.</strong> If randomness strands a source, log the abandoned mass as gridlock.</p>
   <div class="graph" id="g-randgreedy">
     <div class="graph-chrome">
       <span id="g-randgreedy-stage">step 0 &middot; initial deficit</span>
@@ -329,13 +356,15 @@
     </div>
     <div class="step-desc" id="g-cprandgreedy-desc">click <em>next</em> to advance.</div>
   </div>
+  <p class="muted small">Random choices can spend scarce block-pair buckets on low-value pairs before a large residual reaches them. The walker exposes that as seed-dependent gridlock.</p>
 </section>
 
 <!-- ─────────── family · rewire + cluster_preserving_rewire ─────────── -->
 <section class="stage">
-  <div class="stage-num">family · rewire</div>
+  <div class="stage-num">top-up · rewire</div>
   <h2>Make a stub per missing edge, shuffle, pair adjacent. Repair conflicts.</h2>
   <p>Configuration-model approach. Each node drops one stub per missing edge into a bag; shuffle, pair adjacent stubs. Self-loops, parallels, and intra-pairing duplicates queue for repair. Repair is 2-opt: pull a random valid edge from the placed pile, try the four endpoint recombinations, accept the swap if any pair of resulting edges is valid; otherwise requeue. Run for a fixed retry budget. Whatever still conflicts at the end is logged and dropped. The shuffle is the only RNG; dense inputs almost always settle on the first pass, hub-heavy inputs walk the queue.</p>
+  <p><strong>Step 1.</strong> Materialize one stub per missing edge, making the remaining degree mass visible as a bag of half-edges. <strong>Step 2.</strong> Shuffle the bag and pair adjacent stubs for a configuration-model draw over the residual. <strong>Step 3.</strong> Commit valid pairs and queue self-loops, existing edges, and duplicate proposed edges. <strong>Step 4.</strong> Repair the queue by 2-opt endpoint swaps until each queued pair becomes legal or the retry budget is exhausted.</p>
   <div class="graph" id="g-rewire">
     <div class="graph-chrome">
       <span id="g-rewire-stage">step 0 &middot; stubs ready, no pairs yet</span>
@@ -378,14 +407,28 @@
     </div>
     <div class="step-desc" id="g-cprewire-desc">click <em>next</em> to advance.</div>
   </div>
+  <p class="muted small">Bucket-preserving 2-opt has fewer legal swaps than plain rewire. It may abandon stubs a plain repair could place, because every replacement edge must stay inside its original block-pair budget.</p>
+</section>
+
+<!-- ─────────── gridlock accounting ─────────── -->
+<section class="stage">
+  <div class="stage-num">top-up · gridlock accounting</div>
+  <h2>Gridlock is not a bug. It is the certificate that no legal local move remains.</h2>
+  <p>A residual stub means the target degree still wants an edge. A legal candidate means the simple graph can accept one. Gridlock is the moment those two facts disagree: the source still needs degree, but every possible partner is illegal under the active constraints.</p>
+  <p><strong>Step 1.</strong> The source bar stays red after candidate generation, so the degree target has not been fully satisfied. <strong>Step 2.</strong> Every potential partner fails a self-loop, existing-edge, zero-residual, or block-budget check. <strong>Step 3.</strong> The page moves that mass into <code>unplaced[u]</code>, then clears <code>residual[u]</code> so active and abandoned residual are visible separately. <strong>Step 4.</strong> <code>greedy</code> preserves the legacy silent behavior; the other families emit <code>gridlock_logged</code>.</p>
+  <div class="callout">
+    <div class="tag">accounting invariant</div>
+    <p><strong>residual + unplaced + placed degree gain</strong> always explains the original deficit. The algorithms disagree about order, not about conservation of missing degree mass.</p>
+  </div>
 </section>
 
 <!-- ─────────── stackable matchers ─────────── -->
 <section class="stage">
-  <div class="stage-num">stackable matchers</div>
+  <div class="stage-num">top-up · stackable matchers</div>
   <h2>Chain matchers. Each one cleans up what the previous left behind.</h2>
   <p>Stacks compose any of the eight algorithms in a comma-separated list. Each step runs on the residual the previous step left behind. A single name is a one-step stack. Two-step chains pair a bulk drain with a finishing pass; longer chains compose cluster-preserving and plain passes when both block structure and degree mass matter.</p>
   <p>Each step uses its own random seed, derived from the matcher's overall seed, so randomness in one step does not bleed into the priorities of the next. The shared state across steps is the running graph itself plus the deficit dictionary, both updated as edges land. Cluster-preserving steps additionally share the per-(block, block) edge budget, which every cluster-preserving step in the chain decrements; non-cluster-preserving steps ignore the budget entirely. Putting a non-cluster-preserving step <em>after</em> a cluster-preserving one is the way to recover degree mass that the budget gate refused, at the cost of letting that final step place a few edges in buckets the cluster-preserving steps would have refused.</p>
+  <p><strong>Step 1.</strong> Start with the current graph, residual dictionary, unplaced dictionary, and initial block-pair budget. <strong>Step 2.</strong> Run one matcher to terminal state, not just one edge. <strong>Step 3.</strong> Pass the final graph, residual, unplaced counts, and budget forward to the next frame. <strong>Step 4.</strong> Trade fidelity for closure deliberately: gated frames decrement <code>bpBudget</code>, while plain frames ignore it.</p>
 
   <h3>Build a stack</h3>
   <p>Pick algorithms one at a time. Each pick runs on whatever residual the previous picks left behind. <em>back</em> pops the most recent step and reverts its edges + budget. <em>rand step</em> rerolls the top stochastic frame; <em>rand all</em> rerolls every stochastic frame in the stack.</p>
@@ -423,7 +466,7 @@
 
 <!-- ─────────── DNC case study ─────────── -->
 <section class="stage">
-  <div class="stage-num">case study &middot; dnc</div>
+  <div class="stage-num">case study · dnc</div>
   <h2>Pick the matcher off a graph that loses 29% of its edges to dedup.</h2>
   <p>The dnc network has 1,891 nodes, 5 reference clusters, and 10,429 reference edges. Run the standalone SBM generator with seed 1: graph-tool's stub-pair sampler hits enough collisions on the dense intra-cluster blocks that, after self-loops and duplicates are removed, only 7,438 edges survive. The matcher tops up 2,991 missing edges (a 29% deficit), almost entirely concentrated inside cluster interiors where the parallel-edge collisions cluster.</p>
   <p>Four matcher choices, same SBM output, same seed:</p>
@@ -463,7 +506,7 @@
 
 <!-- ─────────── --remap mode ─────────── -->
 <section class="stage">
-  <div class="stage-num">the --remap option</div>
+  <div class="stage-num">top-up · --remap option</div>
   <h2>Pair by degree rank for gens that emit fresh node IDs.</h2>
   <p>ABCD, ABCD+o, LFR, and nPSO emit integer node IDs unrelated to the input's. Diffing degrees against input IDs is meaningless. <code>--remap</code> pairs nodes by descending-degree rank: input rank \(i\) maps to output rank \(i\), and the deficit is computed on that pairing. The pairing is L1- and L2-optimal for matching two non-identical degree sequences (rearrangement inequality). The matcher still places edges in the input's ID space; no on-disk re-ID happens.</p>
   <p>Cluster-preserving variants compose with <code>--remap</code> via two clustering inputs: <code>--input-clustering</code> labels the input-side blocks, <code>--ref-clustering</code> supplies the per-(block, block) edge budget. In direct mode (shared ID space) the two flags collapse to the same file.</p>

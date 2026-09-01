@@ -157,6 +157,18 @@
   <p>Two things the model does <em>not</em> do. It does not forbid outlier-outlier edges: two outliers' \(z\)-stubs can pair in the background graph. And the identity of input outliers does not survive; the wrapper's profile drops their OO edges at input time only to make the target \(\xi\) reachable, not to tell the sampler which specific nodes to label as outliers.</p>
 </section>
 
+<section class="stage">
+  <div class="stage-num">generation · ABCD+o pipeline</div>
+  <h2>The outlier block changes the front end; the ABCD walkers handle the rest.</h2>
+  <p>Read the page against the shared 20-node example. The profile panels establish the input contract, then each generation walker advances exactly one mechanism: outlier assignment, stub split, cluster pairing, background pairing, repair, and final audit.</p>
+  <p><strong>Step 1.</strong> Profile the outlier-aware target: keep the real cluster sizes, count input outliers, and compute a reachable \(\xi\). The wrapper drops OO edges, writes post-drop degrees, writes the real <code>cluster_sizes.csv</code>, writes <code>n_outliers.txt</code>, and writes <code>mixing_parameter.txt</code>; the identities of the input outliers do not pass through to the sampler.</p>
+  <p><strong>Step 2.</strong> Draw the model outliers: sample exactly \(s_0\) vertices uniformly from the degree-eligible set, then pin each selected node to \(\hat y_u = 0\) and \(\hat z_u = d_u\). Low \(\xi\) or hub-heavy inputs can make that eligibility screen the binding constraint.</p>
+  <p><strong>Step 3.</strong> Assign the remaining vertices by descending \(d_u\). Non-outliers fill the real cluster-size list under the ABCD admissibility rule \(x_u \le s_j - 1\), with clusters drawn proportional to remaining capacity; this sequential pass is the sampler's working proxy, not a uniform draw over all admissible assignments.</p>
+  <p><strong>Step 4.</strong> Split each node's degree into two stub pools. Non-outliers stochastically round \(y_u=(1-\xi)d_u\) for cluster graphs while outliers send their full degree to \(G_0\), so realised \(\xi\) moves with the aggregate degree of whichever nodes the sampler picked as outliers.</p>
+  <p><strong>Step 5.</strong> Pair and repair stubs: run configuration-model pairing in each real cluster, then globally in \(G_0\), and route collisions through the same recycle-and-swap repair passes as ABCD. The final swap is the only stage allowed to drop irreparable edges.</p>
+  <p><strong>Step 6.</strong> Audit output semantics. Degree drift, realised \(\xi\), and the stderr-driven warning branch have to be read together because <code>com.csv</code> means different things depending on whether the "outlier nodes form a community" warning fired.</p>
+</section>
+
 <!-- ─────────── Profiling · the shared fixture ─────────── -->
 <section class="stage">
   <div class="stage-num">profiling · outliers as singletons</div>
@@ -1781,7 +1793,7 @@ window.MathJax = {
           + N_OUTLIERS + ' outlier draw' + (N_OUTLIERS === 1 ? '' : 's')
           + ', then ' + (NODES.length - N_OUTLIERS) + ' cluster assignments.';
       } else if (step > TRACE.length) {
-        desc.innerHTML = '<span class="st">done</span> &middot; every vertex placed.';
+        desc.innerHTML = '<span class="st">walk end</span> &middot; every vertex placed.';
       } else {
         const t = TRACE[step - 1];
         if (t.phase === 1) {

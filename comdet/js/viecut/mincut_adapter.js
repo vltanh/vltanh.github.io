@@ -25,8 +25,7 @@
     opts = opts || {};
     const n = nodeIds.length;
     if (n < 2) {
-      return { cutValue: Infinity,
-               inPartition: nodeIds.slice(), outPartition: [], phases: [] };
+      return { cutValue: Infinity, inPartition: nodeIds.slice(), outPartition: [], phases: [] };
     }
     const idToIdx = new Map();
     nodeIds.forEach((id, i) => idToIdx.set(id, i));
@@ -42,7 +41,8 @@
       const b = idToIdx.get(ed[1]);
       if (a === undefined || b === undefined) continue;
       if (a === b) continue;
-      const lo = Math.min(a, b), hi = Math.max(a, b);
+      const lo = Math.min(a, b),
+        hi = Math.max(a, b);
       const key = lo + "," + hi;
       wgtMap.set(key, (wgtMap.get(key) || 0) + 1);
     }
@@ -83,16 +83,14 @@
     }
     G.finish_construction();
 
-    // [UPSTREAM mincut_custom.cpp:37] setSeed COMMENTED OUT; chained mincut
-    // calls share m_mt state for the run. Pass through opts.seed only when
-    // caller explicitly provides one (standalone tracer); chained WCC/CM
-    // calls leave it unset so cactus_mincut keeps prior RNG state.
-    const cactusOpts = (opts.seed !== undefined) ? { seed: opts.seed } : {};
+    // [UPSTREAM main.cpp:125,138] production seeds with 0 once, while
+    // mincut_custom.cpp deliberately leaves the per-call reset commented.
+    // Chained calls therefore carry MT state; only explicit opts.seed resets.
+    const cactusOpts = opts.seed !== undefined ? { seed: opts.seed } : {};
     const result = C.VIECUT.cactus_mincut(G, cactusOpts);
     const inP = result.inPartition.map((i) => nodeIds[i]);
     const outP = result.outPartition.map((i) => nodeIds[i]);
-    return { cutValue: result.cutValue, inPartition: inP, outPartition: outP,
-             phases: [] };
+    return { cutValue: result.cutValue, inPartition: inP, outPartition: outP, phases: [] };
   }
 
   M.viecut = viecut;
@@ -100,6 +98,9 @@
   // verification harnesses can pin the chained-mincut RNG state to the
   // tracer's argv seed (cpp tracer calls random_functions::setSeed(seed)
   // at startup; JS must mirror to get bit-equal start_vertex per pop).
-  // Production walkers don't call this; m_mt persists at default 5489.
-  M.viecut.setSeed = function (s) { C.VIECUT.random_functions.setSeed(s); };
+  // Production page glue calls this once with 0 to mirror main.cpp. It must
+  // not be called again between cluster pops because production carries state.
+  M.viecut.setSeed = function (s) {
+    C.VIECUT.random_functions.setSeed(s);
+  };
 })();

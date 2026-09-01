@@ -44,8 +44,7 @@
     return _ldProbeView[0].toString(16).padStart(16, "0");
   }
   function _ldProbesEnabled() {
-    return (typeof globalThis !== "undefined")
-        && globalThis.LEIDEN_DUMP_PROBES === true;
+    return typeof globalThis !== "undefined" && globalThis.LEIDEN_DUMP_PROBES === true;
   }
   // Tracer-visible pass counter. Mirrors cpp's `gTrace.passes.size() - 1`
   // which grows monotonically across move + refine passes at every level.
@@ -70,10 +69,11 @@
       // (P0 #11; inner igraph_i_rng_get_uint32_bounded scalars unclosed
       // because libigraph is vendored upstream).
       if (_probe) {
-        console.error(
-          `[TRACE-LD-SHUFFLE] site=${siteTag || "?"} idx=${idx} range=${idx + 1} rand_idx=${j}`);
+        console.error(`[TRACE-LD-SHUFFLE] site=${siteTag || "?"} idx=${idx} range=${idx + 1} rand_idx=${j}`);
       }
-      const t = arr[idx]; arr[idx] = arr[j]; arr[j] = t;
+      const t = arr[idx];
+      arr[idx] = arr[j];
+      arr[j] = t;
     }
   }
   // [TRACE-LD-LEMIRE] Per-Lemire-call probe wrapper. Closes P0 #11
@@ -103,13 +103,14 @@
       m = x * r64;
       l = m & 0xffffffffn;
       if (_ldProbesEnabled()) {
-        const accept = (l >= t) ? 1 : 0;
+        const accept = l >= t ? 1 : 0;
         console.error(
-          `[TRACE-LD-LEMIRE] range=${range} attempt=${_attempt} x=${x.toString(16).padStart(8, "0")}`
-          + ` m_hi=${(m >> 32n).toString(16).padStart(8, "0")}`
-          + ` lo=${l.toString(16).padStart(8, "0")}`
-          + ` threshold=${t.toString(16).padStart(8, "0")}`
-          + ` accept=${accept}`);
+          `[TRACE-LD-LEMIRE] range=${range} attempt=${_attempt} x=${x.toString(16).padStart(8, "0")}` +
+            ` m_hi=${(m >> 32n).toString(16).padStart(8, "0")}` +
+            ` lo=${l.toString(16).padStart(8, "0")}` +
+            ` threshold=${t.toString(16).padStart(8, "0")}` +
+            ` accept=${accept}`
+        );
       }
       _attempt++;
     } while (l < t);
@@ -208,11 +209,11 @@
     for (let i = 0; i < n; i++) if (membership[i] + 1 > ncomm) ncomm = membership[i] + 1;
     const size = n;
 
-    let inC      = new Float64Array(ncomm);   // _total_weight_in_comm[c] = intra_c
-    let totFromC = new Float64Array(ncomm);   // _total_weight_from_comm[c]
-    let totToC   = new Float64Array(ncomm);   // _total_weight_to_comm[c]
-    let csize    = new Float64Array(ncomm);
-    let cnodes   = new Int32Array(ncomm);
+    let inC = new Float64Array(ncomm); // _total_weight_in_comm[c] = intra_c
+    let totFromC = new Float64Array(ncomm); // _total_weight_from_comm[c]
+    let totToC = new Float64Array(ncomm); // _total_weight_to_comm[c]
+    let csize = new Float64Array(ncomm);
+    let cnodes = new Int32Array(ncomm);
     let totalWeightInAllComms = 0;
     let totalPossibleEdgesInAllComms = 0;
     const empties = [];
@@ -223,10 +224,15 @@
     const neighPos = new Int32Array(size);
     let neighLast = 0;
 
-    function emptiesAdd(c) { empties.push(c); }
+    function emptiesAdd(c) {
+      empties.push(c);
+    }
     function emptiesRemove(c) {
       for (let i = empties.length - 1; i >= 0; i--) {
-        if (empties[i] === c) { empties.splice(i, 1); return; }
+        if (empties[i] === c) {
+          empties.splice(i, 1);
+          return;
+        }
       }
     }
     // [TRACE-LD-EMPTY] cpp empties-list probes are inlined at the call
@@ -238,17 +244,17 @@
     function rebuildAdmin() {
       ncomm = 0;
       for (let i = 0; i < n; i++) if (membership[i] + 1 > ncomm) ncomm = membership[i] + 1;
-      inC      = new Float64Array(ncomm);
+      inC = new Float64Array(ncomm);
       totFromC = new Float64Array(ncomm);
-      totToC   = new Float64Array(ncomm);
-      csize    = new Float64Array(ncomm);
-      cnodes   = new Int32Array(ncomm);
+      totToC = new Float64Array(ncomm);
+      csize = new Float64Array(ncomm);
+      cnodes = new Int32Array(ncomm);
       const m = graph.ecount();
       // First pass: csize + cnodes from per-node loop (cpp init_admin
       // lines 161-168).
       for (let v = 0; v < n; v++) {
         const c = membership[v];
-        csize[c]  += graph.nodeSize(v);
+        csize[c] += graph.nodeSize(v);
         cnodes[c] += 1;
       }
       // Second pass: totFromC, totToC, inC from per-edge loop. Order
@@ -262,14 +268,16 @@
       //                              mode-loop's w/2-per-self-loop net).
       for (let e = 0; e < m; e++) {
         const uv = graph.edge(e);
-        const u = uv[0], vv = uv[1];
+        const u = uv[0],
+          vv = uv[1];
         const w = graph.edgeWeight(e);
-        const cu = membership[u], cv = membership[vv];
+        const cu = membership[u],
+          cv = membership[vv];
         totFromC[cu] += w;
-        totToC[cv]   += w;
+        totToC[cv] += w;
         if (!directed) {
           totFromC[cv] += w;
-          totToC[cu]   += w;
+          totToC[cu] += w;
         }
         if (cu === cv) inC[cu] += w;
       }
@@ -322,8 +330,8 @@
           const pre = cachedWeight[c] === -1 ? 0 : cachedWeight[c];
           const post = pre + w;
           console.error(
-            `[TRACE-LD-CACHE] EDGE v=${v} idx=${i} u=${u} e=- comm=${c}`
-            + ` w=${_ldHex(w)} self_halved=0 pre=${_ldHex(pre)} post=${_ldHex(post)}`);
+            `[TRACE-LD-CACHE] EDGE v=${v} idx=${i} u=${u} e=- comm=${c}` + ` w=${_ldHex(w)} self_halved=0 pre=${_ldHex(pre)} post=${_ldHex(post)}`
+          );
         }
         if (cachedWeight[c] === -1) {
           cachedWeight[c] = 0;
@@ -337,20 +345,18 @@
     }
 
     function growArr(arr, newN) {
-      const out = (arr instanceof Float64Array) ? new Float64Array(newN)
-              : (arr instanceof Int32Array) ? new Int32Array(newN)
-              : new Array(newN).fill(0);
+      const out = arr instanceof Float64Array ? new Float64Array(newN) : arr instanceof Int32Array ? new Int32Array(newN) : new Array(newN).fill(0);
       for (let i = 0; i < arr.length; i++) out[i] = arr[i];
       return out;
     }
 
     function growAdmin(newN) {
       if (newN <= ncomm) return;
-      inC      = growArr(inC, newN);
+      inC = growArr(inC, newN);
       totFromC = growArr(totFromC, newN);
-      totToC   = growArr(totToC, newN);
-      csize    = growArr(csize, newN);
-      cnodes   = growArr(cnodes, newN);
+      totToC = growArr(totToC, newN);
+      csize = growArr(csize, newN);
+      cnodes = growArr(cnodes, newN);
       const oldNcomm = ncomm;
       ncomm = newN;
       totalPossibleEdgesInAllComms += graph.possibleEdges(0) * (newN - oldNcomm);
@@ -370,9 +376,7 @@
       growAdmin(newId + 1);
       emptiesAdd(newId);
       if (_ldProbesEnabled()) {
-        console.error(
-          `[TRACE-LD-ADDEMPTY] n_before=${_nb} new_comm=${newId}`
-          + ` n_after=${ncomm} empties_size=${empties.length}`);
+        console.error(`[TRACE-LD-ADDEMPTY] n_before=${_nb} new_comm=${newId}` + ` n_after=${ncomm} empties_size=${empties.length}`);
       }
       return newId;
     }
@@ -396,24 +400,25 @@
       // mutable_vertex_partition_traced.cpp move_node ENTRY probe.
       if (_probe) {
         console.error(
-          `[TRACE-LD-MV] ENTRY v=${v} old=${oldComm} new=${newComm}`
-          + ` nsize=${_ldHex(node_size)}`
-          + ` csize_old=${_ldHex(csize[oldComm])}`
-          + ` csize_new=${_ldHex(csize[newComm])}`
-          + ` cnodes_old=${cnodes[oldComm]} cnodes_new=${cnodes[newComm]}`
-          + ` tw_in_old=${_ldHex(inC[oldComm])}`
-          + ` tw_in_new=${_ldHex(inC[newComm])}`
-          + ` tw_from_old=${_ldHex(totFromC[oldComm])}`
-          + ` tw_from_new=${_ldHex(totFromC[newComm])}`
-          + ` tw_to_old=${_ldHex(totToC[oldComm])}`
-          + ` tw_to_new=${_ldHex(totToC[newComm])}`
-          + ` tw_all=${_ldHex(totalWeightInAllComms)}`
-          + ` tpe_all=${_ldHex(totalPossibleEdgesInAllComms)}`
-          + ` directed=${directed ? 1 : 0}`);
+          `[TRACE-LD-MV] ENTRY v=${v} old=${oldComm} new=${newComm}` +
+            ` nsize=${_ldHex(node_size)}` +
+            ` csize_old=${_ldHex(csize[oldComm])}` +
+            ` csize_new=${_ldHex(csize[newComm])}` +
+            ` cnodes_old=${cnodes[oldComm]} cnodes_new=${cnodes[newComm]}` +
+            ` tw_in_old=${_ldHex(inC[oldComm])}` +
+            ` tw_in_new=${_ldHex(inC[newComm])}` +
+            ` tw_from_old=${_ldHex(totFromC[oldComm])}` +
+            ` tw_from_new=${_ldHex(totFromC[newComm])}` +
+            ` tw_to_old=${_ldHex(totToC[oldComm])}` +
+            ` tw_to_new=${_ldHex(totToC[newComm])}` +
+            ` tw_all=${_ldHex(totalWeightInAllComms)}` +
+            ` tpe_all=${_ldHex(totalPossibleEdgesInAllComms)}` +
+            ` directed=${directed ? 1 : 0}`
+        );
       }
       // Possible-edges delta (line 572). Pre-csize-update.
       const dirFactor = directed ? 1 : 2;
-      const delta_pe = 2.0 * node_size * (csize[newComm] - csize[oldComm] + node_size) / dirFactor;
+      const delta_pe = (2.0 * node_size * (csize[newComm] - csize[oldComm] + node_size)) / dirFactor;
       // [TRACE-LD-MV] DELTA_PE: mirror cpp:572 analytic formula. Probe
       // emits BEFORE the += to keep symmetry with cpp probe order.
       if (_probe) {
@@ -422,29 +427,26 @@
       totalPossibleEdgesInAllComms += delta_pe;
       // Remove from old + maybe push to empties (lines 583-601).
       cnodes[oldComm] -= 1;
-      csize[oldComm]  -= node_size;
+      csize[oldComm] -= node_size;
       if (cnodes[oldComm] === 0) {
         // cpp probe emits "ADD" with pre_size/pre_list BEFORE push_back.
         if (_ldProbesEnabled()) {
-          console.error(
-            `[TRACE-LD-EMPTY] ADD v=${v} c=${oldComm} pre_size=${empties.length} pre_list=${empties.join(",")}`);
+          console.error(`[TRACE-LD-EMPTY] ADD v=${v} c=${oldComm} pre_size=${empties.length} pre_list=${empties.join(",")}`);
         }
         emptiesAdd(oldComm);
       }
       // Add to new (if was empty, remove from empties via reverse-iter).
       if (cnodes[newComm] === 0) {
         if (_ldProbesEnabled()) {
-          console.error(
-            `[TRACE-LD-EMPTY] ERASE_PRE v=${v} c=${newComm} pre_size=${empties.length} pre_list=${empties.join(",")}`);
+          console.error(`[TRACE-LD-EMPTY] ERASE_PRE v=${v} c=${newComm} pre_size=${empties.length} pre_list=${empties.join(",")}`);
         }
         emptiesRemove(newComm);
         if (_ldProbesEnabled()) {
-          console.error(
-            `[TRACE-LD-EMPTY] ERASE_POST v=${v} c=${newComm} post_size=${empties.length} post_list=${empties.join(",")}`);
+          console.error(`[TRACE-LD-EMPTY] ERASE_POST v=${v} c=${newComm} post_size=${empties.length} post_list=${empties.join(",")}`);
         }
       }
       cnodes[newComm] += 1;
-      csize[newComm]  += node_size;
+      csize[newComm] += node_size;
       // Per cpp move_node mode loop (lines 638-722): runs IGRAPH_OUT +
       // IGRAPH_IN, each iteration applies int_weight = w/(2-directed)/
       // (u==v ? 2 : 1). Two passes are NOT equivalent to a single pass
@@ -469,7 +471,7 @@
           // self-loop appears TWICE per mode iteration (libleidenalg
           // GraphHelper.cpp:294). JS adj stores self-loops ONCE. Mirror
           // cpp by applying the per-edge contribution twice when u===v.
-          const reps = (!directed && u === v) ? 2 : 1;
+          const reps = !directed && u === v ? 2 : 1;
           for (let r = 0; r < reps; r++) {
             // [TRACE-LD-MV] EDGE: mirror cpp's per-edge probe. cpp encodes
             // mode as igraph_neimode_t (IGRAPH_OUT=1, IGRAPH_IN=2,
@@ -477,8 +479,8 @@
             // AFTER from/to update (matching cpp's probe point) and
             // BEFORE in-comm update.
             const int_weight = w / (directed ? 1 : 2) / (u === v ? 2 : 1);
-            const intra_old = (oldComm === u_comm);
-            const intra_new = ((newComm === u_comm) || (u === v));
+            const intra_old = oldComm === u_comm;
+            const intra_new = newComm === u_comm || u === v;
             // Apply from/to update first (matches cpp).
             if (pass === 0) {
               totFromC[oldComm] -= w;
@@ -488,21 +490,22 @@
               totToC[newComm] += w;
             }
             if (_probe) {
-              const modeTag = (pass === 0) ? 1 : 2;  // OUT=1, IN=2
+              const modeTag = pass === 0 ? 1 : 2; // OUT=1, IN=2
               console.error(
-                `[TRACE-LD-MV] EDGE v=${v} u=${u} e=- mode=${modeTag}`
-                + ` u_comm=${u_comm}`
-                + ` w=${_ldHex(w)}`
-                + ` int_weight=${_ldHex(int_weight)}`
-                + ` intra_old=${intra_old ? 1 : 0}`
-                + ` intra_new=${intra_new ? 1 : 0}`
-                + ` tw_from_old=${_ldHex(totFromC[oldComm])}`
-                + ` tw_from_new=${_ldHex(totFromC[newComm])}`
-                + ` tw_to_old=${_ldHex(totToC[oldComm])}`
-                + ` tw_to_new=${_ldHex(totToC[newComm])}`
-                + ` tw_in_old=${_ldHex(inC[oldComm])}`
-                + ` tw_in_new=${_ldHex(inC[newComm])}`
-                + ` tw_all=${_ldHex(totalWeightInAllComms)}`);
+                `[TRACE-LD-MV] EDGE v=${v} u=${u} e=- mode=${modeTag}` +
+                  ` u_comm=${u_comm}` +
+                  ` w=${_ldHex(w)}` +
+                  ` int_weight=${_ldHex(int_weight)}` +
+                  ` intra_old=${intra_old ? 1 : 0}` +
+                  ` intra_new=${intra_new ? 1 : 0}` +
+                  ` tw_from_old=${_ldHex(totFromC[oldComm])}` +
+                  ` tw_from_new=${_ldHex(totFromC[newComm])}` +
+                  ` tw_to_old=${_ldHex(totToC[oldComm])}` +
+                  ` tw_to_new=${_ldHex(totToC[newComm])}` +
+                  ` tw_in_old=${_ldHex(inC[oldComm])}` +
+                  ` tw_in_new=${_ldHex(inC[newComm])}` +
+                  ` tw_all=${_ldHex(totalWeightInAllComms)}`
+              );
             }
             if (intra_old) {
               inC[oldComm] -= int_weight;
@@ -518,19 +521,20 @@
       // [TRACE-LD-MV] EXIT: post-update admin tuple. Bookends ENTRY.
       if (_probe) {
         console.error(
-          `[TRACE-LD-MV] EXIT v=${v} old=${oldComm} new=${newComm}`
-          + ` csize_old=${_ldHex(csize[oldComm])}`
-          + ` csize_new=${_ldHex(csize[newComm])}`
-          + ` cnodes_old=${cnodes[oldComm]} cnodes_new=${cnodes[newComm]}`
-          + ` tw_in_old=${_ldHex(inC[oldComm])}`
-          + ` tw_in_new=${_ldHex(inC[newComm])}`
-          + ` tw_from_old=${_ldHex(totFromC[oldComm])}`
-          + ` tw_from_new=${_ldHex(totFromC[newComm])}`
-          + ` tw_to_old=${_ldHex(totToC[oldComm])}`
-          + ` tw_to_new=${_ldHex(totToC[newComm])}`
-          + ` tw_all=${_ldHex(totalWeightInAllComms)}`
-          + ` tpe_all=${_ldHex(totalPossibleEdgesInAllComms)}`
-          + ` n_empty=${empties.length}`);
+          `[TRACE-LD-MV] EXIT v=${v} old=${oldComm} new=${newComm}` +
+            ` csize_old=${_ldHex(csize[oldComm])}` +
+            ` csize_new=${_ldHex(csize[newComm])}` +
+            ` cnodes_old=${cnodes[oldComm]} cnodes_new=${cnodes[newComm]}` +
+            ` tw_in_old=${_ldHex(inC[oldComm])}` +
+            ` tw_in_new=${_ldHex(inC[newComm])}` +
+            ` tw_from_old=${_ldHex(totFromC[oldComm])}` +
+            ` tw_from_new=${_ldHex(totFromC[newComm])}` +
+            ` tw_to_old=${_ldHex(totToC[oldComm])}` +
+            ` tw_to_new=${_ldHex(totToC[newComm])}` +
+            ` tw_all=${_ldHex(totalWeightInAllComms)}` +
+            ` tpe_all=${_ldHex(totalPossibleEdgesInAllComms)}` +
+            ` n_empty=${empties.length}`
+        );
       }
       membership[v] = newComm;
     }
@@ -540,7 +544,9 @@
       const w = cachedWeight[comm];
       return w === -1 ? 0 : w;
     }
-    function weightFromComm(v, comm) { return weightToComm(v, comm); }
+    function weightFromComm(v, comm) {
+      return weightToComm(v, comm);
+    }
     function getNeighComms(v) {
       neighComm(v);
       const out = new Array(neighLast);
@@ -611,21 +617,24 @@
       }
       for (let v = 0; v < n; v++) membership[v] = remap[membership[v]];
       const newN = surv.length;
-      const newIn   = new Float64Array(newN);
+      const newIn = new Float64Array(newN);
       const newFrom = new Float64Array(newN);
-      const newTo   = new Float64Array(newN);
-      const newCs   = new Float64Array(newN);
-      const newCn   = new Int32Array(newN);
+      const newTo = new Float64Array(newN);
+      const newCs = new Float64Array(newN);
+      const newCn = new Int32Array(newN);
       for (let i = 0; i < newN; i++) {
         const oldId = surv[i];
-        newIn[i]   = inC[oldId];
+        newIn[i] = inC[oldId];
         newFrom[i] = totFromC[oldId];
-        newTo[i]   = totToC[oldId];
-        newCs[i]   = csize[oldId];
-        newCn[i]   = cnodes[oldId];
+        newTo[i] = totToC[oldId];
+        newCs[i] = csize[oldId];
+        newCn[i] = cnodes[oldId];
       }
-      inC = newIn; totFromC = newFrom; totToC = newTo;
-      csize = newCs; cnodes = newCn;
+      inC = newIn;
+      totFromC = newFrom;
+      totToC = newTo;
+      csize = newCs;
+      cnodes = newCn;
       ncomm = newN;
       empties.length = 0;
       cachedWeight = new Float64Array(ncomm);
@@ -635,28 +644,54 @@
 
     return {
       graph: graph,
-      membership: function () { return membership; },
-      memberOf: function (v) { return membership[v]; },
-      n: function () { return n; },
-      ncomm: function () { return ncomm; },
-      csize:  function (c) { return c < ncomm ? csize[c]  : 0; },
-      cnodes: function (c) { return c < ncomm ? cnodes[c] : 0; },
-      totalWeightInComm:    function (c) { return c < ncomm ? inC[c]      : 0; },
-      totalWeightFromComm:  function (c) { return c < ncomm ? totFromC[c] : 0; },
-      totalWeightToComm:    function (c) { return c < ncomm ? totToC[c]   : 0; },
-      totalWeightInAllComms:        function () { return totalWeightInAllComms; },
-      totalPossibleEdgesInAllComms: function () { return totalPossibleEdgesInAllComms; },
+      membership: function () {
+        return membership;
+      },
+      memberOf: function (v) {
+        return membership[v];
+      },
+      n: function () {
+        return n;
+      },
+      ncomm: function () {
+        return ncomm;
+      },
+      csize: function (c) {
+        return c < ncomm ? csize[c] : 0;
+      },
+      cnodes: function (c) {
+        return c < ncomm ? cnodes[c] : 0;
+      },
+      totalWeightInComm: function (c) {
+        return c < ncomm ? inC[c] : 0;
+      },
+      totalWeightFromComm: function (c) {
+        return c < ncomm ? totFromC[c] : 0;
+      },
+      totalWeightToComm: function (c) {
+        return c < ncomm ? totToC[c] : 0;
+      },
+      totalWeightInAllComms: function () {
+        return totalWeightInAllComms;
+      },
+      totalPossibleEdgesInAllComms: function () {
+        return totalPossibleEdgesInAllComms;
+      },
       moveNode: moveNode,
       renumber: renumber,
-      renumberLeiden: renumber,    // alias (libleidenalg-shape already)
-      weightToComm:   weightToComm,
+      renumberLeiden: renumber, // alias (libleidenalg-shape already)
+      weightToComm: weightToComm,
       weightFromComm: weightFromComm,
       getNeighComms: getNeighComms,
       getNeighCommsConstrained: getNeighCommsConstrained,
       getEmptyCommunity: getEmptyCommunity,
       rebuildAdmin: rebuildAdmin,
-      diffMove: function (v, target) { return qualityFn.diffMove(this, v, target); },
-      quality:  function () { return qualityFn.quality(this); },
+      diffMove: function (v, target) {
+        return qualityFn.diffMove(this, v, target);
+      },
+      quality: function () {
+        return qualityFn.quality(this);
+      },
       qualityFn: qualityFn,
       setMembership: function (m) {
         for (let i = 0; i < n; i++) membership[i] = m[i] | 0;
@@ -688,8 +723,8 @@
         const csizeNew = P.csize(newComm);
         const correctSelfLoops = G.correctSelfLoops();
         const directed = G.isDirected();
-        const oldEdges = directed ? (wToOld + wFromOld) : 2 * wToOld;
-        const newEdges = directed ? (wToNew + wFromNew) : 2 * wToNew;
+        const oldEdges = directed ? wToOld + wFromOld : 2 * wToOld;
+        const newEdges = directed ? wToNew + wFromNew : 2 * wToNew;
         const selfTerm = correctSelfLoops ? 1 : 0;
         const possNew = nv * (2 * csizeNew + nv - selfTerm);
         const possOldDelta = nv * (2 * (csizeOld - nv) + nv - selfTerm);
@@ -701,8 +736,7 @@
         // resolution = 0.0001, the missing +2*sw term flips sign on
         // beneficial super-node merges (e.g. CM's per-side recluster on
         // n=8 in-side merging {6,7} into {0..5} loses sign without it).
-        const diff = (newEdges + sw) - (oldEdges - sw)
-                   - this.resolution * (possNew - possOldDelta);
+        const diff = newEdges + sw - (oldEdges - sw) - this.resolution * (possNew - possOldDelta);
         const result = directed ? diff : diff / 2.0;
         // [TRACE-LD-CPM] Per-call term-by-term breakdown. Closes P0 #12.
         // Field order + naming mirrors cpp_cpm_vertex_partition_traced.cpp
@@ -713,34 +747,29 @@
         // the cpp-shape pe_old/pe_new + diff_old/diff_new from the same
         // inputs so cross-side diff is byte-exact under matching seed.
         if (_ldProbesEnabled()) {
-          const pe_old_cpp = correctSelfLoops
-            ? nv * (2.0 * csizeOld - nv)
-            : nv * (2.0 * csizeOld - nv - 1.0);
-          const pe_new_cpp = correctSelfLoops
-            ? nv * (2.0 * csizeNew + nv)
-            : nv * (2.0 * csizeNew + nv - 1.0);
-          const diff_old_cpp = wToOld + wFromOld - sw
-                             - this.resolution * pe_old_cpp;
-          const diff_new_cpp = wToNew + wFromNew + sw
-                             - this.resolution * pe_new_cpp;
+          const pe_old_cpp = correctSelfLoops ? nv * (2.0 * csizeOld - nv) : nv * (2.0 * csizeOld - nv - 1.0);
+          const pe_new_cpp = correctSelfLoops ? nv * (2.0 * csizeNew + nv) : nv * (2.0 * csizeNew + nv - 1.0);
+          const diff_old_cpp = wToOld + wFromOld - sw - this.resolution * pe_old_cpp;
+          const diff_new_cpp = wToNew + wFromNew + sw - this.resolution * pe_new_cpp;
           const diff_cpp = diff_new_cpp - diff_old_cpp;
           console.error(
-            `[TRACE-LD-CPM] v=${v} old=${oldComm} new=${newComm}`
-            + ` res=${_ldHex(this.resolution)}`
-            + ` w_to_old=${_ldHex(wToOld)}`
-            + ` w_to_new=${_ldHex(wToNew)}`
-            + ` w_from_old=${_ldHex(wFromOld)}`
-            + ` w_from_new=${_ldHex(wFromNew)}`
-            + ` nsize=${_ldHex(nv)}`
-            + ` csize_old=${_ldHex(csizeOld)}`
-            + ` csize_new=${_ldHex(csizeNew)}`
-            + ` self_weight=${_ldHex(sw)}`
-            + ` ped_old=${_ldHex(pe_old_cpp)}`
-            + ` ped_new=${_ldHex(pe_new_cpp)}`
-            + ` diff_old=${_ldHex(diff_old_cpp)}`
-            + ` diff_new=${_ldHex(diff_new_cpp)}`
-            + ` diff=${_ldHex(diff_cpp)}`
-            + ` csl=${correctSelfLoops ? 1 : 0}`);
+            `[TRACE-LD-CPM] v=${v} old=${oldComm} new=${newComm}` +
+              ` res=${_ldHex(this.resolution)}` +
+              ` w_to_old=${_ldHex(wToOld)}` +
+              ` w_to_new=${_ldHex(wToNew)}` +
+              ` w_from_old=${_ldHex(wFromOld)}` +
+              ` w_from_new=${_ldHex(wFromNew)}` +
+              ` nsize=${_ldHex(nv)}` +
+              ` csize_old=${_ldHex(csizeOld)}` +
+              ` csize_new=${_ldHex(csizeNew)}` +
+              ` self_weight=${_ldHex(sw)}` +
+              ` ped_old=${_ldHex(pe_old_cpp)}` +
+              ` ped_new=${_ldHex(pe_new_cpp)}` +
+              ` diff_old=${_ldHex(diff_old_cpp)}` +
+              ` diff_new=${_ldHex(diff_new_cpp)}` +
+              ` diff=${_ldHex(diff_cpp)}` +
+              ` csl=${correctSelfLoops ? 1 : 0}`
+          );
         }
         return result;
       },
@@ -753,7 +782,7 @@
           const ec = P.totalWeightInComm(c);
           const nc = P.csize(c);
           const selfTerm = correctSelfLoops ? 1 : 0;
-          const poss = nc * (nc - selfTerm) / 2.0;
+          const poss = (nc * (nc - selfTerm)) / 2.0;
           q += ec - this.resolution * poss;
         }
         return q;
@@ -794,13 +823,11 @@
         const k_in = directed ? Gp.strengthLeiden(v) : k_out;
         const sw = Gp.nodeSelfWeight(v);
         const K_out_old = P.totalWeightFromComm(oldComm);
-        const K_in_old  = P.totalWeightToComm(oldComm);
+        const K_in_old = P.totalWeightToComm(oldComm);
         const K_out_new = P.totalWeightFromComm(newComm) + k_out;
-        const K_in_new  = P.totalWeightToComm(newComm) + k_in;
-        const diff_old = (w_to_old - k_out * K_in_old / total_weight)
-                       + (w_from_old - k_in * K_out_old / total_weight);
-        const diff_new = (w_to_new + sw - k_out * K_in_new / total_weight)
-                       + (w_from_new + sw - k_in * K_out_new / total_weight);
+        const K_in_new = P.totalWeightToComm(newComm) + k_in;
+        const diff_old = w_to_old - (k_out * K_in_old) / total_weight + (w_from_old - (k_in * K_out_old) / total_weight);
+        const diff_new = w_to_new + sw - (k_out * K_in_new) / total_weight + (w_from_new + sw - (k_in * K_out_new) / total_weight);
         const diff = diff_new - diff_old;
         const m = directed ? m_orig : 2.0 * m_orig;
         const result = diff / m;
@@ -809,24 +836,25 @@
         // (cpp lines 42-119). 15 terms + result; one fprintf per call.
         if (_ldProbesEnabled()) {
           console.error(
-            `[TRACE-LD-MOD] v=${v} old=${oldComm} new=${newComm}`
-            + ` total_weight=${_ldHex(total_weight)}`
-            + ` w_to_old=${_ldHex(w_to_old)}`
-            + ` w_from_old=${_ldHex(w_from_old)}`
-            + ` w_to_new=${_ldHex(w_to_new)}`
-            + ` w_from_new=${_ldHex(w_from_new)}`
-            + ` k_out=${_ldHex(k_out)}`
-            + ` k_in=${_ldHex(k_in)}`
-            + ` self_weight=${_ldHex(sw)}`
-            + ` K_out_old=${_ldHex(K_out_old)}`
-            + ` K_in_old=${_ldHex(K_in_old)}`
-            + ` K_out_new=${_ldHex(K_out_new)}`
-            + ` K_in_new=${_ldHex(K_in_new)}`
-            + ` diff_old=${_ldHex(diff_old)}`
-            + ` diff_new=${_ldHex(diff_new)}`
-            + ` diff=${_ldHex(diff)}`
-            + ` m=${_ldHex(m)}`
-            + ` result=${_ldHex(result)}`);
+            `[TRACE-LD-MOD] v=${v} old=${oldComm} new=${newComm}` +
+              ` total_weight=${_ldHex(total_weight)}` +
+              ` w_to_old=${_ldHex(w_to_old)}` +
+              ` w_from_old=${_ldHex(w_from_old)}` +
+              ` w_to_new=${_ldHex(w_to_new)}` +
+              ` w_from_new=${_ldHex(w_from_new)}` +
+              ` k_out=${_ldHex(k_out)}` +
+              ` k_in=${_ldHex(k_in)}` +
+              ` self_weight=${_ldHex(sw)}` +
+              ` K_out_old=${_ldHex(K_out_old)}` +
+              ` K_in_old=${_ldHex(K_in_old)}` +
+              ` K_out_new=${_ldHex(K_out_new)}` +
+              ` K_in_new=${_ldHex(K_in_new)}` +
+              ` diff_old=${_ldHex(diff_old)}` +
+              ` diff_new=${_ldHex(diff_new)}` +
+              ` diff=${_ldHex(diff)}` +
+              ` m=${_ldHex(m)}` +
+              ` result=${_ldHex(result)}`
+          );
         }
         return result;
       },
@@ -843,7 +871,7 @@
           const w = P.totalWeightInComm(c);
           const w_out = P.totalWeightFromComm(c);
           const w_in = P.totalWeightToComm(c);
-          mod += w - w_out * w_in / ((directed ? 1.0 : 4.0) * m_orig);
+          mod += w - (w_out * w_in) / ((directed ? 1.0 : 4.0) * m_orig);
         }
         const q = (directed ? 1.0 : 2.0) * mod;
         return q / m;
@@ -859,6 +887,8 @@
   function moveNodes(P, rng, opts) {
     opts = opts || {};
     const recordTrace = !!opts.recordTrace;
+    const recordCandidates = !!opts.recordCandidates;
+    const recordMembership = !!opts.recordMembership;
     const considerEmpty = opts.considerEmpty !== false;
     const n = P.n();
     const order = new Array(n);
@@ -883,10 +913,11 @@
     let _visitIdx = 0;
     while (queue.length > 0) {
       if (++_moveCap > n * 1000) {
-        console.warn("[leiden] moveNodes visit-cap exceeded n*1000=" + (n*1000) + " visits; bailing");
+        console.warn("[leiden] moveNodes visit-cap exceeded n*1000=" + n * 1000 + " visits; bailing");
         break;
       }
       const v = queue.shift();
+      const queueBefore = queue.length + 1;
       const vComm = P.memberOf(v);
       const cands = P.getNeighComms(v);
       if (cands.indexOf(vComm) < 0) cands.push(vComm);
@@ -897,9 +928,10 @@
       const _cnodes_vcomm = P.cnodes(vComm);
       if (_probe) {
         console.error(
-          `[TRACE-LD-BRANCH] pass=${_passIdx} visit=${_visitIdx}`
-          + ` v=${v} vcomm=${vComm} consider_comms=ALL_NEIGH_COMMS`
-          + ` n_after_cc=${cands.length} cnodes_vcomm=${_cnodes_vcomm}`);
+          `[TRACE-LD-BRANCH] pass=${_passIdx} visit=${_visitIdx}` +
+            ` v=${v} vcomm=${vComm} consider_comms=ALL_NEIGH_COMMS` +
+            ` n_after_cc=${cands.length} cnodes_vcomm=${_cnodes_vcomm}`
+        );
       }
       if (considerEmpty && _cnodes_vcomm > 1) {
         // [TRACE-LD-EMPTYGATE] Closes P0 #17 (add_empty_community branch
@@ -911,18 +943,19 @@
         if (_probe) {
           const _ncomm_post = P.ncomm();
           console.error(
-            `[TRACE-LD-EMPTYGATE] site=move pass=${_passIdx} visit=${_visitIdx}`
-            + ` v=${v} vcomm=${vComm} cnodes_vcomm=${_cnodes_vcomm}`
-            + ` n_comms_pre=${_ncomm_pre} empty_id=${ec} n_comms_post=${_ncomm_post}`
-            + ` grew=${_ncomm_post > _ncomm_pre ? 1 : 0}`);
+            `[TRACE-LD-EMPTYGATE] site=move pass=${_passIdx} visit=${_visitIdx}` +
+              ` v=${v} vcomm=${vComm} cnodes_vcomm=${_cnodes_vcomm}` +
+              ` n_comms_pre=${_ncomm_pre} empty_id=${ec} n_comms_post=${_ncomm_post}` +
+              ` grew=${_ncomm_post > _ncomm_pre ? 1 : 0}`
+          );
         }
       } else if (_probe && considerEmpty) {
         console.error(
-          `[TRACE-LD-EMPTYGATE] site=move pass=${_passIdx} visit=${_visitIdx}`
-          + ` v=${v} vcomm=${vComm} cnodes_vcomm=${_cnodes_vcomm} skipped=1`);
+          `[TRACE-LD-EMPTYGATE] site=move pass=${_passIdx} visit=${_visitIdx}` + ` v=${v} vcomm=${vComm} cnodes_vcomm=${_cnodes_vcomm} skipped=1`
+        );
       }
       let maxComm = vComm;
-      const _maxCommSizeGuard = false;  // JS Leiden default: max_comm_size=0
+      const _maxCommSizeGuard = false; // JS Leiden default: max_comm_size=0
       let maxImprov = _maxCommSizeGuard ? -Infinity : 10 * Number.EPSILON;
       // [TRACE-LD-CAND] CANDS: full candidate list + initial max_improv.
       // Mirrors cpp probe site at Optimiser.cpp:701-789. Use the canonical
@@ -932,11 +965,12 @@
       if (_probe) {
         const mi_branch = _maxCommSizeGuard ? "NEG_INF" : "10EPS";
         console.error(
-          `[TRACE-LD-CAND] CANDS pass=${_passIdx} visit=${_visitIdx}`
-          + ` v=${v} vcomm=${vComm} ncands=${cands.length}`
-          + ` max_improv_branch=${mi_branch}`
-          + ` max_improv_init=${_ldHex(maxImprov)}`
-          + ` cands=${cands.join(",")}`);
+          `[TRACE-LD-CAND] CANDS pass=${_passIdx} visit=${_visitIdx}` +
+            ` v=${v} vcomm=${vComm} ncands=${cands.length}` +
+            ` max_improv_branch=${mi_branch}` +
+            ` max_improv_init=${_ldHex(maxImprov)}` +
+            ` cands=${cands.join(",")}`
+        );
       }
       const deltas = [];
       for (let i = 0; i < cands.length; i++) {
@@ -944,26 +978,39 @@
         // Default Leiden path has no max_comm_size; no SKIP probe needed
         // here. cpp emits SKIP when 0 < max_comm_size && csize+nv > max
         // (Optimiser.cpp:807-809) — silent in this build.
-        const d = (c === vComm) ? 0 : P.diffMove(v, c);
+        const d = c === vComm ? 0 : P.diffMove(v, c);
         // [TRACE-LD-CAND] DIFF: per-layer diff_move. Single-layer path
         // (default Leiden), so layer=0 + lw=1.0 always.
         if (_probe) {
           console.error(
-            `[TRACE-LD-CAND] DIFF pass=${_passIdx} visit=${_visitIdx}`
-            + ` v=${v} comm=${c} layer=0 lw=${_ldHex(1.0)}`
-            + ` diff_move=${_ldHex(d)}`);
+            `[TRACE-LD-CAND] DIFF pass=${_passIdx} visit=${_visitIdx}` + ` v=${v} comm=${c} layer=0 lw=${_ldHex(1.0)}` + ` diff_move=${_ldHex(d)}`
+          );
         }
-        const possible_improv = d;  // single-layer: layer_weights[0] * d
+        const possible_improv = d; // single-layer: layer_weights[0] * d
         // [TRACE-LD-CAND] COMP: move_nodes uses `>` (cpp:820).
-        const accepts = (possible_improv > maxImprov);
+        const accepts = possible_improv > maxImprov;
         if (_probe) {
           console.error(
-            `[TRACE-LD-CAND] COMP pass=${_passIdx} visit=${_visitIdx}`
-            + ` v=${v} comm=${c} pimprov=${_ldHex(possible_improv)}`
-            + ` max_improv=${_ldHex(maxImprov)}`
-            + ` accepts=${accepts ? 1 : 0}`);
+            `[TRACE-LD-CAND] COMP pass=${_passIdx} visit=${_visitIdx}` +
+              ` v=${v} comm=${c} pimprov=${_ldHex(possible_improv)}` +
+              ` max_improv=${_ldHex(maxImprov)}` +
+              ` accepts=${accepts ? 1 : 0}`
+          );
         }
-        deltas.push({ comm: c, delta: d });
+        if (recordCandidates) {
+          const members = [];
+          const memBefore = P.membership();
+          for (let u = 0; u < memBefore.length; u++) {
+            if (memBefore[u] === c) members.push(u);
+          }
+          deltas.push({
+            comm: c,
+            delta: d,
+            members: members,
+            size: P.cnodes(c),
+            edgeWeight: P.weightToComm(v, c),
+          });
+        }
         if (accepts) {
           maxImprov = possible_improv;
           maxComm = c;
@@ -971,6 +1018,7 @@
       }
       isStable[v] = 1;
       let moved = false;
+      const requeued = [];
       if (maxComm !== vComm) {
         totalImprov += maxImprov;
         P.moveNode(v, maxComm);
@@ -986,26 +1034,37 @@
           // && != maxComm && !fixed` test; emit the cpp-shape tuple. JS
           // has no is_membership_fixed surface for u, so fixed=0 always.
           const _was_stable = isStable[u] ? 1 : 0;
-          const _in_new = (P.memberOf(u) === maxComm) ? 1 : 0;
-          const _push = (u !== v) && _was_stable && !_in_new;
+          const _in_new = P.memberOf(u) === maxComm ? 1 : 0;
+          const _push = u !== v && _was_stable && !_in_new;
           if (_probe) {
             console.error(
-              `[TRACE-LD-RESTAB] pass=${_passIdx} visit=${_visitIdx}`
-              + ` v=${v} u=${u} was_stable=${_was_stable}`
-              + ` in_new=${_in_new} fixed=0`
-              + ` pushed=${_push ? 1 : 0} u_comm=${P.memberOf(u)}`);
+              `[TRACE-LD-RESTAB] pass=${_passIdx} visit=${_visitIdx}` +
+                ` v=${v} u=${u} was_stable=${_was_stable}` +
+                ` in_new=${_in_new} fixed=0` +
+                ` pushed=${_push ? 1 : 0} u_comm=${P.memberOf(u)}`
+            );
           }
           if (u === v) continue;
           if (isStable[u] && P.memberOf(u) !== maxComm) {
             queue.push(u);
             isStable[u] = 0;
+            requeued.push(u);
           }
         }
       }
       if (recordTrace) {
-        const rec = { v: v, fromComm: vComm, toComm: maxComm,
-                      moved: moved, delta: moved ? maxImprov : 0 };
-        if (opts.recordCandidates) rec.candidates = deltas;
+        const rec = {
+          v: v,
+          fromComm: vComm,
+          toComm: maxComm,
+          moved: moved,
+          delta: moved ? maxImprov : 0,
+          queueBefore: queueBefore,
+          queueAfter: queue.length,
+          requeued: requeued,
+        };
+        if (recordCandidates) rec.candidates = deltas;
+        if (recordMembership) rec.membership = Array.from(P.membership());
         traces.push(rec);
       }
       _visitIdx++;
@@ -1020,6 +1079,8 @@
   function mergeNodesConstrained(P, constrained, rng, opts) {
     opts = opts || {};
     const recordTrace = !!opts.recordTrace;
+    const recordCandidates = !!opts.recordCandidates;
+    const recordMembership = !!opts.recordMembership;
     const n = P.n();
     const order = new Array(n);
     for (let v = 0; v < n; v++) order[v] = v;
@@ -1039,12 +1100,13 @@
       // _consider_comms default). Closes P0 #20 on the refine side.
       if (_probe) {
         console.error(
-          `[TRACE-LD-BRANCH] pass=${_passIdx} visit=${_visitIdx}`
-          + ` v=${v} vcomm=${vComm} consider_comms=ALL_NEIGH_COMMS_REFINE`
-          + ` n_after_cc=${cands.length} cnodes_vcomm=${P.cnodes(vComm)}`);
+          `[TRACE-LD-BRANCH] pass=${_passIdx} visit=${_visitIdx}` +
+            ` v=${v} vcomm=${vComm} consider_comms=ALL_NEIGH_COMMS_REFINE` +
+            ` n_after_cc=${cands.length} cnodes_vcomm=${P.cnodes(vComm)}`
+        );
       }
       let maxComm = vComm;
-      const _maxCommSizeGuard_r = false;  // JS Leiden refine default
+      const _maxCommSizeGuard_r = false; // JS Leiden refine default
       let maxImprov = _maxCommSizeGuard_r ? -Infinity : 0;
       // [TRACE-LD-CAND] CANDS: refine candidate list + initial max_improv.
       // Mirrors cpp probe at Optimiser.cpp:1342-1378 (merge_nodes_constrained
@@ -1053,11 +1115,12 @@
       if (_probe) {
         const mi_branch_r = _maxCommSizeGuard_r ? "NEG_INF" : "ZERO";
         console.error(
-          `[TRACE-LD-CAND] CANDS pass=${_passIdx} visit=${_visitIdx}`
-          + ` v=${v} vcomm=${vComm} ncands=${cands.length}`
-          + ` max_improv_branch=${mi_branch_r}`
-          + ` max_improv_init=${_ldHex(maxImprov)}`
-          + ` cands=${cands.join(",")}`);
+          `[TRACE-LD-CAND] CANDS pass=${_passIdx} visit=${_visitIdx}` +
+            ` v=${v} vcomm=${vComm} ncands=${cands.length}` +
+            ` max_improv_branch=${mi_branch_r}` +
+            ` max_improv_init=${_ldHex(maxImprov)}` +
+            ` cands=${cands.join(",")}`
+        );
       }
       const deltas = [];
       for (let j = 0; j < cands.length; j++) {
@@ -1071,21 +1134,34 @@
         const d = P.diffMove(v, c);
         if (_probe) {
           console.error(
-            `[TRACE-LD-CAND] DIFF pass=${_passIdx} visit=${_visitIdx}`
-            + ` v=${v} comm=${c} layer=0 lw=${_ldHex(1.0)}`
-            + ` diff_move=${_ldHex(d)}`);
+            `[TRACE-LD-CAND] DIFF pass=${_passIdx} visit=${_visitIdx}` + ` v=${v} comm=${c} layer=0 lw=${_ldHex(1.0)}` + ` diff_move=${_ldHex(d)}`
+          );
         }
-        const possible_improv = d;  // single-layer
+        const possible_improv = d; // single-layer
         // refine uses `>=` (cpp:1374).
-        const accepts = (possible_improv >= maxImprov);
+        const accepts = possible_improv >= maxImprov;
         if (_probe) {
           console.error(
-            `[TRACE-LD-CAND] COMP pass=${_passIdx} visit=${_visitIdx}`
-            + ` v=${v} comm=${c} pimprov=${_ldHex(possible_improv)}`
-            + ` max_improv=${_ldHex(maxImprov)}`
-            + ` accepts=${accepts ? 1 : 0}`);
+            `[TRACE-LD-CAND] COMP pass=${_passIdx} visit=${_visitIdx}` +
+              ` v=${v} comm=${c} pimprov=${_ldHex(possible_improv)}` +
+              ` max_improv=${_ldHex(maxImprov)}` +
+              ` accepts=${accepts ? 1 : 0}`
+          );
         }
-        deltas.push({ comm: c, delta: d });
+        if (recordCandidates) {
+          const members = [];
+          const memBefore = P.membership();
+          for (let u = 0; u < memBefore.length; u++) {
+            if (memBefore[u] === c) members.push(u);
+          }
+          deltas.push({
+            comm: c,
+            delta: d,
+            members: members,
+            size: P.cnodes(c),
+            edgeWeight: P.weightToComm(v, c),
+          });
+        }
         if (accepts) {
           maxImprov = possible_improv;
           maxComm = c;
@@ -1099,9 +1175,9 @@
         nbMoves += 1;
       }
       if (recordTrace) {
-        const rec = { v: v, fromComm: vComm, toComm: maxComm,
-                      moved: moved, delta: moved ? maxImprov : 0 };
-        if (opts.recordCandidates) rec.candidates = deltas;
+        const rec = { v: v, fromComm: vComm, toComm: maxComm, moved: moved, delta: moved ? maxImprov : 0, constrainedComm: constrained[v] };
+        if (recordCandidates) rec.candidates = deltas;
+        if (recordMembership) rec.membership = Array.from(P.membership());
         traces.push(rec);
       }
       _visitIdx++;
@@ -1117,6 +1193,8 @@
   function optimisePartition(graph, qualityFn, seed, opts) {
     opts = opts || {};
     const recordTrace = !!opts.recordTrace;
+    const recordCandidates = !!opts.recordCandidates;
+    const recordMembership = !!opts.recordMembership;
     const refinePartition = opts.refinePartition !== false;
     // Reset the tracer-visible pass counter so every optimisePartition
     // call starts at pass=0 (matches cpp `gTrace.passes` reset per
@@ -1132,14 +1210,12 @@
     // top-level byte-equal verification sets this to 1 so JS doesn't
     // burn time on inner-level moveNodes that hit the visit-cap due to
     // the deferred Partition admin algebra mismatch (audit row M).
-    const maxOuterLevels = opts.maxOuterLevels != null
-                         ? opts.maxOuterLevels : 100;
+    const maxOuterLevels = opts.maxOuterLevels != null ? opts.maxOuterLevels : 100;
     // onLevelEntry: optional hook fired at level=0 (initial graph +
     // partition) and after each level transition (post-collapse swap).
     // Used by tracer harnesses to dump per-level graph + admin state for
     // byte-equal cross-check vs cpp. Inert when unset.
-    const onLevelEntry = typeof opts.onLevelEntry === "function"
-                       ? opts.onLevelEntry : null;
+    const onLevelEntry = typeof opts.onLevelEntry === "function" ? opts.onLevelEntry : null;
     const rng = CC.MT19937(seed >>> 0);
     let P = LeidenPartition(graph, initialMembership, qualityFn);
     const levels = [];
@@ -1156,14 +1232,16 @@
     let _safety = 0;
     while (aggregateFurther) {
       if (++_safety > maxOuterLevels) {
-        if (maxOuterLevels < 100)
-          break;        // expected bound (e.g. stress mode)
+        if (maxOuterLevels < 100) break; // expected bound (e.g. stress mode)
         console.warn("[leiden] aggregate loop exceeded 100 levels; bailing out");
         break;
       }
       const prevVcount = collapsedGraph.vcount();
       const moveOut = moveNodes(collapsedP, rng, {
-        recordTrace: recordTrace, considerEmpty: true,
+        recordTrace: recordTrace,
+        recordCandidates: recordCandidates,
+        recordMembership: recordMembership,
+        considerEmpty: true,
       });
       // Mirror libleidenalg Optimiser.cpp:737 (move_nodes) +
       // MutableVertexPartition::renumber_communities (which routes to
@@ -1185,6 +1263,8 @@
         const constr = collapsedP.membership();
         refineOut = mergeNodesConstrained(subCollapsedP, constr, rng, {
           recordTrace: recordTrace,
+          recordCandidates: recordCandidates,
+          recordMembership: recordMembership,
         });
       }
       const refinedP = refinePartition ? subCollapsedP : collapsedP;
@@ -1257,17 +1337,16 @@
       const _ld_old_gt_ncomm = prevVcount > collapsedP.ncomm();
       if (_ldProbesEnabled()) {
         console.error(
-          `[TRACE-LD-AGG] level=${level} any_unfixed=1`
-          + ` new_vcount=${newCollapsed.vcount()} old_vcount=${prevVcount}`
-          + ` n_comms=${collapsedP.ncomm()}`
-          + ` new_lt_old=${_ld_new_lt_old ? 1 : 0}`
-          + ` old_gt_ncomm=${_ld_old_gt_ncomm ? 1 : 0}`);
+          `[TRACE-LD-AGG] level=${level} any_unfixed=1` +
+            ` new_vcount=${newCollapsed.vcount()} old_vcount=${prevVcount}` +
+            ` n_comms=${collapsedP.ncomm()}` +
+            ` new_lt_old=${_ld_new_lt_old ? 1 : 0}` +
+            ` old_gt_ncomm=${_ld_old_gt_ncomm ? 1 : 0}`
+        );
       }
-      aggregateFurther = (newCollapsed.vcount() < prevVcount)
-                      && (prevVcount > collapsedP.ncomm());
+      aggregateFurther = newCollapsed.vcount() < prevVcount && prevVcount > collapsedP.ncomm();
       if (_ldProbesEnabled()) {
-        console.error(
-          `[TRACE-LD-AGG] level=${level} final=${aggregateFurther ? 1 : 0}`);
+        console.error(`[TRACE-LD-AGG] level=${level} final=${aggregateFurther ? 1 : 0}`);
       }
       collapsedGraph = newCollapsed;
       collapsedP = newCollapsedP;

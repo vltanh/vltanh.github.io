@@ -101,6 +101,133 @@
 .peel-table td.k { color: var(--cobalt); font-weight: 600; }
 .peel-table td.removed { color: var(--signal); }
 .peel-table td.kept { color: var(--mint); }
+
+.trace-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'Special Elite','Courier New',monospace;
+  font-size: .72rem;
+  margin: .7rem 0 1rem;
+}
+.trace-table caption {
+  caption-side: top;
+  text-align: left;
+  color: var(--paper-3);
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  font-size: .86rem;
+  margin-bottom: .35rem;
+}
+.trace-table th,
+.trace-table td {
+  border-bottom: 1px dashed var(--paper-4);
+  padding: .38rem .45rem;
+  text-align: left;
+  vertical-align: top;
+}
+.trace-table th {
+  color: var(--paper-3);
+  font-weight: 600;
+}
+.trace-table td {
+  color: var(--paper);
+}
+.trace-table td.nodes {
+  color: var(--paper-2);
+  overflow-wrap: anywhere;
+}
+.trace-table td.pass,
+.trace-table tr.accept td.action {
+  color: var(--mint);
+  font-weight: 600;
+}
+.trace-table td.fail,
+.trace-table tr.drop td.action {
+  color: var(--signal);
+  font-weight: 600;
+}
+
+.residual-ladder {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: .65rem;
+  margin: .8rem 0 1.1rem;
+}
+.resid-step {
+  border: 1px solid var(--paper-4);
+  background: rgba(237,228,201,.5);
+  border-radius: 4px;
+  padding: .65rem .7rem;
+  font-family: 'Special Elite','Courier New',monospace;
+}
+.resid-step .r-head {
+  color: var(--paper-3);
+  font-size: .68rem;
+  text-transform: uppercase;
+  margin-bottom: .25rem;
+}
+.resid-step .r-main {
+  display: flex;
+  justify-content: space-between;
+  gap: .5rem;
+  color: var(--paper);
+  font-size: .8rem;
+}
+.resid-step .r-main b {
+  color: var(--cobalt);
+}
+.resid-step .bar-track {
+  height: 9px;
+  background: rgba(155,148,122,.28);
+  border-radius: 2px;
+  margin: .45rem 0;
+  overflow: hidden;
+}
+.resid-step .bar-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(to right, var(--cobalt), var(--mint));
+}
+.resid-step .r-note {
+  color: var(--paper-3);
+  font-size: .7rem;
+  line-height: 1.35;
+}
+
+.extract-flow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: .6rem;
+  margin: .85rem 0 1rem;
+}
+.flow-step {
+  border: 1px solid var(--paper-4);
+  border-radius: 4px;
+  padding: .6rem .65rem;
+  background: rgba(237,228,201,.5);
+}
+.flow-step .label {
+  display: block;
+  font-family: 'Special Elite','Courier New',monospace;
+  color: var(--paper-3);
+  font-size: .68rem;
+  text-transform: uppercase;
+  margin-bottom: .25rem;
+}
+.flow-step b {
+  color: var(--cobalt);
+}
+.flow-step p {
+  margin: 0;
+  font-size: .84rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 840px) {
+  .residual-ladder,
+  .extract-flow {
+    grid-template-columns: 1fr;
+  }
+}
 </style>
 </head>
 <body>
@@ -116,7 +243,7 @@
 </header>
 
 <div class="uc-banner">
-  <strong>Draft.</strong> JS port of the shipped IKC reference, against the 32-node fixture; gate verdicts traced per iteration. Shipped IKC's modularity gate is hard-coded to always pass; the page recreates the paper formula for display, with a strict-gate toggle on the outer-loop walker. Implementation pointers (source paths, line numbers, source-of-truth references) live in the <a href="../../docs/algorithms/ikc.md">technical reference</a>.
+  <strong>Draft.</strong> Teaching trace over the shipped IKC reference, against the 32-node fixture; gate verdicts traced per iteration. Shipped IKC's modularity gate is hard-coded to always pass, so the page recreates the paper formula for display and exposes a strict-gate toggle on the outer-loop walker. Read the default path as the shipped implementation and the toggle as a teaching comparison. Implementation pointers (source paths, line numbers, source-of-truth references) live in the <a href="../../docs/algorithms/ikc.md">technical reference</a>.
 </div>
 
 <section class="hook">
@@ -130,15 +257,13 @@
 
   <p>IKC produces a partial partition. Nodes that never sit inside an accepted cluster come out unlabelled. Coverage on real graphs runs low; cluster purity runs high. The default Park 2024 sweep uses \(k = 10\), at which most of the graph stays unlabelled. The page uses \(k \in [2, 5]\) so something visible happens on a 32-node fixture.</p>
 
-  <div class="defs">
-    <div><span class="term">k-core</span> the maximal induced subgraph of \(G\) where every node has degree \(\ge k\). Equivalently: the result of iteratively removing every node with current degree below \(k\). Unique for each \(k\); nests in \(k\): the \((k{+}1)\)-core is contained in the \(k\)-core.</div>
-    <div><span class="term">core number</span> the largest \(k\) such that node \(v\) belongs to the \(k\)-core. Written \(c(v)\). The graph's <em>degeneracy</em> is \(\max_v c(v)\), the densest core that exists.</div>
-    <div><span class="term">k-validity</span> a candidate cluster \(C\) is \(k\)-valid iff every node \(u \in C\) has \(\ge k\) neighbours that are also in \(C\), measured inside the kcore subgraph \(C\) was extracted from. Stricter than belonging to the global \(k\)-core: a node in the global \(k\)-core can still fail \(k\)-validity for its candidate cluster if its qualifying neighbours sit in a different component of the kcore subgraph.</div>
-    <div><span class="term">modularity gate</span> paper formula
-\[\mathrm{mod}(s) = \frac{\ell_s}{L} - \left(\frac{d_s}{2L}\right)^2\]
-with \(L\) = total edges of the original graph, \(\ell_s\) = intra-cluster edges of \(s\), \(d_s\) = sum of intra-cluster degrees. Shipped IKC short-circuits this to a constant before the formula runs, so the gate is effectively a no-op. The strict-gate toggle on the outer-loop walker switches the constant off and runs the formula.</div>
-    <div><span class="term">residual graph</span> the subgraph that survives after every accepted cluster's nodes are peeled. The kernel re-computes the core decomposition of the residual at every iteration, so the densest core falls monotonically across iterations.</div>
+  <div class="callout">
+    <div class="tag">terms used by the peel</div>
+    <p><strong>k-core.</strong> The maximal induced subgraph of \(G\) where every node has degree \(\ge k\); equivalently, repeatedly remove every current node below the floor until none remain. These cores nest: the \((k{+}1)\)-core is contained in the \(k\)-core. <strong>Core number.</strong> \(c(v)\) is the largest \(k\) such that \(v\) belongs to the \(k\)-core; \(\max_v c(v)\) is the graph degeneracy, the densest core that exists.</p>
+    <p><strong>k-validity.</strong> A candidate cluster \(C\) is \(k\)-valid iff every node \(u \in C\) has at least \(k\) neighbours inside \(C\), measured in the kcore subgraph \(C\) came from. This is stricter than global k-core membership: a node can belong to the global k-core and still fail inside its candidate if its qualifying neighbours sit elsewhere. <strong>Residual graph.</strong> The residual is what remains after accepted or failed candidate nodes are peeled; the kernel recomputes core numbers on it every iteration.</p>
+    <p><strong>Modularity gate.</strong> The paper gate is \(\mathrm{mod}(s) = \frac{\ell_s}{L} - \left(\frac{d_s}{2L}\right)^2\), with \(L\) the original edge count, \(\ell_s\) intra-cluster edges, and \(d_s\) the sum of intra-cluster degrees. Shipped IKC short-circuits this to a constant before the formula runs, so the default gate is effectively a no-op. The strict-gate toggle on the walker switches the constant off for comparison.</p>
   </div>
+  <p>Read the page as a top-down peel. <strong>Step 1.</strong> Return only clusters whose members clear the intra-cluster floor \(k\); density matters more than covering every node. <strong>Step 2.</strong> Compute the residual graph's degeneracy \(K^*\), then extract its \(K^*\)-core, recomputing core numbers after each peel. <strong>Step 3.</strong> Split that core into connected components and test k-validity plus the optional paper modularity gate. <strong>Step 4.</strong> Accepted components become clusters, while failed components leave the residual. <strong>Step 5.</strong> Stage 13 repeats the loop on the shared fixture; slide \(k_{\mathrm{floor}}\) to watch coverage shrink against the planted-colour baseline.</p>
 </section>
 
 <section class="algo-meta">
@@ -197,6 +322,12 @@ with \(L\) = total edges of the original graph, \(\ell_s\) = intra-cluster edges
   </div>
   <div class="kcore-bar" id="g-cores-bar"></div>
 
+  <table class="trace-table" id="g-peel4-ledger">
+    <caption>Parallel peel ledger for the 4-core on this fixture. This is the definition-level view: remove every current node below the floor, recompute degrees, repeat until the survivor set is stable.</caption>
+    <thead><tr><th>round</th><th>nodes removed</th><th>why they leave</th><th>survivors after round</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
   <div class="callout">
     <div class="tag">why the k-core, not arbitrary subgraph density</div>
     <p>Two ways to formalise "every member is well-connected inside the cluster": the k-core (every node has degree \(\ge k\)) and the densest subgraph (maximises average degree). The two answer different questions. The densest subgraph optimises a global average, so one weakly-connected outlier inside the densest subgraph can drag the average up if a few hubs are dense enough to compensate. The k-core is a hard floor: every member meets it. IKC needs the floor, not the average, because the algorithm reports clusters where each member individually satisfies the connectivity contract.</p>
@@ -229,6 +360,8 @@ with \(L\) = total edges of the original graph, \(\ell_s\) = intra-cluster edges
     <div class="graph-canvas" id="g-kvalid-cy"></div>
   </div>
 
+  <div class="extract-flow" id="g-kvalid-flow" aria-label="Candidate extraction flow at k = 2"></div>
+
   <div class="callout">
     <div class="tag">k-validity inside the component vs the full kcore subgraph</div>
     <p>The shipped k-validity check iterates the full kcore subgraph and inspects \(\mathrm{deg}_{\mathrm{sub}}(u)\) for every \(u\) in the candidate. Since the candidate is itself a weakly-connected component of the kcore subgraph, intra-subgraph degree equals intra-component degree for any node in the candidate. The two readings of the predicate agree, even though the loop scope is the larger one. The audit captures the loop scope and the per-node degree so the tracer can match the canonical iteration shape, not just its outcome.</p>
@@ -240,20 +373,19 @@ with \(L\) = total edges of the original graph, \(\ell_s\) = intra-cluster edges
   <div class="stage-num">stage 4 &middot; outer loop schema</div>
   <h2>One core tier per iteration, peeled off the residual.</h2>
 
-  <p>The outer loop repeats one step: compute the residual's core decomposition, take the components of the densest core, gate them, peel the survivors. Each iteration descends the core ladder by exactly one tier.</p>
+  <p>The outer loop repeats one step: compute the residual's core decomposition, take the components of the densest core, gate them, peel the decided nodes. Each iteration descends to the next surviving core tier in the residual. On this fixture the tiers are 4, then 3, then 2, then the bail at 1.</p>
 
-  <ol>
-    <li>Compute the core decomposition of the current residual. Read off \(K^*\), the largest core number that still has a member.</li>
-    <li>Bail check: if \(K^* < k_{\mathrm{floor}}\), every remaining node leaves as a singleton and the loop ends.</li>
-    <li>Extract the \(K^*\)-core of the residual.</li>
-    <li>Split the \(K^*\)-core into weakly-connected components. Each component is a candidate cluster.</li>
-    <li>Gate each candidate on k-validity (every node has \(\ge k_{\mathrm{floor}}\) neighbours inside the candidate).</li>
-    <li>Gate each k-valid candidate on the modularity formula. Shipped code short-circuits this to always pass.</li>
-    <li>Accept the survivors; peel their nodes off the residual; tag each accepted cluster with the iteration's \(K^*\) as its connectivity stamp.</li>
-    <li>Repeat from step 1 on the new residual.</li>
-  </ol>
+  <p><strong>Step 1.</strong> Compute the core decomposition of the current residual and read off \(K^*\), the largest core number still present. This finds the densest structure that survived earlier peels. <strong>Step 2.</strong> If \(K^* < k_{\mathrm{floor}}\), every remaining node leaves as a singleton and the loop ends. Otherwise extract the \(K^*\)-core \(S_t = \{v \in R_t : c_t(v) \ge K^*\}\). <strong>Step 3.</strong> Split \(S_t\) into weakly-connected components; a disconnected top core is not one cluster, so each component is a separate proposal. <strong>Step 4.</strong> Gate each proposal on k-validity and then the modularity formula, noting that shipped code short-circuits the modularity gate to pass. <strong>Step 5.</strong> Accept survivors, peel their nodes from the residual, tag each accepted cluster with the iteration's \(K^*\), and repeat on \(R_{t+1}\).</p>
 
   <p>The next four stages walk one iteration of this loop apiece on the fixture at \(k_{\mathrm{floor}} = 2\). Iteration 0 strips A's \(K_5\). Iteration 1 strips B's 8-block. Iteration 2 strips C's two triangles in one pass. Iteration 3 hits the bail and finishes the loop.</p>
+
+  <div class="residual-ladder" id="g-residual-ladder" aria-label="Residual graph shrinkage at k floor 2"></div>
+
+  <table class="trace-table" id="g-candidate-ledger">
+    <caption>Candidate ledger for the default run (\(k_{\mathrm{floor}} = 2\)). Each row is one connected component of the extracted \(K^*\)-core before the peel is applied.</caption>
+    <thead><tr><th>iteration</th><th>\(K^*\)</th><th>candidate nodes</th><th>min intra-degree</th><th>k gate</th><th>mod gate</th><th>peel action</th></tr></thead>
+    <tbody></tbody>
+  </table>
 
   <div class="callout">
     <div class="tag">why iterative, not a single k-pass</div>
@@ -736,6 +868,182 @@ window.MathJax = {
     if (el) el.textContent = val;
   }
 
+  function fmtNodes(nodes, limit) {
+    limit = limit || 10;
+    const sorted = nodes.slice().sort(function (a, b) { return a - b; });
+    if (!sorted.length) return "none";
+    const shown = sorted.slice(0, limit).join(", ");
+    return "{" + shown + (sorted.length > limit ? ", ..." : "") + "}";
+  }
+
+  function degreeStats(nodes, edges) {
+    const set = new Set(nodes);
+    const deg = {};
+    nodes.forEach(function (id) { deg[id] = 0; });
+    let edgeCount = 0;
+    edges.forEach(function (e) {
+      if (set.has(e[0]) && set.has(e[1])) {
+        deg[e[0]] += 1;
+        deg[e[1]] += 1;
+        edgeCount += 1;
+      }
+    });
+    const vals = nodes.map(function (id) { return deg[id]; });
+    return {
+      min: vals.length ? Math.min.apply(null, vals) : 0,
+      max: vals.length ? Math.max.apply(null, vals) : 0,
+      vals: vals,
+      deg: deg,
+      edges: edgeCount,
+    };
+  }
+
+  function renderPeelLedger() {
+    const tbody = document.querySelector("#g-peel4-ledger tbody");
+    if (!tbody) return;
+    const k = 4;
+    let round = 1;
+    const alive = new Set(F.nodes);
+    tbody.innerHTML = "";
+    while (true) {
+      const deg = {};
+      alive.forEach(function (id) { deg[id] = 0; });
+      F.edges.forEach(function (e) {
+        if (alive.has(e[0]) && alive.has(e[1])) {
+          deg[e[0]] += 1;
+          deg[e[1]] += 1;
+        }
+      });
+      const remove = Array.from(alive).filter(function (id) {
+        return deg[id] < k;
+      }).sort(function (a, b) { return a - b; });
+      if (!remove.length) break;
+      const byDegree = {};
+      remove.forEach(function (id) {
+        const d = deg[id];
+        if (!byDegree[d]) byDegree[d] = [];
+        byDegree[d].push(id);
+      });
+      remove.forEach(function (id) { alive.delete(id); });
+      const reason = Object.keys(byDegree).map(Number).sort(function (a, b) {
+        return a - b;
+      }).map(function (d) {
+        return "deg " + d + ": " + fmtNodes(byDegree[d], 8);
+      }).join("; ");
+      const tr = document.createElement("tr");
+      tr.innerHTML = "<td>" + round + "</td>"
+        + "<td class=\"nodes\">" + fmtNodes(remove, 16) + "</td>"
+        + "<td>" + reason + "</td>"
+        + "<td>" + alive.size + " nodes: " + fmtNodes(Array.from(alive), 12) + "</td>";
+      tbody.appendChild(tr);
+      round += 1;
+      if (round > F.nodes.length) break;
+    }
+    const stable = Array.from(alive).sort(function (a, b) { return a - b; });
+    const tr = document.createElement("tr");
+    tr.className = "accept";
+    tr.innerHTML = "<td>stable</td>"
+      + "<td>none</td>"
+      + "<td class=\"pass\">every survivor has current degree >= " + k + "</td>"
+      + "<td>" + stable.length + " nodes: " + fmtNodes(stable, 12) + "</td>";
+    tbody.appendChild(tr);
+  }
+
+  function renderKvalidFlow() {
+    const host = document.getElementById("g-kvalid-flow");
+    if (!host) return;
+    const cn = I.coreNumbers(F.nodes, F.edges);
+    const candNodes = [];
+    cn.core.forEach(function (k, id) {
+      if (k >= 2) candNodes.push(id);
+    });
+    const candEdges = F.edges.filter(function (e) {
+      return cn.core.get(e[0]) >= 2 && cn.core.get(e[1]) >= 2;
+    });
+    const comps = I.connectedComponents(candNodes, candEdges);
+    const mins = comps.map(function (c) { return degreeStats(c, F.edges).min; });
+    const compText = comps.map(function (c) {
+      return c.length + " nodes " + fmtNodes(c, 6);
+    }).join("; ");
+    host.innerHTML = [
+      {
+        label: "1. filter by core number",
+        body: "core >= 2 keeps <b>" + candNodes.length + "</b> of " + F.nodes.length + " nodes.",
+      },
+      {
+        label: "2. induce the subgraph",
+        body: "keep edges with both endpoints in the set: <b>" + candEdges.length + "</b> edges.",
+      },
+      {
+        label: "3. split into components",
+        body: "<b>" + comps.length + "</b> candidates: " + compText + ".",
+      },
+      {
+        label: "4. gate locally",
+        body: "candidate minimum degrees are <b>" + mins.join(", ") + "</b>; floor is 2, so all pass.",
+      },
+    ].map(function (step) {
+      return "<div class=\"flow-step\"><span class=\"label\">" + step.label + "</span><p>" + step.body + "</p></div>";
+    }).join("");
+  }
+
+  function renderResidualLadder() {
+    const host = document.getElementById("g-residual-ladder");
+    if (!host) return;
+    host.innerHTML = "";
+    ITERS.forEach(function (it, idx) {
+      const before = HIST[idx].residual.size;
+      const after = HIST[idx + 1] ? HIST[idx + 1].residual.size : 0;
+      const acceptedNodes = it.accepted.reduce(function (sum, cRec) {
+        return sum + cRec.nodes.length;
+      }, 0);
+      const removed = before - after;
+      const droppedNodes = removed - acceptedNodes;
+      let note;
+      if (it.bailed) {
+        note = "K* = " + it.maxK + " below floor; drop " + droppedNodes + " singleton nodes.";
+      } else if (droppedNodes > 0) {
+        note = "K* = " + it.maxK + "; accept " + acceptedNodes + ", drop " + droppedNodes + ".";
+      } else {
+        note = "K* = " + it.maxK + "; accept " + acceptedNodes + " node(s).";
+      }
+      const step = document.createElement("div");
+      step.className = "resid-step";
+      step.innerHTML = "<div class=\"r-head\">iteration " + it.iteration + "</div>"
+        + "<div class=\"r-main\"><span>residual</span><b>" + before + " -> " + after + "</b></div>"
+        + "<div class=\"bar-track\"><span class=\"bar-fill\" style=\"width:" + Math.round(100 * before / F.nodes.length) + "%\"></span></div>"
+        + "<div class=\"r-note\">" + note + "</div>";
+      host.appendChild(step);
+    });
+  }
+
+  function renderCandidateLedger() {
+    const tbody = document.querySelector("#g-candidate-ledger tbody");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+    let outCluster = 0;
+    ITERS.forEach(function (it) {
+      if (it.bailed) return;
+      it.components.forEach(function (cRec) {
+        const stats = degreeStats(cRec.nodes, F.edges);
+        const accepted = cRec.accepted;
+        const tr = document.createElement("tr");
+        tr.className = accepted ? "accept" : "drop";
+        const action = accepted
+          ? "output cluster " + (outCluster++)
+          : "drop candidate";
+        tr.innerHTML = "<td>" + it.iteration + "</td>"
+          + "<td>" + it.maxK + "</td>"
+          + "<td class=\"nodes\">" + fmtNodes(cRec.nodes, 12) + "</td>"
+          + "<td>" + stats.min + " (range " + stats.min + "-" + stats.max + ")</td>"
+          + "<td class=\"" + (cRec.kValid ? "pass" : "fail") + "\">" + (cRec.kValid ? "pass" : "fail") + "</td>"
+          + "<td class=\"" + (cRec.modularity > 0 ? "pass" : "fail") + "\">dead pass; paper " + cRec.modularity.toFixed(3) + "</td>"
+          + "<td class=\"action\">" + action + "</td>";
+        tbody.appendChild(tr);
+      });
+    });
+  }
+
   // ── stage 5: iter 0 start (residual = full graph, painted by core) ─
   function renderIter0Start() {
     const cn = I.coreNumbers(F.nodes, F.edges);
@@ -980,7 +1288,11 @@ window.MathJax = {
 
   // Fire renderers after page.js settled (stage-1 + walker mount).
   function init() {
+    renderPeelLedger();
     renderKvalid();
+    renderKvalidFlow();
+    renderResidualLadder();
+    renderCandidateLedger();
     renderIter0Start();
     renderIter0Kcore();
     renderIter0Accept();

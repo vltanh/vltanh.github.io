@@ -48,6 +48,35 @@
 .cmp-table th { font-family: 'Special Elite','Courier New',monospace; font-size: .72rem; letter-spacing: .15em; color: var(--paper-3); }
 .cmp-table td.var { font-family: 'Fraunces', serif; font-style: italic; color: var(--paper); }
 .cmp-table td.num { font-family: 'Special Elite', 'Courier New', monospace; }
+.formula-stack {
+  border: 1px solid var(--rule);
+  background: rgba(237,228,201,.30);
+  border-radius: 2px;
+  padding: .75rem 1rem;
+  margin: 1rem 0;
+  font-size: .9rem;
+}
+.formula-stack .row {
+  display: grid;
+  grid-template-columns: 1.25fr 1.5fr 1.35fr;
+  gap: .8rem;
+  padding: .45rem 0;
+  border-bottom: 1px dashed var(--rule);
+}
+.formula-stack .row:last-child { border-bottom: none; }
+.formula-stack .head {
+  font-family: 'Special Elite','Courier New',monospace;
+  color: var(--azure);
+}
+.formula-stack .why { color: var(--paper-2); }
+.formula-stack .impl {
+  font-family: 'Special Elite','Courier New',monospace;
+  color: var(--paper-3);
+  font-size: .82rem;
+}
+@media (max-width: 720px) {
+  .formula-stack .row { grid-template-columns: 1fr; gap: .25rem; }
+}
 </style>
 </head>
 <body>
@@ -59,11 +88,11 @@
   <div class="kicker">community detection &middot; hierarchical bayesian inference</div>
   <h1><em>SBM-nested-dc</em></h1>
   <p class="fullname">nested (hierarchical) degree-corrected stochastic block model</p>
-  <p class="sub">Stacks flat blockmodels into a hierarchy. Level 0 uses DC entropy and pays the degree DL; every level above uses NDC entropy on the collapsed block-multigraph. The page walks level 0 and shows the upper-level composition as a static trace.</p>
+  <p class="sub">Stacks flat blockmodels into a hierarchy. Level 0 uses DC entropy and pays the degree DL; every level above uses NDC entropy on the collapsed block-multigraph. The page walks level 0 and shows the upper-level rebuild, priors, and hierarchy readout as static panels.</p>
 </header>
 
 <div class="uc-banner">
-  <strong>Draft, level-0 walker only.</strong> Walker for the DC variant of the nested SBM. The family-level framing, the hierarchical construction at every depth, the resolution-limit lift, and the cross-algorithm contrasts live on the <a href="./sbm-nested-best.html">SBM-nested-best</a> anchor page. The kernel runs the full multi-level chain end-to-end and the cpp tracer plus JS replay leg exercise the hierarchy under self-RNG (306/306 cells PASS on the 3-tier stress panel). The page animates only the level-0 trajectory; the upper levels show up as deterministic composition.
+  <strong>Draft, level-0 walker only.</strong> Walker for the DC variant of the nested SBM. The family-level framing, the hierarchical construction at every depth, the resolution-limit lift, and the cross-algorithm contrasts live on the <a href="./sbm-nested-best.html">SBM-nested-best</a> anchor page. The kernel runs the full multi-level chain end-to-end and the cpp tracer plus JS replay leg exercise the hierarchy under self-RNG (306/306 cells PASS on the 3-tier stress panel). The page animates only the level-0 trajectory; the upper levels are shown through static rebuild, NDC-sweep, and hierarchy-readout panels.
 </div>
 
 <section class="hook">
@@ -75,6 +104,12 @@
     <div><span class="term">\(\Sigma_{\text{nested-DC}}\)</span> sum of per-level \(\Sigma\). Lower is better. Self-consistent, no inter-level coupling.</div>
     <div><span class="term">round-robin sweep</span> one outer iteration runs one MH sweep at every level in order, with deterministic upper-level rebuilds between sweeps.</div>
     <div><span class="term">degree correction (DC)</span> conditioning the likelihood on the observed degree sequence \(\boldsymbol{k}\) so that the partition does not have to explain degree heterogeneity through block membership.</div>
+  </div>
+  <p>Start at level 0: the chain assigns input vertices to blocks, counts edges between those blocks, and scores the result with <code>BlockState(G, { mode: "dc" })</code>. Degree correction conditions on the observed \(k_i\), so hubs do not have to become singleton communities merely to explain degree. After that, the hierarchy collapses non-empty blocks into super-vertices with <code>buildLevelGraph(...)</code>; every upper level fits an NDC block model because the super-vertex degrees are inherited edge totals rather than new node data.</p>
+  <p>The nested score is the sum of <code>level.entropy()</code> across the stack. One round-robin iteration sweeps a level, rebuilds the next graph, and then sweeps that graph, keeping each acceptance ratio local. The output is read bottom-up: level-0 blocks are communities, while upper blocks group communities into coarser structure.</p>
+  <div class="callout">
+    <div class="tag">draft read</div>
+    <p>The browser walker is the level-0 visual slice of the nested-DC chain. Upper levels are kept explicit through rebuild and hierarchy panels, not live step walkers yet.</p>
   </div>
 </section>
 
@@ -110,6 +145,22 @@
   <p>Degree correction addresses a different failure. Under NDC the data-fit term \(e_r \log n_r\) treats every vertex in a block as exchangeable in degree; a degree-9 hub and a degree-2 leaf in the same block pay a penalty proportional to the squared spread of their degrees. Under DC the model conditions on the observed degree sequence \(\boldsymbol{k}\), so the partition can group vertices by their connection neighbourhoods regardless of degree. In words: NDC asks the partition to account for why some vertices have many neighbours and others few; DC takes the degrees as given and asks only how the connections distribute across blocks. Two properties. DC is the only flat variant that pays the uniform degree DL \(L_d\), the price of conditioning on \(\boldsymbol{k}\). And the gap between DC and NDC widens with the degree heterogeneity of the graph: on a regular graph the two are equivalent; on a power-law graph DC pays much less.</p>
 </section>
 
+<!-- ─────────── Stage 1.5 · Level-0 block model accounting ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 1.5 &middot; level-0 block model</div>
+  <h2>The bottom level turns vertices into block-edge counts.</h2>
+  <p>The level-0 model is the only place where the observed vertices appear directly. Given a partition \(\boldsymbol{b}^{(0)}\), the code counts how many edge endpoints fall between every pair of blocks and evaluates the flat-DC description length on those sufficient statistics.</p>
+  <p class="step-desc">Each node receives a block label, and the graph is summarised by block sizes \(n_r\), block degrees \(e_r\), and block-pair counts \(e_{rs}\). The Bayesian score compares partitions by how compactly they encode the same edges, so a useful block assignment makes the edge-count matrix concentrated. In the walker, <code>BlockState.entropy()</code> reads cached counts and local proposals use <code>virtualMove(v, s)</code> to recompute only the affected delta.</p>
+  <div class="graph" id="g-l0-accounting">
+    <div class="graph-chrome">
+      <span>level-0 accounting &middot; \(B^{(0)}\) = <span id="g-l0-accounting-B">·</span> &middot; \(\Sigma^{(0)}_{\text{DC}}\) = <span id="g-l0-accounting-S">·</span> nats</span>
+      <span class="right">partition &rarr; \(e^{(0)}_{rs}\) matrix &rarr; DL terms</span>
+    </div>
+    <div class="graph-canvas" id="g-l0-accounting-cv" style="height: 320px"></div>
+  </div>
+  <p>Notice the separation of roles. The partition \(\boldsymbol{b}^{(0)}\) is the latent object being inferred. The degrees \(\boldsymbol{k}\) are observed auxiliary data under DC. The matrix \(\boldsymbol{e}^{(0)}\) is the sufficient statistic that lets a proposed move be scored without re-reading the whole graph.</p>
+</section>
+
 <!-- ─────────── Stage 2 · Nested DC description length ─────────── -->
 <section class="stage">
   <div class="stage-num">stage 2 &middot; nested DC description length</div>
@@ -117,6 +168,28 @@
   <p>The description length the nested-DC chain minimises is</p>
   <p style="text-align:center">\(\Sigma_{\text{nested-DC}}(\boldsymbol{b}^{(0)}, \ldots, \boldsymbol{b}^{(L-1)}) = \Sigma^{(0)}_{\text{DC}}(\boldsymbol{b}^{(0)} ; G^{(0)}) + \sum_{l = 1}^{L - 1} \Sigma^{(l)}_{\text{NDC}}(\boldsymbol{b}^{(l)} ; G^{(l)})\),</p>
   <p>where \(\Sigma^{(0)}_{\text{DC}}\) is the full flat-DC \(\Sigma\) on the input graph and each \(\Sigma^{(l)}_{\text{NDC}}\) for \(l > 0\) is the flat-NDC \(\Sigma\) on the level-\(l\) block-multigraph. In words: pay the DC cost at level 0, pay the NDC cost at every level above. Two properties. The decomposition is additive across levels with no inter-level coupling term, which is what keeps per-level MH well-defined and matches the JS-side self-consistent form (a deliberate divergence from graph-tool's NestedBlockState entropy, which adds a small \(L_{\text{rec dx}}\) coupling). And on any non-trivial hierarchy the absolute \(\Sigma_{\text{nested-DC}}\) exceeds the corresponding flat-DC \(\Sigma_0\) because the level-1+ terms are positive; the resolution-limit lift outpaces this overhead at large \(N\).</p>
+  <div class="formula-stack" aria-label="nested description length reading steps">
+    <div class="row">
+      <span class="head">1. score the input graph</span>
+      <span class="why">Use DC because raw vertices have observed degrees and hubs.</span>
+      <span class="impl">levels[0].state.entropy()</span>
+    </div>
+    <div class="row">
+      <span class="head">2. collapse the partition</span>
+      <span class="why">The next graph's vertices are non-empty level-0 blocks.</span>
+      <span class="impl">buildLevelGraph(G0, state0, b1)</span>
+    </div>
+    <div class="row">
+      <span class="head">3. score upper graphs</span>
+      <span class="why">Use NDC because their "degrees" are inherited block-edge totals.</span>
+      <span class="impl">BlockState(Gl, { mode: "ndc" })</span>
+    </div>
+    <div class="row">
+      <span class="head">4. add the code lengths</span>
+      <span class="why">A shorter total code means the hierarchy explains the graph more parsimoniously.</span>
+      <span class="impl">\(\Sigma_{\text{nested}} = \sum_l \Sigma_l\)</span>
+    </div>
+  </div>
   <p>Each per-level \(\Sigma^{(l)}\) decomposes into the standard three or four DL terms on that level's graph and partition.</p>
   <div class="graph" id="g-dl">
     <div class="graph-chrome">
@@ -140,7 +213,7 @@
   <p>MCMC starts from any valid partition. The level-0 chain initialises with \(B_0 = \) <span id="g-init-B0">8</span> blocks: the kernel shuffles the identity permutation under MT19937 and assigns block \(i \bmod B_0\) to vertex \(\sigma(i)\). The shuffle is backward Fisher-Yates, matching the std::shuffle direction in the cpp tracer. The upper-level partitions inherit from this seeded init by way of the deterministic level-\((l-1) \to l\) rebuild path.</p>
   <div class="graph" id="g-init">
     <div class="graph-chrome">
-      <span>random init &middot; \(\Sigma_0 = \) <span id="g-init-S0">·</span> nats (level 0 only, full \(\Sigma_{\text{nested-DC}}\) reported at stage 9)</span>
+      <span>random init &middot; \(\Sigma_0 = \) <span id="g-init-S0">·</span> nats (level 0 only, full \(\Sigma_{\text{nested-DC}}\) reported below)</span>
       <span class="right">colour = block id (random)</span>
     </div>
     <div class="graph-canvas" id="g-init-cy"></div>
@@ -207,6 +280,7 @@
   <div class="stage-num">stage 6 &middot; level-0 → level-1 rebuild</div>
   <h2>Collapse blocks into vertices; \(e_{rs}\) counts become edge weights.</h2>
   <p>After the level-0 sweep settles, the kernel rebuilds the level-1 graph from the level-0 mode partition. The rebuild walks the level-0 edge list and bins each edge into a level-1 edge between the source and target block ids; level-0 self-loops contribute to a level-1 self-loop on the same block id. The level-1 graph is a weighted multigraph with one vertex per non-empty level-0 block.</p>
+  <p class="step-desc">The rebuild reads every current label \(b_v^{(0)}\), ignores empty block ids, bins each input edge \((u,v)\) into the pair \((b_u^{(0)}, b_v^{(0)})\), compacts the non-empty ids to \(0, \ldots, B_{\text{ne}}^{(0)} - 1\), and creates \(G^{(1)}\) with one super-vertex per surviving level-0 block. Weighted level-1 edges are exactly the binned \(e_{rs}^{(0)}\) counts.</p>
   <div class="graph" id="g-rebuild">
     <div class="graph-chrome">
       <span>level-0 partition (left) &middot; level-1 block-multigraph (right)</span>
@@ -223,6 +297,7 @@
   <div class="stage-num">stage 7 &middot; level-1 NDC sweep</div>
   <h2>Same MH walker, NDC entropy, smaller graph.</h2>
   <p>The level-1 sweep is structurally identical to the level-0 sweep: shuffled visit order, uniform proposal over the level-1 non-empty blocks (plus optional fresh slot), accept-reject under \(\exp(-\beta \Delta\Sigma)\). The only difference is the entropy form: level 1 uses NDC, with no degree DL. The level-1 graph is a weighted multigraph, so the entropy uses edge weights rather than unit counts; the BlockState code path is the same.</p>
+  <p class="step-desc">At level 1 the "vertices" are whole level-0 blocks, and an edge weight records how many original edges crossed that block pair. The upper state is another <code>BlockState</code>, but it is built with <code>mode: "ndc"</code> on the rebuilt graph: a super-vertex degree is \(e_r^{(0)}\), already encoded by the lower level, so treating it as a fresh degree sequence would charge it twice.</p>
   <div class="graph" id="g-l1">
     <div class="graph-chrome">
       <span>level-1 state &middot; \(B^{(1)}\) = <span id="g-l1-B">·</span> &middot; \(\Sigma^{(1)}_{\text{NDC}}\) = <span id="g-l1-S">·</span> nats</span>
@@ -260,6 +335,7 @@
     </div>
     <div class="graph-canvas" id="g-eq-cy" style="height: 240px"></div>
   </div>
+  <p class="step-desc">Large early drops in \(\Sigma^{(0)}\) mean the chain is finding obvious block assignments. Changes in \(B^{(0)}\) mark split or merge moves that alter model complexity. After each lower sweep, the next graph is rebuilt and its own NDC sweep equilibrates the prior over blocks. A flat tail means the displayed partition is a posterior sample from the settled region, not merely an initialization artifact.</p>
   <p>A still-falling trace at the right edge means the chain has not equilibrated and the sweep count is too low. On this fixture 20 sweeps usually settle the chain. The hierarchy adds a small overhead to wall-clock convergence (the per-sweep round-robin spends some of its budget at higher levels); on a 32-node fixture the level-0 trajectory tracks the <a href="./sbm-flat-dc.html">flat-dc page</a>.</p>
 </section>
 
@@ -286,6 +362,21 @@
     <div class="tag">on this fixture, by region</div>
     <p>A's \(K_5\) almost always anchors a level-0 block: the internal edges are dense, so peeling A's hub away from its periphery pays a steep sparse-entropy cost that DC absorbs through the model. B's bridge often stays bridged; C's two 3-cycles split into two blocks (no edges between them); D is seed-dependent. Under nested, the upper levels package A and D into one super-block when the cross-edges between them are dense relative to other inter-block pairs, but level 0 alone matches the <a href="./sbm-flat-dc.html">flat-dc page</a> on this fixture.</p>
   </div>
+</section>
+
+<!-- ─────────── Stage 10.5 · Hierarchy interpretation ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 10.5 &middot; hierarchy interpretation</div>
+  <h2>Read the output bottom-up: communities, then groups of communities.</h2>
+  <p>The nested model does not return one partition and stop. It returns a sequence of partitions. Level 0 groups vertices into communities; level 1 groups those communities into super-communities; higher levels keep compressing until the remaining graph is too small to justify more structure.</p>
+  <div class="graph" id="g-hierarchy">
+    <div class="graph-chrome">
+      <span>hierarchy readout &middot; current seed</span>
+      <span class="right" id="g-hierarchy-meta">·</span>
+    </div>
+    <div class="graph-canvas" id="g-hierarchy-cv" style="height: 300px"></div>
+  </div>
+  <p class="step-desc">Interpret level-0 blocks as the finest communities the model is willing to pay for. The middle levels describe relations among those communities: which level-0 groups share unusually many edges. Once a level has one or two blocks, the hierarchy has mostly spent its explanatory budget.</p>
 </section>
 
 <!-- ─────────── Stage 11 · Nested-DC vs Flat-DC ─────────── -->
@@ -382,7 +473,8 @@ window.MathJax = {
  *
  * The shared walker_page.js mount drives stages 0 / 3 / 5 / 9 / 10 (input,
  * random init, level-0 MH walker, equilibration, final). This block fills
- * in the new stages added on this page (1, 2, 4, 6, 7, 8, 11, 12) by
+ * in the new stages added on this page (1, 1.5, 2, 4, 6, 7, 8, 10.5,
+ * 11, 12) by
  * running a parallel nested-DC + nested-NDC chain on the same seed and
  * rendering static viz frames from the resulting states.
  *
@@ -408,9 +500,9 @@ window.MathJax = {
     const init = U.makeBlockInit(rng, F.nodes.length, B0);
     const state = SBM.BlockState(G, { mode: mode, init: init });
     const S0 = state.entropy();
-    SBM.equilibrate(state, rng, { sweeps: SWEEPS, beta: BETA, recordTrace: false });
+    const l0Eq = SBM.equilibrate(state, rng, { sweeps: SWEEPS, beta: BETA, recordTrace: false });
     // Build the upper-level chain from the final level-0 partition.
-    const levels = [{ graph: G, state: state, mode: mode }];
+    const levels = [{ graph: G, state: state, mode: mode, series: l0Eq.series }];
     let depth = 0;
     while (depth < MAX_DEPTH - 1) {
       const parent = levels[depth];
@@ -419,11 +511,17 @@ window.MathJax = {
       // Seed the next level's initial membership: every parent block in
       // its own super-block (singletons at the upper level). The
       // canonical kernel does the same on the first round-robin pass.
-      const initNext = new Int32Array(parent.graph.vcount());
+      const maxBlockId = Math.max.apply(null, Array.from(nonEmpty));
+      const initNext = new Int32Array(Math.max(parent.graph.vcount(), maxBlockId + 1));
       for (let i = 0; i < initNext.length; i++) initNext[i] = i;
       const built = SBM.buildLevelGraph(parent.graph, parent.state, initNext);
       const stateNext = SBM.BlockState(built.graph, { mode: "ndc", init: built.init });
-      levels.push({ graph: built.graph, state: stateNext, mode: "ndc" });
+      const eqNext = SBM.equilibrate(stateNext, rng, {
+        sweeps: Math.max(6, Math.floor(SWEEPS / 2)),
+        beta: BETA,
+        recordTrace: false,
+      });
+      levels.push({ graph: built.graph, state: stateNext, mode: "ndc", series: eqNext.series });
       depth += 1;
     }
     return { S0: S0, finalS: state.entropy(), levels: levels };
@@ -566,6 +664,144 @@ window.MathJax = {
     ndcRun = runChain(seed, "ndc");
   }
 
+  function level0Matrix(state) {
+    const mem = state.blockMembership();
+    const ne = Array.from(state.nonEmptyBlocks());
+    const posByBlock = new Map();
+    for (let i = 0; i < ne.length; i++) posByBlock.set(ne[i], i);
+    const idxById = C.PAGE.indexById(F);
+    const mat = Array.from({ length: ne.length }, function () {
+      return new Array(ne.length).fill(0);
+    });
+    const sizes = new Array(ne.length).fill(0);
+    for (let v = 0; v < mem.length; v++) {
+      const j = posByBlock.get(mem[v]);
+      if (j != null) sizes[j] += 1;
+    }
+    F.edges.forEach(function (e) {
+      const u = idxById[e[0]], v = idxById[e[1]];
+      const r = posByBlock.get(mem[u]), s = posByBlock.get(mem[v]);
+      if (r == null || s == null) return;
+      if (r === s) mat[r][r] += 2;
+      else { mat[r][s] += 1; mat[s][r] += 1; }
+    });
+    return { blocks: ne, mat: mat, sizes: sizes };
+  }
+
+  // ── Stage 1.5 · level-0 accounting ────────────────────────────────
+  function renderL0Accounting() {
+    if (!dcRun) return;
+    const host = document.getElementById("g-l0-accounting-cv");
+    if (!host || typeof d3 === "undefined") return;
+    host.innerHTML = "";
+    const state = dcRun.levels[0].state;
+    const acc = level0Matrix(state);
+    const B = acc.blocks.length;
+    const breakdown = state.entropyBreakdown ? state.entropyBreakdown() : null;
+    setText("g-l0-accounting-B", String(B));
+    setText("g-l0-accounting-S", state.entropy().toFixed(2));
+
+    const W = 720, H = 320, P = W / 4;
+    const svg = d3.select(host).append("svg")
+      .attr("viewBox", "0 0 " + W + " " + H)
+      .attr("preserveAspectRatio", "xMidYMid meet")
+      .style("width", "100%").style("height", "100%").style("display", "block");
+
+    const heads = ["input vertices", "block labels", "edge-count matrix", "DC code terms"];
+    heads.forEach(function (h, i) {
+      svg.append("text").attr("x", i * P + 14).attr("y", 22)
+         .attr("font-size", 11).attr("font-family", "Special Elite, monospace")
+         .attr("fill", "#1b2033").text(h);
+    });
+    for (let i = 1; i < 4; i++) {
+      svg.append("line").attr("x1", i * P).attr("y1", 34).attr("x2", i * P).attr("y2", H - 18)
+         .attr("stroke", "#c7b98d").attr("stroke-dasharray", "3 4");
+      svg.append("path").attr("d", "M " + (i * P - 18) + " 154 L " + (i * P - 4) + " 154 M "
+                                + (i * P - 11) + " 148 L " + (i * P - 4) + " 154 L " + (i * P - 11) + " 160")
+         .attr("fill", "none").attr("stroke", "#1b2033").attr("stroke-width", 1.2);
+    }
+
+    // Panel 1: raw vertices, coloured by the current level-0 partition.
+    const mem = state.blockMembership();
+    const idxById = C.PAGE.indexById(F);
+    F.nodes.forEach(function (id, i) {
+      const col = i % 8, row = Math.floor(i / 8);
+      const x = 18 + col * 18, y = 58 + row * 22;
+      svg.append("circle").attr("cx", x).attr("cy", y).attr("r", 5.8)
+         .attr("fill", C.PAGE.partitionColor(mem[idxById[id]]))
+         .attr("stroke", "#1b2033").attr("stroke-width", .8);
+    });
+    svg.append("text").attr("x", 14).attr("y", 180).attr("font-size", 10)
+       .attr("font-family", "Special Elite, monospace").attr("fill", "#646a78")
+       .text("degrees k_i are observed");
+
+    // Panel 2: block-size bars.
+    const maxSize = Math.max(1, Math.max.apply(null, acc.sizes));
+    acc.blocks.forEach(function (b, i) {
+      const y = 52 + i * Math.min(28, 190 / Math.max(1, B));
+      const w = 18 + acc.sizes[i] / maxSize * 82;
+      svg.append("rect").attr("x", P + 18).attr("y", y).attr("width", w).attr("height", 14)
+         .attr("fill", C.PAGE.partitionColor(b)).attr("opacity", .78)
+         .attr("stroke", "#1b2033").attr("stroke-width", .8);
+      svg.append("text").attr("x", P + 24 + w).attr("y", y + 11)
+         .attr("font-size", 9).attr("font-family", "Special Elite, monospace")
+         .attr("fill", "#1b2033").text("b" + b + ": n=" + acc.sizes[i]);
+    });
+    svg.append("text").attr("x", P + 14).attr("y", 282).attr("font-size", 10)
+       .attr("font-family", "Special Elite, monospace").attr("fill", "#646a78")
+       .text("partition b^(0) is latent");
+
+    // Panel 3: e_rs heatmap.
+    const flatVals = acc.mat.flat();
+    const maxE = Math.max(1, Math.max.apply(null, flatVals));
+    const cell = Math.min(24, (P - 62) / Math.max(1, B), 176 / Math.max(1, B));
+    const hx = 2 * P + 38, hy = 52;
+    acc.mat.forEach(function (row, r) {
+      row.forEach(function (val, s) {
+        const alpha = .12 + .78 * (val / maxE);
+        svg.append("rect").attr("x", hx + s * cell).attr("y", hy + r * cell)
+           .attr("width", cell - 1).attr("height", cell - 1)
+           .attr("fill", "#5fa0b3").attr("opacity", alpha)
+           .attr("stroke", "#efe6ca").attr("stroke-width", .3);
+        if (cell >= 16 && val > 0) {
+          svg.append("text").attr("x", hx + s * cell + cell / 2).attr("y", hy + r * cell + cell / 2 + 3)
+             .attr("text-anchor", "middle").attr("font-size", 8)
+             .attr("font-family", "Special Elite, monospace").attr("fill", "#1b2033")
+             .text(r === s ? (val / 2) : val);
+        }
+      });
+    });
+    svg.append("text").attr("x", hx).attr("y", hy + B * cell + 18)
+       .attr("font-size", 10).attr("font-family", "Special Elite, monospace")
+       .attr("fill", "#646a78").text("diagonal labels show e_rr / 2");
+
+    // Panel 4: entropy pieces.
+    const tx = 3 * P + 18;
+    const rows = breakdown ? [
+      ["S_DC", breakdown.exact],
+      ["L_e", breakdown.edges_dl],
+      ["-C_k", -breakdown.dc_deg_const],
+      ["L_p", breakdown.partition_dl],
+      ["L_d", breakdown.degree_dl],
+      ["total", breakdown.total],
+    ] : [["total", state.entropy()]];
+    rows.forEach(function (r, i) {
+      const y = 56 + i * 30;
+      svg.append("rect").attr("x", tx).attr("y", y - 14).attr("width", P - 36).attr("height", 22)
+         .attr("fill", i === rows.length - 1 ? "rgba(123,155,214,.22)" : "rgba(237,228,201,.6)")
+         .attr("stroke", "#c7b98d").attr("stroke-width", .8);
+      svg.append("text").attr("x", tx + 8).attr("y", y)
+         .attr("font-size", 10).attr("font-family", "Special Elite, monospace")
+         .attr("fill", "#1b2033").text(r[0]);
+      svg.append("text").attr("x", tx + P - 44).attr("y", y).attr("text-anchor", "end")
+         .attr("font-size", 10).attr("font-family", "Special Elite, monospace")
+         .attr("fill", "#1b2033").text(r[1].toFixed ? r[1].toFixed(2) : r[1]);
+    });
+    svg.append("text").attr("x", tx).attr("y", 282).attr("font-size", 10)
+       .attr("font-family", "Special Elite, monospace").attr("fill", "#646a78")
+       .text("lower total wins");
+  }
+
   function level1Edges(parentState, levelGraph) {
     const N = levelGraph.vcount();
     const out = [];
@@ -621,7 +857,7 @@ window.MathJax = {
     });
     svg.append("text").attr("x", padL).attr("y", 16).attr("font-size", 11)
        .attr("font-family", "Special Elite, monospace").attr("fill", "#1b2033")
-       .text("level 0 mode &middot; B⁽⁰⁾ = " + l0.state.nonEmptyBlocks().length);
+       .text("level 0 mode · B⁽⁰⁾ = " + l0.state.nonEmptyBlocks().length);
 
     // Right half: level-1 multigraph (one node per non-empty L0 block,
     // edges weighted by e_rs). Position by polar layout around the centre.
@@ -675,7 +911,7 @@ window.MathJax = {
       }
       svg.append("text").attr("x", cx).attr("y", 16).attr("text-anchor", "middle")
          .attr("font-size", 11).attr("font-family", "Special Elite, monospace")
-         .attr("fill", "#1b2033").text("level 1 multigraph &middot; B⁽¹⁾ = " + Bne);
+         .attr("fill", "#1b2033").text("level 1 multigraph · B⁽¹⁾ = " + Bne);
     } else {
       svg.append("text").attr("x", W * 0.75).attr("y", H / 2).attr("text-anchor", "middle")
          .attr("font-size", 11).attr("font-family", "Special Elite, monospace")
@@ -692,8 +928,8 @@ window.MathJax = {
        .attr("fill", "#1b2033").text("rebuild");
 
     setText("g-rebuild-meta", "N⁽¹⁾ = " + (dcRun.levels[1] ? dcRun.levels[1].graph.vcount() : 0)
-      + " &middot; E⁽¹⁾ = " + (dcRun.levels[1] ? dcRun.levels[1].graph.ecount() : 0)
-      + " &middot; ∑ e⁽¹⁾ = " + (dcRun.levels[1] ? dcRun.levels[1].graph.totalEdgeWeight() : 0));
+      + " · E⁽¹⁾ = " + (dcRun.levels[1] ? dcRun.levels[1].graph.ecount() : 0)
+      + " · ∑ e⁽¹⁾ = " + (dcRun.levels[1] ? dcRun.levels[1].graph.totalEdgeWeight() : 0));
   }
 
   // ── Stage 7 · level-1 NDC sweep panel ─────────────────────────────
@@ -724,11 +960,9 @@ window.MathJax = {
       const a = -Math.PI / 2 + 2 * Math.PI * i / Bne;
       pos.push({ x: cx + R * Math.cos(a), y: cy + R * Math.sin(a) });
     }
-    // After running the L0 chain, the L1 state is initialised with each
-    // L1 vertex (= L0 non-empty block) in its own super-block. So the
-    // L1 colouring shows each super-vertex on its own under the initial
-    // policy. This matches the on-page-load level-1 init the canonical
-    // round-robin would see at the start of its level-1 sweep.
+    // After running the L0 chain, the L1 state starts from singleton
+    // super-blocks and is equilibrated under NDC. The colouring below
+    // shows the resulting upper-level partition.
     const mem1 = l1s.blockMembership();
     const edges = level1Edges(l1s, l1g);
     edges.forEach(function (e) {
@@ -759,7 +993,7 @@ window.MathJax = {
     }
     svg.append("text").attr("x", cx).attr("y", H - 10).attr("text-anchor", "middle")
        .attr("font-size", 10).attr("font-family", "Special Elite, monospace").attr("fill", "#1b2033")
-       .text("super-vertex id = remapped level-0 block id &middot; edge label = e⁽⁰⁾_{rs}");
+       .text("super-vertex id = remapped level-0 block id · edge label = e⁽⁰⁾_{rs}");
     setText("g-l1-B", String(l1s.nonEmptyBlocks().length));
     setText("g-l1-S", l1s.entropy().toFixed(2));
   }
@@ -818,7 +1052,99 @@ window.MathJax = {
     // Annotation tying back to the DC-at-level-0-only choice.
     svg.append("text").attr("x", W - MR).attr("y", MT - 8).attr("text-anchor", "end").attr("font-size", 10)
        .attr("font-family", "Special Elite, monospace").attr("fill", "#646a78")
-       .text("DC needed where σ² is large &middot; NDC suffices where σ² is small");
+       .text("DC needed where σ² is large · NDC suffices where σ² is small");
+  }
+
+  // ── Stage 10.5 · hierarchy interpretation ────────────────────────
+  function renderHierarchyReadout() {
+    if (!dcRun) return;
+    const host = document.getElementById("g-hierarchy-cv");
+    if (!host || typeof d3 === "undefined") return;
+    host.innerHTML = "";
+    const W = 720, H = 300;
+    const svg = d3.select(host).append("svg")
+      .attr("viewBox", "0 0 " + W + " " + H)
+      .attr("preserveAspectRatio", "xMidYMid meet")
+      .style("width", "100%").style("height", "100%").style("display", "block");
+
+    const columns = [];
+    const links = [];
+    const l0 = dcRun.levels[0];
+    const ne0 = Array.from(l0.state.nonEmptyBlocks());
+    const mat0 = level0Matrix(l0.state);
+    columns.push({
+      title: "level 0 communities",
+      items: ne0.map(function (b, i) {
+        return { key: "0:" + b, id: b, label: "b" + b, sub: "n=" + mat0.sizes[i], color: C.PAGE.partitionColor(b) };
+      }),
+    });
+
+    for (let l = 1; l < dcRun.levels.length; l++) {
+      const st = dcRun.levels[l].state;
+      const ne = Array.from(st.nonEmptyBlocks());
+      const mem = st.blockMembership();
+      columns.push({
+        title: "level " + l + " super-blocks",
+        items: ne.map(function (b) {
+          return { key: l + ":" + b, id: b, label: "b" + b, sub: "upper", color: C.PAGE.partitionColor(b) };
+        }),
+      });
+      const parentNe = Array.from(dcRun.levels[l - 1].state.nonEmptyBlocks());
+      const upperSet = new Set(ne);
+      for (let i = 0; i < parentNe.length && i < mem.length; i++) {
+        if (!upperSet.has(mem[i])) continue;
+        links.push({ from: (l - 1) + ":" + parentNe[i], to: l + ":" + mem[i], l: l });
+      }
+    }
+
+    const maxItems = Math.max(1, Math.max.apply(null, columns.map(function (c) { return c.items.length; })));
+    const colW = W / Math.max(1, columns.length);
+    const pos = new Map();
+    columns.forEach(function (col, ci) {
+      const x = ci * colW + colW / 2;
+      svg.append("text").attr("x", x).attr("y", 22).attr("text-anchor", "middle")
+         .attr("font-size", 11).attr("font-family", "Special Elite, monospace")
+         .attr("fill", "#1b2033").text(col.title);
+      const step = Math.min(42, (H - 78) / Math.max(1, col.items.length));
+      const start = 54 + (maxItems - col.items.length) * Math.min(8, step / 5);
+      col.items.forEach(function (item, ii) {
+        const y = start + ii * step;
+        pos.set(item.key, { x: x, y: y });
+      });
+    });
+
+    links.forEach(function (link) {
+      const a = pos.get(link.from), b = pos.get(link.to);
+      if (!a || !b) return;
+      const dx = Math.abs(b.x - a.x) * .45;
+      svg.append("path").attr("d", "M " + (a.x + 34) + " " + a.y
+        + " C " + (a.x + dx) + " " + a.y + ", " + (b.x - dx) + " " + b.y + ", " + (b.x - 34) + " " + b.y)
+        .attr("fill", "none").attr("stroke", "#5fa0b3").attr("stroke-width", 1.4).attr("opacity", .48);
+    });
+
+    columns.forEach(function (col) {
+      col.items.forEach(function (item) {
+        const p = pos.get(item.key);
+        svg.append("rect").attr("x", p.x - 34).attr("y", p.y - 12).attr("width", 68).attr("height", 24)
+           .attr("rx", 2).attr("fill", item.color).attr("opacity", .82)
+           .attr("stroke", "#1b2033").attr("stroke-width", 1);
+        svg.append("text").attr("x", p.x).attr("y", p.y - 1).attr("text-anchor", "middle")
+           .attr("font-size", 10).attr("font-family", "Special Elite, monospace")
+           .attr("fill", "#1b2033").text(item.label);
+        svg.append("text").attr("x", p.x).attr("y", p.y + 26).attr("text-anchor", "middle")
+           .attr("font-size", 8).attr("font-family", "Special Elite, monospace")
+           .attr("fill", "#646a78").text(item.sub);
+      });
+    });
+
+    const total = dcRun.levels.reduce(function (acc, level) { return acc + level.state.entropy(); }, 0);
+    const parts = dcRun.levels.map(function (level, i) {
+      return "L" + i + "=" + level.state.entropy().toFixed(1);
+    }).join(", ");
+    svg.append("text").attr("x", W / 2).attr("y", H - 12).attr("text-anchor", "middle")
+       .attr("font-size", 10).attr("font-family", "Special Elite, monospace")
+       .attr("fill", "#646a78").text("Σ_nested = " + total.toFixed(1) + " nats (" + parts + ")");
+    setText("g-hierarchy-meta", dcRun.levels.length + " levels · " + parts);
   }
 
   // ── Stage 11 · nested-DC vs flat-DC ───────────────────────────────
@@ -908,11 +1234,13 @@ window.MathJax = {
   function renderAll() {
     recomputeChains();
     renderWhyPanel();
+    renderL0Accounting();
     renderDLTable();
     renderRoundRobin();
     renderRebuild();
     renderLevel1();
     renderDcLevels();
+    renderHierarchyReadout();
     renderCmpFlat();
     renderCmpNdc();
     if (C.retypeset) C.retypeset();
