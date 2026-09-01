@@ -25,11 +25,10 @@ let setThemeSetting = (themeSetting) => {
 let applyTheme = () => {
   let theme = determineComputedTheme();
 
-  setHighlight(theme);
   transTheme();
+  setHighlight(theme);
   setGiscusTheme(theme);
   setSearchTheme(theme);
-  setCookieConsentTheme(theme);
   updateCalendarUrl();
 
   // if mermaid is not defined, do nothing
@@ -246,23 +245,19 @@ let setSearchTheme = (theme) => {
   }
 };
 
-let setCookieConsentTheme = (theme) => {
-  // Sync cookie consent modal with site's theme
-  // The cookie consent library supports dark mode via the cc--darkmode class
-  var htmlElement = document.documentElement;
-
-  if (theme === "dark") {
-    htmlElement.classList.add("cc--darkmode");
-  } else {
-    htmlElement.classList.remove("cc--darkmode");
-  }
-};
+// Keep this comfortably longer than the 240ms transition-duration in
+// _utilities.scss. Removing the class mid-transition snaps every element still
+// interpolating straight to its final colour, which reads as a flicker; at the
+// previous 260ms there were only 20ms of slack, so one slow frame during the
+// repaint was enough to truncate it.
+const THEME_TRANSITION_MS = 240;
+const THEME_TRANSITION_CLEANUP_MS = THEME_TRANSITION_MS + 120;
 
 let transTheme = () => {
   document.documentElement.classList.add("transition");
   window.setTimeout(() => {
     document.documentElement.classList.remove("transition");
-  }, 550);
+  }, THEME_TRANSITION_CLEANUP_MS);
 };
 
 // Determine the expected state of the theme toggle, which can be "dark", "light", or
@@ -340,5 +335,3 @@ let updateCalendarUrl = () => {
     iframe.src = getCalendarUrl(iframe.dataset.calendarId, iframe.dataset.timezone || "UTC");
   }
 };
-
-initTheme();

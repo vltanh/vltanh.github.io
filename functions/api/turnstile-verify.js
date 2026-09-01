@@ -41,7 +41,9 @@ export const onRequestPost = async ({ request, env }) => {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ secret: env.TURNSTILE_SECRET, response: token, remoteip }),
-  }).then((r) => r.json()).catch(() => null);
+  })
+    .then((r) => r.json())
+    .catch(() => null);
 
   if (!verify) {
     return json({ success: false, "error-codes": ["internal-error"] }, 502);
@@ -59,5 +61,4 @@ export const onRequestPost = async ({ request, env }) => {
   });
 };
 
-export const onRequest = () =>
-  json({ success: false, "error-codes": ["bad-request"] }, 405, { allow: "POST" });
+export const onRequest = () => json({ success: false, "error-codes": ["bad-request"] }, 405, { allow: "POST" });

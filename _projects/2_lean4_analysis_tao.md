@@ -14,15 +14,15 @@ repository:
   - vltanh/lean4-analysis-tao
 ---
 
-This project is an ongoing attempt to formalize Terence Tao's [*Analysis I*](https://terrytao.wordpress.com/books/analysis-i/) in [Lean 4](https://lean-lang.org/), following the book's development as faithfully as possible. Both the main text (definitions, lemmas, theorems) and the end-of-section exercises are in scope.
+This project is an ongoing attempt to formalize Terence Tao's [_Analysis I_](https://terrytao.wordpress.com/books/analysis-i/) in [Lean 4](https://lean-lang.org/), following the book's development as faithfully as possible. Both the main text (definitions, lemmas, theorems) and the end-of-section exercises are in scope.
 
 The guiding aim is to **paraphrase the book, not rewrite it**. Definitions appear in the order Tao introduces them, lemmas and theorems keep his numbering, and proofs in the main-text files reproduce the argument Tao gives rather than a slicker alternative. A reader should be able to open the book in one hand and the corresponding file in the other, and follow them line by line.
 
-Lean is a *proof assistant*: a programming language in which mathematical proofs can be written down so precisely that a computer can check every step. If the computer accepts the proof, you know the argument is airtight, with no hand-waving and no hidden gaps.
+Lean is a _proof assistant_: a programming language in which mathematical proofs can be written down so precisely that a computer can check every step. If the computer accepts the proof, you know the argument is airtight, with no hand-waving and no hidden gaps.
 
 ## Tao's own version
 
-Tao himself has since started [a Lean companion to *Analysis I*](https://github.com/teorth/analysis), which began later than this project but is far more advanced and is the canonical reference. This project is mostly a personal learning exercise, kept around as an alternative take rather than a competitor.
+Tao himself has since started [a Lean companion to _Analysis I_](https://github.com/teorth/analysis), which began later than this project but is far more advanced and is the canonical reference. This project is mostly a personal learning exercise, kept around as an alternative take rather than a competitor.
 
 Two main differences in scope. First, Tao's companion uses textbook definitions only at the start, then transitions to Mathlib's standard definitions from Chapter 3 onward, so it doubles as an introduction to Mathlib. This project keeps the from-scratch rule in force throughout: nothing outside Lean's core is ever imported, all the way through, which naturally leads to different design choices from Tao's. Second, Tao deliberately leaves the end-of-section exercises as `sorry` for readers to fill in, whereas this project also formalizes the exercise solutions.
 
@@ -44,6 +44,6 @@ The up-to-date checklist lives on the [project README](https://github.com/vltanh
 
 ## Acknowledgements
 
-- The book itself: Terence Tao, [*Analysis I*](https://terrytao.wordpress.com/books/analysis-i/).
+- The book itself: Terence Tao, [_Analysis I_](https://terrytao.wordpress.com/books/analysis-i/).
 - The [**Lean**](https://lean-lang.org/) and [**Mathlib**](https://leanprover-community.github.io/) communities for the language, the tooling, and for showing what a modern proof assistant can look like.
 - AI assistance from [**GitHub Copilot**](https://github.com/features/copilot), [**Google Gemini**](https://gemini.google.com/), and [**Anthropic Claude**](https://claude.ai/) during formalization.
