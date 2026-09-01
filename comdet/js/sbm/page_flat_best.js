@@ -1,0 +1,1 @@
+!function(){"use strict";if(!window.COMDET||!COMDET.SBM||!COMDET.SBM.mountComparePage)return;const n=COMDET.SBM.VARIANTS;COMDET.SBM.mountComparePage({gen:"sbm-flat-best",variants:[n.dc,n.ndc,n.pp]})}();

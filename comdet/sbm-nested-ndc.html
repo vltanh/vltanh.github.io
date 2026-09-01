@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>SBM-nested-ndc &middot; nested non-degree-corrected SBM | Community Detection Algorithms</title>
+<link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐖</text></svg>">
+<meta name="description" content="Step-by-step walker for the nested non-degree-corrected SBM. Hierarchy without per-level degree priors; cleaner regularisation on small homogeneous fixtures, weaker on heavy-tailed degree sequences.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&amp;family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&amp;family=Caveat+Brush&amp;family=Special+Elite&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./shared.css">
+<style>
+.level-stack {
+  font-family: 'Special Elite','Courier New',monospace;
+  font-size: .82rem;
+  margin: .6rem 0;
+  border: 1px solid var(--rule);
+  background: rgba(237,228,201,.35);
+  padding: .8rem 1rem;
+  border-radius: 2px;
+}
+.level-stack .lvl { padding: .3rem 0; border-bottom: 1px dashed var(--rule); }
+.level-stack .lvl:last-child { border-bottom: none; }
+.level-stack .lvl .id { color: var(--azure); margin-right: .6rem; font-weight: 700; }
+.level-stack .lvl .meta { color: var(--paper-3); margin-left: .5rem; font-size: .76rem; }
+.round-robin {
+  display: flex; gap: .5rem; flex-wrap: wrap; align-items: center;
+  font-family: 'Special Elite','Courier New',monospace; font-size: .78rem;
+  margin: .6rem 0;
+}
+.round-robin .step {
+  padding: .3rem .6rem; border: 1px solid var(--rule); background: rgba(237,228,201,.5);
+  border-radius: 2px;
+}
+.round-robin .step.l0 { background: rgba(120, 158, 200, .25); }
+.round-robin .step.l1 { background: rgba(206, 167, 99, .25); }
+.round-robin .step.l2 { background: rgba(140, 173, 121, .25); }
+.round-robin .step.rebuild { background: rgba(237,228,201,.4); font-style: italic; }
+.round-robin .arrow { color: var(--paper-3); }
+.dl-table { width: 100%; border-collapse: collapse; margin: .8rem 0; font-size: .9rem; }
+.dl-table th, .dl-table td { padding: .55rem .75rem; border-bottom: 1px solid var(--rule); vertical-align: top; text-align: left; }
+.dl-table th { font-family: 'Special Elite','Courier New',monospace; font-size: .72rem; letter-spacing: .15em; color: var(--paper-3); }
+.dl-table td.term { font-family: 'Fraunces', serif; font-style: italic; white-space: nowrap; color: var(--paper); }
+.schematic {
+  font-family: 'Special Elite','Courier New',monospace; font-size: .8rem;
+  padding: 1rem; margin: .5rem 0;
+  background: rgba(237,228,201,.35); border: 1px solid var(--rule); border-radius: 2px;
+  line-height: 1.6;
+}
+.schematic .head { color: var(--paper-3); font-size: .72rem; letter-spacing: .15em; margin-bottom: .4rem; }
+.schematic .row { display: flex; gap: .8rem; align-items: baseline; flex-wrap: wrap; }
+.schematic .row .label { color: var(--azure); font-weight: 700; min-width: 5.5rem; }
+.schematic .row .body { color: var(--paper); }
+.schematic .arrow-down { color: var(--paper-3); text-align: center; padding: .15rem 0; }
+.merge-diagram {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: .8rem;
+  align-items: center;
+  font-family: 'Special Elite','Courier New',monospace; font-size: .78rem;
+  margin: .6rem 0;
+}
+.merge-diagram .side { padding: .6rem .8rem; background: rgba(237,228,201,.4); border: 1px solid var(--rule); border-radius: 2px; }
+.merge-diagram .side .title { color: var(--paper-3); font-size: .7rem; letter-spacing: .12em; margin-bottom: .3rem; }
+.merge-diagram .arrow { font-size: 1.4rem; color: var(--paper-3); text-align: center; }
+.degree-bars {
+  font-family: 'Special Elite','Courier New',monospace; font-size: .78rem;
+  margin: .6rem 0;
+}
+.degree-bars .row { display: flex; align-items: center; gap: .6rem; padding: .15rem 0; }
+.degree-bars .row .lbl { min-width: 8rem; color: var(--paper-3); }
+.degree-bars .row .bar { background: var(--azure); height: 10px; opacity: .65; }
+.degree-bars .row .bar.ochre { background: #c98b3d; }
+.degree-bars .row .num { color: var(--paper); }
+.formula-strip {
+  font-family: 'Special Elite','Courier New',monospace;
+  font-size: .78rem;
+  padding: .7rem .85rem;
+  margin: .65rem 0;
+  border: 1px dashed var(--rule);
+  background: rgba(120,158,200,.14);
+  border-radius: 2px;
+}
+.matrix-sketch {
+  display: grid;
+  grid-template-columns: minmax(140px, .8fr) minmax(260px, 1.2fr);
+  gap: .8rem;
+  margin: .8rem 0;
+  align-items: stretch;
+}
+.matrix-sketch .mini-note,
+.matrix-sketch .mini-matrix {
+  border: 1px solid var(--rule);
+  background: rgba(237,228,201,.35);
+  border-radius: 2px;
+  padding: .75rem .85rem;
+}
+.matrix-sketch .mini-matrix {
+  display: grid;
+  grid-template-columns: 3rem repeat(4, minmax(2.2rem, 1fr));
+  gap: .25rem;
+  align-content: start;
+  font-family: 'Special Elite','Courier New',monospace;
+  font-size: .72rem;
+}
+.matrix-sketch .cell {
+  padding: .35rem .25rem;
+  min-height: 1.65rem;
+  text-align: center;
+  border: 1px solid rgba(80,67,45,.22);
+  background: rgba(255,255,255,.18);
+}
+.matrix-sketch .cell.head { color: var(--paper-3); letter-spacing: .08em; }
+.matrix-sketch .cell.diag { background: rgba(120,158,200,.22); }
+.matrix-sketch .cell.cross { background: rgba(206,167,99,.18); }
+@media (max-width: 720px) {
+  .matrix-sketch { grid-template-columns: 1fr; }
+  .matrix-sketch .mini-matrix { grid-template-columns: 2.7rem repeat(4, minmax(2rem, 1fr)); font-size: .66rem; }
+}
+</style>
+</head>
+<body>
+<main class="page">
+
+<div id="links"></div>
+
+<header class="hdr">
+  <div class="kicker">community detection &middot; bayesian inference</div>
+  <h1><em>SBM-nested-ndc</em></h1>
+  <p class="fullname">nested (hierarchical) non-degree-corrected stochastic block model</p>
+  <p class="sub">Hierarchy without per-level degree priors. Cleaner regularisation on small homogeneous fixtures; weaker on heavy-tailed degree sequences. The page walks every level in turn.</p>
+</header>
+
+<div class="uc-banner">
+  <strong>Draft, level-0 walker animated.</strong> Walker for the NDC variant of the nested SBM. The family-level Bayesian framing, the hierarchical construction, and the cross-algorithm contrasts live on the <a href="./sbm-nested-best.html">SBM-nested-best</a> anchor page; this page keeps the NDC nested family in full detail. The live browser walker animates the level-0 NDC chain directly; the upper-level hierarchy is unpacked with explicit construction diagrams and implementation notes.
+</div>
+
+<section class="hook">
+  <p>The nested non-degree-corrected SBM applies NDC entropy at every level of a level stack. Level 0 is the input graph plus its block partition. Level 1 is the block-multigraph obtained by collapsing level 0's blocks into super-vertices. Levels above repeat the same construction until the top has one or two blocks. The hierarchy returns a tree of partitions at multiple scales instead of a single flat partition.</p>
+  <p>The description length the chain minimises is</p>
+  <p style="text-align:center">\(\Sigma_{\text{nested-NDC}} = \sum_{l = 0}^{L - 1} \Sigma^{(l)}_{\text{NDC}}\),</p>
+  <p>where each \(\Sigma^{(l)}_{\text{NDC}}\) is the flat-NDC \(\Sigma\) on the level-\(l\) graph: sparse entropy NDC plus edges DL plus partition DL, with no degree DL at any level. In plain terms, every level pays the NDC cost. Two properties. The level-0 NDC entropy carries the hub-leaf penalty the flat-ndc walker exposes, and the nested form does not modify that penalty, so the level-0 mode partition under nested-NDC matches the flat-ndc mode partition on the comdet fixture under most seeds. And the absence of the degree DL term everywhere lightens the per-level accounting compared to nested-DC: both variants run the same round-robin MCMC and differ only in the entropy form at level 0.</p>
+  <div class="defs">
+    <div><span class="term">level 0</span> NDC entropy on the input graph. The level-0 vertex factor is \(e_r \log n_r\).</div>
+    <div><span class="term">level \(l > 0\)</span> NDC entropy on the block-multigraph from level \(l - 1\). Identical to the upper-level construction in nested-DC.</div>
+    <div><span class="term">\(\Sigma_{\text{nested-NDC}}\)</span> sum of per-level NDC \(\Sigma\). Lower is better; no inter-level coupling term.</div>
+    <div><span class="term">no degree DL anywhere</span> NDC at every level skips the degree DL term that nested-DC pays at level 0.</div>
+  </div>
+  <p>The level-0 likelihood counts block sizes and block-pair edge counts, then scores the input graph with the exchangeable NDC entropy. A higher level is built by turning non-empty blocks into super-vertices; the old \(e_{rs}\) matrix becomes the weighted multigraph seen by the next flat SBM. Each level pays to describe its edge-count matrix and its partition, which is the Bayesian prior that prevents free over-splitting.</p>
+  <p>The sampler updates one flat partition at a time, round-robin over levels, with deterministic rebuilds between stochastic sweeps. Follow the level-0 walker on the shared fixture first, then read each rebuild panel as those same \(e_{rs}\) counts becoming a smaller weighted graph.</p>
+  <div class="callout">
+    <div class="tag">draft read</div>
+    <p>This page is still Draft. The live browser animation is limited to level 0, while upper-level walkers and canonical graph-tool cross-checks remain explicit caveats.</p>
+  </div>
+</section>
+
+<!-- ─────────── Stage 0 · The input ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 0 &middot; input</div>
+  <h2>The 32-node fixture, painted by planted ground-truth.</h2>
+  <p>Same fixture as every other comdet page. <em>A</em> (12 nodes, blue) is a \(K_5\) on \(\{0..4\}\) plus a 7-node periphery hanging off the \(K_5\). <em>B</em> (8 nodes, ochre) is two \(K_4\)s bridged by the single edge \((15, 16)\). <em>C</em> (6 nodes, green) is two 3-cycles with no edge between them, both labelled the same in ground-truth. <em>D</em> (4 nodes, plum) is two 2-cliques joined by \((27, 28)\). Outliers 30 and 31 dangle off A.</p>
+  <div class="graph" id="g-input">
+    <div class="graph-chrome">
+      <span>32 nodes &middot; 52 edges &middot; 4 planted communities + 2 outliers</span>
+      <span class="right">colour = planted ground-truth</span>
+    </div>
+    <div class="graph-canvas" id="g-input-cy"></div>
+  </div>
+  <p>On the 32-node fixture the asymptotic resolution-limit benefit of the nested form is mostly cosmetic. \(\sqrt{32} \approx 5.7\), so the flat SBM can already represent the 4-community ground-truth comfortably. The hierarchy starts paying for itself when the optimal block count exceeds \(\sqrt{N}\). The relevant feature of this fixture for nested-NDC is the level-0 hub at node 0 (degree 9 inside a 12-member block): under NDC the chain often peels node 0 into its own level-0 block, and the level-1 graph then carries the peeled hub as a singleton super-vertex that may or may not re-merge at level 1.</p>
+</section>
+
+<!-- ─────────── Stage 1 · Why nested + NDC ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 1 &middot; why nested, why NDC</div>
+  <h2>Hierarchy without per-level degree priors.</h2>
+  <p>Two design choices stack here. The nested half says the partition should be a tree, not a list: every level-\(l\) block is a super-block of level-\((l-1)\) blocks, and the inference returns the whole tree at once. The NDC half says no level should condition on the degree sequence: every node in a block is treated as exchangeable, and degree heterogeneity surfaces through the data fit.</p>
+  <div class="graph" id="g-why">
+    <div class="graph-chrome">
+      <span>design space &middot; nested-NDC sits at the corner without degree priors at any level</span>
+      <span class="right">colour = entropy form at each level</span>
+    </div>
+    <div class="graph-canvas">
+      <div class="schematic">
+        <div class="head">flat &middot; one level only</div>
+        <div class="row"><span class="label">flat-NDC</span><span class="body">NDC entropy on the input graph. No hierarchy. No degree prior.</span></div>
+        <div class="row"><span class="label">flat-DC</span><span class="body">DC entropy on the input graph. No hierarchy. Degree prior at level 0.</span></div>
+        <div class="row"><span class="label">flat-PP</span><span class="body">planted-partition entropy. Per-pair matrix collapsed into two scalars.</span></div>
+        <div class="arrow-down">+ hierarchy</div>
+        <div class="head">nested &middot; level stack</div>
+        <div class="row"><span class="label">nested-NDC</span><span class="body">NDC at level 0. NDC at every level above. <em>this page</em>.</span></div>
+        <div class="row"><span class="label">nested-DC</span><span class="body">DC at level 0. NDC at every level above (upper levels are weighted multigraphs without per-node degrees).</span></div>
+        <div class="row"><span class="label">nested-PP</span><span class="body">does not exist in graph-tool: PP collapses \(e_{rs}\) into scalars at level 0, leaving no matrix for level 1 to inherit.</span></div>
+      </div>
+    </div>
+  </div>
+  <p>Why nested-NDC and not just nested-DC for everything. On graphs with roughly homogeneous within-block degrees, the degree prior in nested-DC pays a per-node bookkeeping cost that the model does not get back in data-fit improvement; the extra parameter slot regularises against noise that is not actually there. NDC is the cleaner choice when the within-block degree distribution is narrow. Two properties of this regime. The NDC sparse entropy reads block membership through the \(e_r \log n_r\) vertex factor, which is invariant under node relabelling inside a block; on homogeneous fixtures this matches what the data actually says. And the NDC chain pays no degree DL anywhere, so the absolute \(\Sigma_{\text{nested-NDC}}\) is always smaller than the corresponding \(\Sigma_{\text{nested-DC}}\) in raw nats. Smaller raw \(\Sigma\) values do not by themselves mean the model wins; the comparison goes through the Bayes-factor reading on the anchor <a href="./sbm-nested-best.html">nested-best page</a>.</p>
+  <p>Why nested-NDC and not flat-NDC. The hierarchy buys a structural interpretation that the flat model cannot offer: even when the level-0 mode partition coincides with the flat-ndc mode partition, the level-1+ partition reads the cross-block edge pattern at a coarser scale, grouping blocks that interact more than expected under the level-0 \(e_{rs}\) baseline. On the comdet fixture the level-1 partition often groups A and D into one super-block (they share cross-edges through nodes 27, 28); flat-ndc has no place to express that observation.</p>
+</section>
+
+<!-- ─────────── Stage 2 · Nested NDC description length ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 2 &middot; description length</div>
+  <h2>Sum of per-level NDC terms, no degree DL anywhere.</h2>
+  <p>The objective the chain minimises decomposes per level. At level \(l\) the chain evaluates the flat-NDC description length on the level-\(l\) graph and the level-\(l\) partition. The total is the sum.</p>
+  <p style="text-align:center">\(\Sigma_{\text{nested-NDC}}(\boldsymbol{b}^{(0)}, \ldots, \boldsymbol{b}^{(L-1)}) = \sum_{l = 0}^{L - 1} \Big[ S^{(l)}_{\text{NDC}} + L_e^{(l)} + L_p^{(l)} \Big]\).</p>
+  <p>In plain terms, every level pays three terms, the same three the flat-NDC chain pays at level 0, computed on that level's graph and that level's partition. Two properties. The decomposition is fully additive across levels (no inter-level coupling term in this formulation; graph-tool's canonical adds a small \(\Lambda_{\text{rec dx}}\) coupling that the walker on this page intentionally omits). And the absolute \(\Sigma_{\text{nested-NDC}}\) is always larger than the corresponding flat \(\Sigma^{(0)}_{\text{NDC}}\) on a non-trivial hierarchy, because the level-1+ terms are positive (they pay extra DL for the hierarchy itself).</p>
+  <div class="formula-strip">
+    Level 0 first: fix a partition \(b_i = r\), count \(n_r\), count \(e_{rs}\), then score \(S_{\text{NDC}}\). The hierarchy does not change this likelihood; it only adds more levels that are scored the same way.
+  </div>
+  <p class="step-desc">The level-0 score first computes \(n_r = |\{i:b_i=r\}|\) for each block; NDC treats vertices inside \(r\) as exchangeable, so the urn size is the quantity that matters, and <code>BlockState</code> updates <code>nr[r]</code> when a vertex moves. The edge list is streamed once into the <code>ers</code> matrix, with internal edges stored on the doubled diagonal. The vertex factor \(\sum_r e_r \log n_r\) charges every stub in block \(r\) as though it could have landed on any of \(n_r\) vertices, which is where hub-leaf pressure enters. Off-diagonal entries subtract \(\log(e_{rs}!)\), diagonals use the double-factorial form, and the page evaluates these with log-gamma values. A move \(v:r\to s\) only touches rows and columns \(r\) and \(s\), giving the live candidate table its fast local \(\Delta\Sigma\) values.</p>
+  <div class="matrix-sketch">
+    <div class="mini-note">
+      <p><strong>Visual object.</strong> The \(e_{rs}\) matrix is the bridge from likelihood to hierarchy. At level 0 it is a sufficient statistic for the NDC likelihood. After collapse it becomes the weighted adjacency matrix of level 1.</p>
+      <p>Rows sum to \(e_r\), which feeds the \(e_r \log n_r\) term. The same matrix also tells the next level which super-vertices are connected.</p>
+    </div>
+    <div class="mini-matrix" aria-label="schematic block edge count matrix">
+      <div class="cell head">\(e_{rs}\)</div><div class="cell head">r</div><div class="cell head">s</div><div class="cell head">t</div><div class="cell head">u</div>
+      <div class="cell head">r</div><div class="cell diag">\(e_{rr}\)</div><div class="cell cross">6</div><div class="cell cross">0</div><div class="cell cross">1</div>
+      <div class="cell head">s</div><div class="cell cross">6</div><div class="cell diag">\(e_{ss}\)</div><div class="cell cross">2</div><div class="cell cross">0</div>
+      <div class="cell head">t</div><div class="cell cross">0</div><div class="cell cross">2</div><div class="cell diag">\(e_{tt}\)</div><div class="cell cross">3</div>
+      <div class="cell head">u</div><div class="cell cross">1</div><div class="cell cross">0</div><div class="cell cross">3</div><div class="cell diag">\(e_{uu}\)</div>
+    </div>
+  </div>
+  <div class="graph" id="g-dl">
+    <div class="graph-chrome">
+      <span>per-level DL terms &middot; nested-NDC</span>
+      <span class="right">no degree DL anywhere</span>
+    </div>
+    <div class="graph-canvas">
+      <table class="dl-table">
+        <thead>
+          <tr><th>term</th><th>formula</th><th>active at level</th><th>plain-English read</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="term">sparse entropy NDC</td>
+            <td>\(S^{(l)}_{\text{NDC}} = \sum_r e_r \log n_r - \sum_{r&lt;s} \log(e_{rs}!) - \sum_r [\log((e_{rr}/2)!) + (e_{rr}/2)\log 2]\)</td>
+            <td>every level</td>
+            <td>data-fit cost at this level under exchangeable-within-block placement</td>
+          </tr>
+          <tr>
+            <td class="term">edges DL</td>
+            <td>\(L_e^{(l)} = \log\!\binom{B^{(l)}(B^{(l)}{+}1)/2 + E^{(l)} - 1}{E^{(l)}}\)</td>
+            <td>every level</td>
+            <td>cost of writing the level's \(e_{rs}\) matrix once \(B^{(l)}\) is known</td>
+          </tr>
+          <tr>
+            <td class="term">partition DL</td>
+            <td>\(L_p^{(l)} = \log(N^{(l)}!) - \sum_r \log(n_r^{(l)}!) + \log\!\binom{N^{(l)} - 1}{B^{(l)} - 1} + \log N^{(l)}\)</td>
+            <td>every level</td>
+            <td>cost of writing the level's labelling</td>
+          </tr>
+          <tr>
+            <td class="term">degree DL</td>
+            <td>absent</td>
+            <td>nowhere</td>
+            <td>NDC does not condition on degrees; the cost is folded into \(S^{(l)}_{\text{NDC}}\)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="defs">
+    <div><span class="term">likelihood</span> \(S^{(l)}_{\text{NDC}}\) is the negative log probability of the level-\(l\) graph under the current partition.</div>
+    <div><span class="term">edge prior</span> \(L_e^{(l)}\) pays to write the symmetric edge-count matrix once the number of blocks is known.</div>
+    <div><span class="term">partition prior</span> \(L_p^{(l)}\) pays to assign \(N^{(l)}\) vertices to \(B^{(l)}\) non-empty blocks.</div>
+    <div><span class="term">posterior</span> the terms add in nats: \(-\log P(b,e\mid A) = \Sigma + \text{const}\), so lower \(\Sigma\) means a shorter code for the data and hierarchy together.</div>
+  </div>
+  <p>The two properties of the NDC sparse entropy worth keeping. The vertex factor \(e_r \log n_r\) charges \(\log n_r\) per internal stub: an internal edge incident to a degree-9 hub in a 12-member block pays \(9 \log 12 \approx 22.4\) nats, where the same edge incident to a degree-2 leaf pays \(2 \log 12 \approx 5\) nats. The factor is what makes NDC sensitive to hub-leaf splits. And the formula falls out of the Poisson stochastic block model in the dense-graph limit, which is why NDC is the form pre-2011 literature uses; DC is the post-2011 correction (Karrer and Newman 2011) for heavy-tailed degrees, and nested-DC carries it at level 0 only.</p>
+</section>
+
+<!-- ─────────── Stage 3 · Init nested partition ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 3 &middot; init</div>
+  <h2>Random level-0 partition with \(B_0\) blocks; \(\Sigma_0\) on display.</h2>
+  <p>MCMC starts from any valid partition. The level-0 chain initialises with \(B_0 = \) <span id="g-init-B0">8</span> blocks: the chain shuffles the identity permutation under MT19937 and assigns block \(i \bmod B_0\) to vertex \(\sigma(i)\). The shuffle is backward Fisher-Yates.</p>
+  <div class="graph" id="g-init">
+    <div class="graph-chrome">
+      <span>random init &middot; \(\Sigma_0 = \) <span id="g-init-S0">·</span> nats (level 0)</span>
+      <span class="right">colour = block id (random)</span>
+    </div>
+    <div class="graph-canvas" id="g-init-cy"></div>
+    <div class="widget-row">
+      <button class="btn" id="g-reroll" type="button">reroll</button>
+      <label class="gamma-control">
+        <span class="lbl">seed</span>
+        <input type="number" id="g-seed" min="0" max="999999" step="1" value="7" style="width: 4.5rem"/>
+      </label>
+      <span class="step-label">re-runs the chain &middot; init + 20 sweeps</span>
+    </div>
+  </div>
+  <p>\(\Sigma_0\) is large because the random partition is uninformative: edges cross block boundaries roughly uniformly, the sparse-entropy term gets no concentration discount, and the chain pays the full edges DL + partition DL at every level. Under NDC the level-0 chain has a strong incentive to either group hubs with other hubs or peel them into singletons, both of which lower the \(e_r \log n_r\) penalty; the upper levels then read the level-0 mode partition and adjust their own partitions during the next round-robin pass.</p>
+</section>
+
+<!-- ─────────── Stage 4 · Round-robin init ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 4 &middot; round-robin init</div>
+  <h2>Level-by-level pass; every level gets a starting partition before the MH chain runs.</h2>
+  <p>The chain maintains one flat block state per level. Before the MH sweeps start, the level stack is initialised bottom-up: level 0 from the random partition above, level \(l > 0\) from a one-block-per-vertex partition on the level-\(l\) graph (the level-\(l\) graph itself is built from the level-\((l-1)\) partition that the lower level just finished initialising).</p>
+  <div class="graph" id="g-rri">
+    <div class="graph-chrome">
+      <span>round-robin init &middot; one starting partition per level</span>
+      <span class="right">depth fixed at \(L = \lceil \log_2 N \rceil = 5\)</span>
+    </div>
+    <div class="graph-canvas">
+      <div class="level-stack">
+        <div class="lvl"><span class="id">level 0</span> input graph (\(N_0 = 32\), \(E_0 = 52\)); random partition with \(B_0 = 8\) blocks <span class="meta">walked one MH move at a time below</span></div>
+        <div class="lvl"><span class="id">level 1</span> block-multigraph from level 0 (\(N_1 = B_0\)); each level-1 vertex starts in its own block (\(B_1 = N_1\)) <span class="meta">collapses during sweep 1 at level 1</span></div>
+        <div class="lvl"><span class="id">level 2</span> block-multigraph from level 1; each vertex in its own block <span class="meta">rebuilt after each level-1 sweep</span></div>
+        <div class="lvl"><span class="id">level 3</span> same, smaller <span class="meta">rebuilt after each level-2 sweep</span></div>
+        <div class="lvl"><span class="id">level 4 (top)</span> typically one or two blocks; chain ends here <span class="meta">no rebuild above</span></div>
+      </div>
+    </div>
+  </div>
+  <p>Two properties of the round-robin init. Every level above 0 starts in the most permissive state (one block per vertex), so the MH sweep at that level has the maximum freedom to find structure; the alternative (one super-block containing everything) starts from the most restrictive state and tends to lock in trivial partitions for long stretches. And the depth \(L\) is fixed at \(\lceil \log_2 N \rceil\) (5 levels for \(N = 32\)); levels with trivial structure pay near-zero DL because their partition collapses to one block on the first sweep, so over-allocating depth is cheap.</p>
+</section>
+
+<!-- ─────────── Stage 5 · Level-0 MH sweep ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 5 &middot; level-0 MH sweep</div>
+  <h2>Each visit: pick a vertex, propose a target block, accept or reject.</h2>
+  <p>The level-0 sweep is identical to the <a href="./sbm-flat-ndc.html">flat-NDC walker</a>. One sweep visits every level-0 vertex once in shuffled order. Each visit runs four steps:</p>
+  <ol>
+    <li>Build the candidate pool: every currently non-empty block at level 0, plus one fresh empty slot when the vertex's current block holds more than one member.</li>
+    <li>Sample a target uniformly from the pool (the \(c \to \infty\) limit of Peixoto's local-neighbourhood proposal).</li>
+    <li>Compute \(\Delta\Sigma\) for the move via the subset-entropy delta on the level-0 NDC entropy.</li>
+    <li>Accept with probability \(\min(1, e^{-\beta\Delta\Sigma})\) at \(\beta = 1\). On accept, commit; on reject, leave the partition unchanged.</li>
+  </ol>
+  <p>The \(\Delta\Sigma\) at each visit is the level-0 NDC delta only. The upper-level contributions to \(\Sigma_{\text{nested-NDC}}\) are deterministic given the level-0 partition, so they do not enter the per-visit acceptance ratio; the round-robin pass picks them up between sweeps. The NDC delta has the same closed-form structure as DC's, but the vertex factor is \(e_r \log n_r\) instead of \(\log(e_r!)\); the per-visit \(|\Delta\Sigma|\) values tend to be larger in absolute size than DC's because the NDC vertex factor reacts to unit changes in \(n_r\).</p>
+  <div class="graph" id="g-mcmc">
+    <div class="graph-chrome">
+      <span><span id="g-mcmc-status">visit · &middot; · &middot;</span></span>
+      <span class="right" id="g-mcmc-stats">accepted: &middot; &middot; rejected: &middot; &middot; rate: &middot;</span>
+    </div>
+    <div class="graph-canvas" id="g-mcmc-cy"></div>
+    <div class="widget-row">
+      <button class="btn" id="g-mcmc-reset" type="button">reset</button>
+      <button class="btn" id="g-mcmc-prev" type="button">back</button>
+      <button class="btn primary" id="g-mcmc-next" type="button">next visit</button>
+      <button class="btn" id="g-mcmc-end" type="button">finish chain</button>
+      <span class="step-label">visit <b id="g-mcmc-cur">0</b> / <span id="g-mcmc-total">0</span></span>
+    </div>
+  </div>
+  <p>The side panel lists every candidate block considered for the current vertex with its exact \(\Delta\Sigma\). The picked target shows mint when the proposal was accepted, dim grey when rejected. The vertex's current block is marked "current".</p>
+  <div id="g-mcmc-panel"></div>
+</section>
+
+<!-- ─────────── Stage 6 · Level-0 → Level-1 rebuild ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 6 &middot; level-0 to level-1 rebuild</div>
+  <h2>Collapse the level-0 mode into the level-1 graph.</h2>
+  <p>After the level-0 sweep completes, the level-1 graph is rebuilt from the updated level-0 \(e^{(0)}\) matrix. The rebuild is deterministic: the only stochastic step in the nested chain is the per-level MH sweep; the level transitions are pure aggregations.</p>
+  <div class="graph" id="g-rebuild-l1">
+    <div class="graph-chrome">
+      <span>level-0 to level-1 collapse &middot; vertices = non-empty level-0 blocks</span>
+      <span class="right">edges carry level-0 \(e_{rs}\) as weights</span>
+    </div>
+    <div class="graph-canvas">
+      <div class="merge-diagram">
+        <div class="side">
+          <div class="title">level 0 (input graph)</div>
+          <div>\(N_0 = 32\) vertices</div>
+          <div>\(E_0 = 52\) edges</div>
+          <div>partition: \(B^{(0)}_{\text{ne}}\) non-empty blocks</div>
+          <div>\(\boldsymbol{e}^{(0)}\) matrix: \(B^{(0)}_{\text{ne}} \times B^{(0)}_{\text{ne}}\)</div>
+        </div>
+        <div class="arrow">→ collapse →</div>
+        <div class="side">
+          <div class="title">level 1 (block-multigraph)</div>
+          <div>\(N_1 = B^{(0)}_{\text{ne}}\) vertices (one per non-empty level-0 block)</div>
+          <div>edges carry \(e^{(0)}_{rs}\) as weights</div>
+          <div>self-loops carry \(e^{(0)}_{rr}/2\) (doubled-diagonal convention)</div>
+          <div>total weight \(E_1 = E_0\); no edges lost</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="step-desc">Only non-empty level-0 blocks become level-1 vertices; empty labels are bookkeeping artifacts, not random variables in the hierarchy. The rebuild streams every input edge once, increments the level-1 edge between its endpoint block ids, and uses the same <code>ers</code> matrix the likelihood already counted. Internal block edges become self-loops, cross-block counts become weighted edges, and the total edge weight \(E_l\) stays conserved so every level can reuse the flat-NDC formulas. If level 1 already had labels, surviving super-vertices keep them after renumbering: a rebuild changes the graph, not the Markov chain's memory.</p>
+  <p>Two properties of the rebuild. The total weight of the level-1 graph equals the total weight of the level-0 graph (no edges are lost in the collapse), so \(E^{(l)}\) is conserved across the level transition; this is what allows the flat \(\Sigma\) formulas to evaluate at every level without level-specific arithmetic. And the rebuild is \(O(N^{(l)})\) work per level transition, dominated by walking the level-\((l-1)\) edge list and binning into the level-\(l\) edge map; the total per-iteration cost is \(O(N + \sum_l N^{(l)})\) which on graphs with rapidly shrinking levels reduces to \(O(N)\).</p>
+  <p>The level-1 partition is preserved across the rebuild: every level-1 vertex (which is a non-empty level-0 block) keeps the level-1 block label it had before the rebuild. When a level-0 block became empty during the level-0 sweep, the level-1 vertex that represented it is dropped and the remaining vertices are renumbered \(0 \ldots B^{(0)}_{\text{ne}} - 1\). The level-1 partition vector is permuted to match the new numbering.</p>
+</section>
+
+<!-- ─────────── Stage 7 · Level-1 MH sweep ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 7 &middot; level-1 MH sweep</div>
+  <h2>Same MH move, smaller graph, no degree prior to track.</h2>
+  <p>The level-1 sweep runs the same MH move as level 0, on the level-1 graph: shuffled visit order, per-vertex uniform proposal over the level-1 candidate pool, single-vertex acceptance ratio at \(\beta = 1\). The \(\Delta\Sigma\) is the level-1 NDC delta.</p>
+  <div class="graph" id="g-mh-l1">
+    <div class="graph-chrome">
+      <span>level-1 sweep &middot; NDC entropy on the block-multigraph</span>
+      <span class="right">no degree DL to update; lighter bookkeeping than DC</span>
+    </div>
+    <div class="graph-canvas">
+      <div class="schematic">
+        <div class="head">per-visit work at level 1</div>
+        <div class="row"><span class="label">build pool</span><span class="body">enumerate non-empty level-1 blocks; add fresh empty slot if current has &gt; 1 member</span></div>
+        <div class="row"><span class="label">sample target</span><span class="body">uniform over pool under MT19937; one draw per visit</span></div>
+        <div class="row"><span class="label">compute \(\Delta S^{(1)}\)</span><span class="body">subset-entropy delta on level-1 NDC vertex factor \(e_r^{(1)} \log n_r^{(1)}\); update \(\boldsymbol{e}^{(1)}\) terms touching the two level-1 blocks</span></div>
+        <div class="row"><span class="label">compute \(\Delta L_e^{(1)} + \Delta L_p^{(1)}\)</span><span class="body">edges DL and partition DL deltas at level 1 only; closed-form, \(O(1)\) per visit</span></div>
+        <div class="row"><span class="label">accept / reject</span><span class="body">\(\min(1, e^{-\beta \Delta\Sigma^{(1)}})\); commit or revert</span></div>
+      </div>
+    </div>
+  </div>
+  <p>The "without DC" qualifier at this level is structural, not a choice. The level-1 graph is a weighted multigraph over level-0 blocks; the "degree" of a level-1 vertex is the level-0 block's total edge weight \(e^{(0)}_r\), which is part of the level-0 model rather than an independent quantity at level 1. Degree correction at the higher levels would double-count: the per-node degree variation it tries to fit was already absorbed by the level-0 entropy. Graph-tool's nested SBM machinery makes the same choice; every level above 0 is NDC in both nested-DC and nested-NDC.</p>
+  <p>Two properties of the level-1 sweep. The per-visit cost is \(O(\deg^{(1)}(v) + B^{(1)}_{\text{ne}})\), same shape as the level-0 sweep but with the smaller \(N^{(1)} = B^{(0)}_{\text{ne}}\) (typically a small handful of vertices for a fixture this size). And the level-1 mode partition is what gives the hierarchy its multi-scale interpretation: a non-singleton level-1 block groups level-0 blocks that interact more than the per-pair baseline expects, which on the comdet fixture often pairs A and D into one super-block.</p>
+</section>
+
+<!-- ─────────── Stage 8 · Level-1 → Level-2 rebuild + sweep ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 8 &middot; level-1 to level-2 and beyond</div>
+  <h2>The construction repeats; each level shrinks the graph until the top.</h2>
+  <p>After the level-1 sweep, the level-2 graph is rebuilt from the updated level-1 \(e^{(1)}\) matrix via the same collapse rule. The level-2 MH sweep runs on that graph. The pattern repeats up to the top level \(L - 1\).</p>
+  <div class="graph" id="g-rebuild-l2">
+    <div class="graph-chrome">
+      <span>level-1 to level-2 collapse + level-2 sweep</span>
+      <span class="right">same construction, smaller graph</span>
+    </div>
+    <div class="graph-canvas">
+      <div class="round-robin">
+        <div class="step l1">level-1 mode<br/>\(N_1, B^{(1)}_{\text{ne}}\)</div>
+        <div class="arrow">→</div>
+        <div class="step rebuild">rebuild level-2<br/>vertices = level-1 blocks</div>
+        <div class="arrow">→</div>
+        <div class="step l2">level-2 sweep<br/>NDC on \(N_2 = B^{(1)}_{\text{ne}}\)</div>
+        <div class="arrow">→</div>
+        <div class="step rebuild">rebuild level-3</div>
+        <div class="arrow">→</div>
+        <div class="step l2">level-3 sweep</div>
+        <div class="arrow">→</div>
+        <div class="step rebuild">...</div>
+        <div class="arrow">→</div>
+        <div class="step l2">top sweep<br/>\(L - 1\)</div>
+      </div>
+      <div class="schematic" style="margin-top: .6rem;">
+        <div class="head">typical sizes on the 32-node fixture (depth \(L = 5\))</div>
+        <div class="row"><span class="label">level 0</span><span class="body">\(N_0 = 32\), \(E_0 = 52\), \(B^{(0)}_{\text{ne}} \approx 5..7\) after equilibration</span></div>
+        <div class="row"><span class="label">level 1</span><span class="body">\(N_1 \approx 5..7\), \(B^{(1)}_{\text{ne}} \approx 2..4\)</span></div>
+        <div class="row"><span class="label">level 2</span><span class="body">\(N_2 \approx 2..4\), \(B^{(2)}_{\text{ne}} \approx 1..2\)</span></div>
+        <div class="row"><span class="label">level 3</span><span class="body">\(N_3 \approx 1..2\), trivial</span></div>
+        <div class="row"><span class="label">level 4 (top)</span><span class="body">\(N_4 = 1\), one block, zero entropy</span></div>
+      </div>
+    </div>
+  </div>
+  <p>Two properties of the cascade. The level sizes decay geometrically when the partition coarsens by a constant factor at each step; on the comdet fixture they decay faster than that because the level-1 graph already has only 5 to 7 vertices and most of them merge during the level-1 sweep. And the top level is always trivial: when \(N^{(l)} \le 2\) the only valid partitions are one block or two blocks, the entropy is bounded above by a constant, and the chain confirms that adding more depth pays nothing.</p>
+</section>
+
+<!-- ─────────── Stage 9 · Multi-level merge ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 9 &middot; multi-level merge</div>
+  <h2>One outer iteration = one full pass top to bottom.</h2>
+  <p>The complete round-robin pass is one outer iteration of the nested MCMC chain: one MH sweep at every level in order, with deterministic rebuilds between sweeps. In a full nested implementation the loop runs for a fixed number of outer iterations or until an equilibration test passes; the live panel on this page renders 20 level-0 sweeps, which is the animated slice of that schedule.</p>
+  <div class="graph" id="g-merge">
+    <div class="graph-chrome">
+      <span>one outer iteration &middot; round-robin over the level stack</span>
+      <span class="right">stochastic step at each level; rebuilds are deterministic</span>
+    </div>
+    <div class="graph-canvas">
+      <div class="round-robin">
+        <div class="step l0">level-0 sweep</div>
+        <div class="arrow">→</div>
+        <div class="step rebuild">rebuild L1</div>
+        <div class="arrow">→</div>
+        <div class="step l1">level-1 sweep</div>
+        <div class="arrow">→</div>
+        <div class="step rebuild">rebuild L2</div>
+        <div class="arrow">→</div>
+        <div class="step l2">level-2 sweep</div>
+        <div class="arrow">→</div>
+        <div class="step rebuild">...</div>
+        <div class="arrow">→</div>
+        <div class="step l2">top sweep</div>
+        <div class="arrow">⟳</div>
+        <div class="step">next outer iter</div>
+      </div>
+    </div>
+  </div>
+  <p class="step-desc">During a level-\(l\) sweep, the lower levels have already produced the level-\(l\) graph and upper levels are held fixed, so the update is a flat SBM move on one graph. The sweep visits each vertex once, scores candidate blocks by \(\Delta\Sigma^{(l)}_{\text{NDC}}\), and accepts with \(\min(1,e^{-\Delta\Sigma})\); the live panel shows this exact calculation for level 0. Accepted moves change \(e^{(l)}_{rs}\), so the next graph is rebuilt from the new matrix before its own sweep. The sampler repeats outer iterations until \(\Sigma\) and \(B\) fluctuate around a stable range rather than drifting.</p>
+  <p>Two properties of the round-robin. The cycle is a valid Gibbs-style update of each level's conditional posterior given the other levels, so the chain samples the joint posterior asymptotically; the per-level MH sweeps are inner Metropolis-Hastings moves on each conditional. And the upper-level moves can shift super-blocks of level-0 vertices in one step: when a level-1 move merges two level-1 blocks, every level-0 block underneath one of them is relabelled to the other's super-block id, which on the next level-0 sweep is visible as a different starting partition. The flat chain reaches the same partitions only through long sequences of single-vertex moves.</p>
+  <p>Why the chain does not run greedy merges between level-0 blocks directly. Graph-tool's canonical multilevel sampler does propose agglomerative merges as part of the proposal mix; the walker on this page leaves them out and runs single-vertex MH only. The agglomerative merges are the principal divergence between the page walker and the canonical pipeline, and the technical companion lists them alongside the other sanctioned differences.</p>
+</section>
+
+<!-- ─────────── Stage 10 · Convergence ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 10 &middot; convergence</div>
+  <h2>\(\Sigma\) drops from <span id="g-eq-S">·</span>; \(B\) shifts from <span id="g-eq-B">·</span>.</h2>
+  <p>The trace plots level-0 \(\Sigma\) (blue, left axis) and the number of non-empty level-0 blocks \(B\) (ochre, right axis) after each sweep. In a full nested run, upper-level \(\Sigma\) contributions are recomputed after each rebuild; for a fixture this size the level-1+ contributions are small in absolute nats and the level-0 \(\Sigma\) dominates the total.</p>
+  <div class="graph" id="g-eq">
+    <div class="graph-chrome">
+      <span>per-sweep &middot; level-0 \(\Sigma\) and \(B\) over the chain</span>
+      <span class="right">blue = \(\Sigma_0\) (nats) &middot; ochre = non-empty blocks</span>
+    </div>
+    <div class="graph-canvas" id="g-eq-cy" style="height: 240px"></div>
+  </div>
+  <p class="step-desc">A downward blue trace is burn-in: the chain is still finding shorter descriptions. Block-count jumps are expected because NDC can split or reabsorb hubs, so \(B\) may move even after \(\Sigma\) looks nearly flat. Equilibration is empirical, not proof of a global minimum; rerolling the seed checks whether the same mode returns. Upper levels usually wobble less than the level-0 curve shown here because they only see level-0 changes after rebuilds.</p>
+  <p>A still-falling trace at the right edge means the chain has not equilibrated and the sweep count is too low. On this fixture 20 sweeps usually settle the chain. Under NDC the trace is rougher than under DC because the model is more sensitive to hub placement: the chain may switch between "hub in its own block" and "hub in A" several times before settling, and each switch shifts \(\Sigma_0\) by tens of nats. The upper-level contributions damp the visible wobble because they react to the level-0 mode only when the rebuild rewires the level-1 graph; level-1 mode flips are usually slower than level-0 hub flips.</p>
+</section>
+
+<!-- ─────────── Stage 11 · Final hierarchy vs ground-truth ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 11 &middot; final hierarchy vs planted GT</div>
+  <h2>Level-0 mode partition vs. planted ground-truth.</h2>
+  <p>The level-0 mode the chain settled on (left) next to the planted ground-truth (right). \(\Sigma_0\) at the final partition is shown above the SBM panel; per-block stats are below.</p>
+  <div class="gt-compare">
+    <div class="panel-mini">
+      <div class="cap">SBM-nested-ndc (L0) &middot; \(\Sigma_0 = \) <span id="g-final-S">·</span> nats</div>
+      <div class="graph-canvas" id="g-final-sbm" style="height: 280px"></div>
+    </div>
+    <div class="panel-mini">
+      <div class="cap">planted ground-truth &middot; 4 communities + 2 outliers</div>
+      <div class="graph-canvas" id="g-final-gt" style="height: 280px"></div>
+    </div>
+  </div>
+  <table class="cluster-stats" id="g-final-stats">
+    <thead><tr><th>community</th><th>size</th><th>edges in</th><th>edges out</th><th>conductance</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <div class="callout">
+    <div class="tag">on this fixture, by region</div>
+    <p>Without degree correction, A's hub at node 0 often peels into its own level-0 block: NDC has no way to absorb the degree gap between the \(K_5\) vertices and the periphery leaves under an exchangeable-within-block prior. B's bridge often stays bridged: the SBM has no per-block min-cut threshold, so the single \((15, 16)\) edge reads as evidence the two \(K_4\)s belong together. C's two 3-cycles split into two blocks (no edges between them). D is seed-sensitive. The nested hierarchy could re-merge a peeled-off hub with its periphery at the upper level if A's induced sub-cluster is dense enough on the level-1 graph; the page only renders level 0, and the level-1 partition is reported by the technical companion.</p>
+  </div>
+  <p>The level-1+ partition is not animated on this page. Its typical shape on the comdet fixture: the level-1 graph has \(N_1 \approx 5..7\) super-vertices (one per non-empty level-0 block), and the level-1 mode partition often groups A's super-vertex with D's into one super-block (their cross-edges through nodes 27, 28 make the level-1 graph assortative there); the rest of the time the level-1 partition has every level-0 block in its own super-block, signalling that the hierarchy is structurally trivial above level 0 on this fixture.</p>
+</section>
+
+<!-- ─────────── Stage 12 · NDC degree-pathology across levels ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 12 &middot; NDC degree-pathology across levels</div>
+  <h2>Base level groups by degree if hubs present; coarser levels less affected.</h2>
+  <p>The signature failure mode of flat NDC is hub-leaf splitting: in a block with mixed degrees, the model prefers to peel the high-degree node into a singleton block where its internal-stub cost drops from \(e_r \log n_r\) to \(e_r \log 1 = 0\). The same pathology shows up at every level of nested-NDC, but the higher levels are less exposed because the per-level "degree" is the block-summed edge weight, which is less heterogeneous than per-node degrees.</p>
+  <div class="graph" id="g-pathology">
+    <div class="graph-chrome">
+      <span>internal-stub cost \(e_r \log n_r\) per vertex at level 0 vs. level 1</span>
+      <span class="right">larger bar = more pressure to peel into a singleton block</span>
+    </div>
+    <div class="graph-canvas">
+      <div class="degree-bars">
+        <div class="head schematic" style="background: transparent; border: none; padding: 0 0 .4rem 0; margin: 0;">level 0 &middot; vertex \(e_r \log n_r\) for the A block (\(n = 12\))</div>
+        <div class="row"><span class="lbl">node 0 (hub)</span><span class="bar" style="width: 22%"></span><span class="num">9 &middot; log 12 ≈ 22.4</span></div>
+        <div class="row"><span class="lbl">node 1-4 (\(K_5\))</span><span class="bar" style="width: 10%"></span><span class="num">4 &middot; log 12 ≈ 9.9</span></div>
+        <div class="row"><span class="lbl">node 5-11 (leaves)</span><span class="bar" style="width: 5%"></span><span class="num">2 &middot; log 12 ≈ 5.0</span></div>
+        <div class="head schematic" style="background: transparent; border: none; padding: .6rem 0 .4rem 0; margin: 0;">level 1 &middot; super-vertex \(e^{(1)}_r \log n^{(1)}_r\) for a 4-block level-1 graph</div>
+        <div class="row"><span class="lbl">A super-vertex</span><span class="bar ochre" style="width: 8%"></span><span class="num">≈ 8 nats</span></div>
+        <div class="row"><span class="lbl">B super-vertex</span><span class="bar ochre" style="width: 7%"></span><span class="num">≈ 7 nats</span></div>
+        <div class="row"><span class="lbl">C super-vertex</span><span class="bar ochre" style="width: 4%"></span><span class="num">≈ 4 nats</span></div>
+        <div class="row"><span class="lbl">D super-vertex</span><span class="bar ochre" style="width: 3%"></span><span class="num">≈ 3 nats</span></div>
+      </div>
+    </div>
+  </div>
+  <p>At level 0 the cost gap between the hub (22.4 nats) and the leaves (5 nats) is 17.4 nats; the chain has a strong incentive to peel the hub into its own block to save those 17.4 nats per internal stub it carries. At level 1 the cost gap between the most-connected super-vertex (around 8 nats) and the least-connected (around 3 nats) is 5 nats; the incentive is real but much smaller, and the rest of the per-level DL terms (edges DL + partition DL) often outweigh the saving. Two properties. The pathology attenuates with depth because per-level edge-weight aggregation flattens the per-vertex heterogeneity. And the level-0 pathology is the main signal NDC users care about when picking between nested-NDC and nested-DC; the upper levels behave similarly under both variants and rarely change the comparison.</p>
+</section>
+
+<!-- ─────────── Stage 13 · DC-vs-NDC contrast ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 13 &middot; DC vs. NDC on this fixture</div>
+  <h2>Same hierarchy, different level-0 entropy.</h2>
+  <p>The <a href="./sbm-nested-dc.html">nested-dc page</a> walks the same fixture with DC entropy at level 0 (NDC at every upper level, same as here). The two variants differ only at level 0: nested-DC pays the degree DL and uses the \(\log(e_r!)\) vertex factor, nested-NDC drops the degree DL and uses \(e_r \log n_r\). Above level 0 the two are identical.</p>
+  <div class="graph" id="g-dc-ndc">
+    <div class="graph-chrome">
+      <span>level-0 entropy form &middot; the only place DC and NDC differ in the nested family</span>
+      <span class="right">upper levels are NDC under both variants</span>
+    </div>
+    <div class="graph-canvas">
+      <div class="merge-diagram">
+        <div class="side">
+          <div class="title">nested-DC level 0</div>
+          <div>vertex factor: \(\log(e_r!)\)</div>
+          <div>degree DL: \(\sum_r \log\binom{n_r + e_r - 1}{e_r}\)</div>
+          <div>hub cost (node 0): \(\log(9!) \approx 12.8\) nats</div>
+          <div>absorbs the hub-leaf gap into the model</div>
+        </div>
+        <div class="arrow">vs.</div>
+        <div class="side">
+          <div class="title">nested-NDC level 0</div>
+          <div>vertex factor: \(e_r \log n_r\)</div>
+          <div>degree DL: absent</div>
+          <div>hub cost (node 0): \(9 \log 12 \approx 22.4\) nats</div>
+          <div>pays the hub-leaf gap through the data fit</div>
+        </div>
+      </div>
+      <p class="step-desc">The distinction is concentrated at level 0. DC conditions on degrees and explains node 0's high degree as part of the degree sequence; NDC asks whether node 0 is exchangeable with the rest of A. DC pays the \(L_k^{(0)}\) degree-bookkeeping term, which is worth it on heavy-tailed graphs and wasteful on nearly regular blocks, while NDC skips the term and remains the simpler model. Once level 0 has produced a block graph, both variants run the same NDC formula on the same kind of weighted multigraph, so levels \(l>0\) share the collapse, \(S_{\text{NDC}}\), and \(L_e+L_p\). In the live pages the visual schedule is identical; the toggle is the level-0 block-state score, with this page passing <code>mode: "ndc"</code> and the DC sister page using the degree-corrected mode.</p>
+    </div>
+  </div>
+  <p>On A, nested-DC absorbs node 0's degree into the model and reads A as cohesive; nested-NDC pays the hub-leaf penalty and tends to peel the hub. The nested-DC vs. nested-NDC \(\Delta\Sigma\) on this fixture is in the same ballpark as the flat-DC vs. flat-NDC gap, plus or minus a few nats for the level-1+ contributions. Under Peixoto 2017 §VII.A's Bayes-factor reading, a \(\Delta\Sigma\) above 10 nats is decisive; the gap on this fixture is consistently in that range in favour of nested-DC, which is the expected ordering on any graph with heavy-tailed degrees.</p>
+  <p>Two properties of the comparison. The two chains share the level-1+ construction exactly: the level-1 graph is identical given the same level-0 partition, the level-1 NDC entropy is the same formula, the level-1 sweep is the same MH move; so the divergence in \(\Sigma_{\text{nested-DC}}\) vs. \(\Sigma_{\text{nested-NDC}}\) is concentrated at level 0. And the comparison generalises to any nested SBM: every nested variant in graph-tool is NDC above level 0, so the only choice that ever matters is the level-0 entropy form. The <a href="./sbm-nested-best.html">nested-best page</a> surfaces the \(\Delta\Sigma\) directly under shared seeded init.</p>
+</section>
+
+<!-- ─────────── Stage 14 · Why NDC nested sometimes wins ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 14 &middot; when NDC nested wins</div>
+  <h2>Small fixtures, narrow within-block degree distributions, regularisation favours fewer parameters.</h2>
+  <p>NDC is the wrong choice on the comdet fixture because A has a clear hub-leaf split that DC was built to absorb. On other fixtures the comparison can flip. Three regimes where NDC nested ends up below DC nested in description length.</p>
+  <div class="graph" id="g-wins">
+    <div class="graph-chrome">
+      <span>when nested-NDC wins &middot; three regimes</span>
+      <span class="right">DC is the right default; NDC is the simpler model where it fits</span>
+    </div>
+    <div class="graph-canvas">
+      <div class="schematic">
+        <div class="head">regime 1 &middot; within-block degree variance is small</div>
+        <div class="row"><span class="label">picture</span><span class="body">every node in a block has roughly the same degree; the hub-leaf gap is absent</span></div>
+        <div class="row"><span class="label">why NDC wins</span><span class="body">the \(\log(e_r!)\) vertex factor in DC is a noisy fit when degrees are homogeneous; the \(e_r \log n_r\) factor in NDC is the correct sufficient statistic</span></div>
+        <div class="row"><span class="label">example</span><span class="body">a regular block-structured graph (each block is a \(K_k\) or a cycle); NDC reads it cleanly</span></div>
+      </div>
+      <div class="schematic" style="margin-top: .6rem;">
+        <div class="head">regime 2 &middot; small fixture, partition DL dominates</div>
+        <div class="row"><span class="label">picture</span><span class="body">\(N\) is small enough that the degree DL term \(\sum_r \log\binom{n_r + e_r - 1}{e_r}\) at level 0 is comparable to the data-fit gain</span></div>
+        <div class="row"><span class="label">why NDC wins</span><span class="body">on small \(N\) the degree DL is paying for a regularisation budget the data does not need; NDC saves those nats outright</span></div>
+        <div class="row"><span class="label">example</span><span class="body">graphs below \(N \approx 50\) with one or two communities; the degree DL often exceeds 10 nats</span></div>
+      </div>
+      <div class="schematic" style="margin-top: .6rem;">
+        <div class="head">regime 3 &middot; fewer parameters helps the prior</div>
+        <div class="row"><span class="label">picture</span><span class="body">the hierarchical prior already regularises through the per-level edges DL + partition DL; the extra degree DL at level 0 over-regularises</span></div>
+        <div class="row"><span class="label">why NDC wins</span><span class="body">the prior stack at every level already constrains \(B^{(l)}\); the degree DL at level 0 is a redundant constraint on the level-0 \(B^{(0)}\)</span></div>
+        <div class="row"><span class="label">example</span><span class="body">hierarchical block models where the per-level edge-density distribution is the dominant signal and per-node degree variation is noise</span></div>
+      </div>
+    </div>
+  </div>
+  <p>Two properties of the "NDC wins" regimes. None of them apply to the comdet fixture: the within-block degree variance at A is large (hub at degree 9, leaves at degree 2), \(N = 32\) is small but the degree DL at A's block is only around 6 nats (smaller than the 17.4-nat-per-stub hub-leaf gap), and the level-1+ prior on this fixture is structurally trivial (the level-1 graph is too small to add real regularisation). And the Bayes-factor reading is symmetric: a \(\Delta\Sigma\) of 5 to 10 nats in favour of NDC under Peixoto's reading is "suggestive but inconclusive" exactly as a 5 to 10 nat gap in favour of DC would be; treating raw \(\Sigma\) values across variants as commensurable is a category error the anchor <a href="./sbm-nested-best.html">nested-best page</a> guards against.</p>
+  <div class="callout warn">
+    <div class="tag">caveat &middot; level-0 walker only</div>
+    <p>This page animates only the level-0 MCMC walker. The upper-level construction is shown as lecture diagrams in this HTML: block graph rebuild, hierarchy prior, round-robin schedule, and equilibration logic. Surfacing live upper-level walkers is a separate UI task. A cross-check against graph-tool's nested output belongs with that follow-up; graph-tool's canonical pipeline uses a different RNG, dense entropy, and multilevel agglomerative merges, and those differences are documented as sanctioned in the technical companion.</p>
+  </div>
+</section>
+
+<!-- ─────────── Stage 15 · Cross-links ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 15 &middot; sibling pages</div>
+  <h2>Where to look next.</h2>
+  <ul>
+    <li><a href="./sbm-nested-best.html">SBM-nested-best</a>. The nested-family anchor; covers the hierarchical construction, the round-robin MCMC, the resolution-limit lift, and the contrast against the flat family under one shared seeded init.</li>
+    <li><a href="./sbm-nested-dc.html">SBM-nested-dc</a>. The DC sister variant; degree conditioning at level 0, NDC at every level above.</li>
+    <li><a href="./sbm-flat-ndc.html">SBM-flat-ndc</a>. The flat counterpart of this variant; same level-0 walker without the upper levels. The pages share the level-0 MH move exactly.</li>
+    <li><a href="./sbm-flat-best.html">SBM-flat-best</a>. The flat-family anchor; the natural comparison page when reading whether the hierarchy is worth the extra complexity on a given graph.</li>
+    <li><a href="./sbm-flat-dc.html">SBM-flat-dc</a>. The flat DC variant; the page where the hub-leaf trade-off is exposed without the hierarchy.</li>
+    <li><a href="./leiden-cpm.html">Leiden-CPM</a>. The CPM alternative to the Bayesian framing; resolution-limit-free via a tunable \(\gamma\) instead of a level stack.</li>
+  </ul>
+</section>
+
+<div id="kin"></div>
+
+<aside class="tech-companion">
+  <a href="https://github.com/vltanh/community-detection/blob/main/docs/algorithms/sbm.md" target="_blank" rel="noopener">technical companion: docs/algorithms/sbm.md</a>
+</aside>
+<footer class="ack">
+  <p class="tools">drawn with <a href="https://d3js.org" target="_blank" rel="noopener">d3</a></p>
+  <p class="credit">typed by vltanh, doodled with Claude</p>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script>
+window.MathJax = {
+  tex: {
+    inlineMath: [['\\(', '\\)'], ['$', '$'], ['$$', '$$']],
+    displayMath: [['\\[', '\\]']]
+  },
+  chtml: { scale: 1.0 }
+};
+</script>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script src="./shared.js"></script>
+<script src="./js/fixture.js"></script>
+<script src="./js/comdet/page_helpers.js"></script>
+<script src="./js/sbm/util.js"></script>
+<script src="./js/sbm/rng.js"></script>
+<script src="./js/sbm/graph.js"></script>
+<script src="./js/sbm/block_state.js"></script>
+<script src="./js/sbm/mcmc.js"></script>
+<script src="./js/sbm/trace_plot.js"></script>
+<script src="./js/sbm/walker_page.js"></script>
+<script src="./js/sbm/page_nested_ndc.js"></script>
+
+</body>
+</html>

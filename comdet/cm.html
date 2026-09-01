@@ -1,0 +1,1030 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>CM &middot; connectivity modifier | Community Detection Algorithms</title>
+    <link
+      rel="shortcut icon"
+      href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐖</text></svg>"
+    />
+    <meta name="description" content="CM (connectivity modifier). Walked stage by stage on the shared 32-node fixture." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./shared.css" />
+    <style>
+      /* Scoped to .cm-walker. Page-specific CM walker chrome. */
+      .cm-walker .cm-controls-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.8rem 1.2rem;
+        margin: 0.4rem 0 0.8rem;
+        align-items: baseline;
+        font-size: 0.92rem;
+        color: var(--paper-2);
+      }
+      .cm-walker .cm-controls-row label {
+        font-weight: 500;
+      }
+      .cm-walker .cm-controls-row select {
+        font-family: inherit;
+        font-size: 0.92rem;
+        background: var(--ink-2);
+        color: var(--paper);
+        border: 1px solid var(--paper-3);
+        padding: 0.15rem 0.35rem;
+        border-radius: 3px;
+        margin-left: 0.25rem;
+      }
+      .cm-walker .cm-round-panel {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin: 0.4rem 0 0.6rem;
+      }
+      .cm-walker .cm-round-badge {
+        background: var(--cobalt);
+        color: var(--ink);
+        padding: 0.2rem 0.65rem;
+        border-radius: 3px;
+        font-weight: 600;
+        font-size: 0.9rem;
+      }
+      .cm-walker .cm-queue-pill {
+        background: var(--ink-3);
+        color: var(--paper-2);
+        padding: 0.2rem 0.55rem;
+        border-radius: 3px;
+        font-size: 0.88rem;
+        border-left: 3px solid var(--paper-3);
+      }
+      .cm-walker .cm-queue-pill.mincut {
+        border-left-color: var(--cobalt);
+      }
+      .cm-walker .cm-queue-pill.clustered {
+        border-left-color: var(--amber);
+      }
+      .cm-walker .cm-queue-pill.surv {
+        border-left-color: var(--leaf, #2d6b3d);
+      }
+      .cm-walker .cm-queue-pill b {
+        color: var(--paper);
+      }
+
+      .cm-walker .cm-scrub-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.4rem 0.6rem;
+        padding: 0.4rem 0.2rem;
+        border-top: 1px dashed var(--paper-3);
+        margin-top: 0.35rem;
+      }
+      .cm-walker .cm-scrub {
+        flex: 1 1 18rem;
+        min-width: 12rem;
+        accent-color: var(--cobalt);
+      }
+      .cm-walker .cm-gran {
+        font-size: 0.85rem;
+        color: var(--paper-3);
+        white-space: nowrap;
+      }
+      .cm-walker .cm-gran input {
+        vertical-align: middle;
+        margin-right: 0.2rem;
+      }
+
+      .cm-walker .cm-state-grid {
+        display: grid;
+        gap: 0.6rem;
+        grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+        margin: 0.8rem 0 0.4rem;
+      }
+      .cm-walker .cm-state-card {
+        background: var(--ink-2);
+        border: 1px solid var(--paper-3);
+        border-radius: 3px;
+        padding: 0.45rem 0.55rem;
+        font-size: 0.85rem;
+      }
+      .cm-walker .cm-state-card h4 {
+        margin: 0 0 0.3rem;
+        font-size: 0.82rem;
+        text-transform: lowercase;
+        letter-spacing: 0.04em;
+        color: var(--paper-3);
+        font-weight: 600;
+      }
+      .cm-walker .cm-state-card .empty {
+        color: var(--paper-4);
+        font-style: italic;
+      }
+      .cm-walker .cm-state-card .row {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 0.78rem;
+        padding: 0.12rem 0;
+        border-bottom: 1px dotted var(--paper-4);
+        word-break: break-all;
+      }
+      .cm-walker .cm-state-card .row:last-child {
+        border-bottom: none;
+      }
+      .cm-walker .cm-state-card .row .cid {
+        display: inline-block;
+        min-width: 2rem;
+        color: var(--cobalt);
+        font-weight: 600;
+      }
+      .cm-walker .cm-state-card .row.surv .cid {
+        color: #2d6b3d;
+      }
+      .cm-walker .cm-state-card .row.cur {
+        background: rgba(26, 52, 120, 0.12);
+        outline: 1px solid var(--cobalt);
+      }
+
+      .cm-walker .cm-lineage {
+        background: var(--ink-2);
+        border: 1px solid var(--paper-3);
+        border-radius: 3px;
+        padding: 0.6rem;
+        min-height: 14rem;
+        overflow-x: auto;
+      }
+      .cm-walker .cm-lineage svg {
+        display: block;
+      }
+      .cm-walker .cm-lineage .ln-node circle {
+        stroke: var(--paper);
+        stroke-width: 1.5px;
+        fill: var(--ink-3);
+      }
+      .cm-walker .cm-lineage .ln-node.surv circle {
+        fill: #6dab7d;
+        stroke: #2d6b3d;
+      }
+      .cm-walker .cm-lineage .ln-node.dropped circle {
+        fill: var(--paper-4);
+      }
+      .cm-walker .cm-lineage .ln-node.pending circle {
+        fill: var(--amber);
+        stroke: var(--amber);
+      }
+      .cm-walker .cm-lineage .ln-node.cur circle {
+        stroke: var(--cobalt);
+        stroke-width: 2.5px;
+      }
+      .cm-walker .cm-lineage .ln-node text {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 10px;
+        fill: var(--paper);
+      }
+      .cm-walker .cm-lineage .ln-link {
+        fill: none;
+        stroke: var(--paper-3);
+        stroke-width: 1px;
+      }
+      .cm-walker .cm-lineage .ln-legend {
+        display: flex;
+        gap: 1rem;
+        margin-bottom: 0.4rem;
+        font-size: 0.8rem;
+        color: var(--paper-3);
+      }
+      .cm-walker .cm-lineage .ln-legend .swatch {
+        display: inline-block;
+        width: 0.8rem;
+        height: 0.8rem;
+        border-radius: 50%;
+        vertical-align: middle;
+        margin-right: 0.25rem;
+        border: 1px solid var(--paper);
+      }
+
+      .cm-walker .cm-edge-cases {
+        display: grid;
+        gap: 0.6rem;
+      }
+
+      .cm-walker .step-tip {
+        margin-top: 0.5rem;
+      }
+
+      /* Side-by-side comparison table for paper-vs-binary. */
+      .cm-divergence-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: "IBM Plex Sans", sans-serif;
+        font-size: 0.85rem;
+        margin: 0.6rem 0;
+      }
+      .cm-divergence-table th,
+      .cm-divergence-table td {
+        padding: 0.35rem 0.55rem;
+        text-align: left;
+        border-bottom: 1px dotted var(--paper-4);
+        vertical-align: top;
+      }
+      .cm-divergence-table th {
+        font-size: 0.72rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--paper-3);
+        background: var(--ink-2);
+      }
+      .cm-divergence-table td.col-paper {
+        color: var(--paper-2);
+      }
+      .cm-divergence-table td.col-binary {
+        color: var(--paper);
+      }
+
+      .cm-loop-ledger {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: "IBM Plex Sans", sans-serif;
+        font-size: 0.86rem;
+        margin: 0.7rem 0 0.3rem;
+      }
+      .cm-loop-ledger th,
+      .cm-loop-ledger td {
+        padding: 0.42rem 0.55rem;
+        border-bottom: 1px dotted var(--paper-4);
+        text-align: left;
+        vertical-align: top;
+      }
+      .cm-loop-ledger th {
+        font-family: "Special Elite", "Courier New", monospace;
+        font-size: 0.66rem;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        color: var(--paper);
+        background: var(--ink-2);
+      }
+      .cm-loop-ledger code {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 0.78rem;
+        color: var(--cobalt);
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <div class="back-row">
+        <a class="back-link" href="./">&larr; back to gallery</a>
+      </div>
+
+      <header class="hdr">
+        <div class="kicker">community detection &middot; post-proc &middot; connectivity modifier</div>
+        <h1><em>CM</em></h1>
+        <p class="fullname">connectivity modifier &middot; Park 2024</p>
+        <p class="sub">
+          The heaviest of three connectivity post-procs. <a href="./wcc.html">WCC</a>'s cut, plus a re-run of the base community-detection algorithm
+          on each cut half before the recursion advances.
+        </p>
+      </header>
+
+      <div class="uc-banner">
+        <strong>Draft.</strong> Under-construction trace for the CM post-processor on the shared 32-node fixture. The page keeps under-construction
+        status until reviewed; read the walker as an explanatory trace of cut, recluster, and repeat.
+      </div>
+
+      <section class="hook">
+        <p>
+          <a href="./cc.html">CC</a> drops cross-cluster edges and splits each cluster into its connected pieces. <a href="./wcc.html">WCC</a> adds a
+          threshold: a cluster has to clear a mincut bound or it gets cut and recursed. CM is the heaviest: WCC plus a Leiden recluster on each cut
+          half before the recursion advances.
+        </p>
+
+        <p>
+          The <em>modifier</em> in the name is literal. CC and WCC are filters: the output labels descend from the input labels. CM rewrites them.
+          Post-cut halves are not bound to the input partition; if the base algorithm returns four communities on an 80-node induced subgraph, CM
+          feeds those four into the next round.
+        </p>
+
+        <p>The threshold uses the same parser as <a href="./wcc.html">WCC</a>:</p>
+        <p style="text-align: center">\( f(n) = C \log_x(n) \quad \text{or} \quad f(n) = C\,n^x \)</p>
+        <p>
+          In words: a cluster of \(n\) nodes passes iff its minimum edge cut is strictly larger than \(f(n)\). Two interesting properties: the
+          threshold is monotone in \(n\), so as a cluster shrinks under repeated cuts the bar drops with it, which is why the recursion terminates;
+          and the threshold depends only on size, not on cluster density.
+        </p>
+
+        <p>
+          Park 2024 (<a href="https://doi.org/10.1371/journal.pcsy.0000009">PLOS Complex Systems 1(3):e0000009</a>) gives \( f(n) = \log_{10}(n) \) as
+          the primary criterion. The pipeline wrapper ships \(0.2 \cdot n^{0.5}\) instead. The two cross at \(n = 100\); below that, the log criterion
+          is stricter.
+        </p>
+
+        <p>
+          The shipped loop seeds itself with CC components, runs the WCC mincut-threshold test, and on failure runs Leiden or Louvain inside each
+          non-singleton cut side before staging children for the next round. On the shared fixture under \(\log_{10}\), CM follows WCC's A-peeling
+          path because Leiden CPM returns one community on each residual side; when the base splits a side into multiple communities, CM diverges from
+          WCC immediately.
+        </p>
+        <p>
+          CM changes labels and lineage. Park 2024 splits the full pipeline into initial base clustering, a size filter, the CM loop, and a final size
+          filter; this page's walker covers the binary loop only. Wrapper-only pre/post size filters can remove survivors later, and multi-threaded
+          runs can vary row order even when the partition is stable. The binary writes a parent \(\rightarrow\) child tree, and the <em>extant</em>,
+          <em>reduced</em>, <em>split</em>, and <em>degraded</em> labels are computed downstream from that tree.
+        </p>
+
+        <div class="callout">
+          <div class="tag">why Leiden as inner re-clusterer, not Louvain</div>
+          <p>
+            Leiden's refinement phase gives stronger connectivity than Louvain, so the subsequent component sweep usually has less repair work.
+            Louvain can return disconnected labels, which the sweep may fragment. Both are supported in the binary;
+            <code>src/cm/pipeline.sh</code> has no base-algorithm default and requires <code>--base-algo</code>. This page opens on Leiden CPM as a
+            teaching choice.
+          </p>
+        </div>
+      </section>
+
+      <section class="algo-meta">
+        <div class="algo-refs">
+          <span
+            ><span class="ref-label">paper</span
+            ><a href="https://doi.org/10.1371/journal.pcsy.0000009" target="_blank" rel="noopener">Park 2024</a></span
+          >
+          <span
+            ><span class="ref-label">code</span
+            ><a href="https://github.com/MinhyukPark/constrained-clustering" target="_blank" rel="noopener">constrained-clustering CM</a></span
+          >
+          <span
+            ><span class="ref-label">pipeline</span
+            ><a href="https://github.com/illinois-or-research-analytics/cm_pipeline" target="_blank" rel="noopener"
+              >cm_pipeline (orchestration)</a
+            ></span
+          >
+          <span><span class="ref-label">mincut</span><a href="https://github.com/VieCut/VieCut" target="_blank" rel="noopener">VieCut</a></span>
+          <span><span class="ref-label">base</span><a href="./leiden-cpm.html">Leiden CPM (inner loop)</a></span>
+          <span
+            ><span class="ref-label">docs</span
+            ><a href="https://github.com/vltanh/community-detection/blob/main/docs/algorithms/cm.md" target="_blank" rel="noopener"
+              >technical companion</a
+            ></span
+          >
+        </div>
+        <p class="algo-prov">
+          Byte-equal vs the canonical CM binary across the stress matrix (legacy 6-fixture L4 + three 17-fixture 3-tier panels under Leiden-CPM and
+          Leiden-Mod bases, ~694K cumulative records, 0 mismatches).
+        </p>
+      </section>
+
+      <!-- ─────────── Stage 0 · input fixture ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 0 &middot; input</div>
+        <h2>The planted partition.</h2>
+        <p>
+          32 nodes, 52 edges, four planted communities plus two outliers. Cluster A is a K<sub>5</sub> core with seven periphery nodes hanging off it
+          by single edges. Cluster B is two K<sub>4</sub>'s joined by one bridge edge. Cluster C is two disjoint 3-cycles sharing one label. Cluster D
+          is two 2-cliques. Nodes 30 and 31 sit unclustered. The same fixture is used on the <a href="./cc.html">CC</a> and
+          <a href="./wcc.html">WCC</a> pages.
+        </p>
+
+        <div class="graph">
+          <div class="graph-canvas" id="g-input-cy"></div>
+        </div>
+      </section>
+
+      <!-- ─────────── Stage 1 · drop inter-cluster edges + connected components ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 1 &middot; strip + connected components</div>
+        <h2>The seed step, same as <a href="./cc.html">CC</a>.</h2>
+        <p>
+          CM's first action drops every cross-cluster edge from the residual graph, then runs breadth-first search on each cluster's surviving
+          subgraph in node-id order. Disconnected input clusters fragment here, before any mincut runs. The fixture's cluster C is the case: its two
+          3-cycles share one label but live in separate components, so the seed step splits them into C<sub>1</sub> and C<sub>2</sub>.
+        </p>
+        <p>
+          Why split first, then run mincut? Mincut is undefined on a disconnected graph (the cut value is trivially 0). BFS once per cluster, hand the
+          cut loop only connected pieces.
+        </p>
+      </section>
+
+      <!-- ─────────── Stage 2 · lineage id assignment ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 2 &middot; lineage id assignment</div>
+        <h2>Keep the original id, or mint a fresh one?</h2>
+        <p>
+          CM tracks which output cluster descended from which input cluster, because the cluster-fate classification reads the parent &rarr; child
+          tree. The rule is one comparison per component:
+        </p>
+
+        <p style="text-align: center">
+          \( \text{if } |\text{component}| = |\text{original cluster}| \text{ then keep the original id, else mint a fresh id with parent } =
+          \text{original} \)
+        </p>
+
+        <p>
+          In words: a component covering its entire input cluster keeps the original id; a strict subset gets a fresh id and a parent link. The first
+          fragment of each input cluster also records the row "(parent = root, child = original id)" exactly once. Two interesting properties: the
+          root row records every input cluster that ever fragmented, so the cluster-fate analyzer finds the split inputs by scanning a single row; and
+          ids are never re-used, so the tree is always acyclic.
+        </p>
+      </section>
+
+      <!-- ─────────── Stage 3 · the threshold function ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 3 &middot; the threshold function</div>
+        <h2>What \(f(n)\) says and why.</h2>
+        <p>The well-connectedness test is:</p>
+        <p style="text-align: center">
+          \( \text{threshold} = \text{pre\_log} \cdot \log(n) \)<br />
+          \( \text{is\_close} = | \text{threshold} - \text{cut} | \leq 10^{-9} \)<br />
+          \( \text{well\_connected} = (\text{not is\_close}) \wedge (\text{threshold} &lt; \text{cut}) \)
+        </p>
+        <p>
+          In words: a cluster is well-connected when its cut is strictly above the threshold and not numerically tied to it. The constant
+          \(\text{pre\_log} = C / \log(x)\) is computed once at startup, so per-cluster work is one log call and one multiply. Two interesting
+          properties: a smaller cluster always faces a smaller threshold (log is monotone), so a cluster that fails the bar once cannot recover by
+          surviving a cut that just shrunk it; and the comparison is strict, so a cluster sitting exactly at \(f(n)\) within tolerance fails, not
+          passes.
+        </p>
+
+        <table class="profile-table dnc-stats" style="margin: 0.5rem 0 0.8rem">
+          <thead>
+            <tr>
+              <th>n</th>
+              <th>\(1\cdot\log_{10}(n)\) (paper)</th>
+              <th>\(0.2 \cdot n^{0.5}\) (wrapper)</th>
+              <th>\(1\cdot\log_2(n)\)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>3 (C<sub>1</sub>)</td>
+              <td>0.477</td>
+              <td>0.346</td>
+              <td>1.585</td>
+            </tr>
+            <tr>
+              <td>4 (D)</td>
+              <td>0.602</td>
+              <td>0.400</td>
+              <td>2.000</td>
+            </tr>
+            <tr>
+              <td>8 (B)</td>
+              <td>0.903</td>
+              <td>0.566</td>
+              <td>3.000</td>
+            </tr>
+            <tr>
+              <td>12 (A)</td>
+              <td>1.079</td>
+              <td>0.693</td>
+              <td>3.585</td>
+            </tr>
+            <tr>
+              <td>100</td>
+              <td>2.000</td>
+              <td>2.000</td>
+              <td>6.644</td>
+            </tr>
+            <tr>
+              <td>2000</td>
+              <td>3.301</td>
+              <td>8.944</td>
+              <td>10.966</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          Under the paper's log default only A fails. Under the wrapper's sqrt default every cluster passes; CM is a no-op on this fixture. The log
+          and sqrt families cross at \(n = 100\); above that, sqrt is the stricter bar.
+        </p>
+      </section>
+
+      <!-- ─────────── Stage 4 · mincut on the popped cluster ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 4 &middot; mincut as a primitive</div>
+        <h2>What <a href="./viecut.html">VieCut</a> returns per pop.</h2>
+        <p>
+          VieCut returns the minimum cut size (an edge count) plus the bipartition of the cluster into two sides. Among all bipartitions achieving the
+          minimum, VieCut picks the most balanced one. Balance keeps recursion depth bounded: without it, a "trivial cut" peeling one node at a time
+          would produce recursion depth \(n\) instead of \(\log n\).
+        </p>
+
+        <table class="profile-table dnc-stats" style="margin: 0.5rem 0 0.8rem">
+          <thead>
+            <tr>
+              <th>cluster</th>
+              <th>n</th>
+              <th>mincut</th>
+              <th>bipartition</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>A</td>
+              <td>12</td>
+              <td>1</td>
+              <td>one periphery node vs rest</td>
+            </tr>
+            <tr>
+              <td>B</td>
+              <td>8</td>
+              <td>1</td>
+              <td>{12, 13, 14, 15} vs {16, 17, 18, 19} (along the bridge)</td>
+            </tr>
+            <tr>
+              <td>C<sub>1</sub>, C<sub>2</sub></td>
+              <td>3</td>
+              <td>2</td>
+              <td>{20} vs {21, 22} (rotations possible)</td>
+            </tr>
+            <tr>
+              <td>D</td>
+              <td>4</td>
+              <td>1</td>
+              <td>{26, 27} vs {28, 29} (inter-clique edge)</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- ─────────── Stage 5 · verdict + cut + side filter ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 5 &middot; verdict and side filter</div>
+        <h2>Pass means survivor; fail means re-cluster each side.</h2>
+        <p>
+          The verdict reads the threshold check. Pass: the cluster is well-connected, push it to the survivor list, no further work. Fail: cut along
+          the bipartition, and hand each side of size \(&gt;1\) to the base algorithm. Sides of size 1 are filtered by the strict-greater-than-one
+          gate and drop out; that is what bounds singletons to one extra round instead of an unbounded loop.
+        </p>
+        <p>
+          On cluster A under \(\log_{10}\): cut 1, threshold \(\log_{10}(12) \approx 1.079\), so \(1 &gt; 1.079\) is false, fail. VieCut returns a
+          balanced cut peeling one periphery node. The 1-node side is filtered. The 11-node side goes through the re-cluster step.
+        </p>
+      </section>
+
+      <!-- ─────────── Stage 6 · Leiden replay on each failing side ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 6 &middot; Leiden replay on the failing side</div>
+        <h2>What makes CM different from <a href="./wcc.html">WCC</a>.</h2>
+        <p>
+          This is the step that separates CM from WCC. After a failing cut, CM does not push the two cut halves back directly. For each side of size
+          larger than one, CM builds the induced subgraph of that side and runs <a href="./leiden-cpm.html">Leiden CPM</a> on it for two iterations.
+          Whatever communities Leiden returns become the new clusters; each one is pushed back with the failing cluster's id as parent.
+        </p>
+        <p>
+          One failing cluster can therefore produce more than two children. If Leiden finds three sub-communities in the 11-node side, all three are
+          pushed back, and the lineage tree branches accordingly. On the 32-node fixture at \(r = 0.0001\), Leiden returns one community on every
+          side, so the chain is linear; at \(r = 0.5\), Leiden returns multiple communities and the chain branches.
+        </p>
+        <p>
+          Two interesting properties: the re-cluster step is run on the induced subgraph of the side alone, not the full cluster, so Leiden's view is
+          local; and Leiden's RNG is re-seeded to 0 at every call, so two re-cluster runs on the same induced subgraph produce the same partition
+          regardless of where they sit in the pop sequence.
+        </p>
+
+        <div class="callout">
+          <div class="tag">why this step is the heaviest in the CM family</div>
+          <p>
+            CC does the seed step only. WCC adds the threshold check and the recursive cut. CM adds the Leiden replay. The cost of one re-cluster call
+            is \(O(n + m)\) per Leiden iteration with two iterations per call. On large clusters this dominates the per-pop cost.
+          </p>
+        </div>
+      </section>
+
+      <!-- ─────────── Stage 7 · round drain + fresh ids ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 7 &middot; round drain</div>
+        <h2>End of round: every pending entry gets a fresh id.</h2>
+        <p>
+          CM runs in rounds. One round drains the mincut queue entirely, producing either survivors or re-cluster outputs. The re-cluster outputs land
+          in a pending queue for the next round. When the round ends, every pending entry gets a fresh id from a counter, records its parent link in
+          the lineage tree, and migrates back to the mincut queue. The round counter ticks.
+        </p>
+        <p>
+          Termination: a round produces no work for the next round. Equivalent statement: every cluster in the most recent round either survived or
+          got cut into singletons that the size-greater-than-one gate filtered.
+        </p>
+      </section>
+
+      <!-- ─────────── Stage 8 · the walker (cut + recluster scrubable) ─────────── -->
+      <section class="stage cm-walker">
+        <div class="stage-num">stage 8 &middot; the walker</div>
+        <h2>Cut, threshold check, Leiden replay, round by round.</h2>
+        <p>
+          The walker scrubs through every pop in order. Each pop has a size, a cut, a threshold, a verdict. Edge-of-round events (drains and id
+          assignments) surface under the per-round granularity toggle. Changing the base algorithm, resolution, criterion, or seed re-runs the kernel
+          live.
+        </p>
+
+        <p>
+          <strong>Step 1.</strong> Pop the next current-round cluster from <code>to_be_mincut</code> and build the induced edge set on that node set.
+          <strong>Step 2.</strong> Ask VieCut for the minimum edge cut and a balanced bipartition. <strong>Step 3.</strong> Compare the cut to
+          \(f(n)\). A pass appends the cluster to <code>survivors</code> and creates no children.
+        </p>
+        <p>
+          <strong>Step 4.</strong> A fail treats the two cut sides as repair material. Direct singleton sides are skipped. Every other side is
+          remapped to a local induced subgraph and sent through the selected base algorithm. <strong>Step 5.</strong> CM removes inter-community edges
+          from the base output, runs connected components, and stages each returned component in <code>to_be_clustered</code> with the failing cluster
+          as parent.
+        </p>
+        <p>
+          <strong>Step 6.</strong> At round drain, all staged children receive fresh ids, parent-child rows are written, and the children migrate back
+          to <code>to_be_mincut</code>. That is the difference from WCC: WCC's failing branch pushes the cut pieces themselves; CM lets the base
+          objective rewrite each non-singleton cut side before the next mincut round.
+        </p>
+
+        <table class="cm-loop-ledger">
+          <thead>
+            <tr>
+              <th>state</th>
+              <th>meaning while you scrub</th>
+              <th>updated by</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>to_be_mincut</code></td>
+              <td>Current-round connected clusters waiting for a cut and threshold decision.</td>
+              <td>Initialized by the seed BFS; drained one pop at a time; refilled at round drain.</td>
+            </tr>
+            <tr>
+              <td><code>to_be_clustered</code></td>
+              <td>CM-only staging area for children produced by re-clustering failed cut sides.</td>
+              <td>Filled by the re-cluster branch; emptied when fresh ids are assigned.</td>
+            </tr>
+            <tr>
+              <td><code>survivors</code></td>
+              <td>Clusters whose mincut cleared the threshold and will appear in the final output.</td>
+              <td>Filled only by pass-branch mincut events.</td>
+            </tr>
+            <tr>
+              <td><code>parentToChild</code></td>
+              <td>The lineage tree used later to label clusters as extant, reduced, split, or degraded.</td>
+              <td>Root rows come from seed splitting; ordinary rows come from round drains.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="cm-controls-row">
+          <label
+            >base algorithm:
+            <select id="cm-base">
+              <option value="leiden-cpm" selected>Leiden CPM</option>
+              <option value="leiden-mod">Leiden Mod</option>
+              <option value="louvain">Louvain</option>
+            </select>
+          </label>
+          <label
+            >resolution:
+            <select id="cm-res">
+              <option value="0.0001" selected>0.0001 (paper)</option>
+              <option value="0.001">0.001</option>
+              <option value="0.01">0.01</option>
+              <option value="0.1">0.1</option>
+              <option value="1.0">1.0</option>
+            </select>
+          </label>
+          <label
+            >criterion:
+            <select id="cm-crit">
+              <option value="1log_10(n)" selected>1&middot;log&#8321;&#8320;(n) (paper)</option>
+              <option value="0.2n^0.5">0.2&middot;n^0.5 (pipeline default)</option>
+              <option value="2log_10(n)">2&middot;log&#8321;&#8320;(n)</option>
+              <option value="1log_2(n)">1&middot;log&#8322;(n)</option>
+            </select>
+          </label>
+          <label
+            >teaching seed (production fixed at 0):
+            <input type="number" id="cm-seed" min="0" max="2147483647" step="1" style="width: 6rem" value="0" />
+          </label>
+        </div>
+
+        <div class="cm-round-panel">
+          <span class="cm-round-badge">round <b id="cm-round-num">0</b></span>
+          <span class="cm-queue-pill mincut">to_be_mincut: <b id="cm-q-mincut">0</b></span>
+          <span class="cm-queue-pill clustered">to_be_clustered (next): <b id="cm-q-clust">0</b></span>
+          <span class="cm-queue-pill surv">survivors: <b id="cm-q-surv">0</b></span>
+        </div>
+
+        <div class="graph">
+          <div class="graph-chrome">
+            <span><span class="level-pill" id="g-walk-level">step 0</span><span id="g-walk-status">pre-walk</span></span>
+            <span class="right" id="g-walk-stats">survivors: &middot; &middot; reclusters: &middot;</span>
+          </div>
+          <div class="graph-canvas" id="g-walk-cy"></div>
+          <div class="cm-scrub-row">
+            <button class="btn" id="g-walk-reset" type="button" title="reset">to start</button>
+            <button class="btn" id="g-walk-prev" type="button" title="prev">prev</button>
+            <button class="btn primary" id="cm-play" type="button" title="play / pause">play</button>
+            <button class="btn" id="g-walk-next" type="button" title="next">next</button>
+            <button class="btn" id="g-walk-end" type="button" title="end">to end</button>
+            <input type="range" id="cm-scrub" class="cm-scrub" min="0" max="0" value="0" step="1" />
+            <span class="step-label">event <b id="g-walk-cur">0</b> / <span id="g-walk-total">0</span></span>
+            <label class="cm-gran"><input type="checkbox" id="cm-gran-round" /> per-round</label>
+          </div>
+        </div>
+
+        <div class="cm-state-grid">
+          <div class="cm-state-card">
+            <h4>to_be_mincut (current round)</h4>
+            <div id="cm-state-mincut"><div class="empty">empty</div></div>
+          </div>
+          <div class="cm-state-card">
+            <h4>to_be_clustered (next round)</h4>
+            <div id="cm-state-clust"><div class="empty">empty</div></div>
+          </div>
+          <div class="cm-state-card">
+            <h4>survivors (well-connected so far)</h4>
+            <div id="cm-state-surv"><div class="empty">none yet</div></div>
+          </div>
+        </div>
+
+        <div id="g-walk-panel"></div>
+      </section>
+
+      <!-- ─────────── Stage 9 · lineage tree ─────────── -->
+      <section class="stage cm-walker">
+        <div class="stage-num">stage 9 &middot; lineage tree</div>
+        <h2>Cluster history: parent &rarr; children across rounds.</h2>
+        <p>
+          Each input cluster traces a tree as CM splits and re-clusters it. Roots are the initial connected components. Each internal edge is one cut
+          and one Leiden replay. Leaves are survivors (green), in-flight clusters (amber), or dropped singletons (grey). The cluster-fate label is
+          reconstructable from this tree alone, which is why the binary writes it to disk.
+        </p>
+        <p>
+          On the 32-node fixture under \(\log_{10}\): A's lineage is the linear chain \(0 \rightarrow 6 \rightarrow 7 \rightarrow 8\) (four ids, three
+          rounds, leaf at the 9-node residual). Under the wrapper's sqrt default the tree is empty (no input cluster fragmented). Under \(2 \cdot
+          \log_{10}\) B would also fail and produce a separate chain.
+        </p>
+        <div class="cm-lineage" id="cm-lineage">
+          <div class="ln-legend">
+            <span><span class="swatch" style="background: #6dab7d"></span> survivor</span>
+            <span><span class="swatch" style="background: var(--ink-3)"></span> internal split</span>
+            <span><span class="swatch" style="background: var(--amber)"></span> in flight</span>
+            <span><span class="swatch" style="background: var(--paper-4)"></span> dropped (size 1)</span>
+          </div>
+          <div id="cm-lineage-svg"></div>
+        </div>
+      </section>
+
+      <!-- ─────────── Stage 10 · worked example on cluster A ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 10 &middot; worked example</div>
+        <h2>Cluster A's three rounds, mincut by mincut.</h2>
+        <p>
+          Cluster A is the only cluster that fails the \(\log_{10}\) threshold on this fixture. 12 nodes, K<sub>5</sub> core, seven periphery nodes
+          each attached by a single edge. Its trajectory through the loop covers every operation CM performs.
+        </p>
+
+        <p>
+          <strong>Round 0.</strong> Pop A at \(n=12\): cut \(1\), threshold \(1.079\), verdict fail. VieCut peels one periphery node, the size-1 side
+          is filtered, and Leiden CPM at \(r=0.0001\) runs on the 11-node side. At this low resolution CPM returns one community of 11, which is
+          staged for the next round with A as parent.
+        </p>
+        <p>
+          <strong>Round 1.</strong> Pop id 6 at \(n=11\): cut \(1\), threshold \(\log_{10}(11) \approx 1.041\), verdict fail. The same shape peels one
+          pendant, and the 10-node side goes through Leiden replay. <strong>Round 2.</strong> Pop id 7 at \(n=10\): cut \(1\), threshold
+          \(\log_{10}(10) = 1.000\). The difference is inside the \(10^{-9}\) guard, so <code>is_close</code> is true and the strict comparison fails.
+        </p>
+        <p>
+          <strong>Round 3.</strong> Pop id 8 at \(n=9\): cut \(1\), threshold \(\log_{10}(9) \approx 0.954\), verdict pass. The 9-node residual
+          survives. The lineage is \(0 \rightarrow 6 \rightarrow 7 \rightarrow 8\), and the final survivor list is A residual, B, C<sub>1</sub>,
+          C<sub>2</sub>, D. Three peeled pendants vanish through the size-1 filter.
+        </p>
+
+        <p>
+          The chain has length 4 because A's threshold has to drop below 1 before the cut of 1 stops counting as a failure. The crossover is at \(n =
+          9\), where \(\log_{10}\) finally falls below 1. Two interesting properties: the chain length depends only on the threshold function and the
+          starting cluster size (not on structure beyond the mincut value); and the Leiden replay plays a passive role at \(r = 0.0001\) because it
+          keeps returning one community, so CM is effectively running WCC with a Leiden no-op in the middle.
+        </p>
+
+        <div class="callout">
+          <div class="tag">CC + WCC cross-link</div>
+          <p>
+            If A's trajectory feels familiar from <a href="./wcc.html">WCC</a>, that is not a coincidence: WCC and CM produce the same partition on A
+            here, because Leiden CPM at r=0.0001 returns one community on every side, so the re-cluster step is a no-op. The two diverge when the base
+            algorithm splits a side into multiple communities.
+          </p>
+        </div>
+      </section>
+
+      <!-- ─────────── Stage 11 · cluster fate dictionary ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 11 &middot; cluster fate dictionary</div>
+        <h2>Four labels Park 2024 §4.2 reads from the lineage tree.</h2>
+        <p>
+          <strong>Extant.</strong> One child, same id as parent. The cluster passed every threshold check and appears in the output unchanged. On this
+          fixture under \(\log_{10}\), B, C<sub>1</sub>, C<sub>2</sub>, and D are extant. <strong>Reduced.</strong> One child, smaller node set. A
+          follows \(0 \rightarrow 6 \rightarrow 7 \rightarrow 8\) and ends at 9 nodes, down from 12.
+        </p>
+        <p>
+          <strong>Split.</strong> Two or more children. This can happen because the base algorithm returned multiple communities on a cut half, or
+          because the seed step started with multiple components for one input id; C on this fixture is the seed-step split.
+          <strong>Degraded.</strong> Every leaf descendant ended up below the post-CM size filter \(B\), default 11, so the cluster is effectively
+          erased. This label lives in the Python wrapper and is not surfaced by the walker.
+        </p>
+        <p>
+          The four labels are exhaustive and disjoint per input cluster. Park 2024 §4.4 reports: under Leiden-CPM at low resolution, "split" and
+          "reduced" dominate; under IKC at k=10, most clusters are "extant"; Leiden-Mod sits in between.
+        </p>
+      </section>
+
+      <!-- ─────────── Stage 12 · edge cases ─────────── -->
+      <section class="stage cm-walker">
+        <div class="stage-num">stage 12 &middot; edge cases</div>
+        <h2>What CM does at the corners.</h2>
+        <div class="cm-edge-cases">
+          <div class="callout">
+            <div class="tag">Leiden returns the same partition</div>
+            <p>
+              The base algorithm is a fixed point on its own quality function, so the re-cluster can return one community spanning the whole input
+              side. CM pushes that single community back; next round it gets mincut again. Termination relies on the threshold dropping as the cluster
+              shrinks.
+            </p>
+          </div>
+          <div class="callout">
+            <div class="tag">cluster disintegrates into singletons</div>
+            <p>
+              A re-cluster on an n-node side can return n singletons. The binary pushes them all to the next-round queue. Next round each singleton
+              fails the threshold; the re-cluster on a size-1 side is filtered by the size-greater-than-one gate and the singleton vanishes. One extra
+              round, not an infinite loop.
+            </p>
+          </div>
+          <div class="callout">
+            <div class="tag">threshold equals cut exactly</div>
+            <p>
+              The strict comparison with a \(10^{-9}\) tolerance sends ties to fail, so a cluster sitting exactly at \(f(n)\) gets re-cut. The
+              asymmetry is by design: a post-proc that flags under-cohesive clusters treats equality as the conservative side.
+            </p>
+          </div>
+          <div class="callout">
+            <div class="tag">tree-shaped cluster</div>
+            <p>
+              A tree has mincut 1 by construction, so every tree cluster fails the threshold under \(\log_{10}\) for any \(n \geq 2\). The recursion
+              peels one edge at a time, dissolving the cluster down to singletons. The Python wrapper filters tree clusters before stage 3 to avoid
+              spending compute on them.
+            </p>
+          </div>
+          <div class="callout">
+            <div class="tag">multi-threading: ids vary, partition stable</div>
+            <p>
+              Under multi-thread mode, worker threads pull from the FIFO concurrently and fresh-id assignment depends on which thread pops first. The
+              partition itself is stable; only labels and row order vary. The verification harness pins to single-thread.
+            </p>
+          </div>
+          <div class="callout">
+            <div class="tag">VieCut RNG state drift across pops</div>
+            <p>
+              VieCut is seeded once at startup and not re-seeded per call (the intended per-call re-seed is commented out in the source). Two pops on
+              identical induced subgraphs at different points in the run can produce different bipartitions when ties exist. The JS port mirrors the
+              drift exactly.
+            </p>
+          </div>
+          <div class="callout">
+            <div class="tag">criterion = "0" disables CM</div>
+            <p>
+              Setting the criterion to a constant zero makes every connected cluster pass. CM degenerates to the seed step alone; the output equals
+              <a href="./cc.html">CC</a>'s output.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ─────────── Stage 13 · paper vs binary divergences ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 13 &middot; paper vs binary</div>
+        <h2>Where the deployed CM differs from Park 2024.</h2>
+        <p>The walker runs the binary's stage 3 only. Pre- and post-CM filters live in the Python wrapper.</p>
+
+        <table class="cm-divergence-table">
+          <thead>
+            <tr>
+              <th>Concern</th>
+              <th>Paper (Park 2024)</th>
+              <th>Binary / wrapper</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Threshold default</td>
+              <td class="col-paper">\(f(n) = \log_{10}(n)\)</td>
+              <td class="col-binary">Binary: \(1 \cdot \log_{10}(n)\). Wrapper: \(0.2 \cdot n^{0.5}\). The two cross at n=100.</td>
+            </tr>
+            <tr>
+              <td>Pre-prune (degree band peel)</td>
+              <td class="col-paper">Iteratively remove every node whose degree inside the cluster is below \(f(n)\)</td>
+              <td class="col-binary">
+                Binary has a partial version (singleton trivial-cut only) behind a flag; wrapper does not enable it. Full degree-band prune lives in
+                the Python wrapper.
+              </td>
+            </tr>
+            <tr>
+              <td>Initial size filter \(B\)</td>
+              <td class="col-paper">Drop clusters below \(B = 11\) before stage 3</td>
+              <td class="col-binary">Not in the binary; in the Python wrapper.</td>
+            </tr>
+            <tr>
+              <td>Final size filter \(B\)</td>
+              <td class="col-paper">Drop sub-clusters below \(B = 11\) after stage 3</td>
+              <td class="col-binary">Not in the binary; the binary emits every survivor; the wrapper filters post-binary.</td>
+            </tr>
+            <tr>
+              <td>Tree-cluster filter</td>
+              <td class="col-paper">Drop tree-shaped clusters before stage 3</td>
+              <td class="col-binary">Not in the binary; the wrapper filters post-stage-1.</td>
+            </tr>
+            <tr>
+              <td>Cluster fate labelling</td>
+              <td class="col-paper">Four labels derived from the lineage tree</td>
+              <td class="col-binary">Binary writes the raw tree; four labels computed by a separate analysis script.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- ─────────── Stage 14 · final ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 14 &middot; final</div>
+        <h2>CM output next to ground truth.</h2>
+        <p id="g-final-summary">survivors: · &middot; nodes kept / dropped: ·</p>
+        <div class="graph g-with-side">
+          <div class="graph-canvas" id="g-final-out"></div>
+          <div class="side-right">
+            <div class="side-caption"><span class="st">ground truth</span></div>
+            <div id="g-final-gt"></div>
+          </div>
+        </div>
+        <div id="g-history" class="step-desc"></div>
+        <p>
+          Under this page's teaching configuration (paper criterion \(\log_{10}\), Leiden CPM r=0.0001), the output is A's 9-node residual, B intact,
+          C<sub>1</sub> and C<sub>2</sub> separate, D intact. Node coverage drops from 30 to 27. The repository shell wrapper instead defaults to
+          \(0.2\sqrt n\), while the broader paper pipeline's \(B=11\) filter would drop A's 9-node residual. The binary-core walker leaves that
+          external filtering off so every survivor is visible.
+        </p>
+      </section>
+
+      <aside class="tech-companion">
+        <a href="https://github.com/vltanh/community-detection/blob/main/docs/algorithms/cm.md" target="_blank" rel="noopener"
+          >technical companion: docs/algorithms/cm.md</a
+        >
+      </aside>
+      <footer class="ack">
+        <p class="tools">drawn with <a href="https://d3js.org" target="_blank" rel="noopener">d3</a></p>
+        <p class="credit">typed by vltanh, doodled with Claude</p>
+      </footer>
+    </main>
+
+    <script>
+      window.MathJax = {
+        tex: {
+          inlineMath: [
+            ["\\(", "\\)"],
+            ["$", "$"],
+            ["$$", "$$"],
+          ],
+          displayMath: [["\\[", "\\]"]],
+        },
+        chtml: { scale: 1.0 },
+      };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script src="./shared.js"></script>
+    <script src="./js/fixture.js"></script>
+    <script src="./js/comdet/page_helpers.js"></script>
+    <script src="./js/mincut.js"></script>
+    <script src="./js/viecut/random.js"></script>
+    <script src="./js/viecut/union_find.js"></script>
+    <script src="./js/viecut/node_bucket_pq.js"></script>
+    <script src="./js/viecut/fifo_node_bucket_pq.js"></script>
+    <script src="./js/viecut/mutable_graph.js"></script>
+    <script src="./js/viecut/cactus_graph.js"></script>
+    <script src="./js/viecut/balanced_cut_dfs.js"></script>
+    <script src="./js/viecut/most_balanced.js"></script>
+    <script src="./js/viecut/minimum_cut_helpers.js"></script>
+    <script src="./js/viecut/contract_graph.js"></script>
+    <script src="./js/viecut/contraction_tests.js"></script>
+    <script src="./js/viecut/scc.js"></script>
+    <script src="./js/viecut/noi_minimum_cut.js"></script>
+    <script src="./js/viecut/label_propagation.js"></script>
+    <script src="./js/viecut/viecut_heuristic.js"></script>
+    <script src="./js/viecut/push_relabel.js"></script>
+    <script src="./js/viecut/heavy_edges.js"></script>
+    <script src="./js/viecut/graph_modification.js"></script>
+    <script src="./js/viecut/recursive_cactus.js"></script>
+    <script src="./js/viecut/cactus_mincut.js"></script>
+    <script src="./js/viecut/index.js"></script>
+    <script src="./js/viecut/mincut_adapter.js"></script>
+    <script src="./js/wcc/wcc.js"></script>
+    <script src="./js/common/common.js"></script>
+    <script src="./js/louvain/louvain.js"></script>
+    <script src="./js/leiden/leiden.js"></script>
+    <script src="./js/cm/cm.js"></script>
+    <script src="./js/cm/page.js"></script>
+    <script src="./js/landing_hero.js"></script>
+  </body>
+</html>

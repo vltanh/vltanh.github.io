@@ -1,0 +1,1110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>WCC &middot; well-connected components | Community Detection Algorithms</title>
+    <link
+      rel="shortcut icon"
+      href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐖</text></svg>"
+    />
+    <meta name="description" content="WCC (well-connected components). Walked stage by stage on the shared 32-node fixture." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./shared.css" />
+    <style>
+      /* ─── WCC walker scoped chrome ────────────────────────────────── */
+
+      .wcc-criterion-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.8rem 1.2rem;
+        background: var(--ink-2);
+        border: 1.5px dashed var(--paper-3);
+        border-radius: 3px;
+        padding: 0.9rem 1.1rem;
+        margin-bottom: 1.2rem;
+      }
+      .wcc-criterion-row label {
+        font-family: "Special Elite", "Courier New", monospace;
+        font-size: 0.76rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--paper);
+      }
+      .wcc-criterion-row select,
+      .wcc-criterion-row input {
+        font-family: "Special Elite", "Courier New", monospace;
+        font-size: 0.82rem;
+        padding: 0.35rem 0.55rem;
+        background: var(--ink);
+        color: var(--paper);
+        border: 1.5px solid var(--paper);
+        border-radius: 2px;
+      }
+      .wcc-criterion-row .wcc-formula {
+        font-family: "IBM Plex Sans", sans-serif;
+        font-size: 0.9rem;
+        color: var(--paper-2);
+        font-style: italic;
+        margin-left: auto;
+      }
+
+      .wcc-walker .wcc-state-row {
+        display: grid;
+        grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+        gap: 1.1rem;
+        margin-top: 1rem;
+      }
+      @media (max-width: 820px) {
+        .wcc-walker .wcc-state-row {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .wcc-panel {
+        background: var(--ink-2);
+        border: 1px solid var(--paper-3);
+        border-radius: 3px;
+        padding: 0.7rem 0.9rem;
+        font-family: "Special Elite", "Courier New", monospace;
+        font-size: 0.78rem;
+        color: var(--paper-2);
+        min-height: 4rem;
+      }
+      .wcc-panel .pcap {
+        font-family: "Special Elite", "Courier New", monospace;
+        font-size: 0.68rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--azure);
+        border-bottom: 1px dashed var(--paper-4);
+        padding-bottom: 0.25rem;
+        margin-bottom: 0.55rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+      }
+      .wcc-panel .pcap b {
+        color: var(--paper);
+        font-weight: 400;
+        font-family: "IBM Plex Sans", sans-serif;
+        font-size: 0.82rem;
+        letter-spacing: 0;
+        text-transform: none;
+      }
+
+      /* Queue + survivor chips ----------------------------------------- */
+      .wcc-chiprow {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem;
+      }
+      .wcc-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.2rem 0.5rem 0.25rem;
+        background: var(--ink);
+        border: 1px solid var(--paper-3);
+        border-radius: 8px;
+        font-family: "Special Elite", "Courier New", monospace;
+        font-size: 0.72rem;
+        color: var(--paper);
+        letter-spacing: 0.04em;
+        transition:
+          background 0.18s ease,
+          border-color 0.18s ease,
+          transform 0.25s ease;
+      }
+      .wcc-chip .swatch {
+        display: inline-block;
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        border: 1px solid var(--paper);
+      }
+      .wcc-chip.head {
+        border-color: var(--cobalt);
+        background: var(--hl-yellow);
+        font-weight: 500;
+      }
+      .wcc-chip.kept {
+        background: rgba(78, 122, 58, 0.18);
+        border-color: var(--mint);
+      }
+      .wcc-chip.fresh {
+        animation: wcc-chip-in 0.35s ease;
+      }
+      @keyframes wcc-chip-in {
+        from {
+          transform: scale(0.6);
+          opacity: 0;
+        }
+        to {
+          transform: scale(1);
+          opacity: 1;
+        }
+      }
+      .wcc-chip-empty {
+        color: var(--paper-4);
+        font-style: italic;
+        font-family: "IBM Plex Sans", sans-serif;
+        font-size: 0.82rem;
+      }
+
+      /* Phase strip per pop -------------------------------------------- */
+      .wcc-phases {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 0.35rem;
+        margin: 0.6rem 0 0.8rem;
+      }
+      .wcc-phase {
+        background: var(--ink);
+        border: 1px solid var(--paper-4);
+        border-radius: 2px;
+        padding: 0.4rem 0.5rem 0.45rem;
+        font-family: "Special Elite", "Courier New", monospace;
+        font-size: 0.68rem;
+        letter-spacing: 0.06em;
+        color: var(--paper-3);
+        text-transform: uppercase;
+        transition:
+          background 0.15s,
+          color 0.15s,
+          border-color 0.15s;
+        position: relative;
+      }
+      .wcc-phase .ph-num {
+        display: block;
+        font-size: 0.58rem;
+        color: var(--paper-4);
+        margin-bottom: 0.15rem;
+      }
+      .wcc-phase .ph-label {
+        display: block;
+        font-size: 0.72rem;
+        color: inherit;
+      }
+      .wcc-phase.on {
+        background: var(--hl-yellow);
+        color: var(--paper);
+        border-color: var(--paper);
+      }
+      .wcc-phase.on.verdict-keep {
+        background: rgba(78, 122, 58, 0.25);
+        border-color: var(--mint);
+      }
+      .wcc-phase.on.verdict-push {
+        background: rgba(201, 42, 42, 0.15);
+        border-color: var(--signal);
+      }
+      @media (max-width: 720px) {
+        .wcc-phases {
+          grid-template-columns: repeat(3, 1fr);
+        }
+      }
+
+      /* Threshold gauge ------------------------------------------------- */
+      .wcc-gauge {
+        margin: 0.5rem 0 0.25rem;
+        padding: 0.55rem 0.65rem;
+        background: var(--ink);
+        border: 1px solid var(--paper-4);
+        border-radius: 3px;
+      }
+      .wcc-gauge .gauge-cap {
+        font-family: "Special Elite", "Courier New", monospace;
+        font-size: 0.7rem;
+        color: var(--paper-2);
+        letter-spacing: 0.04em;
+        margin-bottom: 0.35rem;
+      }
+      .wcc-gauge .gauge-bar {
+        position: relative;
+        height: 14px;
+        background: linear-gradient(
+          to right,
+          rgba(201, 42, 42, 0.14) 0%,
+          rgba(201, 42, 42, 0.14) 49.95%,
+          rgba(199, 128, 30, 0.25) 49.95%,
+          rgba(199, 128, 30, 0.25) 50.05%,
+          rgba(78, 122, 58, 0.18) 50.05%,
+          rgba(78, 122, 58, 0.18) 100%
+        );
+        border: 1px solid var(--paper-3);
+        border-radius: 2px;
+        overflow: hidden;
+      }
+      .wcc-gauge .gauge-marker {
+        position: absolute;
+        top: -4px;
+        bottom: -4px;
+        width: 3px;
+        background: var(--cobalt);
+        box-shadow: 0 0 0 1px rgba(243, 236, 215, 0.8);
+        transition: left 0.35s ease;
+      }
+      .wcc-gauge .gauge-thr {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 50%;
+        width: 1px;
+        background: var(--paper);
+        opacity: 0.4;
+      }
+      .wcc-gauge .gauge-axis {
+        display: flex;
+        justify-content: space-between;
+        font-family: "Special Elite", "Courier New", monospace;
+        font-size: 0.66rem;
+        color: var(--paper-3);
+        margin-top: 0.25rem;
+      }
+      .wcc-gauge .gauge-axis b {
+        color: var(--paper);
+        font-weight: 400;
+      }
+
+      /* Verdict badge --------------------------------------------------- */
+      .wcc-verdict {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.25rem 0.55rem;
+        font-family: "Special Elite", "Courier New", monospace;
+        font-size: 0.72rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        border-radius: 2px;
+        border: 1px solid var(--paper);
+      }
+      .wcc-verdict.keep {
+        background: rgba(78, 122, 58, 0.2);
+        color: var(--mint);
+        border-color: var(--mint);
+      }
+      .wcc-verdict.push {
+        background: rgba(201, 42, 42, 0.15);
+        color: var(--signal);
+        border-color: var(--signal);
+      }
+
+      /* Per-pop record table ------------------------------------------- */
+      .wcc-record-wrap {
+        margin-top: 1rem;
+        background: var(--ink-2);
+        border: 1px solid var(--paper-3);
+        border-radius: 3px;
+        padding: 0.7rem 0.9rem;
+        max-height: 18rem;
+        overflow-y: auto;
+      }
+      .wcc-record-wrap .pcap {
+        font-family: "Special Elite", "Courier New", monospace;
+        font-size: 0.68rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--azure);
+        border-bottom: 1px dashed var(--paper-4);
+        padding-bottom: 0.25rem;
+        margin-bottom: 0.4rem;
+      }
+      .wcc-record-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: "Special Elite", "Courier New", monospace;
+        font-size: 0.74rem;
+      }
+      .wcc-record-table th,
+      .wcc-record-table td {
+        padding: 0.22rem 0.45rem;
+        text-align: left;
+        border-bottom: 1px dotted var(--paper-4);
+      }
+      .wcc-record-table th {
+        font-size: 0.64rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--paper-3);
+        position: sticky;
+        top: 0;
+        background: var(--ink-2);
+        z-index: 1;
+      }
+      .wcc-record-table td.num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .wcc-record-table tr.cur {
+        background: var(--hl-yellow);
+      }
+      .wcc-record-table tr.kept td {
+        color: var(--mint);
+      }
+      .wcc-record-table tr.push td {
+        color: var(--paper);
+      }
+      .wcc-record-table tr.future td {
+        color: var(--paper-4);
+        font-style: italic;
+      }
+
+      /* CC pre-pass mini grid ------------------------------------------ */
+      .wcc-cc-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 0.7rem;
+        margin: 0.6rem 0 0.2rem;
+      }
+      .wcc-cc-card {
+        background: var(--ink-2);
+        border: 1px solid var(--paper-3);
+        border-radius: 2px;
+        padding: 0.55rem 0.7rem;
+      }
+      .wcc-cc-card .cc-id {
+        font-family: "Special Elite", "Courier New", monospace;
+        font-size: 0.72rem;
+        color: var(--cobalt);
+        letter-spacing: 0.12em;
+        margin-bottom: 0.25rem;
+        text-transform: uppercase;
+      }
+      .wcc-cc-card .cc-id b {
+        color: var(--paper);
+        font-weight: 400;
+      }
+      .wcc-cc-card .cc-meta {
+        font-family: "IBM Plex Sans", sans-serif;
+        font-size: 0.82rem;
+        color: var(--paper-2);
+      }
+      .wcc-cc-card .cc-comp {
+        display: inline-block;
+        margin: 0.15rem 0.25rem 0 0;
+        padding: 0.1rem 0.35rem;
+        background: var(--ink);
+        border: 1px solid var(--paper-4);
+        border-radius: 2px;
+        font-family: "Special Elite", "Courier New", monospace;
+        font-size: 0.7rem;
+      }
+      .wcc-cc-card .cc-comp.split {
+        background: rgba(199, 128, 30, 0.15);
+        border-color: var(--amber);
+      }
+
+      /* Threshold table (per-cluster fixture readout) ------------------ */
+      .wcc-thr-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: "Special Elite", "Courier New", monospace;
+        font-size: 0.8rem;
+        background: var(--ink-2);
+        border: 1px solid var(--paper-3);
+        border-radius: 3px;
+        margin: 0.6rem 0;
+      }
+      .wcc-thr-table th,
+      .wcc-thr-table td {
+        padding: 0.35rem 0.65rem;
+        text-align: left;
+        border-bottom: 1px dotted var(--paper-4);
+      }
+      .wcc-thr-table th {
+        font-size: 0.66rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--paper-3);
+      }
+      .wcc-thr-table td.num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .wcc-thr-table td.verdict-pass {
+        color: var(--mint);
+        font-weight: 500;
+      }
+      .wcc-thr-table td.verdict-fail {
+        color: var(--signal);
+        font-weight: 500;
+      }
+
+      /* Peel trace mini-table ------------------------------------------ */
+      .wcc-peel-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: "Special Elite", "Courier New", monospace;
+        font-size: 0.78rem;
+        background: var(--ink-2);
+        border: 1px solid var(--paper-3);
+        border-radius: 3px;
+        margin: 0.4rem 0 0.2rem;
+      }
+      .wcc-peel-table th,
+      .wcc-peel-table td {
+        padding: 0.3rem 0.55rem;
+        text-align: left;
+        border-bottom: 1px dotted var(--paper-4);
+      }
+      .wcc-peel-table th {
+        font-size: 0.64rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--paper-3);
+      }
+      .wcc-peel-table td.num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .wcc-peel-table td.fail {
+        color: var(--signal);
+      }
+      .wcc-peel-table td.pass {
+        color: var(--mint);
+        font-weight: 500;
+      }
+
+      /* Step-tip variants ---------------------------------------------- */
+      .wcc-walker .step-tip {
+        margin-top: 0.4rem;
+      }
+      .wcc-walker .step-tip.keep {
+        border-left-color: var(--mint);
+      }
+      .wcc-walker .step-tip.push {
+        border-left-color: var(--signal);
+      }
+
+      .wcc-pseudocode {
+        background: var(--ink);
+        border: 1px solid var(--paper-3);
+        border-radius: 3px;
+        padding: 0.85rem 1rem;
+        overflow-x: auto;
+        font-family: "Special Elite", "Courier New", monospace;
+        font-size: 0.78rem;
+        line-height: 1.55;
+        color: var(--paper);
+        margin: 1rem 0 1.2rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <div class="back-row">
+        <a class="back-link" href="./">&larr; back to gallery</a>
+      </div>
+
+      <header class="hdr">
+        <div class="kicker">community detection &middot; post-proc &middot; well-connected components</div>
+        <h1><em>WCC</em></h1>
+        <p class="fullname">well-connected components &middot; Park 2025 / Vu-Le 2026, threshold per Park 2024</p>
+        <p class="sub">
+          A size-scaled connectedness check on top of <a href="./cc.html">CC</a>. Clusters with a thin edge bridge pass CC and still look suspect; WCC
+          rejects them with a log-scaled mincut threshold and recursively peels the cut until each survivor clears the bar.
+        </p>
+      </header>
+
+      <div class="uc-banner">
+        <strong>Draft.</strong> Under-construction trace for the WCC post-processor on the shared 32-node fixture. The page keeps under-construction
+        status until reviewed; read the walker as an explanatory trace of the mincut-threshold recursion.
+      </div>
+
+      <section class="hook">
+        <p>
+          <a href="./cc.html">CC</a> asks whether a cluster is connected. WCC asks whether it is <em>well-</em>connected. The binary check becomes a
+          sliding threshold scaled to the cluster's size: the mincut of cluster \(C\) has to strictly exceed \(f(|C|)\). If yes, keep. If no, cut at
+          the most balanced minimum cut and recurse on each connected side. <a href="./cm.html">CM</a> sits one step heavier: same recursion, with a
+          base-algorithm replay on each cut half.
+        </p>
+        <p>
+          The first move is still CC's residual-component pre-pass: drop cross-label edges, split disconnected labels into connected pieces, and
+          discard singletons. From there WCC drains a FIFO queue. Each pop calls <a href="./viecut.html">VieCut</a>, reads back a cut value \(c\) and
+          a most-balanced bipartition, compares \(c\) with \(f(n)\), then either keeps the cluster or pushes connected pieces from the two cut sides
+          back onto the queue.
+        </p>
+        <p>
+          On the shared fixture, A fails because a one-edge pendant cut is below \(\log_{10}(12)\). B and D pass because their sizes put the default
+          threshold below 1. The threshold is global policy, so sparse planted clusters, paths, and stars can be dissolved even when they are
+          semantically one community. Exact ties fail too: the predicate is strict, with a \(10^{-9}\) tolerance band on the conservative side.
+        </p>
+      </section>
+
+      <section class="algo-meta">
+        <div class="algo-refs">
+          <span
+            ><span class="ref-label">paper</span
+            ><a href="https://doi.org/10.1007/978-3-031-82435-7_9" target="_blank" rel="noopener">Park 2025</a></span
+          >
+          <span
+            ><span class="ref-label">paper</span
+            ><a href="https://doi.org/10.1007/s41109-025-00747-2" target="_blank" rel="noopener">Vu-Le 2026</a></span
+          >
+          <span
+            ><span class="ref-label">paper</span
+            ><a href="https://doi.org/10.1371/journal.pcsy.0000009" target="_blank" rel="noopener">Park 2024 (threshold)</a></span
+          >
+          <span
+            ><span class="ref-label">code</span
+            ><a href="https://github.com/MinhyukPark/constrained-clustering" target="_blank" rel="noopener"
+              >constrained-clustering MincutOnly</a
+            ></span
+          >
+          <span><span class="ref-label">mincut</span><a href="https://github.com/VieCut/VieCut" target="_blank" rel="noopener">VieCut</a></span>
+          <span
+            ><span class="ref-label">docs</span
+            ><a href="https://github.com/vltanh/community-detection/blob/main/docs/algorithms/wcc.md" target="_blank" rel="noopener"
+              >technical companion</a
+            ></span
+          >
+        </div>
+        <p class="algo-prov">
+          Byte-equal versus the canonical tracer across the L4 stress matrix (12 fixtures, 9 deliberately injected test seeds, 4 partition inputs, 3
+          criteria) and the bumped 3-tier panel chained through Leiden-Mod, Leiden-CPM(0.5), Infomap, and SBM-Flat-PP. The shipped executable itself
+          starts VieCut at hard-coded seed 0.
+        </p>
+      </section>
+
+      <section class="stage">
+        <div class="stage-num">roadmap &middot; algorithm contract</div>
+        <h2>Think of WCC as a queue of candidate clusters.</h2>
+        <p>
+          WCC does not invent communities from scratch. It audits an existing partition. The audit has one invariant: every item in the queue is
+          connected, has more than one node, and still needs a well-connectedness decision.
+        </p>
+        <p>
+          <strong>Step 1.</strong> Start with a labelled graph from a base method: planted labels on this page, or Leiden, Infomap, or SBM in a
+          chained run. The original graph stays fixed; the membership vector is the object being audited. <strong>Step 2.</strong> Run the
+          connected-component pre-pass so every candidate is connected before mincut is asked anything.
+        </p>
+        <p>
+          <strong>Step 3.</strong> Pop one connected candidate, compute its minimum cut, and compare the cut to the size-scaled bar. A pass becomes
+          final. A fail is cut into smaller connected queue items. <strong>Step 4.</strong> At the end, relabel survivors in pop order. Singletons and
+          peeled-off size-1 fragments remain unlabelled as \(-1\).
+        </p>
+        <div class="callout">
+          <div class="tag">queue invariant</div>
+          <p>
+            Every queued item is connected, has more than one node, and has not yet cleared the well-connectedness predicate. That invariant is what
+            lets the recursion stay iterative: no backtracking is needed, because every failed pop only creates strictly smaller connected candidates.
+          </p>
+        </div>
+      </section>
+
+      <!-- ─────────── Stage 1 · input fixture + base clustering ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 1 &middot; input</div>
+        <h2>The base clustering on the 32-node fixture.</h2>
+        <p>
+          Four planted communities labelled A, B, C, D plus two unlabelled outliers (30, 31). A is a 12-node \(K_5\) core with seven periphery nodes
+          attached. B is two \(K_4\)'s joined by one bridge edge. C is two disjoint 3-cycles sharing one label. D is a 4-node path. Shared with the
+          <a href="./cc.html">CC</a> and <a href="./cm.html">CM</a> pages.
+        </p>
+        <div class="graph">
+          <div class="graph-canvas" id="g-input-cy"></div>
+        </div>
+      </section>
+
+      <!-- ─────────── Stage 2 · the threshold inequality ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 2 &middot; the threshold</div>
+        <h2>One inequality, evaluated on each cluster.</h2>
+        <p>The well-connectedness test sits on a single inequality:</p>
+        <p style="text-align: center">\[ \text{mincut}(C) \;>\; f(|C|) \]</p>
+        <p>
+          In words: the smallest edge cut of cluster \(C\) must strictly exceed the threshold evaluated at the cluster's own size \(|C|\). Two
+          interesting properties: the verdict reads only the cluster's internal structure, so the same cluster lifted into a larger graph gets the
+          same answer; and the comparison is strict, so a cluster whose mincut exactly meets the threshold fails, not passes.
+        </p>
+      </section>
+
+      <!-- ─────────── Stage 3 · why log10(n) ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 3 &middot; why \(\log_{10}(n)\)</div>
+        <h2>The threshold scales with cluster size, slowly.</h2>
+        <p>
+          Park 2024 argues the bar from a tail bound on stochastic block models: a planted community drawn from a block has, with high probability, no
+          cut smaller than \(\Theta(\log n)\). A constant bound like "mincut at least 2" catches the bridge case at small \(n\) and then stops being
+          informative once clusters reach the hundreds. Logs grow slower than any polynomial, so the bar stays mild even at \(|V| = 10^6\), where
+          \(\log_{10}(n) = 6\). The default constants are \(C = 1, x = 10\), giving \(f(n) = \log_{10}(n)\).
+        </p>
+      </section>
+
+      <!-- ─────────── Stage 4 · per-cluster threshold readout ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 4 &middot; thresholds on the fixture</div>
+        <h2>Read the bar against the mincut, cluster by cluster.</h2>
+        <p>Mincut values come from the planted topology; threshold values from \(f(n) = \log_{10}(n)\).</p>
+        <table class="wcc-thr-table">
+          <thead>
+            <tr>
+              <th>cluster</th>
+              <th>n</th>
+              <th>structure</th>
+              <th>mincut</th>
+              <th>\(\log_{10}(n)\)</th>
+              <th>verdict</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>A</td>
+              <td class="num">12</td>
+              <td>\(K_5\) core + 7-node periphery</td>
+              <td class="num">1</td>
+              <td class="num">1.079</td>
+              <td class="verdict-fail">fail</td>
+            </tr>
+            <tr>
+              <td>B</td>
+              <td class="num">8</td>
+              <td>two \(K_4\) joined by a bridge</td>
+              <td class="num">1</td>
+              <td class="num">0.903</td>
+              <td class="verdict-pass">pass</td>
+            </tr>
+            <tr>
+              <td>C\(_1\)</td>
+              <td class="num">3</td>
+              <td>3-cycle</td>
+              <td class="num">2</td>
+              <td class="num">0.477</td>
+              <td class="verdict-pass">pass</td>
+            </tr>
+            <tr>
+              <td>C\(_2\)</td>
+              <td class="num">3</td>
+              <td>3-cycle</td>
+              <td class="num">2</td>
+              <td class="num">0.477</td>
+              <td class="verdict-pass">pass</td>
+            </tr>
+            <tr>
+              <td>D</td>
+              <td class="num">4</td>
+              <td>4-node path</td>
+              <td class="num">1</td>
+              <td class="num">0.602</td>
+              <td class="verdict-pass">pass</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          B has mincut 1 (the bridge) and still passes: at \(n = 8\) the bar sits below 1, so a single-edge bridge counts as well-connected. D passes
+          for the same reason at \(n = 4\). C entered as two disjoint 3-cycles; the connected-component pass below treats them as separate clusters
+          before any mincut runs. A is the only cluster that fails on first sight.
+        </p>
+      </section>
+
+      <!-- ─────────── Stage 5 · CC pre-pass ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 5 &middot; connected-component pre-pass</div>
+        <h2>Drop inter-cluster edges, split disconnected clusters, seed the queue.</h2>
+        <p>
+          Same first step as <a href="./cc.html">CC</a>: bucket nodes by label, drop every edge whose endpoints carry different labels,
+          breadth-first-search each induced subgraph, drop components of size 1. The surviving multi-node components become the initial queue for the
+          cut loop. C's two 3-cycles split into C\(_1\) and C\(_2\) here; the cut loop never sees a single \(n = 6\) cluster.
+        </p>
+        <p>
+          Why split first, then test well-connectedness. Mincut is undefined on a disconnected graph: the cut value is trivially 0 and the bipartition
+          is arbitrary. The pre-pass is the cheap shortcut, and it costs one breadth-first search per cluster.
+        </p>
+        <p>
+          <strong>Step 1.</strong> Bucket nodes by input label. <strong>Step 2.</strong> Keep only residual edges where
+          <code>membership[u] === membership[v]</code>. <strong>Step 3.</strong> Run BFS inside each bucket so every disconnected label becomes one
+          candidate per connected piece. <strong>Step 4.</strong> Drop components of size one. <strong>Step 5.</strong> Push every remaining component
+          into the FIFO queue.
+        </p>
+        <div id="g-cc-summary" class="wcc-cc-grid"></div>
+      </section>
+
+      <!-- ─────────── Stage 6 · per-pop mechanics ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 6 &middot; per-pop mechanics</div>
+        <h2>Five phases inside every queue pop.</h2>
+        <p>Once the queue is seeded, the cut loop drains it FIFO. Each pop runs the same five phases.</p>
+        <p>
+          <strong>Step 1.</strong> Pull the head of the queue: <code>cur = queue.shift()</code>. Recursion is represented as a work list, not as a
+          call stack. <strong>Step 2.</strong> Induce the subgraph on the candidate's nodes, because WCC judges only internal cohesion.
+          <strong>Step 3.</strong> Hand that induced graph to <a href="./viecut.html">VieCut</a> and read back the minimum cut value \(c\) plus the
+          most-balanced bipartition among tied minimum cuts.
+        </p>
+        <p>
+          <strong>Step 4.</strong> Evaluate \(f(n)\) on this candidate's size, not on the whole graph size. The implementation precomputes \(C /
+          \ln(x)\), so a log-family threshold costs one log call and one multiply per pop. <strong>Step 5.</strong> Compare under the strict-above
+          rule, with a \(10^{-9}\) tolerance band that treats near-ties as failures.
+        </p>
+        <div class="callout">
+          <div class="tag">pass and fail branches</div>
+          <p>
+            If \(c\) is strictly above \(f(n)\), the candidate is well-connected under the selected criterion; it joins the survivor list and receives
+            an output id later in survivor order. If \(c\) is at or below \(f(n)\), the mincut is evidence that the cluster is held together too
+            weakly, so each cut side is split into connected components and every size-greater-than-1 component is pushed back, in-side first and then
+            out-side.
+          </p>
+        </div>
+        <pre class="wcc-pseudocode"><code>queue = connected_components(residual_graph).filter(size &gt; 1)
+survivors = []
+
+while queue is not empty:
+    C = queue.pop_front()
+    S, T, c = most_balanced_mincut(G induced by C)
+    t = f(size(C))
+
+    if c &gt; t and abs(c - t) &gt; 1e-9:
+        survivors.push(C)
+    else:
+        for side in [S, T]:
+            for H in connected_components(G induced by side):
+                if size(H) &gt; 1:
+                    queue.push_back(H)</code></pre>
+        <p>
+          Three interesting properties of this routine. Survivors are immutable: once a cluster passes, it leaves the queue and never returns.
+          Push-back components are strictly smaller than the popped cluster, so the recursion terminates in at most \(n\) pops on a worst-case 1-cut
+          chain. Survivors carry no input label; output ids run \(0, 1, 2, \dots\) in survivor pop order.
+        </p>
+      </section>
+
+      <!-- ─────────── Stage 7 · the walker ─────────── -->
+      <section class="stage wcc-walker">
+        <div class="stage-num">stage 7 &middot; recursive cut walker</div>
+        <h2>Mincut, threshold check, repeat.</h2>
+        <p>
+          The walker advances one queue pop at a time. The picker re-runs the kernel on the new criterion and re-mounts the walker with the same input
+          partition. Default is \(f(n) = \log_{10}(n)\), the Park 2024 default.
+        </p>
+        <p>
+          Read the canvas as the queue's live partition, not as a new base clustering. After a failed pop, one coloured chunk is replaced by the
+          connected components pushed back from the two cut sides. The phase strip follows the implementation order from the previous section: pull,
+          mincut, threshold, verdict, action. The gauge is the verdict: the integer cut value sits left or right of the selected threshold, with exact
+          log ties forced to fail.
+        </p>
+        <p>
+          The queue and survivor panels make the recursion explicit. New components appear at the queue tail, survivors leave the queue forever, and
+          no backtracking is needed because each pushed item is smaller than the failed parent.
+        </p>
+
+        <div class="wcc-criterion-row">
+          <label for="wcc-criterion">threshold</label>
+          <select id="wcc-criterion">
+            <option value="1log_10(n)">1 &middot; log<sub>10</sub>(n) (Park 2024 default)</option>
+            <option value="2log_10(n)">2 &middot; log<sub>10</sub>(n)</option>
+            <option value="1log_2(n)">1 &middot; log<sub>2</sub>(n)</option>
+            <option value="0.5log_10(n)">0.5 &middot; log<sub>10</sub>(n)</option>
+            <option value="0.2n^0.5">0.2 &middot; n<sup>0.5</sup></option>
+            <option value="piecewise">piecewise (1/2/3/ceil(0.1·sqrt(n)))</option>
+            <option value="0">0 (= CC; no recursion)</option>
+          </select>
+          <span class="wcc-formula" id="wcc-formula">f(n) = log<sub>10</sub>(n)</span>
+        </div>
+
+        <div class="graph">
+          <div class="graph-chrome">
+            <span><span class="level-pill" id="g-walk-level">step 0</span><span id="g-walk-status">stage 0 &middot; planted partition</span></span>
+            <span class="right" id="g-walk-stats">survivors: · &middot; pushes: ·</span>
+          </div>
+          <div class="graph-canvas" id="g-walk-cy"></div>
+          <div class="widget-row">
+            <button class="btn" id="g-walk-reset" type="button">reset</button>
+            <button class="btn" id="g-walk-prev" type="button">back</button>
+            <button class="btn primary" id="g-walk-next" type="button">next pop</button>
+            <button class="btn" id="g-walk-end" type="button">finish</button>
+            <span class="step-label">pop <b id="g-walk-cur">0</b> / <span id="g-walk-total">0</span></span>
+          </div>
+        </div>
+
+        <div class="wcc-state-row">
+          <div id="g-walk-panel"></div>
+          <div>
+            <div class="wcc-panel" id="wcc-queue-panel">
+              <div class="pcap">queue (FIFO) <b id="wcc-queue-count">0</b></div>
+              <div class="wcc-chiprow" id="wcc-queue-chips"></div>
+            </div>
+            <div class="wcc-panel" id="wcc-survivor-panel" style="margin-top: 0.7rem">
+              <div class="pcap">survivors <b id="wcc-survivor-count">0</b></div>
+              <div class="wcc-chiprow" id="wcc-survivor-chips"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="wcc-record-wrap">
+          <div class="pcap">per-pop record table</div>
+          <table class="wcc-record-table" id="wcc-record-table">
+            <thead>
+              <tr>
+                <th>pop</th>
+                <th>n</th>
+                <th>cut</th>
+                <th>thr</th>
+                <th>verdict</th>
+                <th>pushed</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ─────────── Stage 8 · cluster A initial state ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 8 &middot; cluster A, initial state</div>
+        <h2>The only cluster that fails on first sight.</h2>
+        <p>
+          A enters the cut loop at \(n = 12\): the \(K_5\) core on \(\{0, 1, 2, 3, 4\}\) plus four 1-edge pendants (5, 6, 7, 11) and three 2-edge
+          periphery nodes (8, 9, 10). VieCut returns a mincut of 1 (any of the four 1-edge pendants). Among the four tied 1-cuts, all peel a single
+          node, so the most-balanced rule picks one of them; the choice is a VieCut-internal tie-break. Threshold at \(n = 12\) is \(\log_{10}(12)
+          \approx 1.079\). The verdict is fail: 1 is not strictly above 1.079.
+        </p>
+        <p>
+          The cut is local: remove one pendant edge and one node separates, so a single weak appendage is enough to make the whole 12-node cluster
+          have mincut 1. The bar is just above 1, so the strict test \(1 &gt; 1.079\) is false. Failing does not delete the rest of A; the one-node
+          cut side is filtered, and the connected 11-node side becomes the first recursive work item.
+        </p>
+      </section>
+
+      <!-- ─────────── Stage 9 · A pop 1: first peel ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 9 &middot; A pop 1</div>
+        <h2>Peel one pendant. Push the 11-node side back to the queue.</h2>
+        <p>
+          VieCut returns the bipartition (1 pendant, 11 rest). The 1-side fails the size-greater-than-1 push-back gate and vanishes. The 11-side joins
+          the queue tail. The peeled pendant becomes one of nodes 5, 6, 7, 11; which one depends on VieCut's tie-break.
+        </p>
+      </section>
+
+      <!-- ─────────── Stage 10 · A pop 2: second peel ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 10 &middot; A pop 2</div>
+        <h2>Same shape, smaller cluster. \(n = 11\), cut 1, threshold 1.041.</h2>
+        <p>
+          The 11-node residual still has 1-edge pendants in it, so the mincut is still 1. Threshold at \(n = 11\) is \(\log_{10}(11) \approx 1.041\).
+          Fail again. Another pendant peels; the 10-node side returns to the queue.
+        </p>
+      </section>
+
+      <!-- ─────────── Stage 11 · A pop 3: epsilon-band fail ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 11 &middot; A pop 3</div>
+        <h2>Threshold lands on the integer. The epsilon band catches it.</h2>
+        <p>
+          At \(n = 10\), \(\log_{10}(n) = 1.000\) exactly. Mincut is still 1. Under the strict-above rule, 1 is not greater than 1, so the verdict is
+          fail; the \(10^{-9}\) tolerance band confirms it (the gap is zero, well inside the band). A third pendant peels. The 9-node side returns to
+          the queue.
+        </p>
+      </section>
+
+      <!-- ─────────── Stage 12 · A pop 4: the survivor ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 12 &middot; A pop 4</div>
+        <h2>The 9-node residual clears the bar.</h2>
+        <p>
+          At \(n = 9\), threshold drops to \(\log_{10}(9) \approx 0.954\). Mincut is still 1. The verdict is pass: 1 strictly exceeds 0.954. The
+          9-node side joins the survivor list. Binary-verified, the surviving set is \(\{0, 1, 2, 3, 4, 8, 9, 10, 11\}\): the \(K_5\) core, the three
+          2-edge periphery nodes, and one 1-edge pendant that the peel sequence happened to leave behind. The three peeled pendants are some
+          permutation of \(\{5, 6, 7\}\); peel order varies with VieCut tie-breaks, but the survivor set is stable.
+        </p>
+        <p>
+          The four-pop sequence is one threshold crossing. At \(n = 12\) and \(n = 11\), the log bar is above 1, so each pop fails and peels a size-1
+          side. At \(n = 10\), the bar ties the cut exactly and the strict comparison still fails. At \(n = 9\), the bar finally drops below 1, so the
+          same mincut value passes.
+        </p>
+        <table class="wcc-peel-table">
+          <thead>
+            <tr>
+              <th>pop</th>
+              <th>n</th>
+              <th>cut</th>
+              <th>threshold</th>
+              <th>verdict</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="num">1</td>
+              <td class="num">12</td>
+              <td class="num">1</td>
+              <td class="num">1.079</td>
+              <td class="fail">fail &middot; peel</td>
+            </tr>
+            <tr>
+              <td class="num">2</td>
+              <td class="num">11</td>
+              <td class="num">1</td>
+              <td class="num">1.041</td>
+              <td class="fail">fail &middot; peel</td>
+            </tr>
+            <tr>
+              <td class="num">3</td>
+              <td class="num">10</td>
+              <td class="num">1</td>
+              <td class="num">1.000</td>
+              <td class="fail">fail &middot; epsilon band</td>
+            </tr>
+            <tr>
+              <td class="num">4</td>
+              <td class="num">9</td>
+              <td class="num">1</td>
+              <td class="num">0.954</td>
+              <td class="pass">pass &middot; keep</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- ─────────── Stage 13 · B walkthrough ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 13 &middot; cluster B</div>
+        <h2>One bridge edge, passes on first sight.</h2>
+        <p>
+          B is two \(K_4\)'s joined by the edge (15, 16). Mincut is 1 (the bridge). Threshold at \(n = 8\) is \(\log_{10}(8) \approx 0.903\). \(1 >
+          0.903\), so B passes. One pop, no peeling. The single-bridge cluster of size 8 counts as well-connected by the log family. Doubling the
+          coefficient to \(2 \log_{10}(n)\) raises the bar at \(n = 8\) to 1.806 and flips B's verdict to fail; the picker in stage 7 exposes that
+          flip.
+        </p>
+      </section>
+
+      <!-- ─────────── Stage 14 · C and D walkthroughs ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 14 &middot; clusters C, D</div>
+        <h2>The disconnected one was already split. The path-shaped one passes.</h2>
+        <p>
+          C entered the queue as two separate 3-cycles via the connected-component pre-pass. Each has mincut 2 and threshold 0.477 at \(n = 3\); both
+          pass on first sight. D is a 4-node path with mincut 1; threshold at \(n = 4\) is 0.602, so D passes. Three small clusters, three single-pop
+          survivors.
+        </p>
+      </section>
+
+      <!-- ─────────── Stage 15 · prune phase ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 15 &middot; what falls off</div>
+        <h2>Size-1 components are dropped at every push-back gate.</h2>
+        <p>
+          The push-back loop walks each side's connected components and pushes only the size-greater-than-1 ones. Size-1 fragments are filtered, both
+          in the initial connected-component pre-pass and inside the cut loop. On this fixture, three peeled pendants from A and the two outliers (30,
+          31) all fall through this gate. The output has no entries for them; downstream tools read them as unlabelled.
+        </p>
+      </section>
+
+      <!-- ─────────── Stage 16 · final ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 16 &middot; final partition</div>
+        <h2>WCC output next to ground truth.</h2>
+        <p id="g-final-summary">survivors: · &middot; nodes kept / dropped: ·</p>
+        <div class="graph g-with-side">
+          <div class="graph-canvas" id="g-final-out"></div>
+          <div class="side-right">
+            <div class="side-caption"><span class="st">ground truth</span></div>
+            <div id="g-final-gt"></div>
+          </div>
+        </div>
+        <p>
+          Under the \(\log_{10}\) default, five survivors: A's 9-node residual, B intact, C\(_1\) and C\(_2\) separate, D intact. The three peeled
+          pendants and the two outliers are unlabelled. Changing the criterion in stage 7 redraws this panel live; under \(0.2 \sqrt{n}\) every
+          cluster passes on first sight (no peeling), and under \(2 \log_{10}(n)\) B splits into its two \(K_4\)'s.
+        </p>
+      </section>
+
+      <!-- ─────────── Stage 17 · comparison with CC and CM ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 17 &middot; siblings in the family</div>
+        <h2>WCC sits between CC and CM in cost and reach.</h2>
+        <p>
+          <a href="./cc.html">CC</a> stops after the pre-pass. Every connected component of the residual graph is a survivor; no threshold, no
+          recursion. <a href="./cm.html">CM</a> goes one step further than WCC: each failing cluster gets cut, and each side is re-clustered by the
+          base algorithm (Leiden, in the shipped binary) before any survivors are accepted. WCC splits only; CM splits and re-clusters. On the fixture
+          under \(\log_{10}\): CC keeps all five connected pieces (A intact at 12 nodes, C split into two cycles, B and D intact); WCC peels A to 9
+          nodes; CM peels A and then re-clusters the 9-node residual into whatever the inner Leiden call returns.
+        </p>
+      </section>
+
+      <!-- ─────────── Stage 18 · chain composition ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 18 &middot; chain composition</div>
+        <h2>WCC is post-processing; the base clustering feeds it.</h2>
+        <p>
+          In the chained verification matrix, WCC sits downstream of four bases: <a href="./leiden-mod.html">Leiden modularity</a>,
+          <a href="./leiden-cpm.html">Leiden CPM</a> at resolution 0.5, <a href="./infomap.html">Infomap</a>, and
+          <a href="./sbm-flat-pp.html">SBM-Flat-PP</a>. Each base produces an input partition; WCC reads that partition and emits a survivor
+          partition. The stress grid injects nine seeds into the tracer to exercise equal-cut paths; the shipped executable itself starts at fixed
+          seed 0.
+        </p>
+      </section>
+
+      <!-- ─────────── Stage 19 · failure mode ─────────── -->
+      <section class="stage">
+        <div class="stage-num">stage 19 &middot; failure mode</div>
+        <h2>Sparse-by-design clusters fragment.</h2>
+        <p>
+          Tree-shaped clusters (a star, a path, any cluster whose mincut is structurally 1) fail every non-trivial log or sqrt threshold and break
+          down to singletons or pairs. The output drops them entirely. Vu-Le 2026 reports this failure mode on benchmarks with sparse planted
+          communities; the picker in stage 7 reproduces it by turning the bar up. The trade-off is global: the threshold applies to every cluster
+          regardless of provenance, so a planted community that happens to look tree-like is misread the same way an over-merged cluster is.
+        </p>
+      </section>
+
+      <aside class="tech-companion">
+        <a href="https://github.com/vltanh/community-detection/blob/main/docs/algorithms/wcc.md" target="_blank" rel="noopener"
+          >technical companion: docs/algorithms/wcc.md</a
+        >
+      </aside>
+      <footer class="ack">
+        <p class="tools">drawn with <a href="https://d3js.org" target="_blank" rel="noopener">d3</a></p>
+        <p class="credit">typed by vltanh, doodled with Claude</p>
+      </footer>
+    </main>
+
+    <script>
+      window.MathJax = {
+        tex: {
+          inlineMath: [
+            ["\\(", "\\)"],
+            ["$", "$"],
+            ["$$", "$$"],
+          ],
+          displayMath: [["\\[", "\\]"]],
+        },
+        chtml: { scale: 1.0 },
+      };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script src="./shared.js"></script>
+    <script src="./js/fixture.js"></script>
+    <script src="./js/comdet/page_helpers.js"></script>
+    <script src="./js/mincut.js"></script>
+    <script src="./js/viecut/random.js"></script>
+    <script src="./js/viecut/union_find.js"></script>
+    <script src="./js/viecut/node_bucket_pq.js"></script>
+    <script src="./js/viecut/fifo_node_bucket_pq.js"></script>
+    <script src="./js/viecut/mutable_graph.js"></script>
+    <script src="./js/viecut/cactus_graph.js"></script>
+    <script src="./js/viecut/balanced_cut_dfs.js"></script>
+    <script src="./js/viecut/most_balanced.js"></script>
+    <script src="./js/viecut/minimum_cut_helpers.js"></script>
+    <script src="./js/viecut/contract_graph.js"></script>
+    <script src="./js/viecut/contraction_tests.js"></script>
+    <script src="./js/viecut/scc.js"></script>
+    <script src="./js/viecut/noi_minimum_cut.js"></script>
+    <script src="./js/viecut/label_propagation.js"></script>
+    <script src="./js/viecut/viecut_heuristic.js"></script>
+    <script src="./js/viecut/push_relabel.js"></script>
+    <script src="./js/viecut/heavy_edges.js"></script>
+    <script src="./js/viecut/graph_modification.js"></script>
+    <script src="./js/viecut/recursive_cactus.js"></script>
+    <script src="./js/viecut/cactus_mincut.js"></script>
+    <script src="./js/viecut/index.js"></script>
+    <script src="./js/viecut/mincut_adapter.js"></script>
+    <script src="./js/wcc/wcc.js"></script>
+    <script src="./js/wcc/page.js"></script>
+    <script src="./js/landing_hero.js"></script>
+  </body>
+</html>

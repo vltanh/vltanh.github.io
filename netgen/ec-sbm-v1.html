@@ -1,0 +1,1724 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>EC-SBM v1 &middot; Edge-connected SBM | Synthetic Network Generators</title>
+<link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐖</text></svg>">
+<meta name="description" content="Edge-connected SBM (v1). SBM with a per-cluster min-edge-cut floor. Hand-builds a K_(k+1) core inside every cluster, overlays an SBM on the mutated residual, adds outliers via a singleton-block SBM, and tops up the degree sequence with a heap-greedy matcher.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./shared.css">
+<style>
+.blockmat{
+  display:grid; gap:3px;
+  grid-template-columns:repeat(4, minmax(0, 1fr));
+  max-width:320px; margin:0 auto;
+  font-family:'Special Elite','Courier New',monospace;
+  font-size:.8rem;
+}
+.blockmat .cell{
+  background:var(--ink-3);
+  border:1px solid var(--rule);
+  aspect-ratio:1;
+  display:flex; align-items:center; justify-content:center;
+  color:var(--paper-2);
+  transition:background .2s ease, border-color .2s ease;
+  font-variant-numeric:tabular-nums;
+}
+.blockmat .cell:not(.head){ cursor:default; }
+.blockmat .cell.head{
+  background:transparent; border:none; color:var(--paper-3);
+  font-size:.68rem; letter-spacing:.1em; text-transform:uppercase;
+}
+.blockmat .cell.on{
+  background:var(--cobalt); color:var(--ink); border-color:var(--cobalt);
+}
+.graph.g-with-side .side-caption{
+  font-family:'Special Elite','Courier New',monospace;
+  font-size:.76rem;
+  color:var(--paper-2);
+  padding:.15rem 0 .7rem;
+  margin-bottom:.55rem;
+  border-bottom:1px dashed rgba(139,117,65,.4);
+  line-height:1.45;
+}
+.graph.g-with-side .side-caption .st{
+  color:var(--azure);
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  margin-right:.25rem;
+}
+.graph.g-with-side .side-body{
+  display:grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: .4rem;
+}
+.graph.g-with-side .side-right{
+  display:flex; flex-direction:column;
+  align-items:stretch;
+  gap:.4rem;
+}
+.graph.g-with-side .side-right > svg{ width:100%; height:auto; }
+.graph.g-with-side .side-right > .blockmat{ width:100%; max-width:none; margin:0; }
+@media (max-width: 820px){
+  .graph.g-with-side .side-body{ grid-template-columns: 1fr; align-items: start; }
+}
+.viz-node.ringed{ stroke:#c7801e; stroke-width:3.4; }
+.viz-node.isolate-ring{ stroke:#c92a2a; stroke-width:3.4; stroke-dasharray:5 3; }
+.viz-edge.cut{
+  stroke:#c92a2a !important;
+  stroke-width:3.4 !important;
+  stroke-dasharray:8 5;
+}
+/* .deg-bar-row hover/dim/hot styles live in shared.css. */
+.disk-panel{
+  padding:1rem; background:var(--ink-2); border:1px solid var(--rule);
+  border-radius:6px; margin:1rem 0;
+}
+.disk-panel svg{ width:100%; height:auto; display:block; }
+.step-desc{
+  font-family:'Special Elite','Courier New',monospace;
+  font-size:.78rem; color:var(--paper-2); margin-top:.6rem;
+}
+.step-desc .st{ color:var(--azure); letter-spacing:.1em; text-transform:uppercase; }
+.step-desc mjx-container{ font-size:1em !important; }
+.profile-table{ width:100%; border-collapse:collapse; margin:1rem 0; background:var(--ink-2); border:1px solid var(--rule); border-radius:4px; overflow:hidden; }
+.profile-table th, .profile-table td{ padding:.55rem .85rem; border-bottom:1px solid var(--rule); vertical-align:middle; text-align:left; }
+.profile-table tr:last-child th, .profile-table tr:last-child td{ border-bottom:none; }
+.profile-table th{ font-family:'Special Elite','Courier New',monospace; font-size:.72rem; letter-spacing:.15em; color:var(--paper-3); width:10%; white-space:nowrap; }
+.profile-table td.val{ font-family:'Special Elite','Courier New',monospace; font-size:1.05rem; color:var(--azure); font-variant-numeric:tabular-nums; width:10%; white-space:nowrap; }
+.profile-table td.desc{ color:var(--paper-2); font-size:.88rem; line-height:1.45; }
+.readout{
+  display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:.8rem;
+  font-family:'Special Elite','Courier New',monospace; font-size:.78rem;
+}
+.readout .item{ color:var(--paper-3); }
+.readout .item b{ color:var(--azure); margin-left:.3rem; }
+.readout .item.diff b{ color:var(--signal); }
+.readout .item.good b{ color:var(--mint); }
+.block-ring-label{
+  font-family:'Caveat Brush', cursive;
+  font-size:20px;
+  letter-spacing:.04em;
+}
+.provenance-legend{
+  display:flex; gap:1.4rem; flex-wrap:wrap;
+  font-family:'Special Elite','Courier New',monospace;
+  font-size:.78rem; color:var(--paper-2);
+  margin-top:.6rem; justify-content:center;
+}
+.provenance-legend .sw{
+  display:inline-block; width:28px; height:3px; vertical-align:middle;
+  margin-right:.45rem; border-radius:1px;
+}
+.graph-canvas{
+  height:auto;
+  aspect-ratio: 1 / 1;
+  max-height: 560px;
+}
+</style>
+</head>
+<body>
+<main class="page">
+
+<div id="links"></div>
+
+<div class="wip-banner" role="status">
+  <svg class="wip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 L22 20 H2 Z"/><path d="M12 10v5"/><circle cx="12" cy="17.6" r=".7" fill="currentColor"/></svg>
+  <span class="wip-label">under construction</span>
+</div>
+
+<header class="hdr">
+  <div class="kicker">network-generation · ec-sbm-v1</div>
+  <h1><em>EC-SBM</em> v1</h1>
+  <p class="fullname">Edge-connected SBM, v1</p>
+  <p class="sub">SBM with a per-cluster edge-connectivity floor. Adds one scalar to SBM's contract: the minimum edge cut \(k(C)\) of each cluster. Hand-builds a \(K_{k+1}\) clique inside \(C\) so the output cluster survives any \(k-1\) edge removals.</p>
+</header>
+
+<section class="hook">
+  <p><a href="./sbm.html">Plain SBM</a> freezes three things about the input: each node's block label, the per-pair edge count matrix, and the per-node degree. Triangles are not in the contract, and neither is edge-connectivity. A cluster can come out "connected" but one snip away from falling in half: the sampler is free to place intra-block edges on a handful of pairs while starving the rest.</p>
+  <p>EC-SBM adds one scalar per cluster. Measure the minimum edge cut \(k(C)\) of each cluster's induced subgraph in the input and promise the output cluster is at least that edge-connected. Before any SBM sampling, build a \(K_{k+1}\) seed clique on the top-degree nodes of \(C\). A complete graph on \(k+1\) vertices is \(k\)-edge-connected, so every edge added afterwards can only raise the connectivity, never drop it below \(k\).</p>
+  <p>This is v1, the first version of EC-SBM, published in <a href="https://doi.org/10.1007/s41109-025-00701-2" target="_blank" rel="noopener">Vu-Le et al. 2025</a>. The gen side has four phases and two separate SBM calls. <a href="./ec-sbm-v2.html">v2</a> is the rewrite: constructive-only seed, one SBM over all blocks, a block-preserving rewire, a logged true_greedy matcher.</p>
+</section>
+
+<section class="stage">
+  <div class="stage-num">algorithm map · v1 ledger</div>
+  <h2>Follow the edges by ownership, not just by final count.</h2>
+  <p>v1 is easiest to understand as a ledger. The profile records what the output should resemble; each generation phase spends part of that ledger; the last phase tries to patch whatever earlier phases lost through duplicate removal or gridlock. The sections below zoom into each line item.</p>
+  <p><strong>Step 1.</strong> Profile first gives the protected clusters a clean contract. With <code>outlier_mode=excluded</code>, singleton outliers and every incident edge are removed before <code>assignment.csv</code>, <code>degree.csv</code>, <code>edge_counts.csv</code>, and <code>mincut.csv</code> are written. That keeps the mincut promise meaningful, but the outlier-incident degrees and block counts now have to be rebuilt later.</p>
+  <p><strong>Step 2.</strong> The \(K_{k+1}\) core reserves the mincut floor. Nodes are ranked by target degree, the first \(k+1\) become a complete graph, and every seed edge immediately decrements the residual degree and block-count budget. When \(k\) is large, this clique can dominate the cluster's triangle count and consume most of its diagonal budget.</p>
+  <p><strong>Step 3.</strong> The remaining clustered nodes attach by availability. Each arrival samples \(k\) processed partners without replacement, weighted by \(a_v=\max(\texttt{int_deg}[v],0)\). If fewer than \(k\) processed nodes have positive availability, the guarantee wins and <code>ensure_edge_capacity</code> inflates the residual ledger so the required edge can still be placed.</p>
+  <p><strong>Step 4.</strong> The SBM overlay spends the mutated residual matrix. graph-tool samples from the leftover <code>probs</code> and <code>deg</code> arrays, then v1 overlays those sampled edges onto the already committed core. If the SBM hits a core pair, simplification drops the duplicate after the budget has already been charged.</p>
+  <p><strong>Step 5.</strong> The outlier rescue re-reads the original edgelist and makes each outlier a singleton block. A second SBM runs only on outlier-incident cells, recovering clustered-outlier and outlier-outlier counts without giving those singletons any connectivity guarantee or shared outlier structure.</p>
+  <p><strong>Step 6.</strong> <code>combine_edgelists.py</code> merges the clustered and outlier bands into one simple edge file. It canonicalizes undirected pairs, keeps the first copy it sees, and writes <code>sources.json</code> row ranges; those ranges record surviving ownership, not every duplicate proposal that lost.</p>
+  <p><strong>Step 7.</strong> The final <code>match_degree --algorithm greedy</code> pass drains residual degree deficits. It pops the largest deficit, scans legal non-neighbours, and adds top-up edges until partners run out. If a node gridlocks, v1 leaves those stubs out of the graph without an explicit warning.</p>
+  <table class="profile-table">
+    <thead>
+      <tr><th>stage</th><th>ledger action</th><th>risk to watch</th></tr>
+    </thead>
+    <tbody>
+      <tr><th>profile</th><td class="desc">Writes clustered-only assignment, degree, block matrix, and \(k(C)\).</td><td class="desc">Outlier-incident mass disappears until the rescue pass.</td></tr>
+      <tr><th>core + attach</th><td class="desc">Spends diagonal degree and block budget to guarantee edge-connectivity.</td><td class="desc">Large \(k\) can inflate budgets and force dense cores.</td></tr>
+      <tr><th>SBM overlay</th><td class="desc">Samples leftover clustered block counts from mutated arrays.</td><td class="desc">Duplicate core pairs are charged twice and kept once.</td></tr>
+      <tr><th>outlier SBM</th><td class="desc">Samples only cells touching singleton outlier blocks.</td><td class="desc">Outlier labels are incidence targets, not structure targets.</td></tr>
+      <tr><th>combine + match</th><td class="desc">Dedups bands, records provenance, and tops up degree deficits.</td><td class="desc">First-seen provenance hides rejected duplicates; greedy gridlock is silent.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ─────────── Profiling · the shared fixture ─────────── -->
+<section class="stage">
+  <div class="stage-num">profiling · outliers as singletons</div>
+  <h2>Shared input graph: 18 clustered + 2 singletons.</h2>
+  <p>The 20-node synthetic this page builds on, drawn under the shared <em>singleton</em> view: C1 (8), C2 (6), C3 (4), plus outliers 19 + 20 each in their own 1-node cluster. EC-SBM v1 then forces <code>outlier_mode=excluded</code> in the next stage, dropping outliers and their incident edges before profile counts anything; this view is the universal baseline before that exclusion.</p>
+  <div class="graph" id="g-shared-input">
+    <div class="graph-chrome">
+      <span>input G &middot; excluded mode &middot; 3 clusters</span>
+      <span class="right">shared fixture</span>
+    </div>
+    <div class="graph-canvas" id="g-shared-input-cy"></div>
+  </div>
+</section>
+
+<!-- ─────────── Profiling · block assignment ─────────── -->
+<section class="stage">
+  <div class="stage-num">profiling · block assignment</div>
+  <h2>Per-node block label. v1 forces outliers out.</h2>
+  <p>Profile reads the empirical edgelist + clustering and writes seven CSVs. Two are lookups (<code>node_id.csv</code>, <code>cluster_id.csv</code>). Four carry the quantities the gen stages try to match, one per subsection below: <code>assignment.csv</code>, <code>degree.csv</code>, <code>edge_counts.csv</code>, <code>mincut.csv</code>. The seventh, <code>com.csv</code>, is the full (node, cluster) ledger and passes through to the final output unchanged.</p>
+  <p>v1 forces <code>outlier_mode=excluded</code> at profile time: any node not in a size-2+ cluster drops out, along with every edge incident to it. Those nodes come back later through a separate SBM call. v2 folds them into one combined pseudo-block instead; the rest of this page follows v1.</p>
+  <p><strong>Step 1.</strong> The profiler starts from the empirical edgelist and community assignment. At this point outliers are still visible because the graph is still the original input.</p>
+  <p><strong>Step 2.</strong> The protected domain is then filtered down to size-2+ clusters. EC-SBM's connectivity guarantee is per real cluster, so edges touching outliers are not counted in these ledgers.</p>
+  <p><strong>Step 3.</strong> The profile emits the four generation targets below. Everything after profiling either spends one of these ledgers or repairs a deficit caused by earlier spending.</p>
+  <table class="profile-table">
+    <tbody>
+      <tr><th>assignment</th><td class="desc">which block each clustered node belongs to</td></tr>
+      <tr><th>degree</th><td class="desc">how many clustered-side stubs the generator should hit</td></tr>
+      <tr><th>edge counts</th><td class="desc">half-edge budget per block pair</td></tr>
+      <tr><th>mincut</th><td class="desc">the EC-SBM scalar \(k(C)\) for each protected cluster</td></tr>
+    </tbody>
+  </table>
+  <div class="graph" id="g-assign">
+    <div class="graph-chrome">
+      <span>input G after <code>outlier_mode=excluded</code> &middot; dashed rects enclose each block</span>
+      <span class="right">assignment.csv</span>
+    </div>
+    <div class="graph-canvas" id="g-assign-cy"></div>
+  </div>
+</section>
+
+<!-- ─────────── Profiling · degree sequence ─────────── -->
+<section class="stage">
+  <div class="stage-num">profiling · degree sequence</div>
+  <h2>Per-node target degree, counted on the post-exclusion graph.</h2>
+  <p>The second vector is <code>degree.csv</code>: \(k_u\) per node. Because outliers were just dropped, the degrees counted here exclude outlier-incident edges (a node that had 3 neighbours, 2 clustered and 1 outlier, lands at \(k_u = 2\)). Hover a node to find its bar on the right, or a bar to find its node. Gen stages treat the sequence as a target, not a guarantee: dedup and match-degree gridlock can push the achieved degree below.</p>
+  <div class="graph" id="g-deg">
+    <div class="graph-chrome">
+      <span>input G &middot; outliers excluded &middot; hover a node or a degree row to link</span>
+      <span class="right">degree.csv</span>
+    </div>
+    <div class="graph-canvas" id="g-deg-cy"></div>
+  </div>
+</section>
+
+<!-- ─────────── Profiling · block matrix ─────────── -->
+<section class="stage">
+  <div class="stage-num">profiling · the block matrix</div>
+  <h2>Edge count per block pair, 3x3 on the synthetic.</h2>
+  <p>The third input is <code>edge_counts.csv</code>. Read it as a <em>half-edge</em> count: how many half-edges from block \(r\) land in block \(s\). For \(r \neq s\) that coincides with the number of edges between the two blocks; for \(r = s\), each intra-block edge contributes twice (both halves inside \(r\)):</p>
+  \[
+    e_{rr} \;=\; 2 \cdot \bigl| \{\, \{u, v\} \in E \,:\, b_u = b_v = r \,\} \bigr|.
+  \]
+  <p>With outliers excluded, v1's matrix is a compact 3x3. Hover an edge to find its cell, or a cell to light up every edge that contributes to the count.</p>
+  <div class="graph" id="g-mat">
+    <div class="graph-chrome">
+      <span>input G &middot; hover an edge or a cell</span>
+      <span class="right" id="g-mat-cell">cell: (none)</span>
+    </div>
+    <div class="graph-canvas" id="g-mat-cy"></div>
+  </div>
+</section>
+
+<!-- ─────────── Profiling · minimum edge cut ─────────── -->
+<section class="stage">
+  <div class="stage-num">profiling · the minimum edge cut</div>
+  <h2>One new scalar per cluster: \(k(C)\).</h2>
+  <p>For each cluster \(C\), the profile computes the minimum edge cut of \(C\)'s induced subgraph in the input. An edge cut for \(C\) is a set of edges whose removal disconnects \(C\); \(k(C)\) is the smallest such set's size. Measured via <a href="https://pypi.org/project/pymincut/" target="_blank" rel="noopener"><code>pymincut</code></a>'s Nagamochi-Ono-Ibaraki algorithm with a bucket-queue heap (<code>"noi"</code> / <code>"bqueue"</code>). Singleton clusters get \(k = 0\) by definition. Writes one integer per cluster to <code>mincut.csv</code>.</p>
+  <p>Each cluster's mincut on this synthetic, highlighted in red-dashed on the graph below. C1 has a non-trivial internal cut: two subsets of 4 nodes joined by a thin bridge of 2 edges. C2 and C3 isolate a single low-degree vertex.</p>
+  <table class="profile-table">
+    <thead>
+      <tr><th>cluster</th><th>nodes</th><th>min deg in C</th><th>\(k(C)\)</th><th>one minimum cut</th></tr>
+    </thead>
+    <tbody>
+      <tr><th>C1</th><td class="val">8</td><td class="val">3</td><td class="val">2</td><td class="desc">{(1, 5), (4, 8)}, splitting {1,2,3,4} from {5,6,7,8}.</td></tr>
+      <tr><th>C2</th><td class="val">6</td><td class="val">2</td><td class="val">2</td><td class="desc">{(9, 13), (12, 13)}.</td></tr>
+      <tr><th>C3</th><td class="val">4</td><td class="val">1</td><td class="val">1</td><td class="desc">{(16, 18)}.</td></tr>
+    </tbody>
+  </table>
+  <div class="graph" id="g-mincut">
+    <div class="graph-chrome">
+      <span>input G &middot; red-dashed = one minimum edge cut per cluster</span>
+      <span class="right">mincut.csv</span>
+    </div>
+    <div class="graph-canvas" id="g-mincut-cy"></div>
+  </div>
+  <div class="callout">
+    <div class="tag">this is the only thing EC-SBM adds to SBM's contract</div>
+    <p>Assignment, degree, and block-counts are the SBM contract. EC-SBM reuses all three verbatim and adds one integer per cluster: \(k(C)\). Everything that follows exists to honour that number.</p>
+  </div>
+</section>
+
+<!-- ─────────── Generation · K_{k+1} core step-through ─────────── -->
+<section class="stage">
+  <div class="stage-num">generation · the \(K_{k+1}\) core</div>
+  <h2>Build a \(K_{k+1}\) seed clique. Attach the rest with \(k\) edges each.</h2>
+  <p>Per cluster \(C\), sort nodes by target degree desc (id-asc tiebreak). Take the top \(k+1\) and wire them into a complete subgraph \(K_{k+1}\): that is \(\binom{k+1}{2}\) edges, with each node at degree exactly \(k\). A complete graph on \(k+1\) vertices is \(k\)-edge-connected, so any cluster that contains this \(K_{k+1}\) as a subgraph is \(k\)-edge-connected regardless of what the SBM layer does next.</p>
+  <p><strong>Step 1.</strong> Rank by target degree using <code>(-degree, node_id)</code>. The construction spends guaranteed edges on the nodes with the largest residual capacity first, and the id tie-break keeps the trace deterministic when degrees match.</p>
+  <p><strong>Step 2.</strong> Emit every clique edge. When the processed set has at most \(k\) nodes, the new node connects to all processed nodes, so the first \(k+1\) arrivals form exactly \(K_{k+1}\).</p>
+  <p><strong>Step 3.</strong> Charge the residual ledger as each constructive edge is placed: <code>int_deg[u] -= 1</code>, <code>int_deg[v] -= 1</code>, and the relevant <code>probs[b_u,b_v]</code> cell is decremented where possible. If a required edge has no remaining budget, v1 inflates the cell so the guarantee wins.</p>
+  <p>Phase 2 walks the remaining cluster nodes in descending target-degree order. Each new node \(u\) draws exactly \(k\) already-processed partners in one weighted-without-replacement sample, with each candidate \(v\) weighted by its <em>availability</em> \(a_v = \max(\texttt{int\_deg}[v], 0)\), the remaining residual degree. This is <code>gen_kec_core.sample_by_availability</code>: it picks \(\min(k,\,\#\{a_v > 0\})\) partners by weight, then if fewer than \(k\) candidates still have positive availability it fills the remainder uniformly from the exhausted ones (capacity inflation lets those edges still go in). There is no greedy "take the top-\(k\)" rule: a high-availability node is more likely to be picked, not certain to be. During the first \(k+1\) arrivals \(|N_0| \le k\), so the new vertex joins everything already processed, and the result of those arrivals is the \((k+1)\)-clique.</p>
+  <p><strong>Attach step 1.</strong> Look only backward. The arriving node may connect only to nodes already processed in its cluster, which keeps the proof simple: each new node receives \(k\) independent paths into the already protected component.</p>
+  <p><strong>Attach step 2.</strong> Sample by availability, not rank. Positive-residual candidates are in the weighted pool, while exhausted candidates enter only as a uniform fallback if too few positive candidates remain. A candidate with twice the availability is twice as likely in a single draw, but not guaranteed.</p>
+  <p><strong>Attach step 3.</strong> Inflate only when forced. If the sampled partner would violate residual degree or block budget, v1 increases that residual budget by one and still places the edge. This preserves edge-connectivity but weakens exact degree matching.</p>
+  <p>When a partner's residual or the block-pair budget would block a required edge, <code>ensure_edge_capacity</code> inflates both by 1 so the edge can still go in:</p>
+  \[
+    \texttt{int\_deg}[v] \mathrel{+}= 1, \quad \texttt{probs}[b_u, b_v] \mathrel{+}= 1.
+  \]
+  <p>Inflation is the only reason the output's degree sequence ends up approximate. The walker below mirrors <code>gen_kec_core.generate_cluster</code> arrival by arrival, in the same cluster-major order the shipped Python uses (clusters by size desc, nodes within each by post-exclusion target degree desc, id-asc tiebreak).</p>
+  <p>At each arrival the caption lists every already-processed candidate's availability \(a_v\) with the picked partners marked. Phase-1 arrivals (those with \(|V_t| \leq k\)) auto-attach to every predecessor and grow the \(K_{k+1}\) seed; phase-2 arrivals draw \(k\) partners by the availability-weighted sample above. The shipped Python draws from <code>np.random.choice</code> (MT19937); the walker reproduces the same weighting with a seeded LCG, so the marginals match but the exact picks are one realisation among many. <code>random step</code> re-samples the draw at the current arrival and downstream, leaving the locked prefix frozen; <code>random all</code> re-spins every phase-2 arrival.</p>
+  <div class="graph" id="g-core">
+    <div class="graph-chrome">
+      <span id="g-core-stage">step 0 &middot; stripped</span>
+      <span class="right step-label">arrival <b id="g-core-cur">0</b> / <span id="g-core-total">18</span></span>
+    </div>
+    <div class="graph-canvas" id="g-core-cy"></div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-core-rand-step" type="button" title="re-sample partner picks at the current arrival only">random step</button>
+      <button class="btn" id="g-core-rand-all" type="button" title="re-sample partner picks for every greedy arrival">random all</button>
+      <span class="step-label" id="g-core-real">initial realization &middot; random step re-rolls this arrival; random all re-rolls every greedy arrival</span>
+    </div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-core-start" type="button">to start</button>
+      <button class="btn" id="g-core-prev" type="button">back</button>
+      <button class="btn primary" id="g-core-next" type="button">next</button>
+      <button class="btn" id="g-core-end" type="button">to end</button>
+    </div>
+    <div class="step-desc" id="g-core-desc"></div>
+  </div>
+  <div class="callout">
+    <div class="tag">why \(K_{k+1}\) is the tight seed</div>
+    <p>A complete graph on \(k+1\) vertices has \(\binom{k+1}{2}\) edges, exactly \(k\) per vertex, and is \(k\)-edge-connected. Any smaller complete graph is not enough; any bigger one spends edges the profile would rather place elsewhere. v1 inflates the budget to protect the seed edges, not to shrink them.</p>
+  </div>
+</section>
+
+<!-- ─────────── Generation · SBM overlay + dedup ─────────── -->
+<section class="stage">
+  <div class="stage-num">generation · SBM overlay + dedup</div>
+  <h2>Sample an SBM on the mutated residual, overlay the cores, drop duplicates.</h2>
+  <p>After the constructive pass, <code>probs</code> and <code>deg</code> have been decremented by every edge the core + attach placed and inflated wherever the budget was too tight. v1 feeds those mutated arrays to graph-tool, overlays the constructive edges on top, and simplifies:</p>
+  <p><strong>Step 1.</strong> Freeze the constructive band. The \(K_{k+1}\) core and attach edges are already committed; they are not suggestions to the SBM.</p>
+  <p><strong>Step 2.</strong> Sample the residual SBM using the mutated <code>deg</code> vector, the mutated <code>probs</code> matrix, and graph-tool's <code>micro_ers</code> + <code>micro_degs</code> constraints. This restores remaining block-pair counts without reasoning about the mincut proof.</p>
+  <p><strong>Step 3.</strong> Simplify after overlay. Dedup makes the final graph simple, but it can erase an edge the residual SBM already charged to the ledger; that is the v1 source of under-spent cells.</p>
+  <div style="font-family:'Special Elite','Courier New',monospace;color:var(--paper);background:var(--ink-3);border:1px solid var(--rule);padding:.8rem;border-radius:3px;margin:.6rem 0;font-size:.85rem">
+    g = gt.generate_sbm(b, probs.tocsr(), out_degs=deg,<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;micro_ers=True, micro_degs=True, directed=False)<br>
+    g.add_edge_list(core_edges)<br>
+    gt.remove_parallel_edges(g); gt.remove_self_loops(g)
+  </div>
+  <p>Step through the two phases and press <code>random</code> for a different SBM realization. The residual on this synthetic has 1 intra-C2 + 1 intra-C3 budget + 8 inter (4 C1-C2 + 2 C1-C3 + 2 C2-C3). Whether each intra sample lands on a fresh pair or duplicates a constructive edge depends on which slot the SBM picks; the dedup pass collapses any duplicates.</p>
+  <div class="graph" id="g-overlay">
+    <div class="graph-chrome">
+      <span id="g-overlay-stage">step 0 &middot; constructive only</span>
+      <span class="right step-label">step <b id="g-overlay-cur">0</b> / <span id="g-overlay-total">2</span></span>
+    </div>
+    <div class="graph-canvas" id="g-overlay-cy"></div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-overlay-rand-all" type="button" title="resample the SBM overlay">random all</button>
+      <span class="step-label" id="g-overlay-label">realization 1 of 3</span>
+    </div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-overlay-start" type="button">to start</button>
+      <button class="btn" id="g-overlay-prev" type="button">back</button>
+      <button class="btn primary" id="g-overlay-next" type="button">next</button>
+      <button class="btn" id="g-overlay-end" type="button">to end</button>
+    </div>
+    <div class="step-desc" id="g-overlay-desc"></div>
+    <div class="provenance-legend">
+      <span><span class="sw" style="background:#567ad8"></span>core + attach</span>
+      <span><span class="sw" style="background:#7e468f"></span>residual SBM sample</span>
+      <span><span class="sw" style="background:#c92a2a"></span>collision (duplicates core)</span>
+    </div>
+  </div>
+  <div class="callout warn">
+    <div class="tag">caveat: double-accounting</div>
+    <p>Two samplers writing into the same ledger. The constructive phase commits edges and decrements the budget. The SBM phase redraws on the decremented budget but can still sample the same pair the core already placed; <code>remove_parallel_edges</code> drops one copy. Net per collision: budget charged twice, edge kept once, block's intra count lands under profile. v2 replaces this with a single residual-SBM call and a block-preserving 2-opt rewire that swaps endpoints instead of dropping edges.</p>
+  </div>
+</section>
+
+<!-- ─────────── Generation · outlier rescue ─────────── -->
+<section class="stage">
+  <div class="stage-num">generation · the outlier rescue</div>
+  <h2>Outliers get their own SBM pass.</h2>
+  <p>The constructive + overlay phase never saw outliers because the profile excluded them. This phase re-reads the original (pre-exclusion) edgelist, flags every node that is in the edgelist but not in the clustering, and treats each outlier as a size-1 block of its own. It then samples an SBM on the outlier-incident edges only (<code>--scope outlier-incident</code>); the SBM does not touch clustered-side pairs.</p>
+  <p><strong>Step 1.</strong> Return to the original graph. The stage reads the pre-exclusion edge list so it can recover edges touching nodes 19 and 20 in this toy graph; the clustered-only profile no longer contains those edges.</p>
+  <p><strong>Step 2.</strong> Make singleton blocks. Clustered nodes keep C1, C2, or C3, while outliers 19 and 20 each become a new one-node block. That converts "unclustered" vertices into ordinary SBM blocks for this pass.</p>
+  <p><strong>Step 3.</strong> Sample only incident cells. The second SBM is scoped to cells with at least one singleton endpoint, and it does not resample any clustered-clustered pair that the previous stages already handled.</p>
+  <div class="graph" id="g-outlier">
+    <div class="graph-chrome">
+      <span>core + overlay + outlier rescue</span>
+      <span class="right">orchid = outlier SBM band</span>
+    </div>
+    <div class="graph-canvas" id="g-outlier-cy"></div>
+  </div>
+  <div class="callout">
+    <div class="tag">singleton outlier blocks emit edges, not structure</div>
+    <p>Each outlier is its own 1-node block, so the SBM only has inter-block cells to populate. Outlier-outlier edges come out as a cell between two singletons; clustered-outlier edges come out as cells between a real cluster and a singleton. Nothing ever lands on a diagonal. Folding the outliers into one combined block instead gives v2's single-SBM picture.</p>
+  </div>
+</section>
+
+<!-- ─────────── Generation · combine edgelists ─────────── -->
+<section class="stage">
+  <div class="stage-num">generation · combine the bands</div>
+  <h2>Merge sampled bands into one simple edge file and keep provenance.</h2>
+  <p>At this point v1 has two independently sampled bands: the clustered band (constructive core, attach, residual SBM, and its dedup) and the outlier SBM band. <code>combine_edgelists.py</code> concatenates them in that order, applies undirected first-seen-wins dedup, then writes the final <code>edge.csv</code> plus <code>sources.json</code>.</p>
+  <table class="profile-table">
+    <tbody>
+      <tr><th>band 1</th><td class="val">clustered</td><td class="desc">Core + attach + residual SBM, already simple after overlay dedup, written first.</td></tr>
+      <tr><th>band 2</th><td class="val">outlier</td><td class="desc">Singleton-block SBM on outlier-incident edges; duplicate pairs lose if seen before.</td></tr>
+      <tr><th>output</th><td class="val">edge.csv</td><td class="desc"><code>sources.json</code> row ranges record which band produced each surviving edge.</td></tr>
+    </tbody>
+  </table>
+  <p><strong>Step 1.</strong> Canonicalize every row as \((\min(u,v), \max(u,v))\), so <code>7,19</code> and <code>19,7</code> are the same candidate edge.</p>
+  <p><strong>Step 2.</strong> Keep the first copy. The clustered band is input 1, so it has priority if a later outlier-band row repeats an existing pair; the target is a simple graph, not a multigraph.</p>
+  <p><strong>Step 3.</strong> Record row ownership. <code>sources.json</code> maps each generator band to an inclusive 1-based row interval in the final file, which lets diagnostics separate clustered, outlier, and degree-matching edges.</p>
+  <div class="callout">
+    <div class="tag">why combine is a real algorithm step</div>
+    <p>The two SBMs are independent, but the final graph cannot contain duplicate undirected pairs. The combine step is where independent bands become one simple graph and where v1 preserves just enough provenance to audit the final edge mix.</p>
+  </div>
+</section>
+
+<!-- ─────────── Generation · match_degree, with pile viz ─────────── -->
+<section class="stage">
+  <div class="stage-num">generation · match the residual degree</div>
+  <h2>Heap-greedy top-up. The deficit accumulates; match_degree drains it.</h2>
+  <p>Dedup and the outlier pass together remove some edges from each node's degree. The final phase tops that shortfall back up with <code>src/match_degree.py --algorithm greedy</code> (hardcoded in v1):</p>
+  <p><strong>Step 1.</strong> Compute residual stubs: for each node, subtract its current degree after combine from the original <code>degree.csv</code> target, then keep <code>max(target-current, 0)</code> as the heap load.</p>
+  <p><strong>Step 2.</strong> Pop the largest deficit. The heap prioritizes nodes with the most missing stubs, with node id as the deterministic tie-break; this is local repair, not a global matching solver.</p>
+  <p><strong>Step 3.</strong> Add legal non-neighbour edges. The matcher scans candidates that are not already adjacent and adds edges until the popped node is satisfied or no legal partner remains.</p>
+  <p><strong>Step 4.</strong> Accept gridlock silently. If legal partners run out, v1 drops the leftover stubs without a warning, which is why the bars below show both placed top-up and any remaining red deficit.</p>
+  <ol style="margin-left:1.1rem;color:var(--paper-2);font-size:.95rem;line-height:1.6">
+    <li>Build a max-heap of <code>(-residual, node_id)</code> over nodes still short of their target.</li>
+    <li>Pop \(u\). Compute \(u\)'s non-neighbours (live nodes minus \(u\) and its current neighbours).</li>
+    <li>Drain partners from \(u\)'s non-neighbour set in id-ascending order (canonical sorts the candidate set explicitly so the result does not depend on Python's set hash order) until \(u\)'s residual hits zero or candidates run out. Each pair becomes an edge; decrement both sides.</li>
+    <li>If \(u\) ran out of partners first, the remaining stubs are silently dropped. No log line, no warning.</li>
+  </ol>
+  <p>Toggle <code>apply match_degree</code> to watch the deficit pile (the faint-red tail on each bar) drain. Click <code>random</code> for a different matcher realization.</p>
+  <div class="graph" id="g-match">
+    <div class="graph-chrome">
+      <span id="g-match-label">before match_degree &middot; residual deficits visible</span>
+      <span class="right" id="g-match-count">placed: 0 &middot; gridlocked: 0</span>
+    </div>
+    <div class="graph-canvas" id="g-match-cy"></div>
+    <div class="widget-row">
+      <label class="toggle">
+        <input type="checkbox" id="g-match-toggle">
+        <span class="toggle-track"></span>
+        <span>apply match_degree</span>
+      </label>
+      <button class="btn" id="g-match-reroll" title="try a different matcher realization">random</button>
+      <span class="step-label" id="g-match-real">realization 1 of 3</span>
+    </div>
+    <div class="provenance-legend">
+      <span><span class="sw" style="background:#567ad8"></span>clustered (core + overlay)</span>
+      <span><span class="sw" style="background:#7e468f"></span>outlier</span>
+      <span><span class="sw" style="background:#6b6a54"></span>match_degree</span>
+      <span><span class="sw" style="background:#c92a2a"></span>residual deficit</span>
+    </div>
+  </div>
+  <div class="callout warn">
+    <div class="tag">caveat: gridlock hides, the degree sequence leaks</div>
+    <p>A node with residual 3 and only one valid partner leaves the heap with residual 2. Those two stubs vanish without a log line. On a small synthetic you rarely see this. On dense inputs with long-tailed degree distributions, a handful of hubs silently come out short, and the degree-sequence target starts drifting below the profile's.</p>
+    <p>v2's <code>--algorithm true_greedy</code> drives this drop near zero and logs what it cannot place. See the <a href="./matcher.html">match_degree page</a> for the four other algorithms (<code>greedy</code>, <code>random_greedy</code>, <code>rewire</code>, <code>hybrid</code>) and the <code>--remap</code> mode for gens with fresh node IDs.</p>
+  </div>
+</section>
+
+<!-- ─────────── Case study · dnc ─────────── -->
+<section class="stage">
+  <div class="stage-num">case study · dnc</div>
+  <h2>What you get on the shipped example.</h2>
+  <p>Default run on <code>dnc</code> + <code>sbm-flat-best+cc</code> at <code>--seed 1</code>:</p>
+  <table class="profile-table">
+    <thead>
+      <tr><th>stat</th><th>input</th><th>v1 output</th><th>note</th></tr>
+    </thead>
+    <tbody>
+      <tr><th>N</th><td class="val">906</td><td class="val">906</td><td class="desc">Exact. Outliers folded back in through the outlier-rescue SBM after profile exclusion.</td></tr>
+      <tr><th>edges</th><td class="val">10,429</td><td class="val">10,425</td><td class="desc">Close. The match-degree phase fills almost all of the dedup shortfall.</td></tr>
+      <tr><th>mean degree</th><td class="val">23.02</td><td class="val">23.01</td><td class="desc">Follows the edge count.</td></tr>
+      <tr><th>global cc</th><td class="val">0.548</td><td class="val">0.424</td><td class="desc">Meaningfully higher than plain SBM (0.341): the \(K_{k+1}\) cores are dense on the biggest clusters.</td></tr>
+      <tr><th>clusters</th><td class="val">87</td><td class="val">87</td><td class="desc">Profile-stage passthrough (<code>drop_singleton_clusters</code> strips size-1 clusters, but dnc has none).</td></tr>
+    </tbody>
+  </table>
+  <p>The 87 clusters cover 551 nodes; the remaining 355 are outliers that <code>excluded</code> drops in profile. Mincuts on this input skew small: 60 clusters have \(k = 1\), 9 have \(k = 2\), 8 have \(k = 3\). A handful of larger clusters carry most of the construction load: \(k = 49\) on the biggest (50-node) cluster, \(k = 18\) on the 36-node one, \(k = 14\) and \(k = 13\) on the next two.</p>
+  <div class="disk-panel">
+    <div class="step-desc" style="margin-bottom:.45rem"><span class="st">mincut distribution</span> &middot; clusters with each \(k\) value on <code>dnc</code>. Small \(k\) dominates by count; the long tail is where the \(K_{k+1}\) construction spends most of its edges.</div>
+    <svg id="mincut-hist" viewBox="0 0 640 220" preserveAspectRatio="xMidYMid meet"></svg>
+  </div>
+  <p>Provenance from <code>sources.json</code>, inclusive row ranges. The constructive + overlay band dominates; the outlier rescue is a thin strip; match_degree makes up the dedup shortfall.</p>
+  <div class="disk-panel">
+    <div class="step-desc" style="margin-bottom:.45rem"><span class="st">edge provenance</span> &middot; inclusive 1-based row ranges from <code>sources.json</code> on the shipped v1 output.</div>
+    <svg id="prov-bar" viewBox="0 0 640 130" preserveAspectRatio="xMidYMid meet"></svg>
+  </div>
+  <div class="callout">
+    <div class="tag">why the cc jumps against plain SBM</div>
+    <p>The \(K_{k+1}\) core on the 50-node cluster alone is \(K_{50}\): \(\binom{50}{2} = 1225\) intra-edges packed on 50 nodes. Plain SBM on dnc lands at global cc 0.341; v1 lands at 0.424. The delta comes mostly from those cliques. The mincut distribution's long tail matters more than its count because the largest-\(k\) clusters carry most of the edges.</p>
+  </div>
+  <div class="callout warn">
+    <div class="tag">caveat: overlay dedup is invisible in the numbers</div>
+    <p>v1's output misses the input edge count by a thin margin and the global cc by 0.124 (0.548 input, 0.424 v1). How much of that shortfall is overlay-dedup versus match-degree gridlock? v1's logs do not say. v2's logs do, and they show overlay-dedup is the bigger share on dense inputs; gridlock is small when match-degree only has to fill a few stubs per hub.</p>
+  </div>
+</section>
+
+<div id="kin"></div>
+
+<footer class="ack">
+  <p class="tools">drawn with <a href="https://d3js.org" target="_blank" rel="noopener">d3</a></p>
+  <p class="credit">typed by vltanh, doodled with Claude</p>
+</footer>
+
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script>
+window.MathJax = {
+  tex: {
+    inlineMath: [['\\(', '\\)']],
+    displayMath: [['\\[', '\\]']]
+  },
+  chtml: { scale: 1.0 }
+};
+</script>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script src="./shared.js"></script>
+<script src="./js/profile_kernel.js"></script>
+<script src="./js/sbm_kernel.js"></script>
+<script src="./js/match_degree_kernel.js"></script>
+<script src="./js/ec_sbm_kernel.js"></script>
+<script>
+(function () {
+  document.getElementById("links").innerHTML = NETGEN.linksRow({gen: "ec-sbm-v1"});
+  (function () {
+    const icons = document.querySelector("#links .top-icons");
+    if (!icons) return;
+    const extras = [
+      {
+        href: "https://doi.org/10.1007/s41109-025-00701-2",
+        label: "paper",
+        svg: '<path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/>',
+      },
+    ];
+    const sourceLink = icons.querySelector('a[aria-label="github repository"]');
+    if (sourceLink) {
+      sourceLink.setAttribute("href",
+        "https://github.com/illinois-or-research-analytics/ec-sbm");
+      const span = sourceLink.querySelector("span");
+      if (span) span.textContent = "code";
+    }
+    extras.forEach(x => {
+      const a = document.createElement("a");
+      a.href = x.href;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.setAttribute("aria-label", x.label);
+      a.innerHTML =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+        + 'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" '
+        + 'aria-hidden="true">' + x.svg + '</svg>'
+        + '<span>' + x.label + '</span>';
+      icons.appendChild(a);
+    });
+  })();
+  document.getElementById("kin").innerHTML = NETGEN.kinSection({
+    title: "similarity",
+    siblings: [
+      { gen: "sbm", label: "SBM",
+        diff: "The vanilla block model. Same assignment, degree, and block-matrix contract, but no edge-connectivity floor. v1 bolts the \\(K_{k+1}\\) core on top." },
+      { gen: "ec-sbm-v2", label: "EC-SBM v2",
+        diff: "Same \\(K_{k+1}\\) cores, but one SBM on a proper residual (no overlay), a block-preserving 2-opt rewire, and a true_greedy matcher that logs gridlock instead of dropping stubs silently." },
+    ],
+  });
+
+  const COL = NETGEN.COLORS;
+  const EDGES = NETGEN.EDGES;
+  const CLUSTER_OF = NETGEN.CLUSTER_OF;
+  const NODES = NETGEN.NODES;
+  const C1 = NETGEN.C1, C2 = NETGEN.C2, C3 = NETGEN.C3, OUT_N = NETGEN.OUT;
+  const CORE_EDGES = NETGEN.CORE_EDGES;
+  const CORE_NODES = NETGEN.CORE_NODES;
+  const MINCUTS = NETGEN.MINCUTS;
+  const INTRA = NETGEN.INTRA;
+  const INTER = NETGEN.INTER;
+  const OUT_EDGES = NETGEN.OUT_EDGES;
+  const DEGREES = NETGEN.DEGREES;
+  const DEGREES_EXCL = NETGEN.DEGREES_EXCL;
+  const MIN_CUT_EDGES = NETGEN.MIN_CUT_EDGES;
+  const MIN_CUT_ISOLATE = NETGEN.MIN_CUT_ISOLATE;
+
+  const BLOCK_NAMES = ["C1", "C2", "C3"];
+  const BLOCK_NODES = { C1, C2, C3 };
+  const BLOCK_COLOR = { C1: COL.C1, C2: COL.C2, C3: COL.C3 };
+
+  function pickInputColor(e) {
+    if (e.kind === "outlier" || e.kind === "inter") return COL.edge_inter;
+    const c = CLUSTER_OF[e.u] || CLUSTER_OF[e.v];
+    return COL.edge_intra[c] || COL.edge_inter;
+  }
+
+  // Shared input opener · excluded mode (ec-sbm v1's profile default).
+  // Outliers are dropped from the partition, so the rings only enclose
+  // the 3 real clusters; outlier nodes still float on the canvas as
+  // ungrouped grey dots (visual signal that they are excluded).
+  NETGEN.singletonOpener({
+    hostId: "g-shared-input-cy",
+    clusters: [
+      { id: "C1", nodes: C1, color: COL.C1, isOutlier: false },
+      { id: "C2", nodes: C2, color: COL.C2, isOutlier: false },
+      { id: "C3", nodes: C3, color: COL.C3, isOutlier: false },
+    ],
+  });
+
+  function edgeKey(u, v) { return Math.min(u, v) + "-" + Math.max(u, v); }
+
+  // Block enclosures. labelFn lets callers override ("C1" vs "C1 · k=3").
+  function makeBlockRects(svg, opts = {}) {
+    const layer = svg.append("g").attr("class", "block-rects");
+    const labelFn = opts.labelFn || ((name) => `${name} · k = ${MINCUTS[name]}`);
+    const shapes = BLOCK_NAMES.map((name) => {
+      const ids = BLOCK_NODES[name];
+      if (!ids || ids.length === 0) return null;
+      const color = BLOCK_COLOR[name];
+      const rect = layer.append("rect")
+        .attr("rx", 10).attr("ry", 10)
+        .attr("fill", color).attr("fill-opacity", 0.07)
+        .attr("stroke", color).attr("stroke-width", 1.5)
+        .attr("stroke-dasharray", "7 5")
+        .attr("opacity", 0.92);
+      const label = layer.append("text")
+        .attr("class", "block-ring-label")
+        .attr("text-anchor", "start")
+        .attr("fill", color)
+        .attr("opacity", 0.95)
+        .text(labelFn(name));
+      return { ids, rect, label };
+    }).filter(Boolean);
+    return function syncRects(viz) {
+      const padX = 34, padY = 38;
+      shapes.forEach(s => {
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        s.ids.forEach(id => {
+          const n = viz.nodeById[String(id)];
+          if (!n) return;
+          if (n.x < minX) minX = n.x;
+          if (n.x > maxX) maxX = n.x;
+          if (n.y < minY) minY = n.y;
+          if (n.y > maxY) maxY = n.y;
+        });
+        if (!isFinite(minX)) return;
+        let x = minX - padX, y = minY - padY;
+        let w = (maxX - minX) + 2 * padX;
+        let h = (maxY - minY) + 2 * padY;
+        const labelW = s.label.node().getComputedTextLength
+          ? s.label.node().getComputedTextLength() : 0;
+        const wanted = labelW + 24;
+        if (w < wanted) {
+          const cx = (minX + maxX) / 2;
+          w = wanted;
+          x = cx - w / 2;
+        }
+        s.rect.attr("x", x).attr("y", y).attr("width", w).attr("height", h);
+        s.label.attr("x", x + 12).attr("y", y + 20);
+      });
+    };
+  }
+
+  // ── Constructive edge list, live via ECSBMKernel.generateInternalEdges
+  // (faithful port of externals/ec-sbm/src/gen_kec_core.py). The page
+  // ran a hardcoded snapshot of this output prior to the kernel port;
+  // calling the kernel keeps the trace canonical and lets reroll
+  // re-randomise the np.random.choice fallback.
+  //
+  // Seeded LCG (d3.randomLcg) so the default load is reproducible; the
+  // RESIDUAL state below mutates with the kernel call, so subsequent
+  // SBM-overlay computations consume the canonical residual budget.
+  const KEC_RNG_SEED = 0x57f1c4ec;
+  const PROF_KEC = ProfileKernel.runProfile({
+    gen: "ec-sbm",
+    edgelist: EDGES.map(e => [String(e.u), String(e.v)]),
+    clustering: NODES
+      .filter(n => CLUSTER_OF[n] !== "OUT")
+      .map(n => [String(n), CLUSTER_OF[n]]),
+    outlier_mode: "excluded",
+    drop_oo: false,
+  });
+  const KEC_NODE_IDS = PROF_KEC.files["node_id.csv"].trim().split("\n");
+  const KEC_CLUSTER_LABELS = PROF_KEC.files["cluster_id.csv"].trim().split("\n");
+  const KEC_DEG = PROF_KEC.files["degree.csv"].trim().split("\n").map(Number);
+  const KEC_ASSIGN = PROF_KEC.files["assignment.csv"].trim().split("\n").map(Number);
+  const KEC_NUM_CLUSTERS = KEC_CLUSTER_LABELS.length;
+  const KEC_NODE2CLUSTER = new Map();
+  const KEC_CLUSTERING = new Map();
+  KEC_ASSIGN.forEach((c, iid) => {
+    if (c === -1) return;
+    KEC_NODE2CLUSTER.set(iid, c);
+    if (!KEC_CLUSTERING.has(c)) KEC_CLUSTERING.set(c, []);
+    KEC_CLUSTERING.get(c).push(iid);
+  });
+  // Mincut per cluster_iid via the canonical name (BLOCK_NAMES values).
+  const KEC_MCS = KEC_CLUSTER_LABELS.map(name => MINCUTS[name] || 0);
+  // Sparse edge_counts.csv → dense num_clusters x num_clusters matrix.
+  const KEC_PROBS = Array.from({length: KEC_NUM_CLUSTERS},
+    () => new Array(KEC_NUM_CLUSTERS).fill(0));
+  PROF_KEC.files["edge_counts.csv"].trim().split("\n").forEach(row => {
+    if (!row) return;
+    const [r, c, w] = row.split(",").map(Number);
+    KEC_PROBS[r][c] = w;
+  });
+  // Mutates KEC_DEG and KEC_PROBS in place (canonical semantics): post-call
+  // they hold the residual budget for downstream stages (SBM overlay).
+  const KEC_RESULT = ECSBMKernel.generateInternalEdges({
+    clustering: KEC_CLUSTERING,
+    mcs: KEC_MCS,
+    deg: KEC_DEG,
+    probs: KEC_PROBS,
+    node2cluster: KEC_NODE2CLUSTER,
+    rng: d3.randomLcg(KEC_RNG_SEED),
+  });
+  const CORE_PLUS_ATTACH = Array.from(KEC_RESULT.edges.values()).map(
+    ([a, b]) => {
+      const u = parseInt(KEC_NODE_IDS[a], 10);
+      const v = parseInt(KEC_NODE_IDS[b], 10);
+      return u <= v ? [u, v] : [v, u];
+    },
+  );
+  const CORE_SET = new Set(CORE_PLUS_ATTACH.map(([u, v]) => edgeKey(u, v)));
+
+  // ── Residual SBM overlay via SBMKernel ──
+  // canonical: gen_clustered.synthesize_sbm_network calls
+  // gt.generate_sbm(b, residual_probs, out_degs=residual_deg). The
+  // residual budget mutated by ECSBMKernel.generateInternalEdges above
+  // is the input to this call (canonical mutation semantics).
+  // Snapshot the post-KEC residual so reroll re-samples from the same
+  // base instead of compounding budget mutations.
+  const KEC_RESIDUAL_DEG = KEC_DEG.slice();
+  const KEC_RESIDUAL_PROBS = KEC_PROBS.map(row => row.slice());
+  const KEC_BLOCKS = new Array(KEC_NODE_IDS.length).fill(-1);
+  KEC_NODE2CLUSTER.forEach((c, iid) => { KEC_BLOCKS[iid] = c; });
+
+  function sampleSBMOverlay(seed) {
+    const rng = d3.randomLcg(seed);
+    const sub = SBMKernel.sampleMicroSBM({
+      blocks: KEC_BLOCKS,
+      degrees: KEC_RESIDUAL_DEG,
+      eRs: KEC_RESIDUAL_PROBS.map(row => row.slice()),
+      numBlocks: KEC_NUM_CLUSTERS,
+      rng,
+    });
+    // Convert iid edges to page-id edges; classify intra/inter for the
+    // viz layout.
+    const inter = [];
+    const intra = [];
+    sub.edges.forEach(([a, b]) => {
+      const u = parseInt(KEC_NODE_IDS[a], 10);
+      const v = parseInt(KEC_NODE_IDS[b], 10);
+      const ru = KEC_BLOCKS[a], rv = KEC_BLOCKS[b];
+      if (ru === rv) intra.push([u <= v ? u : v, u <= v ? v : u, ru]);
+      else inter.push([u <= v ? u : v, u <= v ? v : u]);
+    });
+    return { inter, intra };
+  }
+
+  let OVERLAY_SEED = 1;
+  let CURRENT_OVERLAY = sampleSBMOverlay(OVERLAY_SEED);
+
+  function overlayEdges(real) {
+    const out = [];
+    real.inter.forEach(([u, v], i) => {
+      out.push({
+        u, v, color: COL.edge_stage3, w: 1.8,
+        id: `ov-inter-${i}`,
+      });
+    });
+    // Intra-block residual samples; flag duplicates against CORE_SET
+    // (these are what remove_parallel_edges will drop, viz-red-dashed).
+    real.intra.forEach(([a, b, blockIdx], i) => {
+      const isDup = CORE_SET.has(edgeKey(a, b));
+      out.push({
+        u: a, v: b,
+        color: isDup ? COL.edge_drop : COL.edge_stage3,
+        w: isDup ? 2.4 : 1.8,
+        id: `ov-intra-${blockIdx}-${i}`,
+        classes: isDup ? "dashed thick" : "",
+      });
+    });
+    return out;
+  }
+
+  // ── Profile · block assignment ──
+  (function () {
+    const host = document.getElementById("g-assign-cy");
+    if (!host) return;
+    host.innerHTML = "";
+    const svg = d3.select(host).append("svg")
+      .attr("class", "viz-svg")
+      .attr("viewBox", NETGEN.fitViewBoxAttr())
+      .attr("preserveAspectRatio", "xMidYMid meet");
+    const syncRects = makeBlockRects(svg, { labelFn: (n) => n });
+    const edges = EDGES.filter(e =>
+      CLUSTER_OF[e.u] !== "OUT" && CLUSTER_OF[e.v] !== "OUT"
+    ).map(e => ({ u: e.u, v: e.v, color: pickInputColor(e), w: 1.4 }));
+    const viz = NETGEN.VIZ.init("g-assign-cy", {
+      svg, showLabels: true, includeOutliers: false, edges,
+    });
+    NETGEN.makeTooltip(viz, document.getElementById("g-assign"));
+    syncRects(viz);
+    viz.sim.on("tick.blockRects", () => syncRects(viz));
+  })();
+
+  // ── Profile · degree sequence (hover-linked bars) ──
+  (function () {
+    const host = document.getElementById("g-deg-cy");
+    if (!host) return;
+    host.innerHTML = "";
+    const svg = d3.select(host).append("svg")
+      .attr("class", "viz-svg")
+      .attr("viewBox", NETGEN.fitViewBoxAttr())
+      .attr("preserveAspectRatio", "xMidYMid meet");
+    const syncRects = makeBlockRects(svg, { labelFn: (n) => n });
+    const edges = EDGES.filter(e =>
+      CLUSTER_OF[e.u] !== "OUT" && CLUSTER_OF[e.v] !== "OUT"
+    ).map(e => ({ u: e.u, v: e.v, color: pickInputColor(e), w: 1.2 }));
+    const viz = NETGEN.VIZ.init("g-deg-cy", {
+      svg, showLabels: true, includeOutliers: false, edges,
+      pad: 40, padRight: 340,
+    });
+    NETGEN.makeTooltip(viz, document.getElementById("g-deg"));
+    syncRects(viz);
+    viz.sim.on("tick.blockRects", () => syncRects(viz));
+
+    NETGEN.mountGxPanel({
+      viz,
+      hostId: "g-deg-cy", prefix: "g-deg",
+      title: "degrees", maxWidth: "26rem",
+      bodyHTML: '<svg id="deg-seq" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet" style="display:block;width:18rem;height:auto"></svg>',
+    });
+    const barSvg = d3.select("#deg-seq");
+    barSvg.selectAll("*").remove();
+    const W = 340, H = 420;
+    const PAD = { top: 14, right: 42, bottom: 18, left: 48 };
+    const iw = W - PAD.left - PAD.right;
+    const nodes = NODES
+      .filter(n => CLUSTER_OF[n] !== "OUT")
+      .slice()
+      .sort((a, b) => (DEGREES_EXCL[b] - DEGREES_EXCL[a]) || (a - b));
+    const ih = H - PAD.top - PAD.bottom;
+    const rowH = ih / nodes.length;
+    const maxD = d3.max(nodes, n => DEGREES_EXCL[n]);
+    const g = barSvg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+
+    const rows = g.selectAll(".deg-bar-row").data(nodes, n => n).enter()
+      .append("g").attr("class", "deg-bar-row")
+      .attr("data-id", d => d)
+      .attr("transform", (d, i) => `translate(0,${i * rowH})`);
+    rows.append("rect").attr("class", "hitbox")
+      .attr("x", -PAD.left + 4).attr("y", 0)
+      .attr("width", W - 8).attr("height", rowH)
+      .attr("fill", "transparent");
+    rows.append("text").attr("x", -6).attr("y", rowH / 2 + 3)
+      .attr("text-anchor", "end")
+      .attr("font-family", "Special Elite, Courier New, monospace")
+      .attr("font-size", "10.5px")
+      .attr("fill", "#2f3a54")
+      .text(d => d);
+    rows.append("rect").attr("class", "bar")
+      .attr("x", 0).attr("y", Math.max(1, rowH * 0.18))
+      .attr("height", Math.max(4, rowH * 0.64))
+      .attr("width", d => (DEGREES_EXCL[d] / maxD) * iw)
+      .attr("fill", d => COL[CLUSTER_OF[d]])
+      .attr("opacity", 0.92)
+      .attr("stroke", "#2f3a54").attr("stroke-width", 0.5);
+    rows.append("text").attr("x", d => (DEGREES_EXCL[d] / maxD) * iw + 6)
+      .attr("y", rowH / 2 + 3)
+      .attr("font-family", "Special Elite, Courier New, monospace")
+      .attr("font-size", "10.5px")
+      .attr("fill", "#6b6a54")
+      .text(d => DEGREES_EXCL[d]);
+
+    NETGEN.bindRowNodeHover(g, viz);
+  })();
+
+  // ── Profile · block matrix (hover linked) ──
+  (function () {
+    const host = document.getElementById("g-mat-cy");
+    if (!host) return;
+    host.innerHTML = "";
+    const padRight = 320;
+    const svg = d3.select(host).append("svg")
+      .attr("class", "viz-svg")
+      .attr("viewBox", NETGEN.fitViewBoxAttr({ padRight, pad: 40 }))
+      .attr("preserveAspectRatio", "xMidYMid meet");
+    const syncRects = makeBlockRects(svg, { labelFn: (n) => n });
+
+    const B = { C1: 0, C2: 1, C3: 2 };
+    const rows = BLOCK_NAMES;
+    const mat = [[0,0,0],[0,0,0],[0,0,0]];
+    INTRA.C1.forEach(() => { mat[B.C1][B.C1] += 2; });
+    INTRA.C2.forEach(() => { mat[B.C2][B.C2] += 2; });
+    INTRA.C3.forEach(() => { mat[B.C3][B.C3] += 2; });
+    INTER.forEach(([u, v]) => {
+      const a = B[CLUSTER_OF[u]], b = B[CLUSTER_OF[v]];
+      if (a == null || b == null) return;
+      mat[a][b] += 1; mat[b][a] += 1;
+    });
+
+    const edges = EDGES.filter(e =>
+      CLUSTER_OF[e.u] !== "OUT" && CLUSTER_OF[e.v] !== "OUT"
+    ).map(e => ({
+      u: e.u, v: e.v, color: pickInputColor(e), w: 1.4,
+      id: "mat-e-" + edgeKey(e.u, e.v),
+      __cellKey: [CLUSTER_OF[e.u], CLUSTER_OF[e.v]].sort().join("-"),
+    }));
+    const viz = NETGEN.VIZ.init("g-mat-cy", {
+      svg, showLabels: true, includeOutliers: false, edges,
+      pad: 40, padRight,
+    });
+    NETGEN.makeTooltip(viz, document.getElementById("g-mat"));
+    NETGEN.mountGxPanel({
+      viz, hostId: "g-mat-cy", prefix: "g-mat",
+      title: "block matrix · e", maxWidth: "20rem",
+      bodyHTML: '<div class="blockmat" id="g-mat-grid"></div>',
+    });
+    const grid = document.getElementById("g-mat-grid");
+    grid.innerHTML = "";
+    function el(tag, cls, text) { const e = document.createElement(tag); e.className = cls; e.textContent = text; return e; }
+    grid.style.gridTemplateColumns = "repeat(4, minmax(0,1fr))";
+    grid.appendChild(el("div", "cell head", ""));
+    rows.forEach(r => grid.appendChild(el("div", "cell head", r)));
+    rows.forEach((r, i) => {
+      grid.appendChild(el("div", "cell head", r));
+      rows.forEach((_, j) => {
+        const c = el("div", "cell", String(mat[i][j]));
+        c.dataset.row = i; c.dataset.col = j;
+        c.dataset.key = rows[i] + "-" + rows[j];
+        grid.appendChild(c);
+      });
+    });
+    syncRects(viz);
+    viz.sim.on("tick.blockRects", () => syncRects(viz));
+
+    const cellEl = document.getElementById("g-mat-cell");
+    const cellById = {};
+    grid.querySelectorAll(".cell:not(.head)").forEach(c => {
+      cellById[c.dataset.key] = c;
+    });
+
+    function lightCell(key, on) {
+      const c = cellById[key] || cellById[key.split("-").reverse().join("-")];
+      if (c) c.classList.toggle("on", !!on);
+    }
+    function lightEdgesOfCell(i, j, on) {
+      const key = [rows[i], rows[j]].sort().join("-");
+      viz.eachEdge(l => {
+        if (l.__cellKey === key) {
+          viz.toggleEdgeClass(l.id, "hi", !!on);
+        }
+      });
+    }
+
+    viz.onEdgeHoverEnter(function (l) {
+      const a = rows[B[CLUSTER_OF[l.u]]], b = rows[B[CLUSTER_OF[l.v]]];
+      const key = [a, b].sort().join("-");
+      lightCell(key, true);
+      cellEl.textContent = `cell: (${a}, ${b}) = ${mat[B[a]][B[b]]}`;
+    });
+    viz.onEdgeHoverLeave(function (l) {
+      const a = rows[B[CLUSTER_OF[l.u]]], b = rows[B[CLUSTER_OF[l.v]]];
+      lightCell([a, b].sort().join("-"), false);
+      cellEl.textContent = "cell: (none)";
+    });
+    grid.querySelectorAll(".cell:not(.head)").forEach(c => {
+      c.addEventListener("mouseenter", () => {
+        const i = +c.dataset.row, j = +c.dataset.col;
+        c.classList.add("on");
+        lightEdgesOfCell(i, j, true);
+        cellEl.textContent = `cell: (${rows[i]}, ${rows[j]}) = ${mat[i][j]}`;
+      });
+      c.addEventListener("mouseleave", () => {
+        const i = +c.dataset.row, j = +c.dataset.col;
+        c.classList.remove("on");
+        lightEdgesOfCell(i, j, false);
+        cellEl.textContent = "cell: (none)";
+      });
+    });
+  })();
+
+  // ── Profile · minimum edge cut on the canon synthetic ──
+  // Highlight red-dashed the edges in MIN_CUT_EDGES for each cluster.
+  // No node ring: a mincut is a set of edges, and on this input each
+  // cut's complement-side happens to be a single vertex, so a node ring
+  // would misrepresent the general case.
+  (function () {
+    const host = document.getElementById("g-mincut-cy");
+    if (!host) return;
+    host.innerHTML = "";
+    const svg = d3.select(host).append("svg")
+      .attr("class", "viz-svg")
+      .attr("viewBox", NETGEN.fitViewBoxAttr())
+      .attr("preserveAspectRatio", "xMidYMid meet");
+    const syncRects = makeBlockRects(svg);
+    const cutSet = new Set();
+    BLOCK_NAMES.forEach(c => {
+      (MIN_CUT_EDGES[c] || []).forEach(([u, v]) => cutSet.add(edgeKey(u, v)));
+    });
+    const edges = EDGES.filter(e =>
+      CLUSTER_OF[e.u] !== "OUT" && CLUSTER_OF[e.v] !== "OUT" &&
+      CLUSTER_OF[e.u] === CLUSTER_OF[e.v]
+    ).map(e => {
+      const isCut = cutSet.has(edgeKey(e.u, e.v));
+      return {
+        u: e.u, v: e.v,
+        color: isCut ? COL.signal : pickInputColor(e),
+        w: isCut ? 3 : 1.2,
+        classes: isCut ? "cut" : "",
+      };
+    });
+    const viz = NETGEN.VIZ.init("g-mincut-cy", {
+      svg, showLabels: true, includeOutliers: false, edges,
+    });
+    NETGEN.makeTooltip(viz, document.getElementById("g-mincut"));
+    syncRects(viz);
+    viz.sim.on("tick.blockRects", () => syncRects(viz));
+  })();
+
+  // ── Generation · K_{k+1} per-arrival walker ──
+  // Mirrors gen_kec_core.generate_cluster called once per cluster (size
+  // desc), advancing one arrival at a time. Within each cluster, nodes
+  // arrive in post-exclusion target-degree desc (id-asc tiebreak). The
+  // first k+1 arrivals per cluster auto-attach to every predecessor (the
+  // K_{k+1} seed); subsequent arrivals greedy-pick k partners from the
+  // already-processed set by residual int_deg desc, with weighted-random
+  // fallback when greedy is starved. Realization 1 is byte-verified
+  // against the shipped Python at PYTHONHASHSEED=0; reroll cycles
+  // per-node variants for arrivals at or after the current step.
+  (function () {
+    const KS = { C1: MINCUTS.C1, C2: MINCUTS.C2, C3: MINCUTS.C3 };
+    function clusterSorted(nodes) {
+      return nodes.slice().sort((a, b) =>
+        (DEGREES_EXCL[b] - DEGREES_EXCL[a]) || (a - b));
+    }
+    const ARRIVAL_SEQ = [
+      ...clusterSorted(C1).map(n => ({ node: n, cluster: "C1" })),
+      ...clusterSorted(C2).map(n => ({ node: n, cluster: "C2" })),
+      ...clusterSorted(C3).map(n => ({ node: n, cluster: "C3" })),
+    ];
+    const TOTAL_ARRIVALS = ARRIVAL_SEQ.length;
+
+    // Per-arrival draw seed. random step / random all bump these so the
+    // weighted-without-replacement draw re-spins; the prefix the user
+    // already watched stays frozen (matcher-reroll cascade convention).
+    const DRAW_SEED = {};
+    ARRIVAL_SEQ.forEach((a) => { DRAW_SEED[a.node] = a.node; });
+    let rollCount = 0;
+
+    // Faithful port of gen_kec_core.sample_by_availability: draw `k` distinct
+    // processed candidates without replacement, weighted by availability
+    // a_v = max(int_deg[v], 0). First pick min(k, #positive) by weight, then
+    // fill the rest uniformly from the exhausted (a_v == 0) candidates. The
+    // canonical np.random.choice (MT19937) is reproduced here with a seeded
+    // d3 LCG: same weighting, one realisation among many.
+    function weightedWORDraw(candidates, avail, count, rng) {
+      const pool = candidates.slice();
+      const picks = [];
+      for (let s = 0; s < count && pool.length; s++) {
+        let total = 0;
+        for (const c of pool) total += Math.max(avail[c], 0);
+        let idx;
+        if (total <= 0) {
+          idx = Math.floor(rng() * pool.length);
+        } else {
+          let r = rng() * total, acc = 0;
+          idx = pool.length - 1;
+          for (let i = 0; i < pool.length; i++) {
+            acc += Math.max(avail[pool[i]], 0);
+            if (r < acc) { idx = i; break; }
+          }
+        }
+        picks.push(pool[idx]);
+        pool.splice(idx, 1);
+      }
+      return picks;
+    }
+
+    function sampleByAvailability(processed, k, avail, rng) {
+      const positive = processed.filter(p => avail[p] > 0);
+      const exhausted = processed.filter(p => avail[p] <= 0);
+      const weightedCount = Math.min(k, positive.length);
+      const sel = weightedWORDraw(positive, avail, weightedCount, rng);
+      const uniformCount = k - weightedCount;
+      if (uniformCount > 0) {
+        sel.push(...weightedWORDraw(exhausted, avail, uniformCount, rng));
+      }
+      return sel;
+    }
+
+    // Replay the linear arrival sequence to capture per-arrival picks
+    // and the availability snapshot just before each arrival's pull.
+    function buildTrace() {
+      const intDeg = {};
+      NODES.forEach(n => { intDeg[n] = DEGREES_EXCL[n] || 0; });
+      const trace = [];
+      const cumulative = [];
+      ARRIVAL_SEQ.forEach((a, i) => {
+        const u = a.node, c = a.cluster, k = KS[c];
+        const preds = ARRIVAL_SEQ.slice(0, i)
+          .filter(p => p.cluster === c)
+          .map(p => p.node);
+        const residualsBefore = {};
+        preds.forEach(p => { residualsBefore[p] = intDeg[p]; });
+        residualsBefore[u] = intDeg[u];
+        let partners, mode;
+        if (preds.length <= k) {
+          partners = preds.slice();
+          mode = "auto-all";
+        } else {
+          const rng = d3.randomLcg(DRAW_SEED[u] / 0xffffffff);
+          partners = sampleByAvailability(preds, k, residualsBefore, rng);
+          mode = "weighted";
+        }
+        const newEdges = partners.map(p => [Math.min(u, p), Math.max(u, p)]);
+        newEdges.forEach(([x, y]) => {
+          intDeg[x] -= 1; intDeg[y] -= 1;
+          cumulative.push([x, y]);
+        });
+        trace.push({
+          arrival: i + 1, node: u, cluster: c, k, mode,
+          preds, partners, newEdges,
+          residualsBefore,
+          cumulativeSnapshot: cumulative.slice(),
+        });
+      });
+      return trace;
+    }
+    let TRACE = buildTrace();
+
+    function edgesAt(step) {
+      if (step === 0) return [];
+      const t = TRACE[step - 1];
+      const newSet = new Set(t.newEdges.map(([u, v]) => edgeKey(u, v)));
+      return t.cumulativeSnapshot.map(([u, v]) => {
+        const isNew = newSet.has(edgeKey(u, v));
+        return {
+          u, v,
+          color: isNew ? COL.signal : COL.edge_stage2,
+          w: isNew ? 2.4 : 1.1,
+          id: `kec-${u}-${v}`,
+        };
+      });
+    }
+
+    function describeStep(step) {
+      if (step === 0) {
+        return {
+          stage: "step 0 · stripped",
+          html: '<span class="st">step 0 · stripped</span> &middot; Outliers 19 and 20 dropped at profile time (v1 forces <code>excluded</code>). 18 nodes remain across C1 (8), C2 (6), C3 (4). Process clusters by size desc; within each, sort nodes by post-exclusion target degree desc (id-asc tiebreak).',
+        };
+      }
+      const t = TRACE[step - 1];
+      const v = t.preds.length;
+      const stage = `arrival ${t.arrival} · ${t.cluster} · node ${t.node}`;
+      const head = `<span class="st">arrival \\(t=${t.arrival}\\)</span> &middot; node ${t.node} placed in cluster ${t.cluster} (target deg ${DEGREES_EXCL[t.node]}, \\(k=${t.k}\\)).`;
+      let body;
+      if (t.mode === "auto-all") {
+        if (v === 0) {
+          body = `\\(|V_t|=0\\), no predecessors in ${t.cluster} yet. \\(K_{${t.k + 1}}\\) seed begins.`;
+        } else {
+          const list = `\\{${t.partners.join(", ")}\\}`;
+          body = `\\(|V_t|=${v} \\leq k=${t.k}\\), so connect to <em>all</em> ${v} predecessor${v === 1 ? "" : "s"}: \\(S_t = ${list}\\).`;
+          if (v === t.k) body += ` ${t.cluster}'s \\(K_{${t.k + 1}}\\) seed is now complete.`;
+        }
+      } else {
+        const sortedPreds = t.preds.slice().sort((a, b) =>
+          (t.residualsBefore[b] - t.residualsBefore[a]) || (a - b));
+        const fmt = (p) => `${p}&nbsp;(\\(a=${Math.max(t.residualsBefore[p], 0)}\\))`;
+        const pickedSet = new Set(t.partners);
+        const picksStr = t.partners.map(fmt).join(", ");
+        const others = sortedPreds.filter(p => !pickedSet.has(p)).map(fmt);
+        const othersStr = others.length ? "{" + others.join(", ") + "}" : "&empty;";
+        body = `\\(|V_t|=${v} > k=${t.k}\\); availability-weighted draw of \\(k=${t.k}\\) partners: \\(S_t\\) = {${picksStr}}. Not drawn: ${othersStr}.`;
+      }
+      return { stage, html: `${head} ${body}` };
+    }
+
+    const viz = NETGEN.VIZ.init("g-core-cy", {
+      showLabels: true, includeOutliers: false, edges: [],
+    });
+    NETGEN.makeTooltip(viz, document.getElementById("g-core"));
+
+    const descEl  = document.getElementById("g-core-desc");
+    const stageEl = document.getElementById("g-core-stage");
+    const realEl  = document.getElementById("g-core-real");
+
+    let controller = null;
+
+    let rollMode = null;
+    const randStepBtn = document.getElementById("g-core-rand-step");
+    const randAllBtn  = document.getElementById("g-core-rand-all");
+
+    function currentStepHasVariant(step) {
+      if (step < 1) return false;
+      const t = TRACE[step - 1];
+      // A phase-2 arrival has a re-rollable draw only when more than k
+      // candidates are available (otherwise the draw is forced).
+      return t.mode === "weighted" && t.preds.length > t.k;
+    }
+
+    function render(step) {
+      viz.setEdges(edgesAt(step));
+      viz.clearAllNodeClass("dim");
+      viz.clearAllNodeClass("newly");
+      const arrived = new Set();
+      for (let i = 0; i < step; i++) arrived.add(TRACE[i].node);
+      viz.eachNode(n => {
+        const id = parseInt(n.id, 10);
+        if (!arrived.has(id)) viz.addNodeClass(n.id, "dim");
+      });
+      if (step >= 1) viz.addNodeClass(TRACE[step - 1].node, "newly");
+      const sd = describeStep(step);
+      descEl.innerHTML = sd.html;
+      stageEl.textContent = sd.stage;
+      let realText;
+      if (rollCount === 0) {
+        realText = "initial realization · random step re-rolls this arrival onward; random all re-rolls every phase-2 arrival";
+      } else if (rollMode === "all") {
+        realText = `reroll #${rollCount} · all phase-2 arrivals re-sampled`;
+      } else {
+        realText = `reroll #${rollCount} · this arrival onward re-sampled; locked prefix frozen`;
+      }
+      realEl.textContent = realText;
+      // Random step has nothing to reroll on auto-all (phase-1) arrivals
+      // or when the draw is forced; step controller already handles step 0.
+      if (step >= 1 && !currentStepHasVariant(step)) {
+        randStepBtn.disabled = true;
+      }
+      NETGEN.retypeset(descEl);
+    }
+
+    // Re-spin the availability-weighted draw for a suffix of phase-2 arrivals.
+    // fromArrival = 1-based arrival index; every phase-2 node at or after it
+    // gets a fresh draw seed, so the locked prefix stays put (reroll cascade).
+    function bumpDrawSeeds(fromArrival) {
+      ARRIVAL_SEQ.forEach((a, i) => {
+        if (i + 1 < fromArrival) return;
+        const k = KS[a.cluster];
+        const predsCount = ARRIVAL_SEQ.slice(0, i)
+          .filter(p => p.cluster === a.cluster).length;
+        if (predsCount > k) DRAW_SEED[a.node] = (DRAW_SEED[a.node] * 1103515245 + 12345) >>> 0;
+      });
+    }
+
+    controller = NETGEN.rerollWalker({
+      prefix:     "g-core",
+      total:      TOTAL_ARRIVALS + 1,
+      totalForCurrent: () => TOTAL_ARRIVALS + 1,
+      curId:      "g-core-cur",
+      totId:      "g-core-total",
+      onRender:   render,
+      onRandStep: (S) => {
+        if (S < 1 || !currentStepHasVariant(S)) return;
+        bumpDrawSeeds(S);
+        rollCount += 1;
+        rollMode = "step";
+        TRACE = buildTrace();
+      },
+      onRandAll: () => {
+        bumpDrawSeeds(1);
+        rollCount += 1;
+        rollMode = "all";
+        TRACE = buildTrace();
+      },
+    });
+  })();
+
+  // ── Generation · SBM overlay + dedup (step 0/1/2 + reroll) ──
+  (function () {
+    const constructive = CORE_PLUS_ATTACH.map(([u, v]) => ({
+      u, v, color: COL.edge_stage2, w: 1.7,
+      id: `ov-c-${edgeKey(u, v)}`,
+    }));
+
+    const viz = NETGEN.VIZ.init("g-overlay-cy", {
+      showLabels: true, includeOutliers: false, edges: constructive,
+    });
+    NETGEN.makeTooltip(viz, document.getElementById("g-overlay"));
+
+    const stageEl = document.getElementById("g-overlay-stage");
+    const labelEl = document.getElementById("g-overlay-label");
+    const descEl = document.getElementById("g-overlay-desc");
+    const countEl = document.getElementById("g-overlay-count");
+
+    let controller = null;
+
+    function render(step) {
+      // Step 0: constructive only. Step 1: + overlay (pre-dedup, collisions
+      // visible). Step 2: dedup applied (collisions removed).
+      const ov = overlayEdges(CURRENT_OVERLAY);
+      const dups = ov.filter(e => e.classes && e.classes.indexOf("dashed") >= 0);
+      viz.clearEdges();
+      viz.addEdges(constructive);
+      if (step >= 1) {
+        const keep = step >= 2 ? ov.filter(e => dups.indexOf(e) < 0) : ov;
+        viz.addEdges(keep);
+      }
+      const pre = constructive.length + (step >= 1 ? ov.length : 0);
+      const dropped = step >= 2 ? dups.length : 0;
+      const kept = pre - dropped;
+      stageEl.textContent = [
+        "step 0 · constructive only",
+        "step 1 · constructive + SBM overlay (pre-dedup)",
+        "step 2 · dedup applied",
+      ][step];
+      countEl && countEl.setAttribute("data-_", "");
+      labelEl.textContent = `realization · seed ${OVERLAY_SEED}`;
+      const desc = [
+        "Constructive edges from the core + attach phase. Residual <code>probs</code> and <code>out_degs</code> after the kernel mutated them are the input to <code>gt.generate_sbm</code>.",
+        "The SBM sample lands on top. Orchid = residual sample, red-dashed = duplicates the sampler put next to an existing core edge. Pre-dedup total " + pre + " edges (counting duplicates twice).",
+        "<code>remove_parallel_edges</code> collapses duplicates; <code>remove_self_loops</code> drops loops. Kept " + kept + ", dropped " + dropped + ". Victim blocks' intra counts land under profile's target.",
+      ][step];
+      descEl.innerHTML = `<span class="st">${[
+        "core only","overlay pre-dedup","after dedup"][step]}</span> &middot; ${desc}`;
+      NETGEN.retypeset(descEl);
+    }
+
+    controller = NETGEN.rerollWalker({
+      prefix: "g-overlay",
+      total: 3,
+      totalForCurrent: () => 3,
+      randAtStart: true,
+      onRender: render,
+      onRandAll: () => {
+        OVERLAY_SEED += 1;
+        CURRENT_OVERLAY = sampleSBMOverlay(OVERLAY_SEED);
+        render(controller.idx);
+      },
+    });
+  })();
+
+  // ── Generation · outlier rescue (canonical v1: scope=outlier-incident,
+  // outlier-mode=singleton, edge-correction=none). Profile is rebuilt on
+  // outlier-incident edges with each outlier as its own singleton block;
+  // SBMKernel samples a fresh edgelist matching that profile. Sample
+  // resamples on reroll; clustered band is the settled stage-2 output. ──
+  const OUT_INC_EDGES = EDGES
+    .filter(e => CLUSTER_OF[e.u] === "OUT" || CLUSTER_OF[e.v] === "OUT")
+    .map(e => [String(e.u), String(e.v)]);
+  const OUT_INC_CLUSTERING = NODES
+    .filter(n => CLUSTER_OF[n] !== "OUT")
+    .map(n => [String(n), CLUSTER_OF[n]]);
+  const PROF_OUT = ProfileKernel.runProfile({
+    gen: "sbm",
+    edgelist: OUT_INC_EDGES,
+    clustering: OUT_INC_CLUSTERING,
+    outlier_mode: "singleton",
+    drop_oo: false,
+  });
+  const OUT_NODE_IDS = PROF_OUT.files["node_id.csv"].trim().split("\n");
+  const OUT_CLUSTER_LABELS = PROF_OUT.files["cluster_id.csv"].trim().split("\n");
+  const OUT_DEG = PROF_OUT.files["degree.csv"].trim().split("\n").map(Number);
+  const OUT_ASSIGN = PROF_OUT.files["assignment.csv"].trim().split("\n").map(Number);
+  const OUT_NUM_BLOCKS = OUT_CLUSTER_LABELS.length;
+  const OUT_PROBS = Array.from({length: OUT_NUM_BLOCKS},
+    () => new Array(OUT_NUM_BLOCKS).fill(0));
+  PROF_OUT.files["edge_counts.csv"].trim().split("\n").forEach(row => {
+    if (!row) return;
+    const [r, c, w] = row.split(",").map(Number);
+    OUT_PROBS[r][c] = w;
+  });
+
+  function sampleOutlierRescue(seed) {
+    const rng = d3.randomLcg(seed);
+    const sub = SBMKernel.sampleMicroSBM({
+      blocks: OUT_ASSIGN,
+      degrees: OUT_DEG.slice(),
+      eRs: OUT_PROBS.map(row => row.slice()),
+      numBlocks: OUT_NUM_BLOCKS,
+      rng,
+    });
+    const out = [];
+    sub.edges.forEach(([a, b]) => {
+      const u = parseInt(OUT_NODE_IDS[a], 10);
+      const v = parseInt(OUT_NODE_IDS[b], 10);
+      out.push(u <= v ? [u, v] : [v, u]);
+    });
+    return out;
+  }
+
+  let OUTLIER_SEED = 1;
+  let CURRENT_OUTLIER = sampleOutlierRescue(OUTLIER_SEED);
+
+  (function () {
+    const viz = NETGEN.VIZ.init("g-outlier-cy", {
+      showLabels: true, edges: [],
+    });
+    NETGEN.makeTooltip(viz, document.getElementById("g-outlier"));
+
+    function rebuild() {
+      const stage2 = CORE_PLUS_ATTACH.map(([u, v]) => ({
+        u, v, color: COL.edge_stage2, w: 1.6, id: `o2-c-${edgeKey(u, v)}`,
+      }));
+      const stage2inter = CURRENT_OVERLAY.inter.map(([u, v], i) => ({
+        u, v, color: COL.edge_stage2, w: 1.4, id: `o2-i-${i}`,
+      }));
+      const stage3 = CURRENT_OUTLIER.map(([u, v], i) => ({
+        u, v, color: COL.edge_stage3, w: 2, id: `o3-${i}`,
+      }));
+      viz.clearEdges();
+      viz.addEdges([...stage2, ...stage2inter, ...stage3]);
+    }
+
+    rebuild();
+    const rerollBtn = document.getElementById("g-outlier-reroll");
+    if (rerollBtn) rerollBtn.addEventListener("click", () => {
+      OUTLIER_SEED += 1;
+      CURRENT_OUTLIER = sampleOutlierRescue(OUTLIER_SEED);
+      rebuild();
+    });
+  })();
+
+  // ── Generation · match_degree (graph + stacked bars + reroll) ──
+  // Canonical v1: src/match_degree.py with --algorithm greedy. Targets
+  // are NETGEN.DEGREES (the empirical input degrees that profile recorded
+  // in degree.csv); pre-match band is core + attach + overlay (dedup-kept)
+  // + outlier rescue; matcher fills the residual deficit by adding edges
+  // between deficit nodes that are not yet adjacent.
+  (function () {
+    const viz = NETGEN.VIZ.init("g-match-cy", {
+      showLabels: true, edges: [],
+      pad: 40, padRight: 320,
+    });
+    NETGEN.makeTooltip(viz, document.getElementById("g-match"));
+    NETGEN.mountGxPanel({
+      viz, hostId: "g-match-cy", prefix: "g-match-bars",
+      title: "degrees", maxWidth: "22rem",
+      bodyHTML: '<svg id="match-bars" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:auto"></svg>',
+    });
+
+    const labelEl = document.getElementById("g-match-label");
+    const countEl = document.getElementById("g-match-count");
+    const realEl = document.getElementById("g-match-real");
+
+    let applied = false;
+    let baseEdges = [];
+    let baseEdgePairs = [];
+    let preCounts = {};
+    let currentMatchEdges = [];
+    let matchSeed = 1;
+
+    function rebuildBase() {
+      baseEdges = [];
+      baseEdgePairs = [];
+      const dups = new Set();
+      // Stage 2: constructive cores.
+      CORE_PLUS_ATTACH.forEach(([u, v]) => {
+        const key = edgeKey(u, v);
+        if (dups.has(key)) return;
+        dups.add(key);
+        baseEdges.push({ u, v, color: COL.edge_stage2, w: 1.5, id: `m-c-${key}` });
+        baseEdgePairs.push([u, v]);
+      });
+      // Stage 2 (overlay, dedup-kept = no duplicates with core).
+      CURRENT_OVERLAY.inter.forEach(([u, v], i) => {
+        const key = edgeKey(u, v);
+        if (dups.has(key)) return;
+        dups.add(key);
+        baseEdges.push({ u, v, color: COL.edge_stage2, w: 1.3, id: `m-i-${i}` });
+        baseEdgePairs.push([u, v]);
+      });
+      CURRENT_OVERLAY.intra.forEach(([u, v, blockIdx], i) => {
+        const key = edgeKey(u, v);
+        if (dups.has(key)) return;
+        dups.add(key);
+        baseEdges.push({ u, v, color: COL.edge_stage2, w: 1.3, id: `m-ii-${blockIdx}-${i}` });
+        baseEdgePairs.push([u, v]);
+      });
+      // Stage 3: outlier rescue (live SBM sample).
+      CURRENT_OUTLIER.forEach(([u, v], i) => {
+        const key = edgeKey(u, v);
+        if (dups.has(key)) return;
+        dups.add(key);
+        baseEdges.push({ u, v, color: COL.edge_stage3, w: 1.6, id: `m-o-${i}` });
+        baseEdgePairs.push([u, v]);
+      });
+      preCounts = countByNode(baseEdges);
+    }
+
+    function targetDeg(n) {
+      return DEGREES[n] || 0;
+    }
+
+    function countByNode(edges) {
+      const c = {};
+      edges.forEach(e => {
+        const u = e.u == null ? e[0] : e.u;
+        const v = e.v == null ? e[1] : e.v;
+        c[u] = (c[u] || 0) + 1; c[v] = (c[v] || 0) + 1;
+      });
+      return c;
+    }
+
+    // Canonical match_degree.greedy via MatchDegreeKernel. baseAdj is
+    // the post-stage-3 adjacency keyed by page id (canonical works on
+    // iid space; for v1 the page identity == canonical iid since the
+    // matcher reads degree.csv ordering). Deficit = max(0, target - ach)
+    // per node. Greedy is deterministic; the rng arg is unused but
+    // required by the API surface for non-greedy algos.
+    function runMatchKernel() {
+      const adj = {};
+      NODES.forEach(n => { adj[n] = new Set(); });
+      baseEdgePairs.forEach(([u, v]) => {
+        adj[u].add(v); adj[v].add(u);
+      });
+      const deficit = {};
+      NODES.forEach(n => {
+        deficit[n] = Math.max(0, targetDeg(n) - (preCounts[n] || 0));
+      });
+      const steps = MatchDegreeKernel.runGreedy({
+        iids: NODES.slice(), deficit, baseAdj: adj,
+      }, {});
+      const finalStep = steps[steps.length - 1];
+      const baseSet = new Set(baseEdgePairs.map(([u, v]) => edgeKey(u, v)));
+      return finalStep.edges.filter(([u, v]) => !baseSet.has(edgeKey(u, v)));
+    }
+
+    function renderBars() {
+      const barSvg = d3.select("#match-bars");
+      barSvg.selectAll("*").remove();
+      const W = 340, H = 420;
+      const PAD = { top: 14, right: 42, bottom: 18, left: 48 };
+      const iw = W - PAD.left - PAD.right;
+      const nodes = NODES.slice()
+        .sort((a, b) => (targetDeg(b) - targetDeg(a)) || (a - b));
+      const ih = H - PAD.top - PAD.bottom;
+      const rowH = ih / nodes.length;
+      const maxD = d3.max(nodes, targetDeg);
+      const g = barSvg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+
+      const c2 = preCounts;
+      const c3 = {};  // outlier rescue already folded into preCounts
+      const c4 = applied ? countByNode(currentMatchEdges) : {};
+
+      nodes.forEach((n, i) => {
+        const y = i * rowH;
+        const t = targetDeg(n);
+        const a2 = c2[n] || 0;
+        const a3 = c3[n] || 0;
+        const a4 = c4[n] || 0;
+        const ach = a2 + a3 + a4;
+        const deficit = Math.max(0, t - ach);
+        const scale = iw / maxD;
+        let x = 0;
+        // node label
+        g.append("text").attr("x", -6).attr("y", y + rowH / 2 + 3)
+          .attr("text-anchor", "end")
+          .attr("font-family", "Special Elite, Courier New, monospace")
+          .attr("font-size", "10.5px")
+          .attr("fill", "#2f3a54").text(n);
+        // segments
+        if (a2 > 0) {
+          g.append("rect").attr("x", x).attr("y", y + rowH * 0.18)
+            .attr("height", rowH * 0.64).attr("width", a2 * scale)
+            .attr("fill", COL.edge_stage2).attr("opacity", 0.9);
+          x += a2 * scale;
+        }
+        if (a3 > 0) {
+          g.append("rect").attr("x", x).attr("y", y + rowH * 0.18)
+            .attr("height", rowH * 0.64).attr("width", a3 * scale)
+            .attr("fill", COL.edge_stage3).attr("opacity", 0.9);
+          x += a3 * scale;
+        }
+        if (a4 > 0) {
+          g.append("rect").attr("x", x).attr("y", y + rowH * 0.18)
+            .attr("height", rowH * 0.64).attr("width", a4 * scale)
+            .attr("fill", COL.edge_stage4).attr("opacity", 0.95);
+          x += a4 * scale;
+        }
+        if (deficit > 0) {
+          g.append("rect").attr("x", x).attr("y", y + rowH * 0.18)
+            .attr("height", rowH * 0.64).attr("width", deficit * scale)
+            .attr("fill", COL.signal).attr("opacity", 0.22)
+            .attr("stroke", COL.signal).attr("stroke-dasharray", "3 2")
+            .attr("stroke-width", 0.7);
+        }
+        g.append("text").attr("x", t * scale + 6).attr("y", y + rowH / 2 + 3)
+          .attr("font-family", "Special Elite, Courier New, monospace")
+          .attr("font-size", "10.5px")
+          .attr("fill", "#6b6a54")
+          .text(ach + "/" + t);
+      });
+    }
+
+    function render() {
+      // Rebuild base edges + pre-match counts from current overlay/outlier
+      // realizations. Then live-call MatchDegreeKernel.runGreedy.
+      rebuildBase();
+      viz.clearEdges();
+      viz.addEdges(baseEdges);
+      const allMatchEdges = runMatchKernel();
+      currentMatchEdges = allMatchEdges;
+      // Compute initial deficit total (placed + gridlocked) for the
+      // count readout.
+      let totalDeficit = 0;
+      NODES.forEach(n => {
+        totalDeficit += Math.max(0, targetDeg(n) - (preCounts[n] || 0));
+      });
+      const placed = currentMatchEdges.length;
+      const gridlocked = Math.max(0, Math.floor((totalDeficit / 2) - placed));
+      if (applied) {
+        viz.addEdges(currentMatchEdges.map(([u, v], i) => ({
+          u, v, color: COL.edge_stage4, w: 2.2, id: `m-s4-${i}`,
+        })));
+        labelEl.textContent = "after match_degree · deficits filed down";
+        countEl.textContent = `placed: ${placed} · gridlocked: ${gridlocked}`;
+      } else {
+        labelEl.textContent = "before match_degree · residual deficits visible";
+        countEl.textContent = `placed: 0 · gridlocked: 0`;
+      }
+      realEl.textContent = `realization · seeds (overlay=${OVERLAY_SEED}, outlier=${OUTLIER_SEED})`;
+      renderBars();
+    }
+
+    NETGEN.toggle({
+      input: document.getElementById("g-match-toggle"),
+      onChange: (on) => { applied = on; render(); },
+    });
+    document.getElementById("g-match-reroll").addEventListener("click", () => {
+      // Match-degree greedy is deterministic; reroll bumps the upstream
+      // overlay + outlier seeds so the deficit shape changes, which is
+      // what produces a different match output.
+      OVERLAY_SEED += 1;
+      CURRENT_OVERLAY = sampleSBMOverlay(OVERLAY_SEED);
+      OUTLIER_SEED += 1;
+      CURRENT_OUTLIER = sampleOutlierRescue(OUTLIER_SEED);
+      render();
+    });
+
+    render();
+  })();
+
+  // ── Case study · dnc mincut histogram ──
+  const DNC_MINCUT_COUNTS = {
+    1: 60, 2: 9, 3: 8, 4: 2, 5: 1, 6: 2, 7: 1,
+    13: 1, 14: 1, 18: 1, 49: 1,
+  };
+  (function () {
+    const svg = d3.select("#mincut-hist");
+    svg.selectAll("*").remove();
+    const W = 640, H = 220;
+    const PAD = { top: 16, right: 20, bottom: 38, left: 44 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+
+    const ks = Object.keys(DNC_MINCUT_COUNTS).map(Number).sort((a, b) => a - b);
+    const x = d3.scaleBand().domain(ks.map(String)).range([0, iw]).padding(0.18);
+    const maxCount = d3.max(ks, k => DNC_MINCUT_COUNTS[k]);
+    const y = d3.scaleLinear().domain([0, maxCount]).range([ih, 0]);
+
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).tickSize(0).tickPadding(6))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace")
+        .style("font-size", "10.5px");
+    g.append("g")
+      .call(d3.axisLeft(y).ticks(5))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace")
+        .style("font-size", "10.5px");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+
+    svg.append("text").attr("x", W / 2).attr("y", H - 8)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace")
+      .style("font-size", "10.5px").text("mincut k(C)");
+    svg.append("text").attr("x", 12).attr("y", PAD.top - 4)
+      .style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace")
+      .style("font-size", "10px").text("number of clusters");
+
+    ks.forEach(k => {
+      const v = DNC_MINCUT_COUNTS[k];
+      const bx = x(String(k));
+      const bw = x.bandwidth();
+      const by = y(v);
+      const bh = ih - by;
+      const fill = k <= 3 ? "#7b9bd6" : (k <= 7 ? "#c7801e" : "#7e468f");
+      g.append("rect")
+        .attr("x", bx).attr("y", by)
+        .attr("width", bw).attr("height", bh)
+        .attr("fill", fill).attr("opacity", 0.9);
+      g.append("text").attr("x", bx + bw / 2).attr("y", by - 4)
+        .attr("text-anchor", "middle")
+        .attr("font-family", "Special Elite, Courier New, monospace")
+        .attr("font-size", "10px")
+        .attr("fill", "#2f3a54").text(v);
+    });
+  })();
+
+  // ── Case study · dnc provenance bar ──
+  (function () {
+    const svg = d3.select("#prov-bar");
+    svg.selectAll("*").remove();
+    const W = 640, H = 130;
+    const PAD = { top: 24, right: 20, bottom: 38, left: 20 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+    const bands = [
+      { label: "clustered",    count: 7291, color: COL.edge_stage2 },
+      { label: "outlier",      count: 1007, color: COL.edge_stage3 },
+      { label: "match_degree", count: 2127, color: COL.edge_stage4 },
+    ];
+    const total = bands.reduce((s, b) => s + b.count, 0);
+    let xacc = 0;
+    bands.forEach((b) => {
+      const w = (b.count / total) * iw;
+      g.append("rect")
+        .attr("x", xacc).attr("y", 0)
+        .attr("width", w).attr("height", ih)
+        .attr("fill", b.color).attr("opacity", 0.92)
+        .attr("stroke", "#2f3a54").attr("stroke-width", 0.7);
+      const lbl = `${b.label} · ${b.count.toLocaleString()}`;
+      const putInside = w > 120;
+      g.append("text")
+        .attr("x", xacc + w / 2)
+        .attr("y", putInside ? ih / 2 + 4 : -6)
+        .attr("text-anchor", "middle")
+        .attr("font-family", "Special Elite, Courier New, monospace")
+        .attr("font-size", "11px")
+        .attr("fill", putInside ? "#f3ecd7" : "#2f3a54")
+        .text(lbl);
+      xacc += w;
+    });
+    svg.append("text").attr("x", W / 2).attr("y", H - 8)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace")
+      .style("font-size", "10.5px")
+      .text(`total ${total.toLocaleString()} edges · inclusive 1-based row ranges from sources.json`);
+  })();
+
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,2993 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>ABCD &middot; Artificial Benchmark for Community Detection | Synthetic Network Generators</title>
+<link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐖</text></svg>">
+<meta name="description" content="ABCD (Artificial Benchmark for Community Detection). Graph is a union of k+1 random graphs: one cluster graph per cluster plus one background graph over all nodes. Mixing parameter ξ sets the degree ratio.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./shared.css">
+<style>
+.graph.g-with-side .side-caption{
+  font-family:'Special Elite','Courier New',monospace;
+  font-size:.76rem;
+  color:var(--paper-2);
+  padding:.15rem 0 .7rem;
+  margin-bottom:.55rem;
+  border-bottom:1px dashed rgba(139,117,65,.4);
+  line-height:1.45;
+}
+.graph.g-with-side .side-caption .st{
+  color:var(--azure);
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  margin-right:.25rem;
+}
+.graph.g-with-side .side-body{
+  display:grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: .4rem;
+}
+.graph.g-with-side .side-right{
+  display:flex; flex-direction:column;
+  align-items:stretch;
+  gap:.4rem;
+}
+.graph.g-with-side .side-right > svg{ width:100%; height:auto; }
+@media (max-width: 820px){
+  .graph.g-with-side .side-body{ grid-template-columns: 1fr; align-items: start; }
+}
+.viz-node.ringed{ stroke:#c7801e; stroke-width:3.4; }
+/* .deg-bar-row + .cs-bar-row hover/dim/hot styles live in shared.css. */
+.block-ring-label{
+  font-family:'Caveat Brush', cursive;
+  font-size:20px;
+  letter-spacing:.04em;
+}
+.disk-panel{
+  padding:1rem; background:var(--ink-2); border:1px solid var(--rule);
+  border-radius:6px; margin:1rem 0;
+}
+.disk-panel svg{ width:100%; height:auto; display:block; }
+.step-desc{
+  font-family:'Special Elite','Courier New',monospace;
+  font-size:.78rem; color:var(--paper-2); margin-top:.6rem;
+}
+.step-desc .st{ color:var(--azure); letter-spacing:.1em; text-transform:uppercase; }
+.step-desc mjx-container{ font-size:1em !important; }
+.profile-table{ width:100%; border-collapse:collapse; margin:1rem 0; background:var(--ink-2); border:1px solid var(--rule); border-radius:4px; overflow:hidden; }
+.profile-table th, .profile-table td{ padding:.55rem .85rem; border-bottom:1px solid var(--rule); vertical-align:middle; text-align:left; }
+.profile-table tr:last-child th, .profile-table tr:last-child td{ border-bottom:none; }
+.profile-table th{ font-family:'Special Elite','Courier New',monospace; font-size:.72rem; letter-spacing:.15em; color:var(--paper-3); width:10%; white-space:nowrap; }
+.profile-table td.val{ font-family:'Special Elite','Courier New',monospace; font-size:1.05rem; color:var(--azure); font-variant-numeric:tabular-nums; width:14%; white-space:nowrap; }
+.profile-table td.desc{ color:var(--paper-2); font-size:.88rem; line-height:1.45; }
+.profile-table.dnc-stats th       { width: 14%; min-width:9rem; white-space:nowrap !important; }
+.profile-table.dnc-stats td.val   { width: 18%; }
+.profile-table.dnc-stats td.desc  { width: auto !important; }
+.readout{
+  display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:.8rem;
+  font-family:'Special Elite','Courier New',monospace; font-size:.78rem;
+}
+.readout .item{ color:var(--paper-3); }
+.readout .item b{ color:var(--azure); margin-left:.3rem; }
+.readout .item.target b{ color:var(--mint); }
+.readout .item.diff b{ color:var(--signal); }
+.graph-canvas{
+  height:auto;
+  aspect-ratio: 640 / 680;
+  max-height: 560px;
+}
+/* .cs-bar-row hot/hi styles live in shared.css. */
+.cmp-bars-svg{ max-width: 420px; }
+/* Borderless widget-row variants used inside the four config-model
+   stage panels: top-padding for the slider row + middle-padding for
+   the readout row beneath it. Replaces inline padding/border styles. */
+.widget-row.row-top{ padding:.7rem 0 0; border:none; }
+.widget-row.row-mid{ padding:.5rem 0 0; border:none; }
+.xi-panel{
+  display:flex; justify-content:center;
+  padding:.55rem .65rem;
+  font-family:'Special Elite','Courier New',monospace;
+  color:#2f3a54;
+}
+.xi-panel .xi-grid{
+  display:grid; grid-template-columns: auto auto auto;
+  column-gap:.4rem; row-gap:.35rem; align-items:center;
+}
+.xi-panel .xi-lhs{ font-size:1.1rem; color:var(--azure); text-align:right; }
+.xi-panel .xi-eq{ color:#6b6a54; }
+.xi-panel .xi-rhs{ display:inline-flex; flex-direction:column; align-items:center; line-height:1.05; }
+.xi-panel .xi-num{ color:#c92a2a; font-size:.95rem; }
+.xi-panel .xi-num sub{ font-size:.7em; }
+.xi-panel .xi-den{ color:#2f3a54; font-size:.95rem; }
+.xi-panel .xi-bar{ display:block; width:2.1rem; height:0; border-top:1px solid #6b6a54; margin:.1rem 0; }
+.xi-panel .xi-sep{ grid-column:1 / -1; border-top:1px dashed rgba(139,117,65,.45); margin:.15rem 0; height:0; }
+.xi-panel .xi-result{ font-size:1.2rem; color:var(--azure); letter-spacing:.04em; }
+.assign-scalar-panel{
+  padding:.55rem .65rem;
+  font-family:'Special Elite','Courier New',monospace;
+  color:#2f3a54;
+}
+.assign-scalar-panel .row{ display:grid; grid-template-columns:1.2rem .9rem 1fr; gap:.35rem; align-items:center; padding:.15rem 0; }
+.assign-scalar-panel .lhs{ font-size:1.05rem; color:var(--azure); text-align:right; }
+.assign-scalar-panel .eq{ color:#6b6a54; }
+.assign-scalar-panel .val{ font-size:1rem; color:var(--azure); }
+.assign-scalar-panel .hint{ margin-top:.4rem; padding-top:.4rem; border-top:1px dashed rgba(139,117,65,.45); color:#6b6a54; font-size:.8rem; }
+.assign-scalar-panel .scalar-line{ font-size:.85rem; padding:.1rem 0; }
+.assign-scalar-panel .scalar-line.dim{ color:#6b6a54; font-size:.78rem; }
+.assign-scalar-panel .next-block{ margin-top:.4rem; padding-top:.4rem; border-top:1px dashed rgba(139,117,65,.45); }
+.assign-scalar-panel .next-head{ font-size:.88rem; color:#2f3a54; margin-bottom:.25rem; }
+.assign-scalar-panel .cluster-row{ font-size:.76rem; padding:.04rem 0; }
+.cluster-nav{
+  position:absolute; top:50%; transform:translateY(-50%);
+  width:2rem; height:2.4rem; z-index:6;
+  border:1px solid rgba(107,106,84,.45); border-radius:.4rem;
+  background:rgba(243,236,215,.8); color:#2f3a54;
+  font-family:'Special Elite','Courier New',monospace;
+  font-size:1.5rem; line-height:1; cursor:pointer;
+  display:flex; align-items:center; justify-content:center;
+  transition: opacity .15s ease, background .15s ease;
+}
+.cluster-nav:hover{ background:rgba(243,236,215,1); }
+.cluster-nav:disabled{ opacity:.4; cursor:default; }
+.cluster-nav:disabled:hover{ background:rgba(243,236,215,.8); }
+.cluster-nav-prev{ left:.4rem; }
+.cluster-nav-next{ right:.4rem; }
+/* Panel wrapper is click-transparent except for the collapse toggle.
+   When the panel extends below the canvas (long content) it would
+   otherwise sit over the widget-row's NEXT button and swallow its
+   clicks. */
+#g-assign-scalars-panel{ pointer-events:none; }
+#g-assign-scalars-toggle{ pointer-events:auto; }
+</style>
+</head>
+<body>
+<main class="page">
+
+<div id="links"></div>
+
+<header class="hdr">
+  <div class="kicker">network-generation · abcd</div>
+  <h1><em>ABCD</em></h1>
+  <p class="fullname">Artificial Benchmark for Community Detection</p>
+  <p class="sub">Output is a union of \(k+1\) independent random graphs: one per cluster plus a background graph over all nodes. The scalar \(\xi\) sets the share of each node's degree that goes to the background.</p>
+</header>
+
+<section class="hook">
+  <p>Given a network \(G\) with a clustering, the goal is a synthetic twin that keeps both the degree sequence and the cluster sizes verbatim while drawing every edge fresh. ABCD models the graph as a <em>union of independent random graphs</em>, one per cluster plus one global background, with a single scalar \(\xi\) trading degree share between the two.</p>
+  <p>Each node \(u\) has target degree \(d_u\). ABCD splits this degree: \(y_u = (1 - \xi) d_u\) funds the cluster graph of \(u\)'s home cluster; \(z_u = \xi d_u\) funds the background graph on \(V\).</p>
+  <p>A configuration model on each cluster graph produces cluster-internal edges; a configuration model on all \(z\)-stubs produces background edges that can pair any two nodes. The final graph is the union. At \(\xi = 0\) the output is disjoint cluster graphs; at \(\xi = 1\) it is a pure random graph with no signal about cluster membership. \(\xi\) is the only structural dial: triangles, clustering coefficient, and per-pair block counts are not in the contract.</p>
+</section>
+
+<!-- ─────────── Profiling · the shared fixture ─────────── -->
+<section class="stage">
+  <div class="stage-num">profiling · outliers as singletons</div>
+  <h2>Shared input graph: 18 clustered + 2 singletons.</h2>
+  <p>The 20-node synthetic this page builds on: C1 (8), C2 (6), C3 (4), plus outliers 19 + 20. ABCD requires \(\sum_j s_j = n\), so our wrapper's <code>outlier_mode=singleton</code> wraps each unclustered node in its own 1-node cluster. The graph below shows the resulting 5-cluster partition; ABCD's later sections all operate on this view.</p>
+  <div class="graph" id="g-shared-input">
+    <div class="graph-chrome">
+      <span>input G &middot; singleton mode &middot; 5 clusters</span>
+      <span class="right">shared fixture</span>
+    </div>
+    <div class="graph-canvas" id="g-shared-input-cy"></div>
+  </div>
+</section>
+
+<!-- ─────────── Profiling · degree sequence ─────────── -->
+<section class="stage">
+  <div class="stage-num">profiling · degree sequence</div>
+  <h2>Every node's degree, copied verbatim.</h2>
+  <p>The profile is a deterministic function of the input; it does not change on re-roll. Profile writes three things. The first is <code>degree.csv</code>, the integer degree \(d_u\) per node, sorted desc. The Julia sampler reads the list unchanged and uses it as the exact degree target.</p>
+  <div class="graph" id="g-deg">
+    <div class="graph-chrome">
+      <span>input G &middot; hover a node or a degree row to link</span>
+      <span class="right">degree.csv</span>
+    </div>
+    <div class="graph-canvas" id="g-deg-cy"></div>
+  </div>
+</section>
+
+<!-- ─────────── Profiling · cluster sizes ─────────── -->
+<section class="stage">
+  <div class="stage-num">profiling · cluster sizes</div>
+  <h2>One integer per cluster, sum to \(n\).</h2>
+  <p>The second file is <code>cluster_sizes.csv</code>, an integer size per cluster, sorted size desc. The paper requires \(\sum_j s_j = n\), so every input node lands in exactly one cluster. Our wrapper satisfies this via <code>outlier_mode=singleton</code>: every unclustered input node becomes a 1-node pseudo-cluster (ID <code>__outlier_&lt;id&gt;__</code>), so the size list sums to \(n\). Real clusters sort to the top; singletons tail. The next two sections show how the sampler uses this list to assign vertices and draw intra-cluster edges; output cluster sizes match the input verbatim.</p>
+  <div class="graph" id="g-cs">
+    <div class="graph-chrome">
+      <span>input G &middot; dashed ring per cluster</span>
+      <span class="right">cluster_sizes.csv</span>
+    </div>
+    <div class="graph-canvas" id="g-cs-cy"></div>
+  </div>
+</section>
+
+<!-- ─────────── Profiling · mixing scalar ─────────── -->
+<section class="stage">
+  <div class="stage-num">profiling · the mixing scalar</div>
+  <h2>One number: \(\xi\).</h2>
+  <p>The third file is <code>mixing_parameter.txt</code>, a single float. Let \(E_{\text{out}}\) be the number of edges crossing cluster boundaries under the profile's clustering (singletons count, so outlier-incident edges are "inter" when the other endpoint is a different cluster). Then</p>
+  \[
+    \xi \;=\; \frac{E_{\text{out}}}{|E|}.
+  \]
+  <p>The paper reads \(\xi\) as the <em>expected fraction of each vertex's degree</em> that the model routes to the background graph: \(\xi d_u\) background stubs, \((1 - \xi) d_u\) cluster-graph stubs. The realised inter-cluster fraction on output hits \(\xi\) only in expectation; on small graphs it drifts by a few percent seed-to-seed.</p>
+  <div class="graph" id="g-xi">
+    <div class="graph-chrome">
+      <span>input G &middot; red edges cross cluster boundaries (\(E_{\text{out}}\))</span>
+      <span class="right">mixing_parameter.txt</span>
+    </div>
+    <div class="graph-canvas" id="g-xi-cy"></div>
+  </div>
+  <div class="callout">
+    <div class="tag">ABCD's \(\xi\) vs LFR's \(\mu\): not the same number</div>
+    <p>Both measure "fraction of edges crossing clusters" on the same input graph, but via different reductions. ABCD's \(\xi\) is a stub-weighted ratio over all edges, \(E_{\text{out}} / |E|\). LFR's \(\mu\) is the mean of per-node ratios, \(\text{mean}_u(d^{\text{out}}_u / d_u)\). On skewed-degree inputs the two diverge: on this synthetic ABCD's \(\xi\) is <b id="xi-vs-mu-xi">&middot;</b> while LFR's \(\mu\) is <b id="xi-vs-mu-mu">&middot;</b>. Do not swap them across models.</p>
+  </div>
+</section>
+
+<!-- ─────────── Generation · assigning vertices to clusters ─────────── -->
+<section class="stage">
+  <div class="stage-num">generation · assigning vertices to clusters</div>
+  <h2>Big nodes to big clusters; small nodes fill the rest.</h2>
+  <p>The sampler assigns each vertex to exactly one cluster before any edges are drawn. The paper frames this as a uniform draw from the admissible permutations; the Julia code uses a sequential proxy that walks vertices in descending \(d_u\) and at each step samples one cluster from the admissible set with probability proportional to its remaining capacity. A vertex \(u\) is admissible for cluster \(j\) iff \(x_u \le s_j - 1\), where \(x_u\) is the per-vertex bound below: the integer ceiling of the expected number of neighbours of \(u\) that end up in \(u\)'s own cluster.</p>
+  \[
+    x_u \;=\; \bigl\lceil (1 - \xi \phi) \, d_u \bigr\rceil, \qquad
+    \phi \;=\; 1 - \sum_{j=1}^{k} \left(\frac{s_j}{n}\right)^{\!2}.
+  \]
+  <p>Vertices are processed by \(d_u\) desc, so admissibility only loosens as the walk proceeds: once a cluster fits a vertex, it fits every later vertex too. The sequential procedure is not equivalent to a uniform draw over admissible permutations: earlier high-\(d_u\) picks bias which clusters retain capacity for later vertices.</p>
+  <p>\(\phi\) is the probability that two nodes drawn uniformly at random fall in different clusters, with \(\phi \in [0, 1)\): one mega-cluster gives \(\phi = 0\), and many small evenly-sized clusters push \(\phi \to 1\) (with \(k\) equal clusters \(\phi = 1 - 1/k\)). It enters the bound because not all of \(u\)'s \(\xi d_u\) background-routed half-edges actually leave the cluster; only the \(\phi\) fraction does, and the remaining \((1-\phi)\xi d_u\) lands back inside \(u\)'s own cluster by chance. \(u\)'s expected intra-degree is therefore \((1-\xi)d_u + (1-\phi)\xi d_u = (1-\xi\phi)d_u\), and \(x_u\) is the integer ceiling of that quantity.</p>
+  <p>The inequality \(\phi &lt; 1\) is what keeps the post-split degree inside the cluster: since \(1 - \xi\phi \ge 1 - \xi\), the bound \(x_u \ge \lceil y_u \rceil \ge \hat y_u\), where \(y_u = (1-\xi)d_u\) is the intra-funded degree and \(\hat y_u\) is its integer realisation after the stochastic rounding the next stage performs. Combined with \(x_u \le s_j - 1\) under admissibility, this gives \(\hat y_u \le s_j - 1\), so the node's intra degree fits inside its cluster's other-member count.</p>
+  <div class="callout warn">
+    <div class="tag">singletons break admissibility for any positive-degree vertex</div>
+    <p>A singleton has \(s_j = 1\), so admissibility requires \(x_u \le 0\); but \(\lceil (1-\xi\phi) d_u \rceil \ge 1\) whenever \(d_u \ge 1\). On inputs with no degree-0 nodes, every positive-degree vertex fails admissibility for every singleton. When real clusters fill up before all small-degree vertices are placed, the sampler falls back to a leftover singleton, prints a warning, and moves on. The fallback violates the bound, so \(\hat y_u\) can exceed \(s_j - 1\); the cluster's configuration model then emits self-loops and parallels for the rewire stage to swap out. Edges the rewire cannot resolve drop, and the realised \(\xi\) drifts above target in proportion to how many singletons absorbed non-zero-degree vertices.</p>
+  </div>
+  <div class="graph" id="g-assign">
+    <div class="graph-chrome">
+      <span></span>
+      <span class="right step-label">step <b id="g-assign-cur">0</b> / <span id="g-assign-total">20</span></span>
+    </div>
+    <div class="graph-canvas" id="g-assign-cy"></div>
+    <div class="widget-row row-top">
+      <button class="btn" id="g-assign-rand-step" type="button">random step</button>
+      <button class="btn" id="g-assign-rand-all" type="button">random all</button>
+      <span class="step-label"><em>step</em>: reroll the cluster pick at this step &middot; <em>all</em>: reroll the whole permutation</span>
+    </div>
+    <div class="widget-row row-mid">
+      <button class="btn" id="g-assign-start">to start</button>
+      <button class="btn" id="g-assign-prev">back</button>
+      <button class="btn primary" id="g-assign-next">next</button>
+      <button class="btn" id="g-assign-end">to end</button>
+    </div>
+    <div class="step-desc" id="g-assign-desc"></div>
+  </div>
+  <div class="callout">
+    <div class="tag">outliers in ABCD are a wrapper idea, not a model parameter</div>
+    <p>The paper has no notion of "outlier"; it takes a cluster-size list with \(\sum_j s_j = n\) and asks no further questions. Our wrapper handles outliers by wrapping each unclustered input node in its own 1-node pseudo-cluster so the sum identity holds, then strips the singletons out of the output community list at the end. <a href="./abcd+o.html">ABCD+o</a> is the extended model that promotes outliers into a proper model-level parameter \(s_0\).</p>
+  </div>
+</section>
+
+<!-- ─────────── Generation · degree split ─────────── -->
+<section class="stage">
+  <div class="stage-num">generation · the degree split</div>
+  <h2>Spend part of each degree on intra-cluster edges.</h2>
+  <p>With the cluster assignment fixed, each vertex sets aside a portion of its degree for intra-cluster edges. The target portion is</p>
+  \[
+    y_u \;=\; (1 - \xi) \, d_u,
+  \]
+  <p>and \(y_u\) funds the cluster graph \(G_{c(u)}\). Both that cluster graph and the later background graph are sampled by the configuration model (our default), which pairs integer stub counts exactly, rather than Chung-Lu, which only matches the degree sequence in expectation. Configuration-model pairing requires an integer \(\hat y_u\), so each cluster member rounds \(y_u\) to its floor and adds a Bernoulli bump with probability equal to the fractional part:</p>
+  \[
+    \hat y_u \;=\; \lfloor y_u \rfloor + \mathbb{1}\{U_u < y_u - \lfloor y_u \rfloor\}, \qquad U_u \sim \text{Uniform}(0, 1).
+  \]
+  <p>The leader (the cluster's largest-degree member, lowest vertex id on ties) is handled separately. It takes the deterministic floor \(\lfloor y_\ell \rfloor\) and adds 0 or 1 by parity: the bump fires when the sum of non-leader \(\hat y_u\) is odd and the floor is even, or vice versa, so the cluster's total internal stub count ends up even. Without that fixup, the cluster's configuration model would be one stub short of a clean pairing.</p>
+  <p>The leftover degree, \(\hat z_u = d_u - \hat y_u\), is the portion routed to the background graph. The background pool inherits any rewire residue from the cluster phase too, but that comes later; here it is enough to read \(\hat z_u\) off as the complement of \(\hat y_u\).</p>
+  <div class="disk-panel">
+    <div class="widget-row tight">
+      <button class="btn primary" id="u-reroll">random</button>
+      <span class="step-label">cluster-coloured stack: intra; red on top: background; dashed tick: pre-rounding target; <span style="color:#c7801e">★</span>: cluster leader.</span>
+    </div>
+    <svg id="xi-bars" viewBox="0 0 640 460" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="readout" style="justify-content:center">
+      <span class="item">background degree <b id="ext-tot">&middot;</b></span>
+      <span class="item">total degree <b id="deg-tot">&middot;</b></span>
+      <span class="item target">target \(\xi\) <b id="xi-tgt">&middot;</b></span>
+      <span class="item diff">realised \(\sum \hat z / \sum w\) <b id="xi-real">&middot;</b></span>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────── Generation · cluster pairing ─────────── -->
+<section class="stage">
+  <div class="stage-num">generation · cluster pairing</div>
+  <h2>Pair \(\hat y_u\) stubs inside each cluster.</h2>
+  <p>Each cluster graph \(G_j\) is a configuration model on its members' \(\hat y_u\) stubs. Each node \(u\) with \(c(u) = j\) contributes \(\hat y_u\) stubs as spokes around the node; they shuffle within the cluster and pair adjacent. Self-loops and parallels are flagged solid red; the next stage rewires them.</p>
+  <p class="dim" style="font-size:.9em">A note on layout. This page splits the inner loop by op-type: this stage walks every cluster's pairs, then the next stage walks every cluster's rewires. The Julia code finishes each cluster's pair-then-rewire pass before moving on, so the kernel narrative is by-cluster. Output is the same; the by-op-type split keeps the pairing and rewire mechanisms each in their own focused walker.</p>
+  <div class="graph" id="g-cpair">
+    <div class="graph-chrome">
+      <span id="g-cpair-stage">stubs ready</span>
+      <span class="right step-label">step <b id="g-cpair-cur">0</b> / <span id="g-cpair-total">0</span></span>
+    </div>
+    <div class="step-label" style="margin:.2rem 0 .6rem; font-size:.78rem; color:#6b6a54"><em>next</em>: one pair · canvas arrows: jump cluster.</div>
+    <div class="graph-canvas" id="g-cpair-cy"></div>
+    <div class="widget-row row-top">
+      <button class="btn" id="g-cpair-rand-step" type="button">random step</button>
+      <button class="btn" id="g-cpair-rand-all" type="button">random all</button>
+      <span class="step-label"><em>step</em>: reroll cluster shuffles only &middot; <em>all</em>: reroll U + stubs</span>
+    </div>
+    <div class="widget-row row-mid">
+      <button class="btn" id="g-cpair-start">to start</button>
+      <button class="btn" id="g-cpair-prev">back</button>
+      <button class="btn primary" id="g-cpair-next">next</button>
+      <button class="btn" id="g-cpair-end">to end</button>
+    </div>
+    <div class="step-desc" id="g-cpair-desc"></div>
+  </div>
+</section>
+
+<!-- ─────────── Generation · cluster rewire ─────────── -->
+<section class="stage">
+  <div class="stage-num">generation · cluster rewire</div>
+  <h2>Cut the collisions, swap into valid edges.</h2>
+  <p>Cluster-graph collisions (self-loops and parallels) move to a recycle list. Each recycle edge \(\{u_1, v_1\}\) is paired with a random other cluster edge \(\{u_2, v_2\}\) (another placed edge, or one still on the recycle list) to make the swap (into \(\{u_1, u_2\}\) and \(\{v_1, v_2\}\), or \(\{u_1, v_2\}\) and \(\{v_1, u_2\}\)) and accepted if both new edges are simple. The rewire loop runs until the cluster graph is collision-free or runs out of moves; whatever is still on the recycle list at the end is dropped as an intra edge.</p>
+  <p>The dropped edges are not gone for good. For each leftover collision \(\{u, v\}\), one stub at each endpoint never paired inside the cluster. Those stubs are forwarded to the background pool, joining whatever the bg-split already allocated, and re-pair anonymously in the next stage. The specific intra edge is gone; the stubs survive and may form new bg edges with anyone.</p>
+  <div class="graph" id="g-crewire">
+    <div class="graph-chrome">
+      <span id="g-crewire-stage">pre-rewire (collisions visible)</span>
+      <span class="right step-label">step <b id="g-crewire-cur">0</b> / <span id="g-crewire-total">2</span></span>
+    </div>
+    <div class="graph-canvas" id="g-crewire-cy"></div>
+    <div class="widget-row row-top">
+      <button class="btn" id="g-crewire-rand-step" type="button">random step</button>
+      <button class="btn" id="g-crewire-rand-all" type="button">random all</button>
+      <span class="step-label"><em>step</em>: reroll the swap targets &middot; <em>all</em>: reroll U + stubs</span>
+    </div>
+    <div class="widget-row row-mid">
+      <button class="btn" id="g-crewire-start">to start</button>
+      <button class="btn" id="g-crewire-prev">back</button>
+      <button class="btn primary" id="g-crewire-next">next</button>
+      <button class="btn" id="g-crewire-end">to end</button>
+    </div>
+    <div class="step-desc" id="g-crewire-desc"></div>
+  </div>
+</section>
+
+<!-- ─────────── Generation · background pairing ─────────── -->
+<section class="stage">
+  <div class="stage-num">generation · background pairing</div>
+  <h2>Pair background stubs across the whole vertex set.</h2>
+  <p>The background graph \(G_0\) is one global pool: every node drops its background stubs into the same urn and the configuration model pairs them without regard for cluster membership. Two members of the same cluster can pair; the resulting edge counts as intra-cluster on the output even though it came from the background. A bg edge that duplicates an existing cluster edge flags for rewire alongside the usual self-loops and parallels.</p>
+  <div class="graph" id="g-bgpair">
+    <div class="graph-chrome">
+      <span id="g-bgpair-stage">background stubs ready</span>
+      <span class="right step-label">step <b id="g-bgpair-cur">0</b> / <span id="g-bgpair-total">0</span></span>
+    </div>
+    <div class="graph-canvas" id="g-bgpair-cy"></div>
+    <div class="widget-row row-top">
+      <button class="btn" id="g-bgpair-rand-step" type="button">random step</button>
+      <button class="btn" id="g-bgpair-rand-all" type="button">random all</button>
+      <span class="step-label"><em>step</em>: reroll bg shuffles only &middot; <em>all</em>: reroll U + stubs</span>
+    </div>
+    <div class="widget-row row-mid">
+      <button class="btn" id="g-bgpair-start">to start</button>
+      <button class="btn" id="g-bgpair-prev">back</button>
+      <button class="btn primary" id="g-bgpair-next">next</button>
+      <button class="btn" id="g-bgpair-end">to end</button>
+    </div>
+    <div class="step-desc" id="g-bgpair-desc"></div>
+  </div>
+</section>
+
+<!-- ─────────── Generation · background rewire ─────────── -->
+<section class="stage">
+  <div class="stage-num">generation · background rewire</div>
+  <h2>Same swap, global pool now.</h2>
+  <p>Same recycle-and-rewire loop as the cluster phase, but the swap partners are drawn from every bg edge instead of one cluster's edges. Each new half is checked against the existing bg edges and the cluster output: if it would land as a self-loop or duplicate either set, it stays on the recycle list and remains visible as a solid-red bad edge until a later op clears it. Anything still on the recycle list when the loop stops is forwarded to the cross-cluster final swap stage; nothing is dropped here.</p>
+  <div class="graph" id="g-bgrewire">
+    <div class="graph-chrome">
+      <span id="g-bgrewire-stage">pre-rewire (collisions visible)</span>
+      <span class="right step-label">step <b id="g-bgrewire-cur">0</b> / <span id="g-bgrewire-total">2</span></span>
+    </div>
+    <div class="graph-canvas" id="g-bgrewire-cy"></div>
+    <div class="widget-row row-top">
+      <button class="btn" id="g-bgrewire-rand-step" type="button">random step</button>
+      <button class="btn" id="g-bgrewire-rand-all" type="button">random all</button>
+      <span class="step-label"><em>step</em>: reroll the swap targets &middot; <em>all</em>: reroll U + stubs</span>
+    </div>
+    <div class="widget-row row-mid">
+      <button class="btn" id="g-bgrewire-start">to start</button>
+      <button class="btn" id="g-bgrewire-prev">back</button>
+      <button class="btn primary" id="g-bgrewire-next">next</button>
+      <button class="btn" id="g-bgrewire-end">to end</button>
+    </div>
+    <div class="step-desc" id="g-bgrewire-desc"></div>
+  </div>
+  <div class="callout">
+    <div class="tag">intra-cluster edges can come from either graph</div>
+    <p>The cluster graph \(G_j\) sees only its members' intra stubs, so every edge of \(G_j\) is intra-cluster by construction. But \(G_0\) pairs background stubs across the whole vertex set, and sometimes pairs two members of the same cluster. Those extra intra-cluster edges count toward the cluster's internal density; they are why the paper shows, for the global variant, a small upward drift of intra-cluster density with cluster size.</p>
+  </div>
+  <div class="callout warn">
+    <div class="tag">caveat: \(\xi\) is the only structural dial</div>
+    <p>ABCD does not target an edge-count matrix. If the input has a block pair \((r, s)\) with 200 crossing edges and \((r, t)\) with 20, the sampler only sees each node's background stubs and pools them globally; \((r, s)\) and \((r, t)\) end up with the count dictated by random pairing weighted by endpoint degrees, not the empirical figures. <a href="./sbm.html">SBM</a> and the <a href="./ec-sbm-v1.html">EC-SBM</a> family honour per-pair block counts; ABCD does not.</p>
+  </div>
+</section>
+
+<!-- ─────────── Generation · cross-cluster final swap ─────────── -->
+<section class="stage">
+  <div class="stage-num">generation · cross-cluster final swap</div>
+  <h2>One last swap pass over the union.</h2>
+  <p>If the background rewire loop finishes with a non-empty recycle list, a final fallback stage runs. It pulls each leftover bad edge \(\{u_1, v_1\}\) and tries to swap it against a partner \(\{u_2, v_2\}\) drawn uniformly from the union of cluster output and background output (intra + inter pooled together). The same two swap variants apply (\(\{u_1, u_2\} + \{v_1, v_2\}\) or \(\{u_1, v_2\} + \{v_1, u_2\}\)). Each new half is checked: if it is a self-loop or duplicates an existing edge in the union, that half goes back on the recycle list; otherwise it is added to the union and the original partner is removed. The loop runs until the recycle list is empty or stops shrinking.</p>
+  <p>Whatever bad edges remain after the loop are dropped from the output. This is the only place in the pipeline where a residue actually leaves the model.</p>
+  <div class="graph" id="g-finalswap">
+    <div class="graph-chrome">
+      <span id="g-finalswap-stage">pre-final (carrying recycle from bg)</span>
+      <span class="right step-label">step <b id="g-finalswap-cur">0</b> / <span id="g-finalswap-total">0</span></span>
+    </div>
+    <div class="graph-canvas" id="g-finalswap-cy"></div>
+    <div class="widget-row row-top">
+      <button class="btn" id="g-finalswap-rand-step" type="button">random step</button>
+      <button class="btn" id="g-finalswap-rand-all" type="button">random all</button>
+      <span class="step-label"><em>step</em>: re-spin from this op forward &middot; <em>all</em>: re-spin U + stubs</span>
+    </div>
+    <div class="widget-row row-mid">
+      <button class="btn" id="g-finalswap-start">to start</button>
+      <button class="btn" id="g-finalswap-prev">back</button>
+      <button class="btn primary" id="g-finalswap-next">next</button>
+      <button class="btn" id="g-finalswap-end">to end</button>
+    </div>
+    <div class="step-desc" id="g-finalswap-desc"></div>
+  </div>
+</section>
+
+<!-- ─────────── Generation · degree preservation ─────────── -->
+<section class="stage">
+  <div class="stage-num">generation · degree preservation</div>
+  <h2>Output degree multiset almost matches input.</h2>
+  <p>Stubs only truly leave the model at the cross-cluster final swap's drop-stale step. Cluster-rewire residue forwards to the bg pool; bg-rewire residue forwards to the cross-cluster final swap; only what the final swap cannot resolve is dropped.</p>
+  <div class="disk-panel">
+    <svg id="deg-cmp" viewBox="0 0 640 320" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="step-desc">
+      <span class="st">reading the chart</span> &middot; nodes sorted by input \(d_u\) descending. Azure bar = input degree, mint bar = output degree from the current realisation. Red-dashed rectangle fills the gap between the two when they differ.
+    </div>
+    <div class="readout" style="justify-content:center">
+      <span class="item">total abs diff (this seed) <b id="deg-diff">&middot;</b></span>
+      <span class="item target">matches exactly <b id="deg-match">&middot;</b></span>
+    </div>
+    <svg id="xi-realised" viewBox="0 0 640 70" preserveAspectRatio="xMidYMid meet" style="margin-top:.6rem"></svg>
+    <div class="step-desc">
+      <span class="st">mixing parameter</span> &middot; mint dashed = target \(\xi\) from the profile; azure tick = realised \(\xi = E_{\text{out}}/|E|\) on the current output. \(E_{\text{out}}\) counts edges whose endpoints sit in different LIVE clusters (singletons count as their own cluster).
+    </div>
+    <div class="readout" style="justify-content:center">
+      <span class="item target">target \(\xi\) <b id="xi-target-bar">&middot;</b></span>
+      <span class="item">realised \(\xi\) <b id="xi-realised-bar">&middot;</b></span>
+      <span class="item diff">drift <b id="xi-drift">&middot;</b></span>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────── Case study · dnc ─────────── -->
+<section class="stage">
+  <div class="stage-num">case study · dnc</div>
+  <h2>What you get on the shipped example.</h2>
+  <p>Default run on <code>dnc</code> + <code>sbm-flat-best+cc</code> at <code>--seed 1</code>, every input outlier wrapped as its own singleton cluster:</p>
+  <table class="profile-table dnc-stats">
+    <thead>
+      <tr><th>stat</th><th>input</th><th>abcd output</th><th>note</th></tr>
+    </thead>
+    <tbody>
+      <tr><th># nodes</th><td class="val">906</td><td class="val">906</td><td class="desc">Every node appears in <code>edge.csv</code>; singleton outliers participate too.</td></tr>
+      <tr><th># clusters</th><td class="val">65</td><td class="val">65</td><td class="desc">Preserved after <code>drop_singleton_clusters</code> strips the 309 outlier singletons.</td></tr>
+      <tr><th># edges</th><td class="val">10,429</td><td class="val">10,177</td><td class="desc">Within 2.4%. Most edges are preserved; the cross-cluster final swap drops what no rewire stage could resolve.</td></tr>
+      <tr><th>global \(\xi\)</th><td class="val">0.704</td><td class="val">0.691</td><td class="desc">Lands just under the input target. The target is high because 309 of 906 input nodes are outliers and each sits in its own 1-node pseudo-cluster, so every outlier-incident edge is inter by definition.</td></tr>
+      <tr><th>global cc</th><td class="val">0.548</td><td class="val">0.300</td><td class="desc">Not targeted. Configuration-model pairing inside a cluster matches stubs uniformly, so a node-pair's probability scales with its endpoints' degrees; triangles happen only by coincidence.</td></tr>
+      <tr><th>char. time</th><td class="val">40.41</td><td class="val">2.93</td><td class="desc">Random-walk mixing time. Background pairing wires the high-degree hubs across the whole vertex set, so the output mixes in roughly 1/14 of the input rate.</td></tr>
+      <tr><th>pseudo-diameter</th><td class="val">8</td><td class="val">6</td><td class="desc">Same hub effect: bg edges shortcut walks across cluster boundaries, so most pairs are within six hops.</td></tr>
+    </tbody>
+  </table>
+  <p>The degree multiset and the cluster-size multiset pass through verbatim (modulo a handful of dropped edges in the cross-cluster final swap). Triangle-driven structure does not: \(cc\) lands at 0.300 against the 0.548 input. Random-walk dynamics shift in the same direction as <a href="./sbm.html">SBM</a>'s top-up phase, but more sharply: bg pairing alone funds about \(\xi |E|\) cross-cluster edges, all drawn between high-degree hubs by stub probability, so the output is far better connected than the input even before any rewire.</p>
+  <div class="disk-panel">
+    <div class="step-desc" style="margin-bottom:.6rem"><span class="st">input degree distribution, log-log</span> &middot; <code>dnc</code> has a heavy tail: max degree 368, next 312, 256, 225, 202; median 4. ABCD reuses this sequence verbatim, so the output's degree histogram is visually indistinguishable from the input's.</div>
+    <svg id="deg-hist" viewBox="0 0 640 260" preserveAspectRatio="xMidYMid meet"></svg>
+  </div>
+  <div class="disk-panel">
+    <div class="step-desc" style="margin-bottom:.6rem"><span class="st">input cluster-size distribution, log-log</span> &middot; two piles. 309 singletons on the left (the outlier mass); 65 real clusters with sizes 2 to 78 on the right. ABCD under <code>outlier_mode=singleton</code> passes both piles through as one flat size list of length 374.</div>
+    <svg id="cs-hist" viewBox="0 0 640 260" preserveAspectRatio="xMidYMid meet"></svg>
+  </div>
+  <div class="callout warn">
+    <div class="tag">caveat 1: the cc gap is the price of "only \(\xi\)"</div>
+    <p><code>dnc</code>'s input global cc is 0.548. ABCD lands at 0.300. The gap is what "configuration model inside each cluster" produces on an input with structured triangles: the sampler has no way to preserve them. <a href="./ec-sbm-v2.html">EC-SBM v2</a>'s \(K_{k+1}\) core and <a href="./npso.html">nPSO</a>'s hyperbolic embedding trade some of ABCD's tractability for a handle on clustering.</p>
+  </div>
+  <div class="callout warn">
+    <div class="tag">caveat 2: node identity is not preserved</div>
+    <p>The sampler sorts the profile's degrees by descending \(d_u\) and re-assigns them to clusters via the sequential capacity-weighted sweep above (a proxy for, not an exact, uniform draw over admissible permutations). "Node 5" in the output is not node 5 in the input; the two are unrelated. What <em>is</em> preserved across every seed: the degree <em>multiset</em> (up to rewire drift) and the cluster <em>size</em> multiset (exact).</p>
+  </div>
+</section>
+
+<div id="kin"></div>
+
+<footer class="ack">
+  <p class="tools">drawn with <a href="https://d3js.org" target="_blank" rel="noopener">d3</a></p>
+  <p class="credit">typed by vltanh, doodled with Claude</p>
+</footer>
+
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script>
+window.MathJax = {
+  tex: {
+    inlineMath: [['\\(', '\\)']],
+    displayMath: [['\\[', '\\]']]
+  },
+  chtml: { scale: 1.0 }
+};
+</script>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script src="./shared.js"></script>
+<script src="./js/spoke_layer.js"></script>
+<script src="./js/profile_kernel.js"></script>
+<script src="./js/abcd_kernel.js"></script>
+<script src="./js/abcd_walkers.js"></script>
+<script>
+(function () {
+  document.getElementById("links").innerHTML = NETGEN.linksRow({gen: "abcd"});
+  (function () {
+    const icons = document.querySelector("#links .top-icons");
+    if (!icons) return;
+    const extras = [
+      {
+        href: "https://doi.org/10.1017/nws.2020.45",
+        label: "paper",
+        svg: '<path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/>',
+      },
+    ];
+    const sourceLink = icons.querySelector('a[aria-label="github repository"]');
+    if (sourceLink) {
+      sourceLink.setAttribute("href",
+        "https://github.com/vltanh/network-generation/tree/main/src/abcd");
+      const span = sourceLink.querySelector("span");
+      if (span) span.textContent = "code";
+    }
+    extras.forEach(x => {
+      const a = document.createElement("a");
+      a.href = x.href;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.setAttribute("aria-label", x.label);
+      a.innerHTML =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+        + 'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" '
+        + 'aria-hidden="true">' + x.svg + '</svg>'
+        + '<span>' + x.label + '</span>';
+      icons.appendChild(a);
+    });
+  })();
+  document.getElementById("kin").innerHTML = NETGEN.kinSection({
+    title: "similarity",
+    siblings: [
+      { gen: "abcd+o", label: "ABCD+o",
+        diff: "Adds a model-level outlier count \\(s_0\\). The sampler picks \\(s_0\\) nodes uniformly from admissibility and pins them to \\(\\hat y = 0\\); all their degree funds the background graph." },
+      { gen: "lfr", label: "LFR",
+        diff: "Similar recipe (configuration model per cluster + rewire), but LFR fits and resamples the degree sequence from a power law and the cluster sizes from a second power law, then targets the mixing parameter \\(\\mu\\) (node-mean, not stub-weighted)." },
+      { gen: "sbm", label: "SBM",
+        diff: "Also draws edges via configuration-model stub matching, but cluster-aware: stubs are pooled per block-pair \\((r,s)\\) and matched to hit each cell's edge count \\(e_{rs}\\). ABCD pools per-cluster and per-global-bg, with no \\(e_{rs}\\) target." },
+    ],
+  });
+
+  const COL = NETGEN.COLORS;
+  const EDGES = NETGEN.EDGES;
+  const CLUSTER_OF = NETGEN.CLUSTER_OF;
+  const DEGREES = NETGEN.DEGREES;
+  const NODES = NETGEN.NODES;
+  const C1 = NETGEN.C1, C2 = NETGEN.C2, C3 = NETGEN.C3, OUT_N = NETGEN.OUT;
+
+  const BLOCK_NAMES  = ["C1", "C2", "C3", "S19", "S20"];
+  const BLOCK_NODES  = { "C1": C1, "C2": C2, "C3": C3, "S19": [19], "S20": [20] };
+  const BLOCK_COLOR  = {
+    "C1": COL.C1, "C2": COL.C2, "C3": COL.C3,
+    "S19": COL.outlier_palette[0],
+    "S20": COL.outlier_palette[1],
+  };
+  const BLOCK_SIZE   = { "C1": C1.length, "C2": C2.length, "C3": C3.length, "S19": 1, "S20": 1 };
+  const BLOCK_IS_SINGLETON = { "C1": false, "C2": false, "C3": false, "S19": true, "S20": true };
+  const blockOfNode  = (n) => (n === 19 ? "S19" : n === 20 ? "S20" : CLUSTER_OF[n]);
+
+  function pickInputColor(e) {
+    if (CLUSTER_OF[e.u] === "OUT" || CLUSTER_OF[e.v] === "OUT") return COL.edge_inter;
+    if (e.kind === "inter") return COL.edge_inter;
+    const c = CLUSTER_OF[e.u] || CLUSTER_OF[e.v];
+    return COL.edge_intra[c] || COL.edge_inter;
+  }
+
+  // Profile-side scalars from ProfileKernel.runProfile (mirrors src/abcd/profile.py
+  // defaults: outlier_mode=singleton, drop_oo=false). The kernel's outputs are the
+  // only profile-side numbers the page surfaces, so we route them through here so a
+  // future change in profile_common.py auto-flows.
+  const PROF_KERNEL_OUT = ProfileKernel.runProfile({
+    gen: "abcd",
+    edgelist: EDGES.map(e => [String(e.u), String(e.v)]),
+    clustering: NODES.filter(n => CLUSTER_OF[n] !== "OUT")
+                     .map(n => [String(n), CLUSTER_OF[n]]),
+    outlier_mode: "singleton",
+    drop_oo: false,
+  });
+  const SYNTHETIC_XI = parseFloat(PROF_KERNEL_OUT.files["mixing_parameter.txt"]);
+
+  // Run LFR's full profile and read μ from the same file LFR's profiler
+  // writes. Going through runProfile keeps abcd in lockstep with any
+  // future change to LFR's profile pipeline (outlier handling, mu
+  // reduction, etc.) instead of replicating steps locally.
+  const LFR_PROF_OUT = ProfileKernel.runProfile({
+    gen: "lfr",
+    edgelist: EDGES.map(e => [String(e.u), String(e.v)]),
+    clustering: NODES.filter(n => CLUSTER_OF[n] !== "OUT")
+                     .map(n => [String(n), CLUSTER_OF[n]]),
+    outlier_mode: "singleton",
+  });
+  const SYNTHETIC_MU = parseFloat(LFR_PROF_OUT.files["mixing_parameter.txt"]);
+
+  // Shared input opener · delegated to NETGEN.singletonOpener so the
+  // 5-cluster singleton view reads identically to nPSO + lfr.
+  (function () {
+    const clusters = BLOCK_NAMES.map(name => ({
+      id: name,
+      nodes: BLOCK_NODES[name],
+      color: BLOCK_COLOR[name],
+      isOutlier: !!BLOCK_IS_SINGLETON[name],
+    }));
+    NETGEN.singletonOpener({ hostId: "g-shared-input-cy", clusters });
+  })();
+
+  // ── Profiling · mixing scalar ──
+  (function () {
+    const host = document.getElementById("g-xi-cy");
+    if (!host) return;
+    host.innerHTML = "";
+    const svg = d3.select(host).append("svg")
+      .attr("class", "viz-svg").attr("viewBox", NETGEN.fitViewBoxAttr())
+      .attr("preserveAspectRatio", "xMidYMid meet");
+    const syncBlockRects = makeBlockRects(svg);
+
+    const isEout = (e) => e.kind === "inter" || e.kind === "outlier";
+    const edges = EDGES.map(e => isEout(e)
+      ? ({ u: e.u, v: e.v, color: COL.signal, w: 2.0 })
+      : ({ u: e.u, v: e.v, color: pickInputColor(e), w: 0.9 })
+    );
+
+    const viz = NETGEN.VIZ.init("g-xi-cy", {
+      svg, showLabels: true, edges, pad: 40, padRight: 340,
+      nodeColor: (id) => BLOCK_COLOR[blockOfNode(parseInt(id, 10))] || COL.OUT,
+    });
+    NETGEN.makeTooltip(viz, document.getElementById("g-xi"));
+    syncBlockRects(viz);
+    viz.sim.on("tick.blockRects", () => syncBlockRects(viz));
+
+    const totalE = EDGES.length;
+    const eOut = EDGES.filter(isEout).length;
+
+    NETGEN.mountGxPanel({
+      viz,
+      hostId: "g-xi-cy", prefix: "g-xi",
+      title: "global mixing parameter", maxWidth: "14rem",
+      bodyHTML:
+        '<div class="xi-panel">'
+        + '<div class="xi-grid">'
+        +   '<span class="xi-lhs">ξ</span>'
+        +   '<span class="xi-eq">=</span>'
+        +   '<span class="xi-rhs"><span class="xi-num">E<sub>out</sub></span>'
+        +     '<span class="xi-bar"></span><span class="xi-den">|E|</span></span>'
+        +   '<span></span>'
+        +   '<span class="xi-eq">=</span>'
+        +   '<span class="xi-rhs"><span class="xi-num">' + eOut + '</span>'
+        +     '<span class="xi-bar"></span><span class="xi-den">' + totalE + '</span></span>'
+        +   '<span class="xi-sep"></span>'
+        +   '<span></span>'
+        +   '<span class="xi-eq">=</span>'
+        +   '<span class="xi-result">' + SYNTHETIC_XI.toFixed(3) + '</span>'
+        + '</div>'
+        + '</div>',
+    });
+    document.getElementById("xi-vs-mu-xi").textContent = SYNTHETIC_XI.toFixed(3);
+    document.getElementById("xi-vs-mu-mu").textContent = SYNTHETIC_MU.toFixed(3);
+  })();
+
+  // ── Live (assignment-driven) cluster mapping ──
+  // The assignment walker writes into LIVE_BLOCK_OF on each reroll.
+  // Downstream walkers (cluster-pair, rewire, bg-pair, bg-rewire,
+  // deg-cmp) and the page's nodeColorOf consume this so node identity
+  // → cluster stays consistent across stages. Initial value mirrors
+  // the input clustering so the first paint agrees with every other
+  // graph on the page; the canonical-stochastic trace only takes
+  // effect after a reroll.
+  const KERNEL_CID_FROM_BLOCK = { C1: 1, C2: 2, C3: 3, S19: 4, S20: 5 };
+  const LIVE_BLOCK_OF = {};
+  // Live (assignment-driven) position map. Initially each node sits
+  // at its own input POSITIONS slot; after a reroll, node v lands at
+  // POSITIONS[t.slot] where t is its trace entry. Downstream walker
+  // viz instances mutate their node x/y/fx/fy from this on reroll so
+  // a node assigned to cluster B sits at one of B's input positions.
+  const LIVE_POS_OF = {};
+  NODES.forEach(n => {
+    LIVE_BLOCK_OF[n] = blockOfNode(n);
+    LIVE_POS_OF[n] = { x: NETGEN.POSITIONS[n].x, y: NETGEN.POSITIONS[n].y };
+  });
+  function rebuildKernelFromLiveBlocks() {
+    // Kernel inputs are arrays indexed by NODES position. KERNEL_W is
+    // degree-only and doesn't depend on assignment, so only the cluster
+    // id array needs to refresh. Realization cache is keyed by seeds +
+    // overrideEpoch; bumping the epoch invalidates every cached entry
+    // so the next buildRealization call picks up the new clusters.
+    for (let i = 0; i < NODES.length; i++) {
+      KERNEL_CLUSTERS[i] = KERNEL_CID_FROM_BLOCK[LIVE_BLOCK_OF[NODES[i]]];
+    }
+    REAL_CACHE.clear();
+    overrideEpoch++;
+    recolorDownstreamVizNodes();
+  }
+  // Each downstream walker viz set node fill from nodeColorOf at
+  // VIZ.init time and never refreshes it. After an assignment reroll
+  // we mutate the underlying datum + the SVG fill so the dot colors
+  // catch up to LIVE_BLOCK_OF. Spoke colors are recomputed each render
+  // (byNodeFromEdges) so they pick up changes automatically; only the
+  // base node circles need manual re-paint. Limited to the four
+  // downstream viz hosts so the profile-side input graphs (which
+  // intentionally show input clustering) stay untouched.
+  const DOWNSTREAM_VIZ_HOSTS = [
+    "g-cpair-cy", "g-crewire-cy", "g-bgpair-cy", "g-bgrewire-cy",
+  ];
+  function recolorDownstreamVizNodes() {
+    DOWNSTREAM_VIZ_HOSTS.forEach(hostId => {
+      const root = document.getElementById(hostId);
+      if (!root) return;
+      d3.select(root).selectAll("g.viz-node-group").each(function (d) {
+        if (!d || d.id == null) return;
+        const id = parseInt(d.id, 10);
+        const c = nodeColorOf(id);
+        const p = LIVE_POS_OF[id];
+        d.color = c;
+        if (p) {
+          d.x = p.x; d.y = p.y;
+          d.fx = p.x; d.fy = p.y;
+          d.homeX = p.x; d.homeY = p.y;
+        }
+      });
+      d3.select(root).selectAll("g.viz-node-group > circle.viz-node")
+        .attr("cx", d => d.x).attr("cy", d => d.y)
+        .attr("fill", d => d.color);
+      d3.select(root).selectAll("g.viz-node-group > text.viz-label")
+        .attr("x", d => d.x).attr("y", d => d.y);
+    });
+  }
+
+  // ── Generation · assigning vertices to clusters ──
+  // Walker viz: 20 vertices wait in a queue (sorted by d_u desc). Each
+  // step "flies" the next vertex into an empty placeholder slot inside
+  // its sampled cluster bin. Cluster bins are dashed-block-rects;
+  // placeholder slots are the original input POSITIONS for that
+  // cluster's members (anonymous slots — node identity not preserved
+  // across the assignment).
+  (function () {
+    const host = document.getElementById("g-assign-cy");
+    if (!host) return;
+    host.innerHTML = "";
+
+    // ViewBox sized to the FULL POSITIONS bbox + queue band — this
+    // is the canvas extent. Inside, the cluster region uses scaled
+    // POS so the bins occupy a smaller fraction of that viewBox.
+    // Scaling only the content (not the viewBox) is what actually
+    // creates the breathing room; scaling both together is a no-op.
+    const POS_SCALE = 0.72;
+    const POS_OFFSET_X = 0;
+    const POS = {};
+    NODES.forEach(n => {
+      const p = NETGEN.POSITIONS[n];
+      POS[n] = { x: p.x * POS_SCALE + POS_OFFSET_X, y: p.y * POS_SCALE };
+    });
+
+    const PAD = 24, QUEUE_BAND_L = 90, PANEL_R = 220;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    NODES.forEach(n => {
+      const p = NETGEN.POSITIONS[n];
+      if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+    });
+    const vbX = minX - PAD - QUEUE_BAND_L;
+    const vbY = minY - PAD;
+    const vbW = (maxX - minX) + 2 * PAD + QUEUE_BAND_L + PANEL_R;
+    const vbH = (maxY - minY) + 2 * PAD;
+
+    // Override the .graph-canvas default aspect-ratio (640/680) so
+    // the wider queue-on-right layout fills the host without
+    // letterboxing.
+    host.style.aspectRatio = `${vbW} / ${vbH}`;
+
+    const svg = d3.select(host).append("svg")
+      .attr("class", "viz-svg")
+      .attr("viewBox", `${vbX} ${vbY} ${vbW} ${vbH}`)
+      .attr("preserveAspectRatio", "xMidYMid meet");
+
+    // Custom tooltip (raw-svg viz, so makeTooltip's VIZ-handle path
+    // doesn't apply). Anchor inside the .graph-canvas so coords stay
+    // relative to the host bounding rect.
+    host.style.position = "relative";
+    const tip = document.createElement("div");
+    tip.className = "cy-tooltip";
+    host.appendChild(tip);
+    function placeTip(ev) {
+      const rect = host.getBoundingClientRect();
+      let x = ev.clientX - rect.left + 14;
+      let y = ev.clientY - rect.top + 14;
+      const tw = tip.offsetWidth, th = tip.offsetHeight;
+      if (x + tw > rect.width - 8)  x = ev.clientX - rect.left - tw - 12;
+      if (y + th > rect.height - 8) y = ev.clientY - rect.top - th - 8;
+      tip.style.left = x + "px";
+      tip.style.top = y + "px";
+    }
+    function showTip(id, ev) {
+      const placedIdx = TRACE.findIndex(tt => tt.v === id);
+      if (placedIdx < 0) return;
+      const t = TRACE[placedIdx];
+      const isPlaced = placedIdx < currentStep;
+      const isNext = placedIdx === currentStep;
+      let status;
+      if (isPlaced) {
+        status = '<div>placed in <b style="color:' + BLOCK_COLOR[t.picked] + '">'
+          + t.picked + '</b>'
+          + (t.fallback ? ' <span class="dim">(fallback)</span>' : '')
+          + '</div>';
+      } else if (isNext) {
+        status = '<div class="dim">next up · see top-right panel</div>';
+      } else {
+        status = '<div class="dim">queued · still waiting</div>';
+      }
+      tip.innerHTML =
+        '<div class="hd">node ' + id + '</div>'
+        + '<div>d<sub>u</sub> <b>' + t.w + '</b></div>'
+        + '<div>x<sub>u</sub> <b>' + t.xu + '</b></div>'
+        + status;
+      tip.classList.add("on");
+      placeTip(ev);
+    }
+    function hideTip() { tip.classList.remove("on"); }
+
+    // Track current walker step so the tooltip can flag the picked
+    // cluster as "selected" once the vertex has flown into the bin.
+    let currentStep = 0;
+
+    // Top-right panel: model scalars used by the assignment rule.
+    // φ depends only on cluster sizes; ξ on the input edge counts;
+    // both are profile-fixed for this fixture.
+    const ASSIGN_N = NODES.length;
+    const ASSIGN_PHI = 1 - BLOCK_NAMES.reduce((s, b) =>
+      s + Math.pow(BLOCK_SIZE[b] / ASSIGN_N, 2), 0);
+    NETGEN.mountGxPanel({
+      hostId: "g-assign-cy", prefix: "g-assign-scalars",
+      title: "next vertex", maxWidth: "13rem",
+      bodyHTML:
+        '<div class="assign-scalar-panel">'
+        + '<div class="scalar-line">ξ = ' + SYNTHETIC_XI.toFixed(3)
+        +   ' &middot; φ = ' + ASSIGN_PHI.toFixed(3) + '</div>'
+        + '<div class="scalar-line dim">x<sub>u</sub> = ⌈(1−ξφ)d<sub>u</sub>⌉</div>'
+        + '<div class="next-block" id="g-assign-next-info"></div>'
+        + '</div>',
+    });
+
+    function updateNextPanel(step) {
+      const host = document.getElementById("g-assign-next-info");
+      if (!host) return;
+      if (step >= TRACE.length) {
+        host.innerHTML = '<div class="dim">all 20 placed.</div>';
+        return;
+      }
+      const t = TRACE[step];
+      const rem = t.remainingBefore || {};
+      const poolTotal = t.admissible.reduce((s, b) => s + (rem[b] || 0), 0);
+      const rows = BLOCK_NAMES.map(b => {
+        const ok = t.admissible.indexOf(b) >= 0;
+        const cap = BLOCK_SIZE[b];
+        const r = rem[b] != null ? rem[b] : cap;
+        const filled = r === 0;
+        let tag;
+        if (filled) tag = '(filled)';
+        else {
+          const cmp = ok ? '≤' : '>';
+          tag = 'x<sub>u</sub> ' + cmp + ' ' + (cap - 1);
+        }
+        let probHtml = '';
+        if (ok && poolTotal > 0) {
+          const p = r / poolTotal;
+          probHtml = ' <span class="dim">p = ' + p.toFixed(2) + '</span>';
+        }
+        return '<div class="cluster-row" style="opacity:' + (ok ? 1 : 0.35) + '">'
+          + '<b style="color:' + BLOCK_COLOR[b] + '">' + b + '</b> '
+          + '<span class="dim">' + tag + '</span>'
+          + probHtml
+          + '</div>';
+      }).join("");
+      host.innerHTML =
+        '<div class="next-head">node <b>' + t.v + '</b> '
+        +   '<span class="dim">d<sub>u</sub> = ' + t.w + ', x<sub>u</sub> = ' + t.xu + '</span></div>'
+        + rows
+        + (t.fallback ? '<div class="dim">no admissible — fallback</div>' : '');
+    }
+
+    // Cluster bins (dashed-block-rects). Tracked so the hover handler
+    // can scale each bin's opacity by its sample probability for the
+    // hovered vertex.
+    const binByName = {};
+    BLOCK_NAMES.forEach(name => {
+      const ids = BLOCK_NODES[name];
+      if (!ids.length) return;
+      const xs = ids.map(i => POS[i].x);
+      const ys = ids.map(i => POS[i].y);
+      const bx = Math.min.apply(null, xs) - 20;
+      const by = Math.min.apply(null, ys) - 20;
+      const bw = Math.max.apply(null, xs) - Math.min.apply(null, xs) + 40;
+      const bh = Math.max.apply(null, ys) - Math.min.apply(null, ys) + 40;
+      const rect = svg.append("rect")
+        .attr("x", bx).attr("y", by).attr("width", bw).attr("height", bh)
+        .attr("rx", 8).attr("ry", 8)
+        .attr("fill", BLOCK_COLOR[name]).attr("fill-opacity", 0.06)
+        .attr("stroke", BLOCK_COLOR[name]).attr("stroke-width", 1.2)
+        .attr("stroke-dasharray", "6 4");
+      const label = svg.append("text")
+        .attr("x", bx + 6).attr("y", by - 4)
+        .attr("font-family", "Caveat Brush, cursive")
+        .attr("font-size", 13).attr("fill", BLOCK_COLOR[name])
+        .text(name);
+      binByName[name] = { rect, label };
+    });
+
+    const BIN_FADE_MS = 320;
+    function scaleBinsByProb(t) {
+      const rem = (t && t.remainingBefore) || {};
+      const poolTotal = t
+        ? t.admissible.reduce((s, b) => s + (rem[b] || 0), 0)
+        : 0;
+      BLOCK_NAMES.forEach(name => {
+        const bin = binByName[name];
+        if (!bin) return;
+        let op, fillOp, labelOp;
+        if (!t || poolTotal <= 0) {
+          op = 1; fillOp = 0.06; labelOp = 1;
+        } else if (t.admissible.indexOf(name) < 0) {
+          op = 0.18; fillOp = 0.02; labelOp = 0.3;
+        } else {
+          const p = (rem[name] || 0) / poolTotal;
+          // p in [0,1]; map to [0.35, 1.0] visible range so even
+          // low-prob admissible clusters stay readable.
+          op = 0.35 + 0.65 * p;
+          fillOp = 0.06 + 0.18 * p;
+          labelOp = op;
+        }
+        bin.rect.transition().duration(BIN_FADE_MS)
+          .attr("opacity", op).attr("fill-opacity", fillOp);
+        bin.label.transition().duration(BIN_FADE_MS).attr("opacity", labelOp);
+      });
+    }
+    function clearBinScale() { scaleBinsByProb(null); }
+
+    // Placeholder slots: ghost dashed circles at every input POSITION.
+    NODES.forEach(n => {
+      const p = POS[n];
+      svg.append("circle").attr("class", "assign-slot")
+        .attr("data-pos-id", n)
+        .attr("cx", p.x).attr("cy", p.y).attr("r", 13)
+        .attr("fill", "none").attr("stroke", "#9a947a")
+        .attr("stroke-width", 0.9).attr("stroke-dasharray", "3 3")
+        .attr("opacity", 0.55);
+    });
+
+    // Queue strip: degree-desc ordering, vertical column on the left.
+    const queueRanks = NODES.slice().sort((a, b) =>
+      DEGREES[b] - DEGREES[a] || a - b);
+    const queueX = vbX + QUEUE_BAND_L / 2;
+    const queueY0 = vbY + 36;
+    const queueY1 = vbY + vbH - 18;
+    const queueDY = queueRanks.length > 1
+      ? (queueY1 - queueY0) / (queueRanks.length - 1) : 0;
+
+
+    // Vertex group (one circle + label per node).
+    const vertG = svg.append("g").attr("class", "assign-verts");
+
+    let ASSIGN_SEED = 1;
+    // Initial trace runs the canonical-stochastic procedure (the
+    // Julia sampler's behaviour) so first paint reflects what the
+    // model actually does, not the input fixture. Sync into the live
+    // block + position maps immediately so KERNEL_CLUSTERS, node
+    // colours, and node positions for every downstream walker pick
+    // up the canonical assignment from page load.
+    let TRACE = computeTrace(ASSIGN_SEED, 0, []);
+    syncLiveBlocks();
+
+    function syncLiveBlocks() {
+      TRACE.forEach(t => {
+        LIVE_BLOCK_OF[t.v] = t.picked;
+        const p = NETGEN.POSITIONS[t.slot];
+        LIVE_POS_OF[t.v] = { x: p.x, y: p.y };
+      });
+    }
+
+    // Re-spin trace from `startRank` onward; ranks [0..startRank-1] are
+    // taken from `prefix` verbatim. Matches the page's RandStep[idx-1..end]
+    // / RandAll[0..end] convention.
+    function computeTrace(seed, startRank, prefix) {
+      startRank = startRank || 0;
+      prefix = prefix || [];
+      const rng = seededRng(seed);
+      const n = NODES.length;
+      const phi = 1 - BLOCK_NAMES.reduce((s, b) =>
+        s + Math.pow(BLOCK_SIZE[b] / n, 2), 0);
+      const xi = SYNTHETIC_XI;
+      const remaining = {};
+      const slotsAvail = {};
+      BLOCK_NAMES.forEach(b => {
+        remaining[b] = BLOCK_SIZE[b];
+        slotsAvail[b] = BLOCK_NODES[b].slice();
+      });
+      const trace = [];
+      for (let r = 0; r < startRank; r++) {
+        const t = prefix[r];
+        trace.push(t);
+        remaining[t.picked]--;
+        const sIdx = slotsAvail[t.picked].indexOf(t.slot);
+        if (sIdx >= 0) slotsAvail[t.picked].splice(sIdx, 1);
+      }
+      for (let r = startRank; r < queueRanks.length; r++) {
+        const v = queueRanks[r];
+        const w = DEGREES[v];
+        const xu = Math.ceil((1 - xi * phi) * w);
+        const remainingBefore = Object.assign({}, remaining);
+        let admissible = BLOCK_NAMES.filter(b =>
+          remaining[b] > 0 && BLOCK_SIZE[b] - 1 >= xu);
+        let fallback = false;
+        if (admissible.length === 0) {
+          admissible = BLOCK_NAMES.filter(b => remaining[b] > 0);
+          fallback = true;
+        }
+        const totalRem = admissible.reduce((s, b) => s + remaining[b], 0);
+        const u = rng() * totalRem;
+        let acc = 0, picked = admissible[0];
+        for (const b of admissible) {
+          acc += remaining[b];
+          if (u < acc) { picked = b; break; }
+        }
+        const pool = slotsAvail[picked];
+        const slotIdx = Math.floor(rng() * pool.length);
+        const slot = pool.splice(slotIdx, 1)[0];
+        remaining[picked]--;
+        trace.push({ v, w, xu, admissible: admissible.slice(), picked, slot, fallback, remainingBefore });
+      }
+      return trace;
+    }
+
+    let lastAssignStep = 0;
+    function render(step) {
+      const prevStep = lastAssignStep;
+      lastAssignStep = step;
+      currentStep = step;
+      // Bin opacity always tracks the current candidate vertex's
+      // sampling probabilities; admissible clusters scale by p, others
+      // dim. At end-of-walk (no candidate left), bins return to flat.
+      const candidate = step < TRACE.length ? TRACE[step] : null;
+      scaleBinsByProb(candidate);
+      updateNextPanel(step);
+      const sel = vertG.selectAll("g.vert").data(queueRanks, d => d);
+      const enter = sel.enter().append("g").attr("class", "vert")
+        .attr("transform", id => {
+          const qIdx = queueRanks.indexOf(id);
+          return `translate(${queueX},${queueY0 + qIdx * queueDY})`;
+        })
+        .style("cursor", "default");
+      enter.append("circle").attr("r", 12).attr("stroke-width", 1.1);
+      enter.append("text")
+        .attr("class", "viz-label")
+        .attr("dy", "0.32em").attr("text-anchor", "middle")
+        .attr("font-size", "9px");
+      enter
+        .on("mouseenter", (ev, id) => showTip(id, ev))
+        .on("mousemove",  (ev) => placeTip(ev))
+        .on("mouseleave", () => hideTip());
+      const all = enter.merge(sel);
+      // Multi-step jumps stagger transitions by trace order so the
+      // sequence reads as a queue draining (ToEnd) or refilling
+      // (ToStart) instead of every vertex moving at once.
+      const stepDelta = step - prevStep;
+      const isJump = Math.abs(stepDelta) > 1;
+      const jumpRange = Math.abs(stepDelta);
+      const STAGGER_MS = 60;
+      const STAGGER_CAP = 1200;
+      const perStep = isJump ? Math.min(STAGGER_MS, STAGGER_CAP / Math.max(1, jumpRange)) : 0;
+      all.each(function (id) {
+        const placedIdx = TRACE.findIndex(t => t.v === id);
+        const isPlaced = placedIdx >= 0 && placedIdx < step;
+        const wasPlaced = placedIdx >= 0 && placedIdx < prevStep;
+        const g = d3.select(this);
+        let delay = 0;
+        if (isJump) {
+          if (stepDelta > 0 && isPlaced && !wasPlaced) {
+            // Forward jump: place trace[prevStep..step-1] in order.
+            delay = (placedIdx - prevStep) * perStep;
+          } else if (stepDelta < 0 && wasPlaced && !isPlaced) {
+            // Backward jump: pull trace[step..prevStep-1] back, latest first.
+            delay = (prevStep - 1 - placedIdx) * perStep;
+          }
+        }
+        if (isPlaced) {
+          const t = TRACE[placedIdx];
+          const p = POS[t.slot];
+          g.transition().delay(delay).duration(380).attr("transform", `translate(${p.x},${p.y})`);
+          g.select("circle")
+            .attr("fill", BLOCK_COLOR[t.picked])
+            .attr("stroke", "#1b2033").attr("opacity", 0.95);
+        } else {
+          const qIdx = queueRanks.indexOf(id);
+          const y = queueY0 + qIdx * queueDY;
+          const isNext = qIdx === step;
+          g.transition().delay(delay).duration(280).attr("transform", `translate(${queueX},${y})`);
+          g.select("circle")
+            .attr("fill", isNext ? COL.hl_yellow : "#ede4c9")
+            .attr("stroke", isNext ? "#c7801e" : "#6b6a54")
+            .attr("stroke-width", isNext ? 2.0 : 1.2)
+            .attr("opacity", isNext ? 1.0 : 0.75);
+        }
+        g.select("text").text(id);
+      });
+
+      const desc = document.getElementById("g-assign-desc");
+      if (step <= 0) {
+        desc.innerHTML = '<span class="st">step 0</span> &middot; '
+          + queueRanks.length + ' vertices queued by \\(d_u\\) desc; cluster bins empty.';
+      } else {
+        const t = TRACE[step - 1];
+        const adm = t.admissible.join(", ");
+        const tag = t.fallback ? " <em>(fallback: no admissible cluster, took leftover slot)</em>" : "";
+        desc.innerHTML = '<span class="st">step ' + step + '</span> &middot; '
+          + 'rank ' + step + ' &middot; \\(d_u = ' + t.w + ', x_u = ' + t.xu + '\\); '
+          + 'admissible {' + adm + '}; sampled <b>' + t.picked + '</b>' + tag + '.';
+      }
+      NETGEN.retypeset(desc);
+    }
+
+    let ctl;
+    ctl = NETGEN.rerollWalker({
+      prefix: "g-assign",
+      total: queueRanks.length + 1,
+      totalForCurrent: () => queueRanks.length + 1,
+      onRender: render,
+      onRandStep: idx => {
+        if (idx <= 0) return false;
+        ASSIGN_SEED = (ASSIGN_SEED * 1103515245 + 12345 + idx * 1009) >>> 0;
+        TRACE = computeTrace(ASSIGN_SEED, idx - 1, TRACE);
+        // Assignment is upstream of every later stage; sync the live
+        // block map + rebuild the kernel cluster array (which bumps
+        // overrideEpoch, busting the realization cache) so the next
+        // buildRealization call groups stubs by the new mapping. Fire
+        // the page-bus listeners directly without bumping U_SEED /
+        // STUB_SEED — those are independent dials. Net effect: only
+        // the cluster mapping changes; per-node U values + stub
+        // shuffles stay fixed.
+        syncLiveBlocks();
+        rebuildKernelFromLiveBlocks();
+        onUChanged.forEach(fn => fn());
+        onStubChanged.forEach(fn => fn());
+        return false;
+      },
+      onRandAll: () => {
+        ASSIGN_SEED = (ASSIGN_SEED * 1103515245 + 12345) >>> 0;
+        TRACE = computeTrace(ASSIGN_SEED, 0, []);
+        syncLiveBlocks();
+        rebuildKernelFromLiveBlocks();
+        onUChanged.forEach(fn => fn());
+        onStubChanged.forEach(fn => fn());
+      },
+    });
+  })();
+
+  // ── Per-panel reroll bus. Each upstream panel owns a seed; downstream
+  //    panels listen for upstream changes and re-render. An upstream
+  //    reroll fires all downstream listeners; a downstream reroll does
+  //    not touch upstream state. The two state slots are:
+  //      U_SEED     : drives stochastic rounding in the weight split
+  //      STUB_SEED  : drives shuffles in the config-model + rewire step
+  //    Weight-split only depends on U_SEED. Step-through + deg-cmp
+  //    depend on both. The top-level "random" buttons per panel advance
+  //    one seed and fire its cascade.
+  // Seed pair chosen for the demo: U=78 / S=80 against the canonical
+  // assignment trace at ASSIGN_SEED=1. Missing-degree across stages:
+  //   cluster-pair       21
+  //   cluster-rewire     12 (fixes 9)
+  //   bg-pair             6 (forwards residue + pairs new edges)
+  //   bg-rewire           3 (fixes 3)
+  //   cross-cluster final 1 (fixes 2, drops 1)
+  // Every stage materially reduces missing degree; the final stage
+  // clearly helps but does not get all the way to zero, so the
+  // walker shows a real drop-stale at the end.
+  let U_SEED = 78;
+  let STUB_SEED = 4160;
+  const onUChanged = [];
+  const onStubChanged = [];
+  function rerollU() {
+    U_SEED += 1;
+    onUChanged.forEach(fn => fn());
+    // U influences stubs (via split), so cascade through stub-dependent too
+    onStubChanged.forEach(fn => fn());
+  }
+  function rerollStub() {
+    STUB_SEED += 1;
+    onStubChanged.forEach(fn => fn());
+  }
+  // Full reroll: U + stubs together. Used by random-all on every walker.
+  function rerollAll() {
+    U_SEED += 1; STUB_SEED += 1;
+    onUChanged.forEach(fn => fn());
+    onStubChanged.forEach(fn => fn());
+  }
+
+  function makeBlockRects(svg) {
+    const layer = svg.append("g").attr("class", "block-rects");
+    const shapes = BLOCK_NAMES.map(name => {
+      const ids = BLOCK_NODES[name];
+      if (!ids || ids.length === 0) return null;
+      const color = BLOCK_COLOR[name];
+      const rect = layer.append("rect")
+        .attr("rx", 10).attr("ry", 10)
+        .attr("fill", color).attr("fill-opacity", 0.07)
+        .attr("stroke", color).attr("stroke-width", 1.5)
+        .attr("stroke-dasharray", "7 5")
+        .attr("opacity", 0.92);
+      const label = layer.append("text")
+        .attr("class", "block-ring-label")
+        .attr("text-anchor", "start")
+        .attr("fill", color)
+        .attr("opacity", 0.95)
+        .style("font-family", "Caveat Brush, cursive")
+        .style("font-size", "18px")
+        .text(name);
+      return { name, ids, rect, label };
+    }).filter(Boolean);
+    return function syncBlockRects(viz) {
+      shapes.forEach(s => {
+        const padX = s.ids.length === 1 ? 22 : 34;
+        const padY = s.ids.length === 1 ? 22 : 38;
+        let mX = Infinity, MX = -Infinity, mY = Infinity, MY = -Infinity;
+        s.ids.forEach(id => {
+          const n = viz.nodeById[String(id)];
+          if (!n) return;
+          if (n.x < mX) mX = n.x; if (n.x > MX) MX = n.x;
+          if (n.y < mY) mY = n.y; if (n.y > MY) MY = n.y;
+        });
+        if (!isFinite(mX)) return;
+        let x = mX - padX, y = mY - padY;
+        let w = (MX - mX) + 2 * padX, h = (MY - mY) + 2 * padY;
+        const labelW = s.label.node().getComputedTextLength ? s.label.node().getComputedTextLength() : 0;
+        const wanted = labelW + 24;
+        if (w < wanted) { const cx = (mX + MX) / 2; w = wanted; x = cx - w / 2; }
+        s.rect.attr("x", x).attr("y", y).attr("width", w).attr("height", h);
+        // Label above the rect's top edge so a singleton's lone node
+        // (centered inside its ring) cannot obscure the cluster name.
+        s.label.attr("x", x + 6).attr("y", y - 6);
+      });
+    };
+  }
+
+  // ── Profiling · degree sequence ──
+  (function () {
+    const host = document.getElementById("g-deg-cy");
+    if (!host) return;
+    const edges = EDGES.map(e => ({ u: e.u, v: e.v, color: pickInputColor(e), w: 1.2 }));
+    const viz = NETGEN.VIZ.init("g-deg-cy", {
+      showLabels: true, edges, pad: 40, padRight: 340,
+      nodeColor: (id) => BLOCK_COLOR[blockOfNode(parseInt(id, 10))] || COL.OUT,
+    });
+    NETGEN.makeTooltip(viz, document.getElementById("g-deg"));
+
+    NETGEN.mountGxPanel({
+      viz,
+      hostId: "g-deg-cy", prefix: "g-deg",
+      title: "degrees", maxWidth: "26rem",
+      bodyHTML: '<svg id="deg-seq" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet" style="display:block;width:18rem;height:auto"></svg>',
+    });
+    const svg = d3.select("#deg-seq");
+    svg.selectAll("*").remove();
+    const W = 340, H = 420;
+    const PAD = { top: 12, right: 42, bottom: 28, left: 38 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+
+    const ordered = NODES.slice().sort((a, b) => DEGREES[b] - DEGREES[a] || a - b);
+    const maxDeg  = d3.max(NODES, n => DEGREES[n]) || 1;
+    const y = d3.scaleBand().domain(ordered.map(String)).range([0, ih]).padding(0.22);
+    const x = d3.scaleLinear().domain([0, maxDeg + 1]).range([0, iw]);
+
+    g.append("g").call(d3.axisLeft(y).tickSize(0).tickPadding(6))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10px");
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).ticks(4))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10px");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+    {
+      const t = svg.append("text").attr("x", W / 2).attr("y", H - 4)
+        .attr("text-anchor", "middle").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px");
+      t.append("tspan").text("degree d");
+      t.append("tspan").attr("baseline-shift", "sub").style("font-size", "80%").text("u");
+    }
+
+    const gBars = g.append("g");
+    ordered.forEach(n => {
+      const row = gBars.append("g").attr("class", "deg-bar-row").attr("data-id", String(n))
+        .attr("transform", `translate(0,${y(String(n))})`);
+      row.append("rect").attr("class", "hitbox")
+        .attr("x", -PAD.left + 4).attr("y", 0).attr("width", iw + PAD.left + PAD.right - 8)
+        .attr("height", y.bandwidth()).attr("fill", "transparent");
+      row.append("rect").attr("class", "bar")
+        .attr("x", 0).attr("y", 0).attr("width", x(DEGREES[n]))
+        .attr("height", y.bandwidth()).attr("fill", BLOCK_COLOR[blockOfNode(n)] || COL.paper_3).attr("opacity", 0.92);
+      row.append("text").attr("x", x(DEGREES[n]) + 5).attr("y", y.bandwidth() / 2)
+        .attr("dominant-baseline", "central")
+        .attr("font-family", "Special Elite, Courier New, monospace")
+        .attr("font-size", "10px").attr("fill", "#2f3a54").text(DEGREES[n]);
+    });
+
+    NETGEN.bindRowNodeHover(gBars, viz);
+  })();
+
+  // ── Profiling · cluster sizes ──
+  (function () {
+    const host = document.getElementById("g-cs-cy");
+    if (!host) return;
+    host.innerHTML = "";
+    const svg = d3.select(host).append("svg")
+      .attr("class", "viz-svg").attr("viewBox", NETGEN.fitViewBoxAttr())
+      .attr("preserveAspectRatio", "xMidYMid meet");
+    const syncBlockRects = makeBlockRects(svg);
+    const edges = EDGES.map(e => ({ u: e.u, v: e.v, color: pickInputColor(e), w: 1.1 }));
+    const viz = NETGEN.VIZ.init("g-cs-cy", {
+      svg, showLabels: true, edges, pad: 40, padRight: 340,
+      nodeColor: (id) => BLOCK_COLOR[blockOfNode(parseInt(id, 10))] || COL.OUT,
+    });
+    NETGEN.makeTooltip(viz, document.getElementById("g-cs"));
+    syncBlockRects(viz);
+    viz.sim.on("tick.blockRects", () => syncBlockRects(viz));
+
+    NETGEN.mountGxPanel({
+      viz,
+      hostId: "g-cs-cy", prefix: "g-cs",
+      title: "cluster sizes", maxWidth: "26rem",
+      bodyHTML: '<svg id="cs-seq" viewBox="0 0 340 300" preserveAspectRatio="xMidYMid meet" style="display:block;width:18rem;height:auto"></svg>',
+    });
+    const bsvg = d3.select("#cs-seq");
+    bsvg.selectAll("*").remove();
+    const W = 340, H = 300;
+    const PAD = { top: 12, right: 56, bottom: 28, left: 56 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+    const g = bsvg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+
+    const sorted = BLOCK_NAMES.slice().sort((a, b) => BLOCK_SIZE[b] - BLOCK_SIZE[a] || a.localeCompare(b));
+    const maxSize = d3.max(BLOCK_NAMES, n => BLOCK_SIZE[n]) || 1;
+    const y = d3.scaleBand().domain(sorted).range([0, ih]).padding(0.22);
+    const x = d3.scaleLinear().domain([0, maxSize + 1]).range([0, iw]);
+
+    g.append("g").call(d3.axisLeft(y).tickSize(0).tickPadding(6))
+      .selectAll("text").style("fill", "#2f3a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "11px");
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).ticks(4))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10px");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+    {
+      const t = bsvg.append("text").attr("x", W / 2).attr("y", H - 4)
+        .attr("text-anchor", "middle").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px");
+      t.append("tspan").text("cluster size s");
+      t.append("tspan").attr("baseline-shift", "sub").style("font-size", "80%").text("j");
+    }
+
+    const gBars = g.append("g");
+    sorted.forEach(name => {
+      const row = gBars.append("g").attr("class", "cs-bar-row").attr("data-name", name)
+        .attr("transform", `translate(0,${y(name)})`);
+      row.append("rect").attr("class", "hitbox")
+        .attr("x", -PAD.left + 4).attr("y", 0).attr("width", iw + PAD.left + PAD.right - 8)
+        .attr("height", y.bandwidth()).attr("fill", "transparent");
+      row.append("rect").attr("class", "bar")
+        .attr("x", 0).attr("y", 0).attr("width", x(BLOCK_SIZE[name]))
+        .attr("height", y.bandwidth()).attr("fill", BLOCK_COLOR[name]).attr("opacity", 0.92);
+      row.append("text").attr("x", x(BLOCK_SIZE[name]) + 5).attr("y", y.bandwidth() / 2)
+        .attr("dominant-baseline", "central")
+        .attr("font-family", "Special Elite, Courier New, monospace")
+        .attr("font-size", "10px").attr("fill", "#2f3a54").text(BLOCK_SIZE[name]);
+    });
+
+    NETGEN.bindClusterRowHover(gBars, viz, {
+      nodesByName: BLOCK_NODES,
+      nameOfNode: (n) => blockOfNode(n),
+    });
+  })();
+
+  // ── Seeded PRNG helpers ──
+  function seededRng(seed) { return d3.randomLcg(seed); }
+  const keyOf = NETGEN.keyOf;
+  // Page-side cluster id mapping for ABCDKernel: 1=C1, 2=C2, 3=C3, 4=outlier-19,
+  // 5=outlier-20. Singletons (4 and 5) inherit from outlier_mode=singleton.
+  const KERNEL_S = [C1.length, C2.length, C3.length, 1, 1];
+  const SINGLETON_KIDS = [4, 5];
+  const SINGLETON_NODE_BY_KID = { 4: 19, 5: 20 };
+  const NAMED_CLUSTER_OF_KERNEL = { 1: "C1", 2: "C2", 3: "C3" };
+  SINGLETON_KIDS.forEach((kid) => {
+    NAMED_CLUSTER_OF_KERNEL[kid] = "S" + SINGLETON_NODE_BY_KID[kid];
+  });
+  const CLUSTER_COLOR_OF = {
+    C1: COL.edge_intra.C1, C2: COL.edge_intra.C2, C3: COL.edge_intra.C3,
+  };
+  SINGLETON_KIDS.forEach((kid, i) => {
+    CLUSTER_COLOR_OF["S" + SINGLETON_NODE_BY_KID[kid]] =
+      COL.outlier_palette[i % COL.outlier_palette.length];
+  });
+  // Per-node colour lookup. Reads the live (assignment-driven) block
+  // map so downstream walkers reflect a node's currently-assigned
+  // cluster, not its input clustering. Initial LIVE_BLOCK_OF mirrors
+  // input so the first paint is identical to the old behaviour.
+  function nodeColorOf(n) {
+    return BLOCK_COLOR[LIVE_BLOCK_OF[n]] || COL.paper_3;
+  }
+  // Page treats vertex i (1-based) as NODES[i-1]; NODES is the canonical
+  // 1..20 fixture so kernel-vertex == page-node id.
+  const PAGE_NODE_BY_KIDX = NODES.slice();  // 0-based -> page id
+
+  // Shared realization cache. Keyed by (u_seed, stub_seed, xi, overrideEpoch).
+  // pairOverride is module-scoped so a cluster-pair reroll cascades into
+  // every downstream walker (cluster-rewire, bg-pair, bg-rewire, final
+  // edges, deg-cmp) automatically: the kernel re-runs with override stubs
+  // for the affected cluster, and downstream stages derive from the
+  // overridden state.
+  const REAL_CACHE = new Map();
+  const KERNEL_W = NODES.map(n => DEGREES[n]);
+  // Source from LIVE_BLOCK_OF (already populated by the assignment
+  // IIFE's initial canonical trace) so kernel groupings honour the
+  // canonical assignment from first paint, not the input fixture.
+  const KERNEL_CLUSTERS = NODES.map(n => KERNEL_CID_FROM_BLOCK[LIVE_BLOCK_OF[n]]);
+  let pairOverride = {};
+  let overrideEpoch = 0;
+  const onClusterPreChanged = [];
+  function fireClusterPreChanged() {
+    REAL_CACHE.clear();
+    overrideEpoch++;
+    onClusterPreChanged.forEach(fn => fn());
+  }
+  // Module-scoped bg-pair override + listener bus. Hoisted out of the
+  // bg-pair IIFE so bg-rewire can read the effective bgPre and regen
+  // its global-rewire ops when bg-pair rerolls. Each entry replaces
+  // R.bgPre[i] verbatim (same {u,v,loop,multi,crossDup} shape).
+  let bgPairOverride = {};
+  const onBgPairChanged = [];
+  function fireBgPairChanged() { onBgPairChanged.forEach(fn => fn()); }
+  // Cluster-rewire reroll bus: invalidates downstream walkers' cursors
+  // (cluster-rewire output is the clusterPost that bg-pair / bg-rewire
+  // paint as backdrop). bg-pair + bg-rewire subscribe to follow rule.
+  const onClusterRewireChanged = [];
+  function fireClusterRewireChanged() {
+    onClusterRewireChanged.forEach(fn => fn());
+  }
+  // Bg-rewire reroll bus: terminal stage, no walkers downstream — kept
+  // for symmetry / future hooks.
+  const onBgRewireChanged = [];
+  function fireBgRewireChanged() {
+    onBgRewireChanged.forEach(fn => fn());
+  }
+  // Final-swap reroll bus: deg-cmp depends on post-final edges so it
+  // listens here too.
+  const onFinalSwapChanged = [];
+  function fireFinalSwapChanged() {
+    onFinalSwapChanged.forEach(fn => fn());
+  }
+  // Module-scoped accessor to the finalswap walker's effective ops list,
+  // populated by the finalswap IIFE. Lets effectiveFinalEdges apply the
+  // final-stage swaps + drop residue when computing post-pipeline edges.
+  let finalSwapEffectiveOps = null;
+  // Walker stateAtStep handles, exposed at module scope after walker
+  // IIFEs construct them. Lets the degree-preservation panel (and any
+  // future cross-walker consumer) compute effective final edges with
+  // rewire overrides applied — instead of reading R.outDeg which
+  // reflects only the kernel baseline.
+  let crewireStateAtStep = null;
+  let bgrewireStateAtStep = null;
+  function effectiveFinalEdges(R) {
+    const out = [];
+    if (crewireStateAtStep) {
+      crewireStateAtStep(R, Infinity).forEach(e => {
+        if (!e.bad) out.push({ u: e.u, v: e.v });
+      });
+    } else {
+      R.clusterPost.forEach(e => out.push({ u: e.u, v: e.v }));
+    }
+    if (bgrewireStateAtStep) {
+      bgrewireStateAtStep(R, Infinity).forEach(e => {
+        if (!e.bad) out.push({ u: e.u, v: e.v });
+      });
+    } else {
+      (R.bgPost || []).forEach(e => out.push({ u: e.u, v: e.v }));
+    }
+    // Apply final-stage swaps on top of the walker-effective union. Each
+    // op cuts p2 + adds newp1/newp2 (those that kept). Skip ops whose p2
+    // is missing from the effective union (means a crewire/bgrewire local
+    // reroll diverged from the kernel baseline op trace; the kernel-
+    // recorded p2 no longer exists). Residue items were never in the union
+    // so dropping them is a no-op for degree.
+    const ops = finalSwapEffectiveOps || R.finalRewireOps || [];
+    if (ops.length > 0) {
+      const edgeSet = new Set();
+      out.forEach(e => edgeSet.add(keyOf(e.u, e.v)));
+      ops.forEach(op => {
+        const pk = keyOf(op.p2[0], op.p2[1]);
+        if (!edgeSet.has(pk)) return;
+        edgeSet.delete(pk);
+        if (op.keep1) edgeSet.add(keyOf(op.newp1[0], op.newp1[1]));
+        if (op.keep2) edgeSet.add(keyOf(op.newp2[0], op.newp2[1]));
+      });
+      const out2 = [];
+      edgeSet.forEach(k => {
+        const [u, v] = k.split("|").map(Number);
+        out2.push({ u, v });
+      });
+      return out2;
+    }
+    return out;
+  }
+  function effectiveOutDeg(R) {
+    const deg = {};
+    NODES.forEach(n => { deg[n] = 0; });
+    effectiveFinalEdges(R).forEach(e => {
+      deg[e.u] = (deg[e.u] || 0) + 1;
+      deg[e.v] = (deg[e.v] || 0) + 1;
+    });
+    return deg;
+  }
+  function effectiveBgPre(R) {
+    return R.bgPre.map((e, i) => bgPairOverride[i] || e);
+  }
+  function buildRealization(u_seed, stub_seed, xi) {
+    const key = u_seed + "|" + stub_seed + "|" + xi.toFixed(4) + "|" + overrideEpoch;
+    if (REAL_CACHE.has(key)) return REAL_CACHE.get(key);
+    const seedInt = ((u_seed * 1009 + 17) ^ (stub_seed * 131 + 7)) >>> 0;
+    // First pass: kernel without overrides — needed to learn cluster
+    // layouts (member sets, prePair offsets) before we can translate
+    // pairOverride entries into per-cluster stub arrays.
+    const baseCm = ABCDKernel.configModel({
+      clusters: KERNEL_CLUSTERS, w: KERNEL_W, s: KERNEL_S,
+      hasOutliers: false, xi, rng: seededRng(seedInt + 1),
+      traceStages: true,
+    });
+    // Build override stub arrays per cluster from pairOverride. For each
+    // clusterPre position, use override pair if set, otherwise the base
+    // kernel's pair. Flatten to stubs (u, v alternating).
+    let kernelOverrides;
+    if (Object.keys(pairOverride).length > 0) {
+      const clusterStubsByCluster = {};
+      let preIdx = 0;
+      baseCm.stages.perCluster.forEach(stage => {
+        const cname = NAMED_CLUSTER_OF_KERNEL[stage.cluster];
+        if (!cname) return;
+        const stubs = [];
+        for (let i = 0; i < stage.prePairs.length; i++) {
+          const o = pairOverride[preIdx + i];
+          if (o) stubs.push(o.u, o.v);
+          else stubs.push(stage.prePairs[i][0], stage.prePairs[i][1]);
+        }
+        clusterStubsByCluster[stage.cluster] = stubs;
+        preIdx += stage.prePairs.length;
+      });
+      // Lock wInternal to base values so cluster K's recycle (which differs
+      // when override changes K's prePairs) can't shift later clusters'
+      // randround draws. Without this, clusterPre.length drifts across
+      // rerolls and yByNode (per-node spoke count) varies — visible to the
+      // user as a node "growing" or "losing" a spoke between rerolls.
+      const wInternalByVertex = new Array(NODES.length).fill(0);
+      baseCm.stages.perCluster.forEach(stage => {
+        stage.members.forEach((v, idx) => {
+          wInternalByVertex[v - 1] = stage.wInternalPreForward[idx];
+        });
+      });
+      kernelOverrides = { clusterStubsByCluster, wInternalByVertex };
+    }
+    // Second pass: kernel with overrides if any. Fresh rng so recycle /
+    // global stages get fresh draws against the overridden prePairs.
+    const cm = kernelOverrides ? ABCDKernel.configModel({
+      clusters: KERNEL_CLUSTERS, w: KERNEL_W, s: KERNEL_S,
+      hasOutliers: false, xi, rng: seededRng(seedInt + 1),
+      traceStages: true, overrides: kernelOverrides,
+    }) : baseCm;
+    // Use pre-residue-forward wInternal for the y/z display so singletons
+    // show the model's intended split (y = wInternalRaw rounded), not the
+    // post-recycle adjusted value. The downstream stages still consume the
+    // canonical post-forward edges from cm.edges.
+    const wInternalPreForward = new Array(NODES.length).fill(0);
+    cm.stages.perCluster.forEach(stage => {
+      stage.members.forEach((v, idx) => {
+        wInternalPreForward[v - 1] = stage.wInternalPreForward[idx];
+      });
+    });
+    const split = {};
+    NODES.forEach((n, i) => {
+      const w = KERNEL_W[i];
+      const y = wInternalPreForward[i];
+      split[n] = { w, y, z: w - y };
+    });
+    // Per-cluster pre / post snapshots. ABCD treats singleton clusters
+    // as full clusters (outlier_mode=singleton), so their prePairs are
+    // walked too. Singletons get the OUT color since they live as their
+    // own real-but-tiny cluster on the same canvas as C1/C2/C3.
+    const clusterPre = [];
+    const clusterPost = [];
+    // clusterStubLayouts: per cluster, the stub multiset (members + intra
+    // stub count per member) and the slice of clusterPre that cluster
+    // owns. The cluster-pairing random-step uses this to do SBM-style
+    // suffix reseed: keep [0..k-1] verbatim, derive remaining stubs as
+    // wIn[v] minus prefix-consumption, re-shuffle, re-pair the tail.
+    const clusterStubLayouts = [];
+    cm.stages.perCluster.forEach(stage => {
+      const cname = NAMED_CLUSTER_OF_KERNEL[stage.cluster];
+      if (!cname) return;
+      const startInClusterPre = clusterPre.length;
+      stage.prePairs.forEach(([a, b, loop, multi]) => {
+        clusterPre.push({
+          u: PAGE_NODE_BY_KIDX[a - 1], v: PAGE_NODE_BY_KIDX[b - 1],
+          cluster: cname, loop, multi,
+        });
+      });
+      stage.postEdges.forEach(([a, b]) => {
+        clusterPost.push({
+          u: PAGE_NODE_BY_KIDX[a - 1], v: PAGE_NODE_BY_KIDX[b - 1],
+          cluster: cname,
+        });
+      });
+      clusterStubLayouts.push({
+        cname,
+        startInClusterPre,
+        members: stage.members.map(v => PAGE_NODE_BY_KIDX[v - 1]),
+        wIn: stage.wInternalPreForward.slice(),
+        numPairs: stage.prePairs.length,
+      });
+    });
+    const g = cm.stages.global;
+    const bgPre = g.prePairs.map(([a, b, loop, multi, crossDup]) => ({
+      u: PAGE_NODE_BY_KIDX[a - 1], v: PAGE_NODE_BY_KIDX[b - 1],
+      loop, multi, crossDup,
+    }));
+    // bgStubLayout: bg has a single global stub pool. Members = every
+    // page node id, wIn[i] = appearances of members[i] in g.stubsShuffled
+    // (post odd-parity drop). Same suffix-reseed semantics + field names
+    // as the per-cluster layout, so NETGEN.suffixReseed consumes both
+    // shapes uniformly.
+    const bgWIn = NODES.map(() => 0);
+    g.stubsShuffled.forEach(v => {
+      const pageNode = PAGE_NODE_BY_KIDX[v - 1];
+      const idx = NODES.indexOf(pageNode);
+      if (idx >= 0) bgWIn[idx] += 1;
+    });
+    const bgStubLayout = {
+      members: NODES.slice(),
+      wIn: bgWIn,
+      numPairs: bgPre.length,
+    };
+    const bgPost = g.postEdges.map(([a, b]) => ({
+      u: PAGE_NODE_BY_KIDX[a - 1], v: PAGE_NODE_BY_KIDX[b - 1],
+    }));
+    // Per-op rewire trace for the cluster and background phases. Each
+    // op is one outer iteration of the recycle loop: cuts p1 + p2 and
+    // attempts to place newp1 + newp2. `success: false` means the op
+    // could not place anything legal and p1 went back to the queue.
+    function mapPair(p) {
+      if (!p) return null;
+      return [PAGE_NODE_BY_KIDX[p[0] - 1], PAGE_NODE_BY_KIDX[p[1] - 1]];
+    }
+    const clusterRewireOps = [];
+    // Per-node count of cluster-rewire residue stubs forwarded to bg
+    // pool. Each leftover collision {a,b} contributes 1 stub to node a
+    // and 1 stub to node b.
+    const clusterResidueByNode = {};
+    NODES.forEach(n => { clusterResidueByNode[n] = 0; });
+    const clusterResidueColorByNode = {};
+    cm.stages.perCluster.forEach(stage => {
+      const cname = NAMED_CLUSTER_OF_KERNEL[stage.cluster];
+      if (!cname) return;
+      if (stage.rewireOps) {
+        stage.rewireOps.forEach(op => {
+          clusterRewireOps.push({
+            cluster: cname,
+            p1: mapPair(op.p1), p2: mapPair(op.p2),
+            newp1: mapPair(op.newp1), newp2: mapPair(op.newp2),
+            src: op.src, success: !!op.success,
+          });
+        });
+      }
+      (stage.residueEntries || []).forEach(([a, b]) => {
+        const u = PAGE_NODE_BY_KIDX[a - 1];
+        const v = PAGE_NODE_BY_KIDX[b - 1];
+        clusterResidueByNode[u] = (clusterResidueByNode[u] || 0) + 1;
+        clusterResidueByNode[v] = (clusterResidueByNode[v] || 0) + 1;
+        const col = CLUSTER_COLOR_OF[cname] || COL.edge_stage2;
+        clusterResidueColorByNode[u] = col;
+        clusterResidueColorByNode[v] = col;
+      });
+    });
+    const globalRewireOps = (g.rewireOps || []).map(op => ({
+      p1: mapPair(op.p1), p2: mapPair(op.p2),
+      newp1: mapPair(op.newp1), newp2: mapPair(op.newp2),
+      src: op.src, success: !!op.success,
+      placedNewp1: !!op.placedNewp1, placedNewp2: !!op.placedNewp2,
+    }));
+    // Final edges direct from kernel (post-rewire + final-stage union).
+    const clusterForbidden = new Set();
+    clusterPost.forEach(e => clusterForbidden.add(keyOf(e.u, e.v)));
+    const finalEdgeSet = new Set();
+    cm.edges.forEach(([a, b]) => {
+      const u = PAGE_NODE_BY_KIDX[a - 1], v = PAGE_NODE_BY_KIDX[b - 1];
+      finalEdgeSet.add(keyOf(u, v));
+    });
+    const finalEdges = [];
+    finalEdgeSet.forEach(k => {
+      const [u, v] = k.split("|").map(Number);
+      const cluster = clusterForbidden.has(k)
+        ? Object.keys(NAMED_CLUSTER_OF_KERNEL).map(id => NAMED_CLUSTER_OF_KERNEL[id])
+            .find(cn => clusterPost.some(e => e.cluster === cn && keyOf(e.u, e.v) === k))
+        : null;
+      finalEdges.push(cluster ? { u, v, cluster } : { u, v });
+    });
+    const outDeg = {};
+    NODES.forEach(n => { outDeg[n] = 0; });
+    finalEdges.forEach(e => { outDeg[e.u]++; outDeg[e.v]++; });
+    // Cross-cluster final-stage trace: edges/recycle snapshots taken
+    // before the final loop, then per-op records mapped from kernel
+    // 1-based vertex ids back to page node ids. Exposed for the
+    // final-swap walker.
+    const finalStage = cm.stages && cm.stages.final;
+    let finalRewireOps = null, finalEdgesBefore = null, finalRecycleBefore = null, finalResidueLeft = null;
+    if (finalStage) {
+      finalEdgesBefore = (finalStage.edgesBefore || [])
+        .map(([a, b]) => [PAGE_NODE_BY_KIDX[a - 1], PAGE_NODE_BY_KIDX[b - 1]]);
+      finalRecycleBefore = (finalStage.recycleBefore || [])
+        .map(([a, b]) => [PAGE_NODE_BY_KIDX[a - 1], PAGE_NODE_BY_KIDX[b - 1]]);
+      finalResidueLeft = (finalStage.residueLeft || [])
+        .map(([a, b]) => [PAGE_NODE_BY_KIDX[a - 1], PAGE_NODE_BY_KIDX[b - 1]]);
+      finalRewireOps = (finalStage.rewireOps || []).map(op => ({
+        p1: mapPair(op.p1), p2: mapPair(op.p2),
+        newp1: mapPair(op.newp1), newp2: mapPair(op.newp2),
+        coin: op.coin, keep1: !!op.keep1, keep2: !!op.keep2,
+      }));
+    }
+    const RR = {
+      split, clusterPre, clusterPost, bgPre, bgPost, finalEdges, outDeg,
+      clusterRewireOps, globalRewireOps,
+      finalRewireOps, finalEdgesBefore, finalRecycleBefore, finalResidueLeft,
+      clusterResidueByNode, clusterResidueColorByNode,
+      clusterStubLayouts, bgStubLayout,
+      seed: stub_seed, residueCount: cm.residueAfter,
+    };
+    REAL_CACHE.set(key, RR);
+    return RR;
+  }
+
+  // ── Generation · weight split slider with re-roll ──
+  (function () {
+    const svg = d3.select("#xi-bars");
+    svg.selectAll("*").remove();
+    const NODES_SORTED = [...C1, ...C2, ...C3, ...OUT_N];
+    const W = 640, H = 460;
+    const PAD = { top: 30, right: 20, bottom: 44, left: 40 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+
+    const x = d3.scaleBand().domain(NODES_SORTED.map(String)).range([0, iw]).padding(0.15);
+    const maxDeg = d3.max(Object.values(DEGREES));
+    const y = d3.scaleLinear().domain([0, maxDeg]).range([ih, 0]);
+
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).tickSize(0).tickPadding(8))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10px");
+    g.append("g").call(d3.axisLeft(y).ticks(maxDeg).tickSize(-iw).tickFormat(d => d))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10px");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+    svg.append("text").attr("x", W / 2).attr("y", H - 8)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace")
+      .style("font-size", "10.5px").text("node (cluster-sorted)");
+
+    const bars = g.selectAll(".bar").data(NODES_SORTED).join("g")
+      .attr("class", "bar").attr("transform", d => `translate(${x(String(d))},0)`);
+    bars.append("rect").attr("class", "internal")
+      .attr("x", 0).attr("y", ih).attr("width", x.bandwidth()).attr("height", 0)
+      .attr("fill", d => BLOCK_COLOR[LIVE_BLOCK_OF[d]] || COL.paper_3).attr("opacity", 0.92);
+    bars.append("rect").attr("class", "external")
+      .attr("x", 0).attr("y", ih).attr("width", x.bandwidth()).attr("height", 0)
+      .attr("fill", COL.edge_drop).attr("opacity", 0.78);
+    bars.append("text").attr("class", "leader-mark")
+      .attr("x", x.bandwidth() / 2).attr("text-anchor", "middle")
+      .attr("dominant-baseline", "central")
+      .attr("font-family", "Caveat Brush, cursive")
+      .attr("font-size", "13px").attr("fill", COL.amber)
+      .text("★").style("display", "none");
+    // Pre-rounding intra-target line: y_u = (1 - xi) * d_u. Tick sits
+    // between the cluster-coloured stack (height ŷ_u, integer-rounded
+    // toward this line) and the red top (which extends up to d_u).
+    bars.append("line").attr("class", "ymark")
+      .attr("x1", 1).attr("x2", x.bandwidth() - 1)
+      .attr("stroke", "#1b2033").attr("stroke-width", 1.4)
+      .attr("stroke-dasharray", "3 2");
+
+    const sumExt = document.getElementById("ext-tot");
+    const sumDeg = document.getElementById("deg-tot");
+    const xiTgt  = document.getElementById("xi-tgt");
+    const xiReal = document.getElementById("xi-real");
+
+    function update() {
+      const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
+      // Per-cluster leader = max-degree member under current LIVE_BLOCK_OF.
+      // Used to mark the bar that took the deterministic-floor + parity bump
+      // instead of the standard Bernoulli stochastic round.
+      const leaderByBlock = {};
+      NODES.forEach(nid => {
+        const b = LIVE_BLOCK_OF[nid];
+        const cur = leaderByBlock[b];
+        if (!cur || DEGREES[nid] > DEGREES[cur]) leaderByBlock[b] = nid;
+      });
+      let totZ = 0, totW = 0;
+      bars.each(function (nid) {
+        const s = R.split[nid];
+        totZ += s.z; totW += s.w;
+        const isLeader = leaderByBlock[LIVE_BLOCK_OF[nid]] === nid;
+        d3.select(this).select(".internal")
+          .attr("fill", BLOCK_COLOR[LIVE_BLOCK_OF[nid]] || COL.paper_3)
+          .transition().duration(200)
+          .attr("y", y(s.y)).attr("height", ih - y(s.y));
+        d3.select(this).select(".external")
+          .transition().duration(200)
+          .attr("y", y(s.y + s.z))
+          .attr("height", y(s.y) - y(s.y + s.z));
+        d3.select(this).select(".leader-mark")
+          .style("display", isLeader ? null : "none")
+          .attr("y", y(s.w) - 10);
+        const yTarget = (1 - SYNTHETIC_XI) * s.w;
+        d3.select(this).select(".ymark")
+          .transition().duration(200)
+          .attr("y1", y(yTarget)).attr("y2", y(yTarget));
+      });
+      sumExt.textContent = totZ;
+      sumDeg.textContent = totW;
+      xiTgt.textContent = SYNTHETIC_XI.toFixed(3);
+      xiReal.textContent = (totZ / totW).toFixed(3);
+    }
+    document.getElementById("u-reroll").addEventListener("click", rerollU);
+    onUChanged.push(update);
+    update();
+  })();
+
+  // ── Generation · 4 stage walkers, one viz panel each ──
+  // Each stage scopes its own NETGEN.VIZ.init to its own canvas.
+  // Pairing stages walk per-pair (pick + place sub-steps); rewire
+  // stages walk pre → cut → place. The xi slider + stub/U rerolls
+  // reconfigure all 4 walkers since the trace lengths shift with seed.
+
+  function dimAllExcept(viz, keepIds) {
+    const keep = new Set((keepIds || []).map(Number));
+    viz.eachNode(n => {
+      const id = parseInt(n.id, 10);
+      if (keep.has(id)) viz.removeNodeClass(n.id, "dim");
+      else viz.addNodeClass(n.id, "dim");
+    });
+  }
+  function clearDimPick(viz) {
+    viz.clearAllNodeClass("dim");
+    viz.clearAllNodeClass("pick");
+  }
+
+  // Shared cluster-nav arrows for any walker that wants per-cluster
+  // ‹/› navigation. Boundaries are walker-idx values where each
+  // cluster's last op (pair or rewire) has just been placed; the
+  // walker's last reachable idx (ctl.total - 1) is the implicit
+  // final boundary, idx 0 the implicit first. Arrows snap-jump via
+  // ctl.set; a MutationObserver on the step-counter keeps the nav
+  // disable-state in sync after walker-driven idx changes (since
+  // stepController's internal refreshButtons does not call the
+  // ctl.refreshButtons accessor).
+  function attachClusterNav(opts) {
+    const { ctl, hostId, prefix, getLocked, boundariesFn, curElId } = opts;
+    const host = document.getElementById(hostId);
+    if (!host) return;
+    function mkBtn(side, label, aria) {
+      const b = document.createElement("button");
+      b.className = "cluster-nav cluster-nav-" + side;
+      b.id = prefix + "-cluster-" + side;
+      b.type = "button";
+      b.setAttribute("aria-label", aria);
+      b.textContent = label;
+      return b;
+    }
+    const prev = mkBtn("prev", "‹", "previous cluster");
+    const next = mkBtn("next", "›", "next cluster");
+    host.appendChild(prev);
+    host.appendChild(next);
+    function refresh() {
+      const starts = boundariesFn();
+      const cur = ctl.idx;
+      const locked = !!(getLocked && getLocked());
+      // Drop-stale (cur > last cluster boundary) is outside the
+      // cluster sequence; cluster-skip arrows don't apply there.
+      const maxStart = starts.length ? starts[starts.length - 1] : -1;
+      const offCluster = cur > maxStart;
+      prev.disabled = locked || offCluster || cur <= 0;
+      next.disabled = locked || offCluster || !starts.some(s => s > cur);
+    }
+    if (opts.bindLockChange) opts.bindLockChange(refresh);
+    function jump(forward) {
+      if (getLocked && getLocked()) return;
+      const starts = boundariesFn();
+      if (!starts.length) return;
+      const cur = ctl.idx;
+      let target;
+      if (forward) {
+        target = starts.find(s => s > cur);
+        // No further boundary: stop at last cluster's end. Drop-stale
+        // is reached via Next, not the cluster-skip arrow.
+        if (target == null) return;
+      } else {
+        const earlier = starts.filter(s => s < cur);
+        target = earlier.length ? earlier[earlier.length - 1] : 0;
+      }
+      ctl.setSnap(target);
+      refresh();
+    }
+    prev.addEventListener("click", () => jump(false));
+    next.addEventListener("click", () => jump(true));
+    const curEl = document.getElementById(curElId);
+    if (curEl && typeof MutationObserver !== "undefined") {
+      new MutationObserver(refresh)
+        .observe(curEl, { childList: true, characterData: true, subtree: true });
+    }
+    refresh();
+  }
+
+
+  // Stage 1: cluster pairing — mounted via shared factory.
+  NETGEN.mountClusterPairWalker({
+    hostId: "g-cpair",
+    getR: () => buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI),
+    positions: LIVE_POS_OF,
+    nodeColorOf: (id) => nodeColorOf(id),
+    clusterColorOf: (cname) => CLUSTER_COLOR_OF[cname],
+    stage2Color: COL.edge_stage2,
+    dropColor: COL.edge_drop,
+    mintColor: COL.mint || "#4e7a3a",
+    stubSeedFn: () => STUB_SEED,
+    pairOverride,
+    fireClusterPreChanged,
+    resetEpoch: () => { REAL_CACHE.clear(); overrideEpoch++; },
+    busSubscriptions: [onStubChanged, onUChanged],
+    introDesc: "Each node sprouts \\(\\hat y_u\\) intra-cluster stubs in its cluster's colour (current \\(\\xi = " + SYNTHETIC_XI.toFixed(3) + "\\)). The kernel shuffles each cluster's stubs and pairs them adjacent in shuffled order.",
+    stepDescFn: (cur, j, _len, tag) => {
+      const tag2 = cur.loop ? " (self-loop)" : j.bad ? " (parallel of an existing edge)" : "";
+      return "Cluster " + cur.cluster + ": stubs of <b>" + cur.u + "</b> and <b>" + cur.v + "</b> pair up" + tag2 + ". The 2 mint spokes are the stubs just consumed; remaining stubs around each node await later pairs.";
+    },
+    navBoundariesFn: () => {
+      const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
+      return R.clusterStubLayouts
+        .filter(c => c.numPairs > 0)
+        .map(c => c.startInClusterPre + c.numPairs);
+    },
+  });
+
+  // Stage 2: cluster rewire — per-op walker. Each step is one outer
+  // iteration of the recycle loop: cuts p1 + p2 (solid red flash), then
+  // places newp1 + newp2 (fresh stroke). Non-participating nodes dim.
+  // Step 0 = pre-rewire snapshot; step k = state after op (k - 1).
+  (function () {
+    const viz = NETGEN.VIZ.init("g-crewire-cy", {
+      showLabels: true, edges: [], pinned: true,
+      positions: LIVE_POS_OF,
+      nodeColor: (id) => nodeColorOf(parseInt(id, 10)),
+    });
+    let lastStep = 0;
+    let lockBusy = false;
+    let ctl = null;
+    const crewireLockListeners = [];
+    function setLock(b) {
+      if (lockBusy === b) return;
+      lockBusy = b;
+      if (ctl) ctl.refreshButtons();
+      crewireLockListeners.forEach(fn => fn(b));
+    }
+    const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setLock });
+    const byNodeFromList = (list) => {
+      // Base count: every entry's two endpoints contribute 1 stub each.
+      const cfg = NETGEN.spokeLayer.byNodeFromEdges(viz, list,
+        n => nodeColorOf(parseInt(n.id, 10)));
+      // At the drop-stale step, the residue's edge has been removed
+      // from `list` (so it doesn't draw as a red edge anymore), but
+      // its 2 stubs need to remain visible as unpaired spokes around
+      // each endpoint — the cluster-rewire residue stubs that the
+      // kernel forwards into the bg pool.
+      crewireDropStaleResidue.forEach(e => {
+        const uk = String(e.u), vk = String(e.v);
+        if (cfg[uk]) cfg[uk].count = (cfg[uk].count || 0) + 1;
+        else if (cfg[e.u]) cfg[e.u].count = (cfg[e.u].count || 0) + 1;
+        if (cfg[vk]) cfg[vk].count = (cfg[vk].count || 0) + 1;
+        else if (cfg[e.v]) cfg[e.v].count = (cfg[e.v].count || 0) + 1;
+      });
+      return cfg;
+    };
+    function placedEntry(e) {
+      return {
+        u: e.u, v: e.v, id: e.id, bad: !!e.bad,
+        color: e.bad ? COL.edge_drop : (CLUSTER_COLOR_OF[e.cluster] || COL.edge_stage2),
+        badColor: COL.edge_drop,
+      };
+    }
+    function fourEndpoints(op) {
+      const f = new Set();
+      [op && op.p1, op && op.p2, op && op.newp1, op && op.newp2].forEach(p => {
+        if (p) { f.add(p[0]); f.add(p[1]); }
+      });
+      return [...f];
+    }
+    // Per-cluster ops override: { [cluster]: newOps[] } replaces the
+    // base ops for that cluster, in source order. effectiveOps merges.
+    let opsOverride = null;
+    function effectiveOps(R) {
+      if (!opsOverride) return R.clusterRewireOps;
+      const out = [];
+      const groupedNew = Object.assign({}, opsOverride);
+      // Walk base ops; when entering a cluster with override, drop the
+      // base ops for that cluster and splice in the override ops.
+      const seenCluster = new Set();
+      R.clusterRewireOps.forEach(op => {
+        if (groupedNew[op.cluster]) {
+          if (!seenCluster.has(op.cluster)) {
+            seenCluster.add(op.cluster);
+            groupedNew[op.cluster].forEach(o => out.push(o));
+          }
+          // Skip all base ops for this cluster.
+        } else {
+          out.push(op);
+        }
+      });
+      return out;
+    }
+    let rewireRerollNonce = 0;
+    function rerollClusterRewireRange(startG, endG) {
+      const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
+      rewireRerollNonce += 1;
+      const next = NETGEN.rerollClusterRewireRange({
+        R, baseOps: effectiveOps(R), startG, endG,
+        prePairsByName: NETGEN.clusterPrePairsByName,
+        replayFromOps: ABCDKernel.replayClusterRewireFromOps,
+        rngFor: clusterSeed =>
+          seededRng(STUB_SEED * 9173 + rewireRerollNonce * 31 + clusterSeed * 113),
+        currentByCluster: opsOverride,
+        storeShape: "byCluster",
+      });
+      if (next) opsOverride = next;
+    }
+    function sameXY(e, p) {
+      return (e.u === p[0] && e.v === p[1]) || (e.u === p[1] && e.v === p[0]);
+    }
+    // Stable per-instance edge list at step k. Each clusterPre entry
+    // gets its own id ("cr-pre-N") so parallels and self-loops survive
+    // as distinct entries; new edges from successful ops append with
+    // their own ids. Unsuccessful ops requeue p1, so they leave the
+    // list untouched.
+    // cluster-rewire: failed ops are no-ops (kernel inner loop tries
+    // every candidate; if none clears, p1 is requeued without cutting).
+    // The list is therefore untouched on failure.
+    const stateAtStepRaw = NETGEN.makeRewireStateAtStep({
+      prePairsOf: R => R.clusterPre,
+      opsOf: R => effectiveOps(R),
+      idPrefix: "cr",
+      entryDecorator: (entry, e) => Object.assign(entry, { cluster: e.cluster }),
+      applyOp: NETGEN.abcdClusterRewireApplyOp,
+      // Keep bad entries through drop-stale so we can compute the
+      // residue stub counts. The wrapper below filters them out of the
+      // placed list and bumps byNode counts so the spoke layer draws
+      // unpaired stubs at the affected endpoints (the residue is
+      // forwarded to the bg pool, not dropped from the model).
+      keepBadAtDropStale: true,
+    });
+    let crewireDropStaleResidue = [];
+    function stateAtStep(R, k) {
+      const ops = effectiveOps(R);
+      const isDropStale = k > ops.length;
+      const list = stateAtStepRaw(R, k);
+      if (isDropStale) {
+        crewireDropStaleResidue = list.filter(e => e.bad).slice();
+        return list.filter(e => !e.bad);
+      }
+      crewireDropStaleResidue = [];
+      return list;
+    }
+    crewireStateAtStep = stateAtStep;
+    function paintLabelDesc(step, ops, isDropStale) {
+      clearDimPick(viz);
+      const opsCount = ops.length;
+      const labelEl = document.getElementById("g-crewire-stage");
+      const descEl = document.getElementById("g-crewire-desc");
+      const op = (step > 0 && !isDropStale) ? ops[step - 1] : null;
+      if (step === 0) {
+        labelEl.textContent = "pre-rewire";
+        descEl.innerHTML = '<span class="st">pre-rewire</span> &middot; ' +
+          opsCount + " collision op" + (opsCount === 1 ? "" : "s") +
+          " ahead. Solid red = self-loop or parallel.";
+      } else if (isDropStale) {
+        labelEl.textContent = "cut to stubs";
+        descEl.innerHTML = '<span class="st">cut to stubs</span> &middot; ' +
+          "Bad edges that survived every rewire attempt are cut from the cluster output, but their endpoints' stubs remain as unpaired spokes. Those stubs flow into the background pool in the next stage.";
+      } else {
+        const tag = op.success
+          ? (op.src === "valid" ? "swap with valid edge" : "swap with recycled pair")
+          : "no legal swap; p1 requeued";
+        labelEl.textContent = "op " + step + " / " + opsCount + " · cluster " + op.cluster;
+        const desc = op.success
+          ? tag + ". Cut <code>" + op.p1.join("–") + "</code> + <code>" + (op.p2 ? op.p2.join("–") : "?") +
+            "</code>; place <code>" + op.newp1.join("–") + "</code> + <code>" + op.newp2.join("–") + "</code>."
+          : tag + ". Outer iteration could not find a legal partner for <code>" + op.p1.join("–") +
+            "</code>; pushed back onto the recycle queue.";
+        descEl.innerHTML = '<span class="st">op ' + step + '</span> &middot; ' + desc;
+      }
+    }
+    const render = NETGEN.makeRewireRender({
+      viz, spokes, prefix: "g-crewire",
+      R: () => buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI),
+      opsOf: R => effectiveOps(R),
+      stateAtStep, placedEntry, paintLabelDesc, byNodeFromList,
+      // Force playMany on the drop-stale step (removes-only) so the
+      // bad edges run the normal "cut" bridge-retract animation,
+      // leaving spokes at the endpoints — the residue stubs the kernel
+      // forwards to the bg pool.
+      forcePlayManyOnRemovesOnly: true,
+      getLastStep: () => lastStep,
+      setLastStep: (s) => { lastStep = s; },
+    });
+    function totalForCurrent() {
+      const xi = SYNTHETIC_XI;
+      const R = buildRealization(U_SEED, STUB_SEED, xi);
+      return 2 + effectiveOps(R).length;
+    }
+    // RandStep re-spins ops [idx-1..end] across touched clusters via
+    // spokes.playMany; returns NETGEN.SKIP so controller skips re-render.
+    // RandAll re-spins ops [0..end].
+    ctl = NETGEN.rerollWalker({
+      prefix: "g-crewire",
+      total: totalForCurrent(),
+      totalForCurrent,
+      onRender: render,
+      getLocked: () => lockBusy,
+      // Drop-stale at total-1: no op range to spin there.
+      randStepDisabledAt: (idx) => idx >= totalForCurrent() - 1,
+      onRandStep: idx => {
+        if (idx <= 0) return;
+        const xi = SYNTHETIC_XI;
+        const R = buildRealization(U_SEED, STUB_SEED, xi);
+        const beforeList = stateAtStep(R, idx);
+        const oldOp = effectiveOps(R)[idx - 1];
+        rerollClusterRewireRange(idx - 1, effectiveOps(R).length);
+        const afterList = stateAtStep(R, idx);
+        const op = R.clusterRewireOps[idx - 1] && effectiveOps(R)[idx - 1];
+        const labelEl = document.getElementById("g-crewire-stage");
+        const descEl = document.getElementById("g-crewire-desc");
+        if (op) {
+          const tag = op.success
+            ? (op.src === "valid" ? "swap with valid edge" : "swap with recycled pair")
+            : "no legal swap; p1 requeued";
+          labelEl.textContent = "op " + idx + " · re-rolled · " + tag;
+          const undoBit = oldOp && oldOp.success
+            ? "Undo prior swap (cut <code>" + oldOp.newp1.join("–") + "</code> + <code>" +
+              oldOp.newp2.join("–") + "</code>, restore <code>" + oldOp.p1.join("–") + "</code> + <code>" +
+              (oldOp.p2 ? oldOp.p2.join("–") : "?") + "</code>); then "
+            : oldOp
+              ? "Undo prior no-op; then "
+              : "";
+          const newBit = op.success
+            ? "cut <code>" + op.p1.join("–") + "</code> + <code>" + (op.p2 ? op.p2.join("–") : "?") +
+              "</code>; place <code>" + op.newp1.join("–") + "</code> + <code>" + op.newp2.join("–") + "</code>."
+            : "no legal partner for <code>" + op.p1.join("–") +
+              "</code>; pushed back onto the recycle queue.";
+          descEl.innerHTML = '<span class="st">op ' + idx + '</span> &middot; ' + undoBit + newBit;
+        }
+        clearDimPick(viz);
+        // Diff by id AND (u,v): RandStep keeps op-indexed ids stable
+        // (cr-op<i>-1 / -2) but coin flips can swap newp1/newp2's u,v
+        // under the same slot — id-only diff would miss that.
+        const { removes, adds } = NETGEN.diffPlacedById(beforeList, afterList, placedEntry);
+        const byNode = byNodeFromList(afterList);
+        spokes.playMany(removes, adds, () => {}, { byNode });
+        lastStep = idx;
+        render.setLastRendered(afterList);
+        return NETGEN.SKIP;
+      },
+      onRandAll: idx => {
+        if (idx <= 0) return;
+        const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
+        rerollClusterRewireRange(0, effectiveOps(R).length);
+      },
+      onAfterRandAll: () => fireClusterRewireChanged(),
+    });
+    function reconfigKeep() {
+      opsOverride = null;
+      NETGEN.followCursor(ctl, totalForCurrent());
+    }
+    onStubChanged.push(reconfigKeep);
+    onUChanged.push(reconfigKeep);
+    onClusterPreChanged.push(reconfigKeep);
+
+    attachClusterNav({
+      ctl,
+      hostId: "g-crewire-cy",
+      prefix: "g-crewire",
+      curElId: "g-crewire-cur",
+      getLocked: () => lockBusy,
+      bindLockChange: (cb) => crewireLockListeners.push(cb),
+      boundariesFn: () => {
+        const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
+        const ops = effectiveOps(R);
+        const bnds = [];
+        for (let i = 1; i < ops.length; i++) {
+          if (ops[i].cluster !== ops[i - 1].cluster) bnds.push(i);
+        }
+        if (ops.length) bnds.push(ops.length);
+        return bnds;
+      },
+    });
+  })();
+
+  // Stage 3: background pairing (single-step-per-pair; ẑ_u spokes per
+  // node; cluster post-rewire backdrop in faded grey).
+  (function () {
+    const viz = NETGEN.VIZ.init("g-bgpair-cy", {
+      showLabels: true, edges: [], pinned: true,
+      positions: LIVE_POS_OF,
+      nodeColor: (id) => nodeColorOf(parseInt(id, 10)),
+    });
+    let lockOverride = false;
+    let ctl = null;
+    function setRandLock(locked) {
+      lockOverride = locked;
+      if (ctl) ctl.refreshButtons();
+    }
+    const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setRandLock });
+    function totalFromR(R) { return 1 + R.bgPre.length; }
+    function effectiveBg(R, i) { return bgPairOverride[i] || R.bgPre[i]; }
+    let bgpairRerollNonce = 0;
+    function rollBgPair(R, idx) {
+      const lay = R.bgStubLayout;
+      if (idx >= lay.numPairs) return { snap: false };
+      const prefix = [];
+      for (let i = 0; i < idx; i++) prefix.push(effectiveBg(R, i));
+      const clusterEdgeKeys = new Set(R.clusterPost.map(e => keyOf(e.u, e.v)));
+      bgpairRerollNonce += 1;
+      const fresh = seededRng(STUB_SEED * 5779 + bgpairRerollNonce * 47 + idx * 113);
+      const newTail = NETGEN.stubPoolReseed({
+        layout: lay, prefix, rng: fresh,
+        classify: (a, b, ctx) => {
+          const loop = (a === b);
+          const k = keyOf(a, b);
+          const multi = !loop && ctx.localEdges.has(k);
+          const crossDup = !loop && !multi && clusterEdgeKeys.has(k);
+          if (!loop && !multi && !crossDup) ctx.add(k);
+          return { u: a, v: b, loop, multi, crossDup };
+        },
+      });
+      newTail.forEach((np, i) => { bgPairOverride[idx + i] = np; });
+      spokes.markReroll();
+      fireBgPairChanged();
+      return { snap: false };
+    }
+    function rollBgPrefix(R, kIncl) {
+      const vals = [];
+      for (let i = 0; i <= kIncl; i++) vals.push(effectiveBg(R, i));
+      for (let k = vals.length - 1; k > 0; k--) {
+        const r = Math.floor(Math.random() * (k + 1));
+        [vals[k], vals[r]] = [vals[r], vals[k]];
+      }
+      for (let i = 0; i <= kIncl; i++) bgPairOverride[i] = vals[i];
+      fireBgPairChanged();
+    }
+
+    let lastTargetList = null;
+    let firstRender = true;
+    function render(step, snap) {
+      const xi = SYNTHETIC_XI;
+      const R = buildRealization(U_SEED, STUB_SEED, xi);
+      const total = 1 + R.bgPre.length;
+      if (step >= total) step = total - 1;
+      // Backdrop: cluster-post rides in the placed prefix with noSlot
+      // so it shares dupInfo with bg-pair edges (parallels at the
+      // same (u,v) fan symmetrically). cy edge layer stays empty.
+      viz.setEdges([]);
+      // byNode counts come from bgPre's actual incidence (mirror of
+      // cluster-pair). split[n].z is the pre-parity target; the
+      // sampled pool may drop a stub or two to even out and we
+      // don't want orphan spokes hanging off the last walker frame.
+      // Per-slot colours: residue stubs forwarded from cluster-rewire
+      // wear that cluster's colour; the rest (genuine z_u stubs) wear
+      // the dark "ink" colour to read as plain bg-split stubs.
+      const BG_DEFAULT_COLOR = COL.paper || "#1b2033";
+      const cfg = NETGEN.spokeLayer.byNodeFromEdges(viz, R.bgPre, BG_DEFAULT_COLOR);
+      const residueByNode = R.clusterResidueByNode || {};
+      const residueColorByNode = R.clusterResidueColorByNode || {};
+      Object.keys(cfg).forEach(nidStr => {
+        const slot = cfg[nidStr]; if (!slot) return;
+        const nidNum = parseInt(nidStr, 10);
+        const resCount = residueByNode[nidNum] || 0;
+        if (resCount <= 0) return;
+        const resColor = residueColorByNode[nidNum] || slot.color;
+        const colors = new Array(slot.count).fill(slot.color);
+        // Place residue stubs in the trailing slots so they sit at
+        // adjacent angles and read as a contiguous "block" of
+        // cluster-coloured spokes around the node.
+        for (let i = 0; i < resCount && i < slot.count; i++) {
+          colors[slot.count - 1 - i] = resColor;
+        }
+        slot.colors = colors;
+      });
+      // Cluster-post keys = duplicate-detection set for crossDup colour.
+      const clusterKeys = {};
+      R.clusterPost.forEach(e => { clusterKeys[keyOf(e.u, e.v)] = true; });
+      const effPairs = [];
+      for (let i = 0; i < step; i++) effPairs.push(effectiveBg(R, i));
+      const isExtraBad = (e, k) => !!e.crossDup || !!clusterKeys[k];
+      const placed = NETGEN.walkerMarkPlaced(effPairs.slice(0, step - 1), {
+        idPrefix: "bp-",
+        goodColor: COL.edge_inter,
+        badColor: COL.edge_drop,
+        keyOf, isExtraBad,
+      });
+      let just = null;
+      let bridgeColor = COL.edge_inter;
+      const j = NETGEN.walkerMarkJust(effPairs, step, { keyOf, isExtraBad });
+      if (j) {
+        just = {
+          u: j.e.u, v: j.e.v, color: bridgeColor, bad: j.bad,
+          badColor: j.bad ? COL.edge_drop : null,
+        };
+      }
+      const backdrop = NETGEN.clusterPostBackdrop(R, {
+        idPrefix: "bp-cluster-",
+        colorOf: e => CLUSTER_COLOR_OF[e.cluster] || COL.edge_stage2,
+      });
+      // Cumulative target list for the snap-jump diff path: backdrop +
+      // placed entries + just-as-placed-entry with the id it would carry
+      // when settled (bp-${step-1}). Lets multi-step jumps run one
+      // chained playMany so every changed pair animates concurrently.
+      const targetList = backdrop.concat(placed);
+      if (just) {
+        targetList.push({
+          u: just.u, v: just.v, color: bridgeColor,
+          bad: just.bad, badColor: just.badColor,
+          id: "bp-" + (step - 1),
+        });
+      }
+      if (firstRender) {
+        spokes.snapToState({ byNode: cfg, placed: targetList, just: null, justSeq: step });
+        firstRender = false;
+      } else if (snap) {
+        if (lastTargetList) {
+          spokes.snapToState({ byNode: cfg, placed: lastTargetList, just: null, justSeq: -1 });
+        }
+        NETGEN.playManyDiff(spokes, lastTargetList || [], targetList, null, {
+          byNode: cfg,
+          onEmpty: () => spokes.snapToState({ byNode: cfg, placed: targetList, just: null, justSeq: step }),
+        });
+      } else {
+        NETGEN.snapOrSync(spokes, { byNode: cfg, placed: backdrop.concat(placed), just, justSeq: step, bridgeColor }, false);
+      }
+      lastTargetList = targetList;
+
+      const totEl = document.getElementById("g-bgpair-total");
+      const curEl = document.getElementById("g-bgpair-cur");
+      if (totEl) totEl.textContent = String(total - 1);
+      if (curEl) curEl.textContent = String(step);
+      let label, desc;
+      if (step === 0) {
+        label = "background stubs ready";
+        desc = "Every node sprouts its background stubs (cobalt). Faded edges in the back are the cluster phase's output.";
+      } else {
+        const cur = j.e;
+        const tag = cur.loop ? " (self-loop)"
+          : cur.crossDup ? " (duplicate of a cluster edge)"
+          : j.bad ? " (parallel)" : "";
+        label = "bg pair " + step + " / " + R.bgPre.length;
+        desc = "Stubs of <b>" + cur.u + "</b> and <b>" + cur.v + "</b> pair up" + tag + ". Mint spokes = the just-consumed pair; remaining spokes await later draws.";
+      }
+      document.getElementById("g-bgpair-stage").textContent = label;
+      const descEl = document.getElementById("g-bgpair-desc");
+      descEl.innerHTML = '<span class="st">' + label + "</span> &middot; " + desc;
+      NETGEN.retypeset(descEl);
+    }
+
+    const xi0 = SYNTHETIC_XI;
+    const R0 = buildRealization(U_SEED, STUB_SEED, xi0);
+    ctl = NETGEN.rerollWalker({
+      prefix: "g-bgpair",
+      total: totalFromR(R0),
+      totalForCurrent: () => totalFromR(buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI)),
+      getLocked: () => lockOverride,
+      onRender: render,
+      onRandStep: idx => {
+        if (idx <= 0) return false;
+        const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
+        return rollBgPair(R, idx - 1).snap;
+      },
+      // random all: in-stage reseed of the bg pair pool from position 0,
+      // keeping every other stage's seed untouched.
+      onRandAll: idx => {
+        if (idx <= 0) return;
+        bgPairOverride = {};
+        const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
+        rollBgPair(R, 0);
+      },
+    });
+    function reTotalReset() {
+      bgPairOverride = {};
+      fireBgPairChanged();
+      const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
+      ctl.reconfigure(totalFromR(R));
+    }
+    function reTotalKeep() {
+      bgPairOverride = {};
+      fireBgPairChanged();
+      const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
+      NETGEN.followCursor(ctl, totalFromR(R));
+    }
+    onStubChanged.push(reTotalReset);
+    onUChanged.push(reTotalReset);
+    onClusterPreChanged.push(reTotalKeep);
+    // crewire RandAll changes clusterPost (bg-pair backdrop + crossDup
+    // detection input). Apply follow rule on bg-pair.
+    onClusterRewireChanged.push(reTotalKeep);
+  })();
+
+  // Stage 4: background rewire — per-op walker. Mirrors g-crewire's
+  // shape on the global pool. Cluster post-rewire backdrop renders
+  // faint behind the bg state. Cross-cluster collisions (`crossDup`)
+  // surface as solid red in the seed snapshot.
+  (function () {
+    const viz = NETGEN.VIZ.init("g-bgrewire-cy", {
+      showLabels: true, edges: [], pinned: true,
+      positions: LIVE_POS_OF,
+      nodeColor: (id) => nodeColorOf(parseInt(id, 10)),
+    });
+    let lastStep = 0;
+    let lockBusy = false;
+    let ctl = null;
+    function setLock(b) {
+      if (lockBusy === b) return;
+      lockBusy = b;
+      if (ctl) ctl.refreshButtons();
+    }
+    const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setLock });
+
+    // Per-op global-rewire override. null = use kernel's R.globalRewireOps
+    // verbatim. Otherwise an array that fully replaces the op trace; the
+    // page never partially mutates an override (a reroll always replays
+    // from a deterministic prefix and overwrites the whole array).
+    let opsOverride = null;
+    let rewireRerollNonce = 0;
+    function effectiveOps(R) { return opsOverride || R.globalRewireOps; }
+    // [[u, v, loop, multi, crossDup], ...] in page-node-id space, the
+    // shape ABCDKernel.replayGlobalRewireFromOps consumes. Reads the
+    // bg-pair stage's effective pre-state so a bg-pair reroll feeds
+    // into bg-rewire's initial state and op trace.
+    function rerollGlobalRewireRange(startG, endG) {
+      const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
+      const baseOps = effectiveOps(R);
+      const lo = Math.max(0, startG);
+      const hi = Math.min(endG, baseOps.length);
+      if (lo >= hi) return;
+      rewireRerollNonce += 1;
+      const opsBefore = baseOps.slice(0, lo);
+      const fresh = seededRng(STUB_SEED * 7919 + rewireRerollNonce * 41);
+      const newOps = ABCDKernel.replayGlobalRewireFromOps(
+        NETGEN.globalPrePairsTuples(effectiveBgPre(R)),
+        NETGEN.clusterEdgeEkeys(R.clusterPost),
+        opsBefore, fresh,
+      );
+      opsOverride = opsBefore.concat(newOps);
+    }
+
+    // bg-rewire: each newp evaluated independently against globalEdges
+    // + clusterEdgeKeys + self-loop. Cuts always apply (when op has
+    // p2); rejected newps still go into the multigraph as bad edges
+    // awaiting future rewire (canonical recycle queue). Pool stub
+    // balance preserved; "drop stale" filters survivors.
+    const stateAtStep = NETGEN.makeRewireStateAtStep({
+      prePairsOf: R => effectiveBgPre(R),
+      opsOf: R => effectiveOps(R),
+      idPrefix: "br",
+      applyOp: NETGEN.abcdBgRewireApplyOp(),
+      // Bg-rewire residue passes to the cross-cluster final swap; the
+      // bad edges aren't dropped here. Leave them on screen so the
+      // cross-cluster walker can pick them up as recycle entries.
+      keepBadAtDropStale: true,
+    });
+    bgrewireStateAtStep = stateAtStep;
+    function placedFromList(list) {
+      return list.map(e => ({
+        u: e.u, v: e.v, id: e.id, bad: !!e.bad,
+        color: e.bad ? COL.edge_drop : COL.edge_inter,
+        badColor: COL.edge_drop,
+      }));
+    }
+    const byNodeFromList = (list) =>
+      NETGEN.spokeLayer.byNodeFromEdges(viz, list, n => nodeColorOf(parseInt(n.id, 10)));
+    function fourEndpoints(op) {
+      const f = new Set();
+      [op && op.p1, op && op.p2, op && op.newp1, op && op.newp2].forEach(p => {
+        if (p) { f.add(p[0]); f.add(p[1]); }
+      });
+      return [...f];
+    }
+    function paintLabelDesc(step, ops, isDropStale) {
+      clearDimPick(viz);
+      const labelEl = document.getElementById("g-bgrewire-stage");
+      const descEl = document.getElementById("g-bgrewire-desc");
+      const op = (step > 0 && !isDropStale) ? ops[step - 1] : null;
+      if (step === 0) {
+        labelEl.textContent = "pre-rewire";
+        descEl.innerHTML = '<span class="st">pre-rewire</span> &middot; ' +
+          ops.length + " bg-pool collision op" +
+          (ops.length === 1 ? "" : "s") +
+          " ahead. Solid red = self-loop, parallel, or cluster duplicate.";
+      } else if (isDropStale) {
+        labelEl.textContent = "forward to final";
+        descEl.innerHTML = '<span class="st">forward to final</span> &middot; ' +
+          "Recycle-queue leftovers (bad edges the loop could not swap " +
+          "before its fairness counter expired) are forwarded to the " +
+          "cross-cluster final swap stage. Nothing is dropped here.";
+      } else {
+        const code = (s) => "<code>" + s + "</code>";
+        const placedNames = [];
+        const recycledNames = [];
+        if (op.newp1) (op.placedNewp1 ? placedNames : recycledNames).push(op.newp1.join("–"));
+        if (op.newp2) (op.placedNewp2 ? placedNames : recycledNames).push(op.newp2.join("–"));
+        const cutPair = code(op.p1.join("–")) + (op.p2 ? " + " + code(op.p2.join("–")) : "");
+        // Outcome key: "success" | "no-valid-pool" | "partial" | "all-rejected".
+        let outcome;
+        if (op.success) outcome = "success";
+        else if (op.reason === "no-valid-pool") outcome = "no-valid-pool";
+        else if (op.placedNewp1 || op.placedNewp2) outcome = "partial";
+        else if (op.p2) outcome = "all-rejected";
+        else outcome = "no-valid-pool";
+        const TAG = {
+          "success": op.src === "valid" ? "swap with valid bg edge" : "swap with recycled pair",
+          "no-valid-pool": "no valid pool to swap with",
+          "partial": "partial: one newp placed, one to recycle",
+          "all-rejected": "both newp pushed to recycle",
+        };
+        const DESC = {
+          "success": "Cut " + cutPair + "; place " + placedNames.map(code).join(" + ") + ".",
+          "no-valid-pool": "No valid swap partner for " + code(op.p1.join("–")) +
+                           "; pushed back onto recycle queue.",
+          "partial": "Cut " + cutPair + "; place " + placedNames.map(code).join(" + ") +
+                     "; " + recycledNames.map(code).join(" + ") + " pushed to recycle.",
+          "all-rejected": "Cut " + cutPair + "; " +
+                          recycledNames.map(code).join(" + ") + " both pushed to recycle.",
+        };
+        labelEl.textContent = "op " + step + " · " + TAG[outcome];
+        descEl.innerHTML = '<span class="st">op ' + step + '</span> &middot; ' + DESC[outcome];
+      }
+    }
+    const placedEntry = (e) => ({
+      u: e.u, v: e.v, id: e.id, bad: !!e.bad,
+      color: e.bad ? COL.edge_drop : COL.edge_inter,
+      badColor: COL.edge_drop,
+    });
+    const render = NETGEN.makeRewireRender({
+      viz, spokes, prefix: "g-bgrewire",
+      R: () => buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI),
+      opsOf: R => effectiveOps(R),
+      stateAtStep, placedEntry, paintLabelDesc, byNodeFromList,
+      backdropOf: R => NETGEN.clusterPostBackdrop(R, {
+        idPrefix: "br-cluster-",
+        colorOf: e => CLUSTER_COLOR_OF[e.cluster] || COL.edge_stage2,
+      }),
+      getLastStep: () => lastStep,
+      setLastStep: (s) => { lastStep = s; },
+    });
+    function totalForCurrent() {
+      const xi = SYNTHETIC_XI;
+      const R = buildRealization(U_SEED, STUB_SEED, xi);
+      // 1 (pre-rewire) + opsCount + 1 (drop-stale) = 2 + opsCount.
+      return 2 + effectiveOps(R).length;
+    }
+    // RandStep re-spins ops [idx-1..end]; RandAll re-spins ops [0..end].
+    // playMany off before/after diff animates the swap.
+    ctl = NETGEN.rerollWalker({
+      prefix: "g-bgrewire",
+      total: totalForCurrent(),
+      totalForCurrent,
+      onRender: render,
+      getLocked: () => lockBusy,
+      // Drop-stale at total-1: no op range to spin there.
+      randStepDisabledAt: (idx) => idx >= totalForCurrent() - 1,
+      onRandStep: idx => {
+        if (idx <= 0) return;
+        const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
+        const beforeList = stateAtStep(R, idx);
+        const oldOp = effectiveOps(R)[idx - 1];
+        rerollGlobalRewireRange(idx - 1, effectiveOps(R).length);
+        const afterList = stateAtStep(R, idx);
+        paintLabelDesc(idx, effectiveOps(R));
+        const labelEl = document.getElementById("g-bgrewire-stage");
+        const descEl = document.getElementById("g-bgrewire-desc");
+        if (labelEl && descEl && oldOp) {
+          labelEl.textContent = labelEl.textContent.replace(/^op (\d+) · /, "op $1 · re-rolled · ");
+          const oldNew = [];
+          if (oldOp.newp1 && oldOp.placedNewp1) oldNew.push(oldOp.newp1.join("–"));
+          if (oldOp.newp2 && oldOp.placedNewp2) oldNew.push(oldOp.newp2.join("–"));
+          const oldCut = oldOp.p1.join("–") + (oldOp.p2 ? " + " + oldOp.p2.join("–") : "");
+          const undoBit = oldNew.length
+            ? "Undo prior swap (cut " + oldNew.map(s => "<code>" + s + "</code>").join(" + ") +
+              ", restore <code>" + oldCut + "</code>); then "
+            : "Undo prior no-op; then ";
+          const sep = " · ";
+          const parts = descEl.innerHTML.split(sep);
+          if (parts.length >= 2) {
+            descEl.innerHTML = parts[0] + sep + undoBit + parts.slice(1).join(sep);
+          }
+        }
+        clearDimPick(viz);
+        const toEntry = (e) => ({
+          u: e.u, v: e.v, id: e.id, bad: !!e.bad,
+          color: e.bad ? COL.edge_drop : COL.edge_inter,
+          badColor: COL.edge_drop,
+        });
+        // Diff by id AND (u,v): RandStep keeps op-indexed ids stable
+        // (br-op<i>-1 / -2) but coin flips can swap newp1/newp2's u,v
+        // under the same slot — id-only diff would miss that.
+        const { removes, adds } = NETGEN.diffPlacedById(beforeList, afterList, toEntry);
+        const byNode = byNodeFromList(afterList);
+        spokes.playMany(removes, adds, () => {}, { byNode });
+        lastStep = idx;
+        render.setLastRendered(afterList);
+        return NETGEN.SKIP;
+      },
+      onRandAll: idx => {
+        if (idx <= 0) return;
+        const R = buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI);
+        rerollGlobalRewireRange(0, effectiveOps(R).length);
+      },
+      onAfterRandAll: () => fireBgRewireChanged(),
+    });
+    function reconfigReset() {
+      opsOverride = null;
+      ctl.reconfigure(totalForCurrent());
+    }
+    function reconfigKeep() {
+      opsOverride = null;
+      NETGEN.followCursor(ctl, totalForCurrent());
+    }
+    // bg-pair reroll changes the bg pre-state; the kernel-recorded
+    // R.globalRewireOps no longer match the new pre-pairs, so regen
+    // the op trace from the effective bgPre with a fresh rng.
+    function regenFromBgPre() {
+      rewireRerollNonce += 1;
+      const xi = SYNTHETIC_XI;
+      const R = buildRealization(U_SEED, STUB_SEED, xi);
+      const fresh = seededRng(STUB_SEED * 7919 + rewireRerollNonce * 41);
+      opsOverride = ABCDKernel.replayGlobalRewireFromOps(
+        NETGEN.globalPrePairsTuples(effectiveBgPre(R)),
+        NETGEN.clusterEdgeEkeys(R.clusterPost),
+        [], fresh,
+      );
+      NETGEN.followCursor(ctl, totalForCurrent());
+    }
+    // Cluster-pair RandAll cascades cluster-pre → bg-pair (reTotalKeep)
+    // → bg-pair fires bgPairChanged → regenFromBgPre handles bg-rewire.
+    // No direct cluster-pre subscription — it would fight regenFromBgPre
+    // for cursor control.
+    onStubChanged.push(reconfigReset);
+    onUChanged.push(reconfigReset);
+    onBgPairChanged.push(regenFromBgPre);
+    // crewire RandAll changes clusterPost (bg-rewire's backdrop +
+    // clusterEdgeKeys for crossDup gating). Apply follow rule.
+    onClusterRewireChanged.push(reconfigKeep);
+  })();
+
+  // ── Generation · cross-cluster final swap walker ──
+  // Spoke-animated walker over R.finalRewireOps. Body lives in the
+  // shared abcd_walkers.js so abcd+o shares the exact same code path.
+  NETGEN.mountFinalSwapWalker({
+    hostId: "g-finalswap",
+    getR: () => buildRealization(U_SEED, STUB_SEED, SYNTHETIC_XI),
+    positions: LIVE_POS_OF,
+    nodeColorOf: (id) => nodeColorOf(id),
+    edgeColorOf: (u, v) => {
+      const bu = LIVE_BLOCK_OF[u], bv = LIVE_BLOCK_OF[v];
+      if (bu === bv && CLUSTER_COLOR_OF[bu]) return CLUSTER_COLOR_OF[bu];
+      return COL.edge_inter;
+    },
+    dropColor: COL.edge_drop,
+    stubSeedFn: () => STUB_SEED,
+    busSubscriptions: [onStubChanged, onUChanged, onBgPairChanged, onBgRewireChanged],
+    syncOverride: (ops) => { finalSwapEffectiveOps = ops; },
+    notifyChanged: () => fireFinalSwapChanged(),
+  });
+
+
+  // ── Generation · degree preservation (overlay bars) ──
+  (function () {
+    const svg = d3.select("#deg-cmp");
+    svg.selectAll("*").remove();
+    const NODES_SORTED = NODES.slice().sort((a, b) => DEGREES[b] - DEGREES[a] || a - b);
+    const W = 640, H = 320;
+    const PAD = { top: 22, right: 20, bottom: 40, left: 46 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+    const x = d3.scaleBand().domain(NODES_SORTED.map(String)).range([0, iw]).padding(0.15);
+    const maxDeg = d3.max(Object.values(DEGREES));
+    const y = d3.scaleLinear().domain([0, maxDeg + 1]).range([ih, 0]);
+
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).tickSize(0).tickPadding(8))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10px");
+    g.append("g").call(d3.axisLeft(y).ticks(maxDeg))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10px");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+    svg.append("text").attr("x", W / 2).attr("y", H - 8)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace")
+      .style("font-size", "10.5px").text("node (sorted by input degree desc)");
+    svg.append("text").attr("x", 12).attr("y", PAD.top - 4)
+      .style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace")
+      .style("font-size", "10px").text("degree");
+
+    // Legend
+    const legend = svg.append("g").attr("transform", `translate(${W - 250},${PAD.top - 6})`);
+    legend.append("rect").attr("x", 0).attr("y", 0).attr("width", 14).attr("height", 10)
+      .attr("fill", COL.azure).attr("opacity", 0.55);
+    {
+      const t = legend.append("text").attr("x", 18).attr("y", 9).style("fill", "#2f3a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px");
+      t.append("tspan").text("input d");
+      t.append("tspan").attr("baseline-shift", "sub").style("font-size", "80%").text("u");
+    }
+    legend.append("rect").attr("x", 92).attr("y", 0).attr("width", 14).attr("height", 10).attr("fill", COL.mint).attr("opacity", 0.7);
+    legend.append("text").attr("x", 110).attr("y", 9).style("fill", "#2f3a54")
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px")
+      .text("output");
+    legend.append("rect").attr("x", 168).attr("y", 0).attr("width", 14).attr("height", 10)
+      .attr("fill", COL.edge_drop || "#c33").attr("opacity", 0.45)
+      .attr("stroke", COL.edge_drop || "#c33").attr("stroke-width", 1).attr("stroke-dasharray", "3 2");
+    legend.append("text").attr("x", 186).attr("y", 9).style("fill", "#2f3a54")
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px")
+      .text("missing");
+
+    // Stacked layout: per node, single column of width=bandwidth.
+    //   in  : azure backdrop, full height = win
+    //   out : mint on top, height = wout (always ≤ win; output degrees
+    //         can only stay or shrink relative to input)
+    //   miss: red-dashed highlight on the gap (mint top to in top)
+    const colW = x.bandwidth();
+    const rows = g.selectAll(".cmp").data(NODES_SORTED).join("g")
+      .attr("class", "cmp")
+      .attr("transform", d => `translate(${x(String(d))},0)`);
+    rows.append("rect").attr("class", "in")
+      .attr("x", 0).attr("y", y(0)).attr("width", colW).attr("height", 0)
+      .attr("fill", COL.azure).attr("opacity", 0.55);
+    rows.append("rect").attr("class", "out")
+      .attr("x", 0).attr("y", y(0)).attr("width", colW).attr("height", 0)
+      .attr("fill", COL.mint).attr("opacity", 0.7);
+    rows.append("rect").attr("class", "miss")
+      .attr("x", 0).attr("y", y(0)).attr("width", colW).attr("height", 0)
+      .attr("fill", COL.edge_drop || "#c33").attr("opacity", 0.55)
+      .attr("stroke", COL.edge_drop || "#c33").attr("stroke-width", 1.2)
+      .attr("stroke-dasharray", "3 2");
+
+    function render() {
+      const xi = SYNTHETIC_XI;
+      const R = buildRealization(U_SEED, STUB_SEED, xi);
+      // effectiveOutDeg threads cluster-rewire + bg-rewire + final-swap
+      // walker overrides through the final-edge tally so the panel
+      // tracks the walker viz instead of just the kernel baseline.
+      const effDeg = effectiveOutDeg(R);
+      let diff = 0, match = 0;
+      rows.each(function (nid) {
+        const win = DEGREES[nid];
+        const wout = effDeg[nid] || 0;
+        diff += Math.abs(win - wout);
+        if (win === wout) match++;
+        const missH = Math.max(0, win - wout);
+        d3.select(this).select(".in")
+          .transition().duration(250)
+          .attr("y", y(win)).attr("height", ih - y(win));
+        d3.select(this).select(".out")
+          .transition().duration(250)
+          .attr("y", y(wout)).attr("height", ih - y(wout));
+        d3.select(this).select(".miss")
+          .transition().duration(250)
+          .attr("y", y(wout + missH))
+          .attr("height", missH > 0 ? y(wout) - y(wout + missH) : 0);
+      });
+      document.getElementById("deg-diff").textContent = diff;
+      document.getElementById("deg-match").textContent = match + "/" + NODES.length;
+      renderXi(R);
+    }
+
+    // ── Mixing-parameter bar: target ξ vs realised ξ on output ──
+    const xiSvg = d3.select("#xi-realised");
+    xiSvg.selectAll("*").remove();
+    const XW = 640, XH = 70;
+    const XPAD = { top: 16, right: 24, bottom: 26, left: 24 };
+    const xiInnerW = XW - XPAD.left - XPAD.right;
+    const xiAxisY = XH - XPAD.bottom + 4;
+    const xiBarY = XPAD.top + 8;
+    const xiBarH = 14;
+    const xig = xiSvg.append("g").attr("transform", `translate(${XPAD.left},0)`);
+    const xiX = d3.scaleLinear().domain([0, 1]).range([0, xiInnerW]);
+    xig.append("rect").attr("class", "lane")
+      .attr("x", 0).attr("y", xiBarY).attr("width", xiInnerW).attr("height", xiBarH)
+      .attr("fill", COL.azure).attr("opacity", 0.12)
+      .attr("stroke", "#cdbf8d").attr("stroke-width", 1);
+    [0, 0.25, 0.5, 0.75, 1].forEach(t => {
+      xig.append("line")
+        .attr("x1", xiX(t)).attr("x2", xiX(t))
+        .attr("y1", xiBarY + xiBarH).attr("y2", xiBarY + xiBarH + 4)
+        .attr("stroke", "#9a947a").attr("stroke-width", 1);
+      xig.append("text")
+        .attr("x", xiX(t)).attr("y", xiAxisY)
+        .attr("text-anchor", "middle")
+        .style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace")
+        .style("font-size", "9.5px")
+        .text(t.toFixed(2));
+    });
+    const xiTargetLine = xig.append("line")
+      .attr("y1", xiBarY - 4).attr("y2", xiBarY + xiBarH + 4)
+      .attr("stroke", COL.mint).attr("stroke-width", 2)
+      .attr("stroke-dasharray", "4 3");
+    const xiTargetLabel = xig.append("text")
+      .attr("y", xiBarY - 6).attr("text-anchor", "middle")
+      .style("fill", COL.mint)
+      .style("font-family", "Special Elite, Courier New, monospace")
+      .style("font-size", "10px")
+      .text("target");
+    const xiRealisedTick = xig.append("line")
+      .attr("y1", xiBarY).attr("y2", xiBarY + xiBarH)
+      .attr("stroke", COL.azure).attr("stroke-width", 4);
+
+    function renderXi(R) {
+      const edges = effectiveFinalEdges(R);
+      let inter = 0;
+      edges.forEach(e => {
+        if (LIVE_BLOCK_OF[e.u] !== LIVE_BLOCK_OF[e.v]) inter++;
+      });
+      const total = edges.length;
+      const realised = total > 0 ? inter / total : 0;
+      const target = SYNTHETIC_XI;
+      xiTargetLine.transition().duration(250).attr("x1", xiX(target)).attr("x2", xiX(target));
+      xiTargetLabel.transition().duration(250).attr("x", xiX(target));
+      xiRealisedTick.transition().duration(250).attr("x1", xiX(realised)).attr("x2", xiX(realised));
+      document.getElementById("xi-target-bar").textContent = target.toFixed(3);
+      document.getElementById("xi-realised-bar").textContent = realised.toFixed(3);
+      const drift = realised - target;
+      document.getElementById("xi-drift").textContent = (drift >= 0 ? "+" : "") + drift.toFixed(3);
+    }
+    onStubChanged.push(render);
+    onUChanged.push(render);
+    onClusterPreChanged.push(render);
+    onClusterRewireChanged.push(render);
+    onBgPairChanged.push(render);
+    onBgRewireChanged.push(render);
+    onFinalSwapChanged.push(render);
+    render();
+  })();
+
+  // ── Case study · degree log-log ──
+  const DNC_DEG_HIST = [
+    [1, 340], [2, 70], [3, 36], [4, 40], [5, 22], [6, 19], [7, 20], [8, 25],
+    [9, 10], [10, 14], [11, 3], [12, 11], [13, 5], [14, 5], [15, 3], [16, 1],
+    [17, 3], [18, 4], [19, 23], [20, 3], [22, 1], [24, 13], [25, 10], [26, 4],
+    [28, 2], [30, 1], [35, 14], [38, 6], [40, 3], [43, 3], [48, 1], [54, 3],
+    [60, 3], [74, 28], [76, 8], [92, 1], [100, 1], [150, 1], [200, 1],
+    [256, 1], [312, 1], [368, 1],
+  ];
+  (function () {
+    const svg = d3.select("#deg-hist");
+    svg.selectAll("*").remove();
+    const W = 640, H = 260;
+    const PAD = { top: 18, right: 20, bottom: 36, left: 48 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+    const x = d3.scaleLog().domain([1, 500]).range([0, iw]);
+    const y = d3.scaleLog().domain([0.5, 500]).range([ih, 0]);
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).ticks(6, "~g"))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px");
+    g.append("g").call(d3.axisLeft(y).ticks(5, "~g"))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+    svg.append("text").attr("x", W / 2).attr("y", H - 6)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace")
+      .style("font-size", "10.5px").text("degree (log)");
+    svg.append("text")
+      .attr("transform", `translate(12,${PAD.top + ih / 2}) rotate(-90)`)
+      .attr("text-anchor", "middle")
+      .style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace")
+      .style("font-size", "10px").text("count (log)");
+    g.selectAll(".ddot").data(DNC_DEG_HIST).join("circle")
+      .attr("cx", d => x(d[0])).attr("cy", d => y(d[1]))
+      .attr("r", 2.6).attr("fill", COL.azure).attr("opacity", 0.88);
+  })();
+
+  // ── Case study · cluster-size log-log ──
+  const DNC_CS_HIST = [
+    [1, 355], [2, 44], [3, 13], [4, 7], [5, 2], [6, 3], [7, 1], [8, 2],
+    [9, 2], [10, 2], [12, 1], [14, 2], [15, 1], [19, 1], [29, 1], [33, 2],
+    [36, 1], [50, 1], [52, 1],
+  ];
+  (function () {
+    const svg = d3.select("#cs-hist");
+    svg.selectAll("*").remove();
+    const W = 640, H = 260;
+    const PAD = { top: 18, right: 20, bottom: 36, left: 48 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+    const x = d3.scaleLog().domain([1, 80]).range([0, iw]);
+    const y = d3.scaleLog().domain([0.5, 500]).range([ih, 0]);
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).ticks(5, "~g"))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px");
+    g.append("g").call(d3.axisLeft(y).ticks(5, "~g"))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+    svg.append("text").attr("x", W / 2).attr("y", H - 6)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace")
+      .style("font-size", "10.5px").text("cluster size (log)");
+    svg.append("text")
+      .attr("transform", `translate(12,${PAD.top + ih / 2}) rotate(-90)`)
+      .attr("text-anchor", "middle")
+      .style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace")
+      .style("font-size", "10px").text("count (log)");
+    g.selectAll(".cdot").data(DNC_CS_HIST).join("circle")
+      .attr("cx", d => x(d[0])).attr("cy", d => y(d[1]))
+      .attr("r", d => d[0] === 1 ? 4.4 : 2.8)
+      .attr("fill", d => d[0] === 1 ? COL.signal : COL.azure).attr("opacity", 0.9);
+    g.append("text").attr("x", x(1) + 12).attr("y", y(355) - 6)
+      .attr("fill", COL.signal)
+      .style("font-family", "Caveat Brush, cursive").style("font-size", "15px")
+      .text("309 singleton outliers");
+  })();
+
+})();
+</script>
+</body>
+</html>

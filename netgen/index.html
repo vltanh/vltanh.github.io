@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Synthetic Network Generators</title>
+<link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐖</text></svg>">
+<meta name="description" content="A gallery of synthetic-network generators for community-detection benchmarking, each walked stage by stage on the same small example input.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./shared.css">
+<style>
+/* Typed-note body: sans-serif overrides the serif body in shared.css. */
+body {
+  font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  font-variation-settings: normal;
+}
+
+.hdr h1 { transform: rotate(-1.2deg); }
+.hdr .sub {
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-style: normal;
+  color: var(--paper-2);
+  line-height: 1.55;
+}
+
+/* Icon nav (fixed-width hover, no layout shift) */
+.icon-links {
+  display: flex; flex-wrap: wrap; gap: 1.6rem;
+  justify-content: center; align-items: center;
+  margin: 1.3rem auto 2.6rem;
+}
+.icon-links a {
+  display: inline-flex; align-items: center; gap: .45rem;
+  color: var(--paper);
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .72rem; letter-spacing: .16em; text-transform: uppercase;
+  background: none; background-image: none;
+  padding: .3rem .2rem .45rem;
+  border-bottom: 1.5px solid transparent;
+  transition: color .18s ease, border-color .18s ease, transform .18s ease;
+  opacity: .8;
+}
+.icon-links a:hover {
+  color: var(--signal);
+  opacity: 1;
+  border-bottom-color: var(--signal);
+  transform: translateY(-1px);
+  background-image: none;
+}
+.icon-links a svg { width: 18px; height: 18px; flex-shrink: 0; transition: transform .18s ease; }
+.icon-links a:hover svg { transform: rotate(-8deg); }
+
+/* Hook prose */
+.hook {
+  font-family: 'IBM Plex Sans', sans-serif;
+  color: var(--paper-2);
+  font-size: 1.05rem; line-height: 1.72;
+  max-width: var(--span-prose);
+  margin: 0 auto 2.8rem;
+}
+.hook em {
+  color: var(--paper);
+  font-style: italic;
+  background: linear-gradient(180deg, transparent 58%, rgba(246,225,90,.5) 58%, rgba(246,225,90,.5) 92%, transparent 92%);
+  padding: 0 .15em;
+}
+.hook .defs {
+  margin-top: 1.4rem;
+  display: grid; gap: .5rem;
+  font-size: .95rem; line-height: 1.55;
+  padding: .9rem 1.1rem;
+  border-left: 2px solid var(--paper);
+  background: rgba(237, 228, 201, .55);
+  border-radius: 0 2px 2px 0;
+}
+.hook .defs .term {
+  font-family: 'Special Elite', 'Courier New', monospace;
+  color: var(--paper);
+  font-size: .78rem; letter-spacing: .1em; text-transform: uppercase;
+  margin-right: .35rem;
+}
+.hook .defs .term.out { color: var(--signal); }
+.hook .defs .term.cl { color: var(--cobalt); }
+.hook ol.post-process {
+  margin: 0; padding-left: 1.3rem;
+  font-size: .95rem; line-height: 1.55;
+}
+.hook ol.post-process li { margin-bottom: .35rem; }
+.hook ol.post-process li:last-child { margin-bottom: 0; }
+.hook ol.post-process strong {
+  color: var(--paper);
+  font-weight: 500;
+}
+/* .defs is a styled card; paragraph after it sets its own rhythm. The
+   ordered list + its surrounding paragraphs all share the same 1rem
+   inter-block gap as p+p, so the post-process block reads as a
+   continuation of the hook instead of crowding the card. */
+.hook .defs + p,
+.hook p + ol.post-process,
+.hook ol.post-process + p {
+  margin-top: 1rem;
+}
+
+/* Shared-graph: 2-col layout (svg left, info right) on wide, stacked on narrow */
+.shared-graph {
+  max-width: var(--span-wide); margin: 0 auto 3.4rem;
+  background: var(--ink-2); border: 1.5px solid var(--paper);
+  border-radius: 2px; padding: 1.4rem 1.5rem;
+  box-shadow: 3px 3px 0 rgba(27,32,51,.15);
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(250px, 290px);
+  gap: 1.5rem;
+  align-items: stretch;
+}
+.shared-graph::before,
+.shared-graph::after {
+  content: ""; position: absolute;
+  top: -9px; width: 50px; height: 16px;
+  background: var(--tape-tan); opacity: .82;
+  border: 1px solid rgba(139,117,65,.4);
+  box-shadow: 0 1px 2px rgba(27,32,51,.15);
+  pointer-events: none;
+}
+.shared-graph::before { left: 14px; transform: rotate(-4deg); }
+.shared-graph::after  { right: 14px; transform: rotate(3deg); }
+.shared-graph svg {
+  display: block; width: 100%; height: auto;
+  cursor: grab; touch-action: none;
+  align-self: center;
+}
+.shared-graph svg:active { cursor: grabbing; }
+.info-col {
+  display: flex; flex-direction: column; gap: .95rem;
+  padding-left: 1rem;
+  border-left: 1px dashed rgba(139,117,65,.55);
+}
+@media (max-width: 680px) {
+  .shared-graph { grid-template-columns: 1fr; }
+  .info-col { border-left: none; border-top: 1px dashed rgba(139,117,65,.55); padding-left: 0; padding-top: 1rem; }
+}
+.info-block {
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .76rem; color: var(--paper-2);
+  line-height: 1.55;
+}
+.info-block .hd {
+  display: block; color: var(--paper);
+  font-size: .66rem; letter-spacing: .2em; text-transform: uppercase;
+  margin-bottom: .35rem; font-weight: 400;
+}
+.info-block .big {
+  font-size: .84rem; line-height: 1.5; color: var(--paper);
+  white-space: nowrap;
+}
+.info-block .big b { color: var(--cobalt); font-weight: 400; font-variant-numeric: tabular-nums; }
+.info-block ul { list-style: none; padding: 0; margin: 0; }
+.info-block li {
+  padding: .08rem 0;
+  display: flex; align-items: center; gap: .5rem;
+}
+.info-block li b { color: var(--cobalt); font-weight: 400; font-variant-numeric: tabular-nums; }
+.edge-swatch {
+  display: inline-flex; flex-direction: column; justify-content: center;
+  width: 1.1rem; flex-shrink: 0;
+  gap: 1.5px;
+}
+.edge-swatch .bar { display: block; height: 2.5px; border-radius: 1px; }
+.legend-row {
+  display: flex; flex-wrap: wrap; gap: .4rem .95rem;
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .74rem; color: var(--paper-2);
+}
+.legend-dot {
+  display: inline-block; width: .82rem; height: .82rem; border-radius: 50%;
+  vertical-align: middle; margin-right: .35rem;
+  border: 1px solid var(--paper);
+  box-shadow: 1px 1px 0 rgba(27,32,51,.25);
+}
+.info-hint {
+  font-family: 'Caveat Brush', cursive;
+  font-size: 1.15rem; color: var(--paper-3);
+  transform: rotate(-1.5deg);
+  margin-top: auto;
+  padding-top: .3rem;
+  line-height: 1.2;
+}
+
+/* HTML tooltip over the graph */
+.gtip {
+  position: absolute; pointer-events: none;
+  background: var(--paper); color: var(--ink);
+  border: 1.5px solid var(--paper);
+  border-radius: 2px;
+  padding: .45rem .6rem;
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .7rem;
+  opacity: 0;
+  box-shadow: 2px 2px 0 rgba(27,32,51,.25);
+  z-index: 4;
+  max-width: 220px; line-height: 1.45;
+  transition: opacity .12s ease;
+}
+.gtip.on { opacity: 1 }
+.gtip b { color: var(--hl-yellow); font-weight: 400; }
+.gtip .dim { color: rgba(243, 236, 215, .65); }
+.gtip .hd {
+  color: var(--hl-yellow); font-weight: 400;
+  letter-spacing: .14em; text-transform: uppercase;
+  margin-bottom: .25rem; font-size: .66rem;
+}
+
+/* Family sections */
+.family {
+  margin: 0 auto 3.4rem;
+  max-width: var(--span-wide);
+  position: relative;
+}
+.family-title {
+  font-family: 'Caveat Brush', 'Caveat', cursive;
+  font-size: clamp(1.85rem, 3.2vw, 2.25rem);
+  font-weight: 400;
+  color: var(--paper);
+  margin: 0 0 .55rem;
+  display: inline-block;
+  transform: rotate(-1deg);
+  position: relative;
+  padding: 0 .1rem 0;
+  line-height: 1.08;
+}
+.family-title::before {
+  content: "";
+  position: absolute;
+  left: -14px; right: -18px;
+  top: -6px; bottom: -8px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 220 50' preserveAspectRatio='none' overflow='visible'><defs><filter id='r' x='-15%25' y='-18%25' width='130%25' height='136%25'><feTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='3' seed='3' result='w'/><feDisplacementMap in='SourceGraphic' in2='w' scale='10' result='d'/><feTurbulence type='fractalNoise' baseFrequency='2.6' numOctaves='2' seed='7' result='p'/><feColorMatrix in='p' type='matrix' values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  1.8 0 0 0 -.15' result='pa'/><feComposite in='d' in2='pa' operator='in' result='c'/><feGaussianBlur in='c' stdDeviation='.35'/></filter></defs><g filter='url(%23r)' fill='none' stroke='%23c92a2a' stroke-linecap='round' stroke-linejoin='round'><path d='M 6 12 L 215 16 L 5 22 L 216 26 L 5 32 L 215 36 L 6 41' stroke-width='11' opacity='.22' stroke-dasharray='14 3 9 4 18 2 11 3'/><path d='M 10 15 L 213 18 L 9 25 L 214 29 L 9 35 L 213 38' stroke-width='7.5' opacity='.24'/></g></svg>");
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  background-position: center;
+  opacity: .52;
+  transform: rotate(-2.3deg);
+  z-index: -1;
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 5%, #000 95%, transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 5%, #000 95%, transparent 100%);
+}
+.family ~ .family .family-title::before {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 220 50' preserveAspectRatio='none' overflow='visible'><defs><filter id='r' x='-15%25' y='-18%25' width='130%25' height='136%25'><feTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='3' seed='7' result='w'/><feDisplacementMap in='SourceGraphic' in2='w' scale='10' result='d'/><feTurbulence type='fractalNoise' baseFrequency='2.6' numOctaves='2' seed='11' result='p'/><feColorMatrix in='p' type='matrix' values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  1.8 0 0 0 -.15' result='pa'/><feComposite in='d' in2='pa' operator='in' result='c'/><feGaussianBlur in='c' stdDeviation='.35'/></filter></defs><g filter='url(%23r)' fill='none' stroke='%23c92a2a' stroke-linecap='round' stroke-linejoin='round'><path d='M 6 12 L 215 16 L 5 22 L 216 26 L 5 32 L 215 36 L 6 41' stroke-width='11' opacity='.22' stroke-dasharray='14 3 9 4 18 2 11 3'/><path d='M 10 15 L 213 18 L 9 25 L 214 29 L 9 35 L 213 38' stroke-width='7.5' opacity='.24'/></g></svg>");
+  transform: rotate(-1.6deg);
+}
+.family ~ .family ~ .family .family-title::before {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 220 50' preserveAspectRatio='none' overflow='visible'><defs><filter id='r' x='-15%25' y='-18%25' width='130%25' height='136%25'><feTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='3' seed='11' result='w'/><feDisplacementMap in='SourceGraphic' in2='w' scale='10' result='d'/><feTurbulence type='fractalNoise' baseFrequency='2.6' numOctaves='2' seed='15' result='p'/><feColorMatrix in='p' type='matrix' values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  1.8 0 0 0 -.15' result='pa'/><feComposite in='d' in2='pa' operator='in' result='c'/><feGaussianBlur in='c' stdDeviation='.35'/></filter></defs><g filter='url(%23r)' fill='none' stroke='%23c92a2a' stroke-linecap='round' stroke-linejoin='round'><path d='M 6 12 L 215 16 L 5 22 L 216 26 L 5 32 L 215 36 L 6 41' stroke-width='11' opacity='.22' stroke-dasharray='14 3 9 4 18 2 11 3'/><path d='M 10 15 L 213 18 L 9 25 L 214 29 L 9 35 L 213 38' stroke-width='7.5' opacity='.24'/></g></svg>");
+  transform: rotate(-2.8deg);
+}
+.family-lede {
+  font-family: 'IBM Plex Sans', sans-serif;
+  color: var(--paper-2);
+  font-size: .98rem; line-height: 1.6;
+  margin-bottom: 1.3rem;
+  max-width: var(--span-medium);
+}
+
+
+/* Equal-width cards */
+.gen-grid {
+  display: flex; flex-wrap: wrap; gap: 1.4rem 1.3rem;
+  align-items: stretch;
+}
+.gen-card {
+  flex: 0 0 auto;
+  width: calc((100% - 1.3rem) / 2);
+  min-width: 260px;
+  display: flex; flex-direction: column;
+  padding: 1.1rem 1.25rem 1.15rem;
+  background: var(--ink-2); border: 1.5px solid var(--paper);
+  border-radius: 2px; color: inherit;
+  background-image: none;
+  box-shadow: 2.5px 3px 0 rgba(27,32,51,.18);
+  transition: transform .22s ease, box-shadow .22s ease, background .22s ease;
+  position: relative;
+}
+/* Click overlay lives under .refs so ref links stay clickable */
+.gen-card .card-click {
+  position: absolute; inset: 0;
+  z-index: 1;
+  background: none; background-image: none;
+  border: none;
+}
+.gen-card::before { z-index: 2; }
+.gen-card .refs { position: relative; z-index: 3; }
+
+@media (max-width: 600px) { .gen-card { width: 100%; } }
+
+.gen-card:nth-of-type(odd)  { transform: rotate(-.7deg); }
+.gen-card:nth-of-type(even) { transform: rotate(.6deg); }
+.gen-card::before {
+  content: ""; position: absolute;
+  top: -8px; left: 50%;
+  transform: translateX(-50%) rotate(-2deg);
+  width: 46px; height: 14px;
+  background: var(--tape-tan); opacity: .85;
+  border: 1px solid rgba(139,117,65,.4);
+  box-shadow: 0 1px 2px rgba(27,32,51,.15);
+}
+.gen-card:hover {
+  background: var(--hl-yellow);
+  transform: rotate(0) translateY(-2px);
+  box-shadow: 3.5px 4px 0 rgba(27,32,51,.28);
+  color: inherit; background-image: none;
+}
+/* Optional readiness marker for cards that are still placeholders. */
+.gen-card.under-construction::after {
+  content: "under construction";
+  position: absolute;
+  bottom: 8px;
+  right: 10px;
+  transform: rotate(-3deg);
+  font-family: 'Caveat Brush', 'Caveat', cursive;
+  font-size: .72rem;
+  line-height: 1;
+  color: var(--signal);
+  background: var(--hl-yellow);
+  padding: .12rem .4rem .15rem;
+  border: 1px solid var(--signal);
+  border-radius: 2px;
+  box-shadow: 1px 1px 0 rgba(27,32,51,.18);
+  letter-spacing: .02em;
+  pointer-events: none;
+  z-index: 6;
+  white-space: nowrap;
+}
+.gen-card .name-row {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: .6rem; margin-bottom: .5rem;
+}
+.gen-card .name-block { display: flex; flex-direction: column; gap: .1rem; }
+.gen-card .name {
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: 1.15rem; font-weight: 400;
+  color: var(--cobalt);
+  letter-spacing: .01em;
+  transition: color .18s ease;
+}
+.gen-card:hover .name { color: var(--paper); }
+.gen-card .fullname {
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-style: italic;
+  font-size: .74rem; font-weight: 400;
+  color: var(--paper-3);
+  line-height: 1.3;
+}
+.gen-card:hover .fullname { color: var(--paper-2); }
+.gen-card .refs {
+  display: inline-flex; align-items: baseline; gap: .4rem;
+  flex-shrink: 0;
+}
+.gen-card .refs .sep { color: var(--paper-4); font-size: .7rem; }
+.gen-card .ref {
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .62rem; letter-spacing: .14em;
+  color: var(--paper-3);
+  text-transform: uppercase;
+  background: none; background-image: none;
+  padding-bottom: 1px;
+  border-bottom: 1px dashed var(--paper-3);
+  transition: color .18s ease, border-color .18s ease;
+}
+.gen-card .ref:hover {
+  color: var(--signal);
+  border-bottom: 1.5px solid var(--signal);
+}
+.gen-card .ref.unpub {
+  color: var(--paper-4);
+  border-bottom: 1px dashed var(--paper-4);
+  cursor: default;
+}
+.gen-card .ref.unpub:hover {
+  color: var(--paper-4);
+  border-bottom: 1px dashed var(--paper-4);
+}
+.gen-card .blurb {
+  font-family: 'IBM Plex Sans', sans-serif;
+  color: var(--paper-2); font-size: .93rem; line-height: 1.55;
+  flex: 1;
+}
+
+</style>
+</head>
+<body>
+<main class="page">
+
+<header class="hdr">
+  <div class="kicker">project · network-generation</div>
+  <h1>Synthetic Network <em>Generators</em></h1>
+  <p class="sub">A gallery of generators walked stage by stage on the same small input. A community detector cannot be stress-tested without synthetics whose ground truth is known: each generator here takes a reference network and its community structure, and produces fresh draws keyed to that ground truth.</p>
+</header>
+
+<nav class="icon-links" aria-label="project links">
+  <a href="https://github.com/vltanh/network-generation/tree/main/docs/algorithms" target="_blank" rel="noopener" aria-label="algorithm notes">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4.5v15A1.5 1.5 0 0 0 5.5 21H20V5H5.5A1.5 1.5 0 0 1 4 4.5Z"/><path d="M4 4.5A1.5 1.5 0 0 1 5.5 3H20v2"/><path d="M8 8h8M8 11.5h8M8 15h6"/></svg>
+    notes
+  </a>
+  <a href="/projects/network-generation/" target="_blank" rel="noopener" aria-label="project page">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/></svg>
+    project
+  </a>
+  <a href="https://github.com/vltanh/network-generation" target="_blank" rel="noopener" aria-label="github repository">
+    <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+    source
+  </a>
+</nav>
+
+<section class="hook">
+  <p>Given a network \(G\) (undirected, unweighted, simple) with a community structure \(\mathcal{C}\) on its nodes, we want to sample a family of networks that are <em>statistically similar</em> to \(G\) and \(\mathcal{C}\) without being identical. \(\mathcal{C}\) can be ground-truth or produced by a detection algorithm; the generator does not care which. What "statistically similar" means differs from one generator to the next: each freezes a different summary of \(G\) and \(\mathcal{C}\) and randomises the rest.</p>
+  <p>Scoring a community-detection algorithm requires networks whose answer can be checked. An empirical network gives only one labelling, which may itself be wrong, and a single network is a sample of one. Synthetics fix that: each generator emits a network and its ground-truth clustering together, across as many seeds, sizes, and noise levels as the test demands.</p>
+  <p>Each page below walks one generator from input to output on the same 20-node example, keeps one interactive widget per stage, and closes with a plain note on what holds and what drifts.</p>
+  <p>Two labels recur across the pages: a node is either inside a non-trivial community or standing alone, and generators treat the two cases differently.</p>
+  <div class="defs">
+    <div><span class="term cl">clustered</span>: node that belongs to a community of size &ge; 2.</div>
+    <div><span class="term out">outlier</span>: node that is unclustered, or the sole member of a singleton community.</div>
+  </div>
+  <p>Every generator runs the same three-stage pipeline: <strong>profile</strong> the input to extract the parameters the generator needs, <strong>generate</strong> a fresh graph from those parameters, then <strong>post-process</strong> the output. Post-processing covers up to three steps. An optional <em>match-degree</em> rewire aligns the generated degree sequence to the input (see <a href="./matcher.html">degree matchers</a>). A <em>simplify</em> pass collapses parallel edges and drops self-loops. A <em>singleton drop</em> removes size-1 clusters and relabels the lone node as an outlier.</p>
+</section>
+
+<figure class="shared-graph">
+  <svg id="shared-graph-svg" aria-label="20-node synthetic input graph"></svg>
+  <div class="info-col">
+    <div class="info-block">
+      <span class="hd">the example</span>
+      <div class="big"><b>20</b> nodes &middot; <b>40</b> edges &middot; <b>3</b> clusters</div>
+    </div>
+    <div class="info-block">
+      <span class="hd">node breakdown</span>
+      <ul>
+        <li><b>18</b> clustered</li>
+        <li><b>2</b> outliers</li>
+      </ul>
+    </div>
+    <div class="info-block">
+      <span class="hd">edge breakdown</span>
+      <ul>
+        <li>
+          <span class="edge-swatch">
+            <span class="bar" style="background:#3559a0"></span>
+            <span class="bar" style="background:#b4741d"></span>
+            <span class="bar" style="background:#4e7a3a"></span>
+          </span>
+          <span><b>27</b> intra-cluster</span>
+        </li>
+        <li>
+          <span class="edge-swatch"><span class="bar" style="background:#3a3f4a"></span></span>
+          <span><b>8</b> inter-cluster</span>
+        </li>
+        <li>
+          <span class="edge-swatch"><span class="bar" style="background:#7e468f"></span></span>
+          <span><b>4</b> clustered-outlier</span>
+        </li>
+        <li>
+          <span class="edge-swatch"><span class="bar" style="background:#c92a2a"></span></span>
+          <span><b>1</b> outlier-outlier</span>
+        </li>
+      </ul>
+    </div>
+    <div class="info-block">
+      <span class="hd">cluster breakdown</span>
+      <div class="legend-row">
+        <span><span class="legend-dot" style="background:#7b9bd6"></span>C1 (8)</span>
+        <span><span class="legend-dot" style="background:#e0a649"></span>C2 (6)</span>
+        <span><span class="legend-dot" style="background:#8fbb70"></span>C3 (4)</span>
+        <span><span class="legend-dot" style="background:#e07c6a"></span>outliers (2)</span>
+      </div>
+    </div>
+    <span class="info-hint">hover for stats</span>
+  </div>
+  <div class="gtip" id="gtip"></div>
+</figure>
+
+<section class="family">
+  <h2 class="family-title">Block-model generators</h2>
+  <p class="family-lede">Central objects: the cluster assignment \(\mathcal{C}\), the block-to-block edge-count matrix, and the per-node degree sequence (every variant here uses the degree-corrected SBM). Variants add further structural constraints (per-cluster edge connectivity) on top.</p>
+  <div class="gen-grid">
+    <article class="gen-card">
+      <a class="card-click" href="./sbm.html" aria-label="SBM generator"></a>
+      <div class="name-row">
+        <div class="name-block">
+          <span class="name">SBM</span>
+          <span class="fullname">stochastic block model</span>
+        </div>
+        <span class="refs">
+          <a class="ref" href="https://doi.org/10.1103/PhysRevE.95.012317" target="_blank" rel="noopener">paper</a>
+          <span class="sep">&middot;</span>
+          <a class="ref" href="https://git.skewed.de/count0/graph-tool" target="_blank" rel="noopener">code</a>
+        </span>
+      </div>
+      <div class="blurb">The degree-corrected variant of the classic SBM. Keeps the cluster assignment, the block-to-block edge counts, and the per-node degree sequence; the rest is random. The baseline the other block-model variants build on.</div>
+    </article>
+    <article class="gen-card under-construction">
+      <a class="card-click" href="./ec-sbm-v1.html" aria-label="EC-SBMv1 generator"></a>
+      <div class="name-row">
+        <div class="name-block">
+          <span class="name">EC-SBMv1</span>
+          <span class="fullname">edge-connected SBM, v1</span>
+        </div>
+        <span class="refs">
+          <a class="ref" href="https://doi.org/10.1007/s41109-025-00701-2" target="_blank" rel="noopener">paper</a>
+          <span class="sep">&middot;</span>
+          <a class="ref" href="https://github.com/illinois-or-research-analytics/ec-sbm" target="_blank" rel="noopener">code</a>
+        </span>
+      </div>
+      <div class="blurb">SBM with an edge-connectivity guarantee: a hand-built \(k\)-edge-connected core is stitched into each cluster before sampling, so each output cluster ends up at least as edge-connected as its input counterpart. Outliers are treated as singleton clusters, which replicates the edges between them; a naive greedy matcher fills any residual degree deficit.</div>
+    </article>
+    <article class="gen-card under-construction">
+      <a class="card-click" href="./ec-sbm-v2.html" aria-label="EC-SBMv2 generator"></a>
+      <div class="name-row">
+        <div class="name-block">
+          <span class="name">EC-SBMv2</span>
+          <span class="fullname">edge-connected SBM, v2</span>
+        </div>
+        <span class="refs">
+          <span class="ref unpub" title="no paper yet">unpublished</span>
+          <span class="sep">&middot;</span>
+          <a class="ref" href="https://github.com/illinois-or-research-analytics/ec-sbm" target="_blank" rel="noopener">code</a>
+        </span>
+      </div>
+      <div class="blurb">Same edge-connectivity guarantee as v1, with two changes. Treating outliers as singleton clusters can accidentally regenerate community-like structure among them; v2 folds all outliers into a single block instead. Residual accounting is simpler too: one SBM call, a block-preserving rewire, and a true_greedy degree-matching pass.</div>
+    </article>
+    <article class="gen-card under-construction">
+      <a class="card-click" href="./ec-sbm-v3.html" aria-label="EC-SBMv3 generator"></a>
+      <div class="name-row">
+        <div class="name-block">
+          <span class="name">EC-SBMv3</span>
+          <span class="fullname">edge-connected SBM, v3</span>
+        </div>
+        <span class="refs">
+          <span class="ref unpub" title="no paper yet">unpublished</span>
+          <span class="sep">&middot;</span>
+          <a class="ref" href="https://github.com/illinois-or-research-analytics/ec-sbm" target="_blank" rel="noopener">code</a>
+        </span>
+      </div>
+      <div class="blurb">Same downstream stages as v2 (residual SBM + block-preserving rewire + block-aware matcher). Stage 2 swaps the rigid \(K_{k+1}\) seed for a per-cluster PSO build on a hyperbolic disk, with a per-cluster temperature search that drives the simulated clustering coefficient toward each input cluster's empirical target.</div>
+    </article>
+  </div>
+</section>
+
+<section class="family">
+  <h2 class="family-title">Mixing-parameter generators</h2>
+  <p class="family-lede">Central object: a single scalar setting the fraction of edges that cross cluster boundaries. Variants differ in what drives the degrees and cluster sizes (resampled from a power law, or taken as given).</p>
+  <div class="gen-grid">
+    <article class="gen-card under-construction">
+      <a class="card-click" href="./lfr.html" aria-label="LFR generator"></a>
+      <div class="name-row">
+        <div class="name-block">
+          <span class="name">LFR</span>
+          <span class="fullname">Lancichinetti&ndash;Fortunato&ndash;Radicchi benchmark</span>
+        </div>
+        <span class="refs">
+          <a class="ref" href="https://doi.org/10.1103/PhysRevE.78.046110" target="_blank" rel="noopener">paper</a>
+          <span class="sep">&middot;</span>
+          <a class="ref" href="https://github.com/andrealancichinetti/LFRbenchmarks" target="_blank" rel="noopener">code</a>
+        </span>
+      </div>
+      <div class="blurb">Fits power laws to the degree distribution and the cluster sizes, resamples both from scratch, and discards the original. Mixing is the mean of a per-node fraction \(\mu\). The long-standing community-detection benchmark.</div>
+    </article>
+    <article class="gen-card">
+      <a class="card-click" href="./abcd.html" aria-label="ABCD generator"></a>
+      <div class="name-row">
+        <div class="name-block">
+          <span class="name">ABCD</span>
+          <span class="fullname">artificial benchmark for community detection</span>
+        </div>
+        <span class="refs">
+          <a class="ref" href="https://doi.org/10.1017/nws.2020.45" target="_blank" rel="noopener">paper</a>
+          <span class="sep">&middot;</span>
+          <a class="ref" href="https://github.com/bkamins/ABCDGraphGenerator.jl" target="_blank" rel="noopener">code</a>
+        </span>
+      </div>
+      <div class="blurb">A faster, more tractable alternative to LFR. Takes the degree sequence and cluster sizes as given; a single global mixing parameter \(\xi\) sets the proportion of edges that cross cluster boundaries.</div>
+    </article>
+    <article class="gen-card under-construction">
+      <a class="card-click" href="./abcd+o.html" aria-label="ABCD+o generator"></a>
+      <div class="name-row">
+        <div class="name-block">
+          <span class="name">ABCD+o</span>
+          <span class="fullname">ABCD with outliers</span>
+        </div>
+        <span class="refs">
+          <a class="ref" href="https://doi.org/10.1007/s41109-023-00552-9" target="_blank" rel="noopener">paper</a>
+          <span class="sep">&middot;</span>
+          <a class="ref" href="https://github.com/bkamins/ABCDGraphGenerator.jl" target="_blank" rel="noopener">code</a>
+        </span>
+      </div>
+      <div class="blurb">ABCD with an explicit outlier block. The sampler picks the outlier set at random; outlier-outlier edges are unlikely but not forbidden.</div>
+    </article>
+  </div>
+</section>
+
+<section class="family">
+  <h2 class="family-title">Geometric generators</h2>
+  <p class="family-lede">Nodes placed in a latent geometric space; edges drawn from proximity. The only family here where clustering coefficient is a design goal rather than a side effect.</p>
+  <div class="gen-grid">
+    <article class="gen-card">
+      <a class="card-click" href="./npso.html" aria-label="nPSO generator"></a>
+      <div class="name-row">
+        <div class="name-block">
+          <span class="name">nPSO</span>
+          <span class="fullname">nonuniform popularity-similarity optimisation</span>
+        </div>
+        <span class="refs">
+          <a class="ref" href="https://doi.org/10.1088/1367-2630/aac06f" target="_blank" rel="noopener">paper</a>
+          <span class="sep">&middot;</span>
+          <a class="ref" href="https://github.com/biomedical-cybernetics/nPSO_model" target="_blank" rel="noopener">code</a>
+        </span>
+      </div>
+      <div class="blurb">Embeds nodes on a hyperbolic disk and connects pairs that lie close in the geometry; a temperature knob trades clustering coefficient against randomness.</div>
+    </article>
+  </div>
+</section>
+
+<footer class="ack">
+  <p class="tools">drawn with <a href="https://d3js.org" target="_blank" rel="noopener">d3</a></p>
+  <p class="credit">typed by vltanh, doodled with Claude</p>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script>
+window.MathJax = {
+  tex: {
+    inlineMath: [['\\(', '\\)'], ['$', '$'], ['$$', '$$']],
+    displayMath: [['\\[', '\\]']]
+  },
+  chtml: { scale: 1.0 }
+};
+</script>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script src="./shared.js"></script>
+<script>
+(function () {
+  const POS = NETGEN.POSITIONS;
+  // Landing page reserves the original coral red for outlier illustration;
+  // generator pages have moved COL.OUT to a neutral purple, but the
+  // landing's hero card and legend keep the punchier original.
+  const COL = Object.assign({}, NETGEN.COLORS, {
+    OUT: "#e07c6a",
+    edge_intra: Object.assign({}, NETGEN.COLORS.edge_intra, { OUT: "#a04030" }),
+  });
+  const CLUSTER_OF = NETGEN.CLUSTER_OF;
+  const DEGREES = NETGEN.DEGREES;
+  const EDGES = NETGEN.EDGES;
+  const NODES = NETGEN.NODES;
+
+  // ── Per-node stats ────────────────────────────────────────
+  const intraDeg = {};
+  const interDeg = {};
+  NODES.forEach(n => { intraDeg[n] = 0; interDeg[n] = 0; });
+  EDGES.forEach(({u, v}) => {
+    const sameCluster = CLUSTER_OF[u] === CLUSTER_OF[v] && CLUSTER_OF[u] !== "OUT";
+    if (sameCluster) { intraDeg[u]++; intraDeg[v]++; }
+    else             { interDeg[u]++; interDeg[v]++; }
+  });
+  function edgeType(e) {
+    const cu = CLUSTER_OF[e.u], cv = CLUSTER_OF[e.v];
+    if (cu === "OUT" && cv === "OUT") return "outlier-outlier";
+    if (cu === "OUT" || cv === "OUT") return "clustered-outlier";
+    if (cu === cv) return "intra-cluster (" + cu + ")";
+    return "inter-cluster (" + cu + ", " + cv + ")";
+  }
+  function edgeColor(e) {
+    const cu = CLUSTER_OF[e.u], cv = CLUSTER_OF[e.v];
+    if (cu === "OUT" && cv === "OUT") return COL.edge_drop;
+    if (cu === "OUT" || cv === "OUT") return COL.edge_stage3;
+    if (cu === cv) return COL.edge_intra[cu];
+    return COL.edge_inter;
+  }
+
+  // ── Force-directed, anchored to preset positions ──────────
+  const svg = d3.select("#shared-graph-svg")
+    .attr("viewBox", NETGEN.fitViewBoxAttr())
+    .attr("preserveAspectRatio", "xMidYMid meet");
+  const gLinks = svg.append("g").attr("class", "links");
+  const gNodes = svg.append("g").attr("class", "nodes");
+  const gLabels = svg.append("g").attr("class", "labels");
+
+  const simNodes = NODES.map(id => ({
+    id, x: POS[id].x, y: POS[id].y,
+    homeX: POS[id].x, homeY: POS[id].y,
+    cluster: CLUSTER_OF[id],
+  }));
+  const idx = {}; simNodes.forEach(n => idx[n.id] = n);
+  const simLinks = EDGES.map(e => ({
+    source: idx[e.u], target: idx[e.v],
+    kind: e.kind, type: edgeType(e), color: edgeColor(e),
+  }));
+
+  const link = gLinks.selectAll("line").data(simLinks).join("line")
+    .attr("stroke", d => d.color)
+    .attr("stroke-width", 1.5)
+    .attr("stroke-linecap", "round")
+    .attr("opacity", 0.82)
+    .style("cursor", "pointer");
+
+  const node = gNodes.selectAll("circle").data(simNodes).join("circle")
+    .attr("r", 13)
+    .attr("fill", d => COL[d.cluster])
+    .attr("stroke", "#1b2033")
+    .attr("stroke-width", 1.5)
+    .style("cursor", "grab");
+
+  const label = gLabels.selectAll("text").data(simNodes).join("text")
+    .attr("text-anchor", "middle")
+    .attr("dominant-baseline", "central")
+    .attr("font-family", "Special Elite, Courier New, monospace")
+    .attr("font-size", 10)
+    .attr("font-weight", 400)
+    .attr("fill", "#1b2033")
+    .attr("pointer-events", "none")
+    .text(d => d.id);
+
+  const sim = d3.forceSimulation(simNodes)
+    .force("link", d3.forceLink(simLinks).distance(55).strength(0.15))
+    .force("charge", d3.forceManyBody().strength(-45))
+    .force("collide", d3.forceCollide(16))
+    .force("x", d3.forceX(d => d.homeX).strength(0.18))
+    .force("y", d3.forceY(d => d.homeY).strength(0.18))
+    .alpha(0.35).alphaDecay(0.035);
+
+  sim.on("tick", () => {
+    link
+      .attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+      .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+    node.attr("cx", d => d.x).attr("cy", d => d.y);
+    label.attr("x", d => d.x).attr("y", d => d.y);
+  });
+
+  const drag = d3.drag()
+    .on("start", function (e, d) {
+      if (!e.active) sim.alphaTarget(0.35).restart();
+      d.fx = d.x; d.fy = d.y;
+      d3.select(this).style("cursor", "grabbing");
+    })
+    .on("drag", function (e, d) { d.fx = e.x; d.fy = e.y; })
+    .on("end", function (e, d) {
+      if (!e.active) sim.alphaTarget(0);
+      d.fx = null; d.fy = null;
+      d3.select(this).style("cursor", "grab");
+    });
+  node.call(drag);
+
+  // ── Tooltip ──────────────────────────────────────────────
+  const tip = document.getElementById("gtip");
+  const figure = document.querySelector(".shared-graph");
+  function showTip(html, clientX, clientY) {
+    tip.innerHTML = html;
+    tip.classList.add("on");
+    const rect = figure.getBoundingClientRect();
+    let x = clientX - rect.left + 14;
+    let y = clientY - rect.top + 14;
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    if (x + tw > rect.width - 8) x = clientX - rect.left - tw - 12;
+    if (y + th > rect.height - 8) y = clientY - rect.top - th - 8;
+    tip.style.left = x + "px";
+    tip.style.top = y + "px";
+  }
+  function hideTip() { tip.classList.remove("on"); }
+
+  node.on("mouseenter", function (e, d) {
+    const d_total = DEGREES[d.id];
+    const d_int = intraDeg[d.id];
+    const d_ext = interDeg[d.id];
+    const mu = d_total > 0 ? (d_ext / d_total) : 0;
+    const type = d.cluster === "OUT" ? "outlier" : "clustered";
+    const clusterLabel = d.cluster === "OUT" ? "(none)" : d.cluster;
+    showTip(
+      '<div class="hd">node ' + d.id + ' &middot; ' + type + '</div>' +
+      '<div>cluster <b>' + clusterLabel + '</b></div>' +
+      '<div>degree <b>' + d_total + '</b> <span class="dim">(intra ' + d_int + ', inter ' + d_ext + ')</span></div>' +
+      '<div>μ<sub>i</sub> <b>' + mu.toFixed(2) + '</b></div>',
+      e.clientX, e.clientY
+    );
+  })
+  .on("mousemove", function (e) { showTip(tip.innerHTML, e.clientX, e.clientY); })
+  .on("mouseleave", hideTip);
+
+  link.on("mouseenter", function (e, d) {
+    showTip(
+      '<div class="hd">edge</div>' +
+      '<div><b>' + d.source.id + '</b>, <b>' + d.target.id + '</b></div>' +
+      '<div class="dim">' + d.type + '</div>',
+      e.clientX, e.clientY
+    );
+  })
+  .on("mousemove", function (e) { showTip(tip.innerHTML, e.clientX, e.clientY); })
+  .on("mouseleave", hideTip);
+
+})();
+</script>
+
+</body>
+</html>

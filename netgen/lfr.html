@@ -1,0 +1,1861 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>LFR &middot; Lancichinetti&ndash;Fortunato&ndash;Radicchi Benchmark | Synthetic Network Generators</title>
+<link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐖</text></svg>">
+<meta name="description" content="LFR (Lancichinetti-Fortunato-Radicchi) benchmark: fit power laws to input's degree distribution and cluster-size distribution, then resample both from scratch. Mixing parameter μ is the mean of per-node out-ratio.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./shared.css">
+<style>
+.graph.g-with-side .side-caption{
+  font-family:'Special Elite','Courier New',monospace;
+  font-size:.76rem; color:var(--paper-2);
+  padding:.15rem 0 .7rem; margin-bottom:.55rem;
+  border-bottom:1px dashed rgba(139,117,65,.4); line-height:1.45;
+}
+.graph.g-with-side .side-caption .st{
+  color:var(--azure); letter-spacing:.12em; text-transform:uppercase; margin-right:.25rem;
+}
+.graph.g-with-side .side-body{
+  display:grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+  gap: 1rem; align-items: center; margin-bottom: .4rem;
+}
+.graph.g-with-side .side-right{ display:flex; flex-direction:column; align-items:stretch; gap:.4rem; }
+.graph.g-with-side .side-right > svg{ width:100%; height:auto; }
+@media (max-width: 820px){
+  .graph.g-with-side .side-body{ grid-template-columns: 1fr; align-items: start; }
+}
+.viz-node.ringed{ stroke:#c7801e; stroke-width:3.4; }
+.block-ring-label{ font-family:'Caveat Brush', cursive; font-size:20px; letter-spacing:.04em; }
+.disk-panel{
+  padding:1rem; background:var(--ink-2); border:1px solid var(--rule);
+  border-radius:6px; margin:1rem 0;
+}
+.disk-panel svg{ width:100%; height:auto; display:block; }
+.step-desc{
+  font-family:'Special Elite','Courier New',monospace;
+  font-size:.78rem; color:var(--paper-2); margin-top:.6rem;
+}
+.step-desc .st{ color:var(--azure); letter-spacing:.1em; text-transform:uppercase; }
+.step-desc mjx-container{ font-size:1em !important; }
+.profile-table{ width:100%; border-collapse:collapse; margin:1rem 0; background:var(--ink-2); border:1px solid var(--rule); border-radius:4px; overflow:hidden; }
+.profile-table th, .profile-table td{ padding:.55rem .85rem; border-bottom:1px solid var(--rule); vertical-align:middle; text-align:left; }
+.profile-table tr:last-child th, .profile-table tr:last-child td{ border-bottom:none; }
+.profile-table th{ font-family:'Special Elite','Courier New',monospace; font-size:.72rem; letter-spacing:.15em; color:var(--paper-3); width:10%; white-space:nowrap; }
+.profile-table td.val{ font-family:'Special Elite','Courier New',monospace; font-size:1.05rem; color:var(--azure); font-variant-numeric:tabular-nums; width:14%; white-space:nowrap; }
+.profile-table td.desc{ color:var(--paper-2); font-size:.88rem; line-height:1.45; }
+.readout{
+  display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:.8rem;
+  font-family:'Special Elite','Courier New',monospace; font-size:.78rem;
+}
+.readout .item{ color:var(--paper-3); }
+.readout .item b{ color:var(--azure); margin-left:.3rem; }
+.readout .item.target b{ color:var(--mint); }
+.readout .item.diff b{ color:var(--signal); }
+.graph-canvas{ height:auto; aspect-ratio: 640 / 680; max-height: 560px; }
+.resample-row{ cursor:default; }
+.resample-row rect.in{ fill: var(--azure); opacity: 0.85; }
+.resample-row rect.out{ fill: var(--orchid); opacity: 0.9; }
+.split-int{ fill:var(--azure); opacity:.88; }
+.split-ext{ fill:var(--orchid); opacity:.9; }
+</style>
+</head>
+<body>
+<main class="page">
+
+<div id="links"></div>
+
+<div class="wip-banner" role="status">
+  <svg class="wip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 L22 20 H2 Z"/><path d="M12 10v5"/><circle cx="12" cy="17.6" r=".7" fill="currentColor"/></svg>
+  <span class="wip-label">under construction</span>
+</div>
+
+<header class="hdr">
+  <div class="kicker">network-generation · lfr</div>
+  <h1><em>LFR</em></h1>
+  <p class="fullname">Lancichinetti&ndash;Fortunato&ndash;Radicchi benchmark</p>
+  <p class="sub">Fit one power law to the degree distribution, another to the cluster sizes. Resample both from scratch. Configuration model per cluster + global rewire to hit the per-node mixing parameter \(\mu\). The long-standing community-detection benchmark.</p>
+</header>
+
+<section class="hook">
+  <p>LFR's design choice is the opposite of <a href="./abcd.html">ABCD</a>'s. ABCD takes your degree sequence and cluster sizes verbatim; LFR refuses to. It assumes the <em>shapes</em> are power laws and distils your input to two scalar exponents plus a handful of range parameters.</p>
+  <p>Stage 2 resamples new degrees from a truncated power law with the fitted exponent and range, and new cluster sizes from a second power law under LFR's size-floor constraints. The output graph shares statistics with the input but not identity: node 5 in the output is not node 5 in the input; cluster 3 is not cluster 3.</p>
+  <p>Mixing is controlled by a scalar \(\mu\) per node: each node's internal/external degree split is fixed up front by rounding \(d^{\text{int}}_i = (1-\mu)\,d_i\) (with a coin flip on the fractional part), so \(\mu_i = d^{\text{out}}_i / d_i \approx \mu\) by construction. A rewire loop then reshuffles edge endpoints (never nodes) until no external edge accidentally lands inside its own cluster, keeping each node's split intact. The paper's Fig. 3 shows the resulting \(\mu_i\) distribution as bell-shaped around \(\mu\), not a delta.</p>
+  <p>LFR targets graphs with controlled degree + size distributions, sweepable across \(\mu\). ABCD fits when the input itself is the target. The two models share a configuration-model-plus-rewire backbone but differ on what counts as input.</p>
+</section>
+
+<section class="stage">
+  <div class="stage-num">generation · LFR pipeline</div>
+  <h2>Fit shapes first; build a new graph second.</h2>
+  <p>LFR is not a degree-sequence copier. It compresses the input into distribution parameters, draws a new synthetic instance, and then enforces the internal/external split implied by \(\mu\).</p>
+  <p><strong>Step 1.</strong> Profile degrees without copying node identities. The wrapper keeps \(N\), \(\langle k\rangle\), \(k_{\max}\), and fitted \(t_1\) from <code>degree.csv</code>; small inputs make the power-law fit noisy, and output degrees are always a fresh sample.</p>
+  <p><strong>Step 2.</strong> Profile community sizes under LFR's size floor. The fit keeps \(c_{\min} = \max(\min c, 3)\), \(c_{\max}\), and fitted \(t_2\); size-1/2 communities and singleton outliers cannot survive as generated communities.</p>
+  <p><strong>Step 3.</strong> Compute \(\mu\) as the mean of node-level ratios \(d_i^{out}/d_i\). This is not ABCD's stub-weighted \(\xi\): leaves and hubs get equal votes.</p>
+  <p><strong>Step 4.</strong> Draw a fresh benchmark instance from the fitted laws. Degree draws use inverse-CDF lookup, size draws run until their adjusted sum is \(N\), and a parity repair makes the degree sum pairable; IDs, exact degrees, and exact cluster sizes are intentionally not preserved.</p>
+  <p><strong>Step 5.</strong> Reserve same-community and cross-community stubs before any edges exist. LFR stochastically rounds \(d_i^{int} \approx (1-\mu)d_i\) and sets \(d_i^{out}=d_i-d_i^{int}\), so low-degree nodes realise only coarse \(\mu_i\) ratios.</p>
+  <p><strong>Step 6.</strong> Place nodes where their internal degree can fit. The assignment requires \(d_i^{int} \le c_q - 1\); independently sampled degrees and sizes can be incompatible, so the binary may resize and restart.</p>
+  <p><strong>Step 7.</strong> Pair the legal stub bags: internal stubs inside each community, external stubs globally. Random pairings can create loops, parallels, and same-community external mates.</p>
+  <p><strong>Step 8.</strong> Repair loops and duplicates by endpoint swaps that preserve degrees as much as possible. Irreparable collisions can still leave a small degree loss.</p>
+  <p><strong>Step 9.</strong> Rewire mate edges so every external stub actually leaves its community. The operation swaps endpoints, not budgets, which is why final \(\mu_i\) values concentrate around \(\mu\) instead of matching it exactly node by node.</p>
+</section>
+
+<!-- ─────────── Profiling · the shared fixture ─────────── -->
+<section class="stage">
+  <div class="stage-num">profiling · outliers as singletons</div>
+  <h2>Shared input graph: 18 clustered + 2 singletons.</h2>
+  <p>The 20-node synthetic LFR profiles to derive its scalars: C1 (8), C2 (6), C3 (4), plus outliers 19 + 20 each in their own 1-node cluster. Under the wrapper's <code>outlier_mode=singleton</code>, the cluster-size list reads <code>[8, 6, 4, 1, 1]</code>; the size-1 entries are below LFR's hard \(c_{\min} = 3\) floor and will not survive the resample.</p>
+  <div class="graph" id="g-shared-input">
+    <div class="graph-chrome">
+      <span>input G &middot; singleton mode &middot; 5 clusters</span>
+      <span class="right">shared fixture</span>
+    </div>
+    <div class="graph-canvas" id="g-shared-input-cy"></div>
+  </div>
+</section>
+
+<!-- ─────────── Profiling · degree distribution ─────────── -->
+<section class="stage">
+  <div class="stage-num">profiling · degree distribution</div>
+  <h2>Extract the shape; throw away the identity.</h2>
+  <p>Profile writes <code>degree.csv</code> (per-node integer degrees) the same way ABCD does, but LFR's stage 2 reads only four derived scalars from it: \(N\), \(\langle k \rangle\), \(k_{\max}\), and the power-law exponent \(t_1\) from <code>powerlaw.Fit</code> with auto-selected \(x_{\min}\). The sequence itself is discarded.</p>
+  <p>On the synthetic the fit is coarse because only 20 points feed it; the curve below shows the degree histogram and the fitted \(k^{-t_1}\) line. On <code>dnc</code> the fit lands at \(t_1 \approx 1.45\) with auto \(x_{\min} = 1\), which is a poor fit by the strict-KS test but the best the <code>powerlaw</code> package can do.</p>
+  <p>What survives is the empirical scale and tail profile: \(N\), \(\langle k\rangle\), \(k_{\max}\), and \(t_1\). What disappears is identity. Node IDs and their original degrees are not carried forward, so a high-degree input vertex does not become a specific high-degree output vertex; the sampler reconstructs a new sorted sequence from the fitted law.</p>
+  <div class="disk-panel">
+    <svg id="deg-fit" viewBox="0 0 640 300" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="step-desc"><span class="st">reading the chart</span> &middot; dots are the input degree histogram (log-log axes); azure line is the fitted \(k^{-t_1}\) power law. The tail shape matters for the stage-2 resampler; the specific counts do not.</div>
+  </div>
+</section>
+
+<!-- ─────────── Profiling · cluster sizes ─────────── -->
+<section class="stage">
+  <div class="stage-num">profiling · cluster sizes</div>
+  <h2>A second power law, with a size floor.</h2>
+  <p>Profile writes <code>cluster_sizes.csv</code> the same way ABCD does. Stage 2 derives \(c_{\min}, c_{\max}\), and the exponent \(t_2\) fitted with <code>xmin = max(min(cluster_sizes), 3)</code>. The floor of 3 is a hard LFR requirement: the C++ binary refuses to build clusters smaller than 3. If the input has size-1 or size-2 clusters (such as the wrapper's singleton outliers), the floor absorbs them; the fitted exponent is estimated only from sizes \(\ge 3\).</p>
+  <p>On the synthetic: <code>cluster_sizes = [8, 6, 4, 1, 1]</code> → \(c_{\min} = 3\) (floor applies), \(c_{\max} = 8\), \(t_2 \approx 2.23\). On <code>dnc</code>: 374 entries, 309 of them singletons → \(c_{\min} = 3\), \(c_{\max} = 78\), \(t_2 \approx 1.72\).</p>
+  <p>The generator keeps only a distributional profile: \(c_{\min}\), \(c_{\max}\), and \(t_2\), with \(c_{\min}\) clipped to 3. A community of size 1 or 2 cannot host many internal stubs, so LFR refuses to generate it; stage 2 ignores those below-floor sizes and draws new sizes until their adjusted total is exactly \(N\).</p>
+  <div class="disk-panel">
+    <svg id="cs-fit" viewBox="0 0 640 300" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="step-desc"><span class="st">reading the chart</span> &middot; dots are the input cluster-size histogram (log-log). Singletons (size 1) on the synthetic and on <code>dnc</code> appear in red; they are below the fit's \(x_{\min}\) floor and do not influence \(t_2\). The fit line starts at \(c_{\min}\).</div>
+  </div>
+</section>
+
+<!-- ─────────── Profiling · mixing scalar ─────────── -->
+<section class="stage">
+  <div class="stage-num">profiling · the mixing scalar</div>
+  <h2>One number: \(\mu\) (node-mean, not stub-weighted).</h2>
+  <p>LFR writes <code>mixing_parameter.txt</code>, a single float. Unlike ABCD's stub-weighted \(\xi\), LFR uses the mean of per-node ratios:</p>
+  \[
+    \mu \;=\; \frac{1}{|V|} \sum_{u \in V} \frac{d^{\text{out}}_u}{d_u}.
+  \]
+  <p>Each node contributes equally regardless of degree. A degree-1 node with one inter-cluster edge contributes \(1/1 = 1\); a degree-1000 hub with 500 inter-cluster edges contributes \(500/1000 = 0.5\). On skewed degrees the two conventions drift by a few percent. On <code>dnc</code> LFR's \(\mu = 0.622\) while ABCD's \(\xi = 0.718\); they are close but not equal.</p>
+  <table class="profile-table">
+    <tbody>
+      <tr><th>leaf</th><td class="val">\(1/1 = 1.00\)</td><td class="desc">One external edge on a leaf contributes the full value 1 to the average.</td></tr>
+      <tr><th>medium</th><td class="val">\(2/5 = 0.40\)</td><td class="desc">The node contributes its own fraction, not its two external stubs as separate votes.</td></tr>
+      <tr><th>hub</th><td class="val">\(50/100 = 0.50\)</td><td class="desc">The hub gets one vote too, so it does not dominate \(\mu\) by degree.</td></tr>
+    </tbody>
+  </table>
+  <table class="profile-table">
+    <tbody>
+      <tr><th>N</th><td class="val" id="prof-N">&middot;</td><td class="desc">Vertex count.</td></tr>
+      <tr><th>\(\langle k \rangle\)</th><td class="val" id="prof-k">&middot;</td><td class="desc">Mean degree. Passed to the binary via <code>-k</code>.</td></tr>
+      <tr><th>\(k_{\max}\)</th><td class="val" id="prof-maxk">&middot;</td><td class="desc">Maximum degree. Caps the truncated power-law sampler.</td></tr>
+      <tr><th>\(c_{\min}, c_{\max}\)</th><td class="val" id="prof-cs">&middot;</td><td class="desc">Size bounds, \(c_{\min}\) clipped at 3.</td></tr>
+      <tr><th>\(t_1\)</th><td class="val" id="prof-t1">&middot;</td><td class="desc">Degree power-law exponent from <code>powerlaw.Fit</code> auto \(x_{\min}\).</td></tr>
+      <tr><th>\(t_2\)</th><td class="val" id="prof-t2">&middot;</td><td class="desc">Cluster-size power-law exponent with \(x_{\min} = c_{\min}\).</td></tr>
+      <tr><th>\(\mu\)</th><td class="val" id="prof-mu">&middot;</td><td class="desc">Mean per-node out-ratio. This is the target the rewire loop chases.</td></tr>
+    </tbody>
+  </table>
+  <div class="callout">
+    <div class="tag">LFR's \(\mu\) vs ABCD's \(\xi\): same phrase, different number</div>
+    <p>ABCD's \(\xi\) sums across stubs then divides: \(\xi = (\sum_u d^{\text{out}}_u) / (\sum_u d_u)\). LFR's \(\mu\) takes per-node ratios then averages. On symmetric or uniform-degree graphs the two match; on heavy-tail graphs like <code>dnc</code> they diverge by a few percent. Neither generator accepts the other's convention; do not swap them.</p>
+  </div>
+</section>
+
+<!-- ─────────── Generation · resample sequences ─────────── -->
+<section class="stage">
+  <div class="stage-num">generation · resample degrees and cluster sizes</div>
+  <h2>Draw fresh sequences from the fitted power laws.</h2>
+  <p>The C++ binary samples a new degree sequence from \(P(k) \propto k^{-t_1}\) truncated to \([d_{\min}, k_{\max}]\), where \(d_{\min}\) is chosen by a bisection (<code>solve_dmin</code> + integer-average parity) so the distribution's mean lands at \(\langle k \rangle\) in expectation. It then draws \(N\) degrees in one pass via inverse-CDF lookup (no rejection loop), sorts them, and decrements the single largest if the total is odd so the configuration model can close. Cluster sizes come from a second power law \(P(c) \propto c^{-t_2}\) with floor \(c_{\min}\); they are drawn until they sum past \(N\), then the smallest entry absorbs the remainder so the total is exactly \(N\). The upper cap \(c_{\max}\) only bounds the sampler's range and is best-effort: when the fitted exponent is poor, output sizes can drift above \(c_{\max}\). Both samples differ from the input.</p>
+  <p>Press <em>re-roll sequences</em> to draw a new pair. The bars below overlay input (azure) vs resampled (plum) for each rank position. On the synthetic the resampled degree sequence tends to have a flatter tail: with only 20 points, the single-pass sampler rarely reproduces the input's heavy hubs.</p>
+  <p><strong>Step 1.</strong> Solve \(d_{\min}\), build the truncated CDF once, and use lower-bound lookup for each random degree draw. <strong>Step 2.</strong> If the sampled degree sum is odd, decrement the largest degree by one so stubs can be paired. <strong>Step 3.</strong> Draw community sizes from \(c^{-t_2}\), then adjust the smallest entry so the sizes sum to exactly \(N\).</p>
+  <div class="disk-panel">
+    <div class="widget-row tight">
+      <button class="btn primary" id="resample-reroll" type="button">re-roll sequences</button>
+      <span class="step-label">draws fresh degree + cluster-size samples from the fitted power laws</span>
+    </div>
+    <svg id="resample-degs" viewBox="0 0 640 240" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="step-desc" style="margin:.4rem 0 .8rem"><span class="st">degree sequence</span> &middot; rank on x-axis (sorted degree desc), degree on y-axis. Azure = input; plum = resampled.</div>
+    <svg id="resample-cs" viewBox="0 0 640 170" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="step-desc"><span class="st">cluster sizes</span> &middot; rank on x-axis. The floor \(c_{\min} = 3\) caps the minimum; input singletons (size 1) do not survive.</div>
+  </div>
+</section>
+
+<!-- ─────────── Generation · internal/external stub split ─────────── -->
+<section class="stage">
+  <div class="stage-num">generation · internal/external stub split</div>
+  <h2>Convert the target \(\mu\) into integer stub counts.</h2>
+  <p>After resampling degrees, LFR decides each node's internal budget before it knows the final edge set. For node \(i\), the target is \(d_i^{int} \approx (1-\mu)d_i\); a stochastic rounding step handles fractional values, and the external budget is whatever remains. This is why the final \(\mu_i\) distribution is spread around \(\mu\): integer stubs are coarse, especially on low-degree nodes.</p>
+  <p>The split turns each degree into two coloured piles: internal stubs reserved for same-community edges and external stubs reserved for cross-community edges. Assignment and rewiring both need those counts fixed; later swaps can move endpoints, but they cannot change a node's total internal/external budget. In code, <code>sampleInternalDegrees</code> rounds \((1-\mu)d_i\), then balances excess or defect so the requested split is feasible.</p>
+  <div class="disk-panel">
+    <div class="widget-row tight">
+      <div class="scrub">
+        <label>μ</label>
+        <input type="range" id="split-mu-slider" min="0" max="0.8" step="0.005" value="0.4">
+        <output id="split-mu-val">0.40</output>
+      </div>
+      <span class="step-label">same target used by the generation walkers below</span>
+    </div>
+    <svg id="stub-split" viewBox="0 0 640 270" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="step-desc"><span class="st">reading the chart</span> &middot; each bar is one resampled node degree. Azure = internal stubs; plum = external stubs. Increasing \(\mu\) moves mass from internal to external without changing the sampled total degree.</div>
+    <div class="readout" style="justify-content:center">
+      <span class="item target">target \(\mu\) <b id="split-target">&middot;</b></span>
+      <span class="item">internal stubs <b id="split-int-stubs">&middot;</b></span>
+      <span class="item">external stubs <b id="split-ext-stubs">&middot;</b></span>
+      <span class="item">mean observed <b id="split-mean">&middot;</b></span>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────── Generation · node-to-cluster assignment ─────────── -->
+<section class="stage">
+  <div class="stage-num">generation · node-to-cluster assignment</div>
+  <h2>Iterate until no homeless node remains.</h2>
+  <p>The paper's step 4: walk the degree sequence and place each node in a random community whose remaining slot count exceeds the node's internal degree \(d^{\text{int}} = (1-\mu) d\). If the binary fails to place a node within \(3N\) retries, it calls <code>change_community_size</code> to reshuffle the cluster-size sequence and restarts the assignment from scratch. Most realistic parameter settings converge on the first attempt.</p>
+  <p>Step through the iterations below. Home position is random each time; re-roll draws a new permutation.</p>
+  <p>A node assigned to community \(q\) must satisfy \(d_i^{int} \le c_q - 1\); otherwise it asks for more internal neighbours than exist. Degree and size sequences are sampled independently, so a hub can be too large for the first sampled community layout. The binary handles that by building a node-community bipartite assignment, running swap passes, and remapping nodes by degree feasibility.</p>
+  <table class="profile-table" id="assign-constraint-table">
+    <tbody></tbody>
+  </table>
+  <div class="graph" id="g-assign">
+    <div class="graph-chrome">
+      <span id="g-assign-stage">iter 0 · all nodes homeless</span>
+      <span class="right step-label">step <b id="g-assign-cur">0</b> / <span id="g-assign-total">4</span></span>
+    </div>
+    <div class="graph-canvas" id="g-assign-cy"></div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-assign-rand-step" type="button">random step</button>
+      <button class="btn" id="g-assign-rand-all" type="button">random all</button>
+      <span class="step-label"><em>step</em>: re-roll this iter only &middot; <em>all</em>: re-roll full assignment</span>
+    </div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-assign-start" type="button">to start</button>
+      <button class="btn" id="g-assign-prev" type="button">back</button>
+      <button class="btn primary" id="g-assign-next" type="button">next</button>
+      <button class="btn" id="g-assign-end" type="button">to end</button>
+    </div>
+    <div class="step-desc" id="g-assign-desc"></div>
+  </div>
+</section>
+
+<!-- ─────────── Generation · config model + rewire ─────────── -->
+<section class="stage">
+  <div class="stage-num">generation · configuration model + \(\mu\) rewire</div>
+  <h2>Configuration model to seed, targeted rewire to match \(\mu_i\).</h2>
+  <p>With assignment fixed, the binary builds the edge set in two halves: a per-cluster configuration model on the internal-degree sub-sequence in each cluster, then a cross-cluster configuration model on the leftover external stubs. The external config model is blind to cluster membership, so some external edges land between two nodes of the same cluster (a "mate" edge). After the seed, a mate-rewire phase walks every such edge and swaps an endpoint with a random outside node, so the external edge truly leaves the cluster while each node keeps its pre-set internal/external split. Every swap preserves node degrees, only re-pairing endpoints.</p>
+  <p>The walker below decomposes the seed phase: each step pairs two stubs uniformly at random; collisions (self-loops, parallels) flag red-dashed and feed a 2-opt cleanup pass that swaps endpoints with a random valid edge. Highlighted nodes mark the up to 4 endpoints touched by each swap; everything else dims. The distribution of \(\mu_i\) at the end is bell-shaped around \(\mu\), not a delta: small-degree nodes have few possible ratios (degree-1 only 0 or 1; degree-2 only 0, 0.5, 1) so they cluster at discrete points. The bars below the walker plot the \(\mu_i\) distribution from a finalised sample; the slider moves the target \(\mu\), re-roll resamples the edge generation.</p>
+  <p><strong>Step 1.</strong> Randomly pair stubs while keeping each node's sampled degree budget fixed; internal and external stubs are paired in different bags. <strong>Step 2.</strong> Repair self-loops and parallel edges with endpoint swaps that preserve degrees. <strong>Step 3.</strong> When an external pair accidentally stays inside one community, the mate pass swaps one endpoint outward while preserving every node's split.</p>
+
+  <div class="graph" id="g-cm">
+    <div class="graph-chrome">
+      <span id="g-cm-stage">step 0 · stubs ready, no edges</span>
+      <span class="right step-label">step <b id="g-cm-cur">0</b> / <span id="g-cm-total">0</span></span>
+    </div>
+    <div class="graph-canvas" id="g-cm-cy"></div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-cm-rand-step" type="button">random step</button>
+      <button class="btn" id="g-cm-rand-all" type="button">random all</button>
+      <span class="step-label"><em>step</em>: reshuffle this pairing only &middot; <em>all</em>: reshuffle every config-model pairing</span>
+    </div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-cm-start" type="button">to start</button>
+      <button class="btn" id="g-cm-prev" type="button">back</button>
+      <button class="btn primary" id="g-cm-next" type="button">next</button>
+      <button class="btn" id="g-cm-end" type="button">to end</button>
+    </div>
+    <div class="step-desc" id="g-cm-desc"></div>
+  </div>
+  <div class="disk-panel">
+    <div class="widget-row tight">
+      <div class="scrub">
+        <label>μ</label>
+        <input type="range" id="mu-slider" min="0" max="0.8" step="0.005" value="0.4">
+        <output id="mu-val">0.40</output>
+      </div>
+      <button class="btn" id="mu-snap">snap to profile \(\mu\)</button>
+      <button class="btn primary" id="mu-reroll">re-roll edges</button>
+    </div>
+    <svg id="mu-hist" viewBox="0 0 640 260" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="step-desc"><span class="st">reading the chart</span> &middot; x-axis is \(\mu_i\), y-axis is count. Bars are the observed per-node ratios; the dashed vertical line is the target \(\mu\). On 20 nodes the distribution is jagged because each node contributes one of only a few possible rationals.</div>
+    <div class="readout" style="justify-content:center">
+      <span class="item target">target \(\mu\) <b id="mu-target">&middot;</b></span>
+      <span class="item">mean achieved <b id="mu-achieved">&middot;</b></span>
+      <span class="item">within ±0.1 <b id="mu-close">&middot;</b></span>
+    </div>
+  </div>
+
+  <p>Before the mate-rewire kicks in, each cluster runs its own configuration-model build via <code>buildSubgraph</code>: a deterministic multimap seed places intra-cluster edges first, then 10 randomization passes 4-way-swap the local adjacency, and finally a multi-edge rewire breaks any duplicates that surface when each cluster is merged into the global edge set. The walker below steps through every Phase-2 swap and every Phase-3 multi-edge rewire across all clusters in cluster order. Each step boldfaces the up to 4 endpoints touched, dims everything else, then animates the cut + place.</p>
+  <p><strong>Step 1.</strong> Place a simple internal scaffold inside each community using the assigned nodes and their internal-degree targets. <strong>Step 2.</strong> Randomize the local adjacency by cutting two internal edges and placing two replacement edges that keep degrees unchanged. <strong>Step 3.</strong> When duplicate internal edges appear after merging clusters into the global set, repair them with another degree-preserving swap.</p>
+
+  <div class="graph" id="g-bs">
+    <div class="graph-chrome">
+      <span id="g-bs-stage">step 0 · per-cluster build init</span>
+      <span class="right step-label">step <b id="g-bs-cur">0</b> / <span id="g-bs-total">0</span></span>
+    </div>
+    <div class="graph-canvas" id="g-bs-cy"></div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-bs-rand-step" type="button">random step</button>
+      <button class="btn" id="g-bs-rand-all" type="button">random all</button>
+      <span class="step-label"><em>step</em>: re-roll this swap only &middot; <em>all</em>: re-roll every Phase-2 swap + Phase-3 rewire</span>
+    </div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-bs-start" type="button">to start</button>
+      <button class="btn" id="g-bs-prev" type="button">back</button>
+      <button class="btn primary" id="g-bs-next" type="button">next</button>
+      <button class="btn" id="g-bs-end" type="button">to end</button>
+    </div>
+    <div class="step-desc" id="g-bs-desc"></div>
+  </div>
+
+  <p>The mate-rewire phase is what turns LFR's μ from a target into the bell-shaped distribution above. After per-cluster internal edges are placed, the binary builds a global external-edge config model and runs a phase-3 loop: for any same-cluster external edge, pick a random outside node, do a 4-way swap that pulls one endpoint out of the cluster. The walker below steps op-by-op through that loop on the current sample. Per-cluster internal edges render as faded backdrop; mate edges still inside a cluster surface red-dashed; each step ghost-flashes the cuts before settling on the placements.</p>
+  <p><strong>Step 1.</strong> Scan the external-edge set for a pair whose endpoints are assigned to the same community; that pair is a mate violation. <strong>Step 2.</strong> Cut the bad external edge and one other external edge, then reconnect crosswise through an outside endpoint. <strong>Step 3.</strong> Keep the budgets fixed: the operation changes edge partners, not degrees or internal/external counts.</p>
+
+  <div class="graph" id="g-mr">
+    <div class="graph-chrome">
+      <span id="g-mr-stage">step 0 · mate-rewire init</span>
+      <span class="right step-label">step <b id="g-mr-cur">0</b> / <span id="g-mr-total">0</span></span>
+    </div>
+    <div class="graph-canvas" id="g-mr-cy"></div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-mr-rand-step" type="button">random step</button>
+      <button class="btn" id="g-mr-rand-all" type="button">random all</button>
+      <span class="step-label"><em>step</em>: re-roll this rewire only &middot; <em>all</em>: reseed full LFR pipeline</span>
+    </div>
+    <div class="widget-row tight">
+      <button class="btn" id="g-mr-start" type="button">to start</button>
+      <button class="btn" id="g-mr-prev" type="button">back</button>
+      <button class="btn primary" id="g-mr-next" type="button">next</button>
+      <button class="btn" id="g-mr-end" type="button">to end</button>
+    </div>
+    <div class="step-desc" id="g-mr-desc"></div>
+  </div>
+</section>
+
+<!-- ─────────── Case study · dnc ─────────── -->
+<section class="stage">
+  <div class="stage-num">case study · dnc</div>
+  <h2>What you get on the shipped example.</h2>
+  <p>Default run on <code>dnc</code> + <code>sbm-flat-best+cc</code> at <code>--seed 1</code> (\(N = 906\), \(\langle k \rangle = 23.02\), \(t_1 = 1.45\), \(t_2 = 1.72\), \(c_{\min} = 3\), \(c_{\max} = 78\), \(\mu = 0.622\)):</p>
+  <table class="profile-table">
+    <thead>
+      <tr><th>stat</th><th>input</th><th>lfr output</th><th>note</th></tr>
+    </thead>
+    <tbody>
+      <tr><th>N</th><td class="val">906</td><td class="val">906</td><td class="desc">Exact match (CLI arg).</td></tr>
+      <tr><th>edges</th><td class="val">10,429</td><td class="val">10,352</td><td class="desc">Off by 0.7%. LFR's rewire + resample lose only a handful of edges.</td></tr>
+      <tr><th>mean degree</th><td class="val">23.02</td><td class="val">22.85</td><td class="desc">Close but not exact: the truncated power-law sampler hits the mean in expectation only.</td></tr>
+      <tr><th>max degree</th><td class="val">368</td><td class="val">362</td><td class="desc">The input's heavy tail (368, 312, 256, 225, 202, ...) is often cut short: sampling from \(k^{-1.45}\) with \(k_{\max} = 368\) rarely draws the extreme quantiles without many tries.</td></tr>
+      <tr><th>\(\mu\)</th><td class="val">0.622</td><td class="val">~0.622</td><td class="desc">Hit via the rewire loop within the paper's tolerance; small per-node drift.</td></tr>
+      <tr><th>global cc</th><td class="val">0.548</td><td class="val">0.252</td><td class="desc">Not targeted.</td></tr>
+      <tr><th>clusters</th><td class="val">65</td><td class="val">8</td><td class="desc">LFR resamples cluster sizes from \(c^{-1.72}\) with floor 3 summing to 906. With \(t_2 = 1.72\) the sampler concentrates mass on the tail, so fewer larger clusters cover \(N\); 8 clusters for <code>dnc</code> is typical.</td></tr>
+      <tr><th>com.csv rows</th><td class="val">597</td><td class="val">906</td><td class="desc">Every node gets a cluster in LFR (no singletons to strip). Clustered count shoots up to all of \(N\) because the floor-3 constraint disallows 1-node clusters.</td></tr>
+    </tbody>
+  </table>
+  <div class="callout warn">
+    <div class="tag">caveat 1: node IDs do not correspond</div>
+    <p>LFR's output uses node IDs 1 through \(N\). Those IDs do not correspond to the input's node IDs, nor do the cluster IDs correspond. If a downstream tool asks "is the output's cluster 7 the same as the input's cluster 7", the answer is no: LFR does not see the input's clustering, only its size distribution. Anything keyed on identity needs <a href="./abcd.html">ABCD</a> or <a href="./sbm.html">SBM</a> instead.</p>
+  </div>
+  <div class="callout warn">
+    <div class="tag">caveat 2: cluster count shifts</div>
+    <p>On <code>dnc</code>, input has 65 real clusters (plus 309 singletons the wrapper counts separately); LFR output has 8 clusters. This is not a bug: LFR samples \(c^{-t_2}\) with floor \(c_{\min}\) and sum fixed to \(N\). With \(t_2 \approx 1.72\) the sampler draws a handful of large clusters that sum to 906 quickly, leaving no room for the many small clusters the input had. The fitted \(c_{\max} = 78\) does not constrain the output here: empirically every output cluster on <code>dnc</code> lands in [85, 151], so the upper bound is best-effort, not enforced. LFR is the wrong tool when a specific cluster count is required.</p>
+  </div>
+  <div class="callout warn">
+    <div class="tag">caveat 3: outliers disappear</div>
+    <p>The wrapper's <code>outlier_mode=singleton</code> makes every unclustered input node a size-1 pseudo-cluster. LFR's floor \(c_{\min} = 3\) refuses them: their sizes don't survive the fit, and the output has no singletons at all. Outlier semantics are incompatible with LFR; they resolve as "every node is clustered" on LFR output.</p>
+  </div>
+</section>
+
+<div id="kin"></div>
+
+<footer class="ack">
+  <p class="tools">drawn with <a href="https://d3js.org" target="_blank" rel="noopener">d3</a></p>
+  <p class="credit">typed by vltanh, doodled with Claude</p>
+</footer>
+
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script>
+window.MathJax = {
+  tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] },
+  chtml: { scale: 1.0 }
+};
+</script>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script src="./shared.js"></script>
+<script src="./js/spoke_layer.js"></script>
+<script src="./js/profile_kernel.js"></script>
+<script src="./js/lfr_kernel.js"></script>
+<script>
+(function () {
+  document.getElementById("links").innerHTML = NETGEN.linksRow({gen: "lfr"});
+  (function () {
+    const icons = document.querySelector("#links .top-icons");
+    if (!icons) return;
+    const extras = [{
+      href: "https://doi.org/10.1103/PhysRevE.78.046110",
+      label: "paper",
+      svg: '<path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/>',
+    }];
+    const sourceLink = icons.querySelector('a[aria-label="github repository"]');
+    if (sourceLink) {
+      sourceLink.setAttribute("href", "https://github.com/vltanh/network-generation/tree/main/src/lfr");
+      const span = sourceLink.querySelector("span");
+      if (span) span.textContent = "code";
+    }
+    extras.forEach(x => {
+      const a = document.createElement("a");
+      a.href = x.href; a.target = "_blank"; a.rel = "noopener";
+      a.setAttribute("aria-label", x.label);
+      a.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + x.svg + '</svg><span>' + x.label + '</span>';
+      icons.appendChild(a);
+    });
+  })();
+  document.getElementById("kin").innerHTML = NETGEN.kinSection({
+    title: "similarity",
+    siblings: [
+      { gen: "abcd", label: "ABCD",
+        diff: "Same configuration-model + rewire backbone but takes the degree sequence verbatim, skips the power-law fit. Uses the stub-weighted \\(\\xi\\) instead of LFR's node-mean \\(\\mu\\)." },
+      { gen: "abcd+o", label: "ABCD+o",
+        diff: "ABCD with an explicit outlier parameter \\(s_0\\). LFR has no outlier concept and the floor \\(c_{\\min} = 3\\) absorbs any singleton from the wrapper's profile." },
+      { gen: "npso", label: "nPSO",
+        diff: "Also fits a power law for degrees (\\(\\gamma\\)), but embeds nodes on a hyperbolic disk; clustering coefficient is the targeted quantity, not the mixing." },
+    ],
+  });
+
+  const COL = NETGEN.COLORS;
+  const EDGES = NETGEN.EDGES;
+  const CLUSTER_OF = NETGEN.CLUSTER_OF;
+  const DEGREES = NETGEN.DEGREES;
+  const NODES = NETGEN.NODES;
+  const C1 = NETGEN.C1, C2 = NETGEN.C2, C3 = NETGEN.C3, OUT_N = NETGEN.OUT;
+
+  // Shared input opener · same nPSO-style 5-cluster singleton view.
+  // 3 real clusters + 2 singletons, each with its own dashed ring +
+  // distinct hue from the shared outlier palette.
+  (function () {
+    const palette = COL.outlier_palette;
+    const clusters = [
+      { id: "C1", nodes: C1, color: COL.C1, isOutlier: false },
+      { id: "C2", nodes: C2, color: COL.C2, isOutlier: false },
+      { id: "C3", nodes: C3, color: COL.C3, isOutlier: false },
+    ];
+    OUT_N.forEach((n, i) => {
+      clusters.push({ id: "S" + n, nodes: [n], color: palette[i % palette.length], isOutlier: true });
+    });
+    NETGEN.singletonOpener({ hostId: "g-shared-input-cy", clusters });
+  })();
+
+  // Profile-side scalars via ProfileKernel.runProfile. lfr defaults
+  // (src/lfr/profile.py): outlier_mode=singleton, drop_oo=false. Kernel emits
+  // degree.csv, cluster_sizes.csv (singletons retained), and mixing_parameter.txt
+  // (mean reduction: per-node out/total averaged, numpy pairwise sum).
+  const PROF_KERNEL_OUT = ProfileKernel.runProfile({
+    gen: "lfr",
+    edgelist: EDGES.map(e => [String(e.u), String(e.v)]),
+    clustering: NODES.filter(n => CLUSTER_OF[n] !== "OUT")
+                     .map(n => [String(n), CLUSTER_OF[n]]),
+    outlier_mode: "singleton",
+    drop_oo: false,
+  });
+  const PROF_DEGREES = PROF_KERNEL_OUT.files["degree.csv"].trim().split("\n").map(Number);
+  const PROF_CLUSTER_SIZES = PROF_KERNEL_OUT.files["cluster_sizes.csv"].trim().split("\n").map(Number);
+  const N_ = PROF_DEGREES.length;
+  const K_MEAN = PROF_DEGREES.reduce((a, b) => a + b, 0) / N_;
+  const K_MAX = PROF_DEGREES[0];  // kernel sorts deg desc.
+  const C_MIN = Math.max(Math.min(...PROF_CLUSTER_SIZES), 3);
+  const C_MAX = Math.max(...PROF_CLUSTER_SIZES);
+  // Fitted exponents (read from src/lfr/profile.py output on the synthetic).
+  // powerlaw.Fit lives in Python only; the page hardcodes the canonical fits
+  // rather than reimplementing the package.
+  const T1 = 2.11;
+  const T2 = 2.23;
+  const MU_MEAN = parseFloat(PROF_KERNEL_OUT.files["mixing_parameter.txt"]);
+
+  // ── Populate profile-table readouts ──
+  document.getElementById("prof-N").textContent = N_;
+  document.getElementById("prof-k").textContent = K_MEAN.toFixed(2);
+  document.getElementById("prof-maxk").textContent = K_MAX;
+  document.getElementById("prof-cs").textContent = "(" + C_MIN + ", " + C_MAX + ")";
+  document.getElementById("prof-t1").textContent = T1.toFixed(2);
+  document.getElementById("prof-t2").textContent = T2.toFixed(2);
+  document.getElementById("prof-mu").textContent = MU_MEAN.toFixed(3);
+
+  // ── Per-panel rerolls ──
+  let RESAMPLE_SEED = 1, ASSIGN_SEED = 1, EDGE_SEED = 1;
+  const onResampleChanged = [];
+  const onAssignChanged = [];
+  const onEdgeChanged = [];
+  function rerollResample() {
+    RESAMPLE_SEED += 1;
+    onResampleChanged.forEach(fn => fn());
+    onAssignChanged.forEach(fn => fn());
+    onEdgeChanged.forEach(fn => fn());
+  }
+  function rerollAssign() {
+    ASSIGN_SEED += 1;
+    onAssignChanged.forEach(fn => fn());
+    onEdgeChanged.forEach(fn => fn());
+  }
+  function rerollEdges() {
+    EDGE_SEED += 1;
+    onEdgeChanged.forEach(fn => fn());
+  }
+
+  // d3.randomLcg drives page-LOCAL layout shuffles only (not the byte-equal
+  // kernel path). For LFRKernel calls the closure also carries the integer
+  // seed via __seed: the kernel ignores the [0,1) closure and threads its own
+  // ran2 stream (Numerical Recipes) seeded from __seed, matching the canonical
+  // LFR binary bit-for-bit. (Live page RNG behaviour is now ran2, not LCG.)
+  function seededRng(seed) {
+    const s = (seed | 0);
+    const fn = d3.randomLcg(s);
+    fn.__seed = s;
+    return fn;
+  }
+  function shuffled(arr, rng) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+  // Degree + cluster-size sampling delegate to LFRKernel, which is a
+  // line-for-line port of benchm.cpp's solve_dmin / integer_average /
+  // powerlaw cumulative + lower_bound stages (verified byte-equal vs
+  // canonical via tools/viz_check/lfr/kernel_check.mjs). Page-side
+  // wrappers sort desc to match the post-stage layout the viz expects.
+  function resampleDegrees(seed) {
+    const rng = seededRng(seed * 73 + 11);
+    const { degrees } = LFRKernel.sampleDegreeSequence({
+      N: N_, k_avg: K_MEAN, max_k: K_MAX, t1: T1, rng,
+    });
+    return degrees.slice().sort((a, b) => b - a);
+  }
+
+  function resampleClusterSizes(seed, maxIntDegOverride) {
+    const rng = seededRng(seed * 97 + 29);
+    // Canonical pipeline order: internal-degree sequence is sampled BEFORE
+    // cluster sizes so the seed branch (max_internal_degree+1 pre-pushed
+    // when !fixed_range) uses the actual max of the sampled internal
+    // degrees, not a naive (1-mu)*max_k lower bound.
+    let max_internal_degree = maxIntDegOverride;
+    if (max_internal_degree === undefined) {
+      const splitRng = seededRng(seed * 41 + 5);
+      const degs = resampleDegrees(seed);
+      const split = LFRKernel.sampleInternalDegrees({
+        degrees: degs, mu: MU_MEAN, rng: splitRng,
+      });
+      max_internal_degree = split.internal.length ? Math.max(0, ...split.internal) : 0;
+    }
+    const { sizes } = LFRKernel.sampleClusterSizes({
+      N: N_, max_internal_degree, c_min: C_MIN, c_max: C_MAX, t2: T2, rng,
+      fixed_range: false, overlap_extra: 0,
+    });
+    return sizes.slice().sort((a, b) => b - a);
+  }
+
+  // ── Profiling · degree-distribution fit ──
+  (function () {
+    const svg = d3.select("#deg-fit");
+    svg.selectAll("*").remove();
+    const W = 640, H = 300;
+    const PAD = { top: 22, right: 20, bottom: 40, left: 48 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+
+    // Build degree histogram.
+    const hist = d3.rollup(NODES.map(n => DEGREES[n]), v => v.length, d => d);
+    const data = Array.from(hist.entries()).map(([k, c]) => ({ k, c })).sort((a,b) => a.k - b.k);
+
+    const xMax = d3.max(data, d => d.k) || 10;
+    const yMax = d3.max(data, d => d.c) || 10;
+    const x = d3.scaleLog().domain([0.9, xMax * 1.2]).range([0, iw]);
+    const y = d3.scaleLog().domain([0.5, yMax * 1.5]).range([ih, 0]);
+
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).ticks(6, "~g"))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px");
+    g.append("g").call(d3.axisLeft(y).ticks(5, "~g"))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+    svg.append("text").attr("x", W / 2).attr("y", H - 8)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px")
+      .text("degree (log)");
+
+    // Fit line: count ≈ C * k^(-t1). Fit C by matching total mass roughly.
+    const C_fit = data.reduce((s, d) => s + d.c * Math.pow(d.k, T1), 0) / data.length;
+    const lineData = [];
+    for (let kk = 1; kk <= xMax; kk += 0.2) {
+      lineData.push([kk, C_fit * Math.pow(kk, -T1)]);
+    }
+    g.append("path")
+      .datum(lineData)
+      .attr("fill", "none").attr("stroke", COL.azure).attr("stroke-width", 1.6).attr("opacity", 0.8)
+      .attr("d", d3.line().x(d => x(d[0])).y(d => y(Math.max(0.5, d[1]))));
+
+    g.selectAll(".pt").data(data).join("circle")
+      .attr("class", "pt")
+      .attr("cx", d => x(d.k))
+      .attr("cy", d => y(d.c))
+      .attr("r", 3.2)
+      .attr("fill", COL.cobalt).attr("opacity", 0.9);
+
+    // Fit-param tag
+    svg.append("text").attr("x", PAD.left + 8).attr("y", PAD.top + 14)
+      .style("fill", COL.azure).style("font-family", "Special Elite, Courier New, monospace").style("font-size", "11px")
+      .text("t1 ≈ " + T1.toFixed(2));
+  })();
+
+  // ── Profiling · cluster-size fit ──
+  (function () {
+    const svg = d3.select("#cs-fit");
+    svg.selectAll("*").remove();
+    const W = 640, H = 300;
+    const PAD = { top: 22, right: 20, bottom: 40, left: 48 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+
+    const hist = d3.rollup(PROF_CLUSTER_SIZES, v => v.length, d => d);
+    const data = Array.from(hist.entries()).map(([k, c]) => ({ k, c })).sort((a,b) => a.k - b.k);
+
+    const xMax = d3.max(data, d => d.k) || 10;
+    const yMax = d3.max(data, d => d.c) || 10;
+    const x = d3.scaleLog().domain([0.9, xMax * 1.3]).range([0, iw]);
+    const y = d3.scaleLog().domain([0.5, yMax * 1.5]).range([ih, 0]);
+
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).ticks(5, "~g"))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px");
+    g.append("g").call(d3.axisLeft(y).ticks(5, "~g"))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+    svg.append("text").attr("x", W / 2).attr("y", H - 8)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px")
+      .text("cluster size (log)");
+
+    // Fit line starts at C_MIN.
+    const fitData = data.filter(d => d.k >= C_MIN);
+    const C_fit = fitData.length
+      ? fitData.reduce((s, d) => s + d.c * Math.pow(d.k, T2), 0) / fitData.length
+      : 1;
+    const lineData = [];
+    for (let kk = C_MIN; kk <= xMax; kk += 0.2) {
+      lineData.push([kk, C_fit * Math.pow(kk, -T2)]);
+    }
+    g.append("path")
+      .datum(lineData)
+      .attr("fill", "none").attr("stroke", COL.azure).attr("stroke-width", 1.6).attr("opacity", 0.8)
+      .attr("d", d3.line().x(d => x(d[0])).y(d => y(Math.max(0.5, d[1]))));
+
+    g.selectAll(".pt").data(data).join("circle")
+      .attr("class", "pt")
+      .attr("cx", d => x(d.k))
+      .attr("cy", d => y(d.c))
+      .attr("r", d => d.k < C_MIN ? 4.4 : 3.2)
+      .attr("fill", d => d.k < C_MIN ? COL.signal : COL.cobalt)
+      .attr("opacity", 0.9);
+
+    // Labels
+    svg.append("text").attr("x", PAD.left + 8).attr("y", PAD.top + 14)
+      .style("fill", COL.azure).style("font-family", "Special Elite, Courier New, monospace").style("font-size", "11px")
+      .text("t2 ≈ " + T2.toFixed(2) + " · cmin " + C_MIN);
+  })();
+
+  // ── Generation · resample sequences ──
+  (function () {
+    const SORTED_INPUT = NODES.slice().map(n => DEGREES[n]).sort((a,b) => b - a);
+    const W = 640, H = 240;
+    const PAD = { top: 20, right: 20, bottom: 36, left: 40 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+
+    const svg = d3.select("#resample-degs");
+    svg.selectAll("*").remove();
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+    const x = d3.scaleBand().domain(d3.range(N_).map(String)).range([0, iw]).padding(0.1);
+    const y = d3.scaleLinear().domain([0, K_MAX + 1]).range([ih, 0]);
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).tickFormat("").tickSize(0));
+    g.append("g").call(d3.axisLeft(y).ticks(5))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10px");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+
+    const halfW = x.bandwidth() * 0.45;
+    const rows = g.selectAll(".rr").data(d3.range(N_)).join("g")
+      .attr("class", "rr")
+      .attr("transform", i => `translate(${x(String(i))},0)`);
+    rows.append("rect").attr("class", "in")
+      .attr("x", 0).attr("width", halfW).attr("y", ih).attr("height", 0)
+      .attr("fill", COL.azure).attr("opacity", 0.85);
+    rows.append("rect").attr("class", "out")
+      .attr("x", halfW + 1).attr("width", halfW).attr("y", ih).attr("height", 0)
+      .attr("fill", COL.orchid).attr("opacity", 0.9);
+
+    function update() {
+      const resampled = resampleDegrees(RESAMPLE_SEED);
+      rows.each(function (i) {
+        const vin = SORTED_INPUT[i] || 0;
+        const vout = resampled[i] || 0;
+        d3.select(this).select(".in")
+          .transition().duration(250)
+          .attr("y", y(vin)).attr("height", ih - y(vin));
+        d3.select(this).select(".out")
+          .transition().duration(250)
+          .attr("y", y(vout)).attr("height", ih - y(vout));
+      });
+    }
+    onResampleChanged.push(update);
+    document.getElementById("resample-reroll").addEventListener("click", rerollResample);
+    update();
+  })();
+
+  // ── Cluster-sizes resample ──
+  (function () {
+    const INPUT_SORTED = PROF_CLUSTER_SIZES.slice().sort((a,b) => b - a);
+    const W = 640, H = 170;
+    const PAD = { top: 16, right: 20, bottom: 30, left: 40 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+
+    const svg = d3.select("#resample-cs");
+    svg.selectAll("*").remove();
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+    const maxLen = 10;
+    const x = d3.scaleBand().domain(d3.range(maxLen).map(String)).range([0, iw]).padding(0.1);
+    const y = d3.scaleLinear().domain([0, C_MAX + 1]).range([ih, 0]);
+    g.append("g").attr("transform", `translate(0,${ih})`).call(d3.axisBottom(x).tickFormat("").tickSize(0));
+    g.append("g").call(d3.axisLeft(y).ticks(4))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10px");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+
+    const halfW = x.bandwidth() * 0.45;
+    const rows = g.selectAll(".cc").data(d3.range(maxLen)).join("g")
+      .attr("class", "cc")
+      .attr("transform", i => `translate(${x(String(i))},0)`);
+    rows.append("rect").attr("class", "in")
+      .attr("x", 0).attr("width", halfW).attr("y", ih).attr("height", 0)
+      .attr("fill", COL.azure).attr("opacity", 0.85);
+    rows.append("rect").attr("class", "out")
+      .attr("x", halfW + 1).attr("width", halfW).attr("y", ih).attr("height", 0)
+      .attr("fill", COL.orchid).attr("opacity", 0.9);
+
+    function update() {
+      const resampled = resampleClusterSizes(RESAMPLE_SEED);
+      rows.each(function (i) {
+        const vin = INPUT_SORTED[i] || 0;
+        const vout = resampled[i] || 0;
+        d3.select(this).select(".in")
+          .transition().duration(250)
+          .attr("y", y(vin)).attr("height", ih - y(vin));
+        d3.select(this).select(".out")
+          .transition().duration(250)
+          .attr("y", y(vout)).attr("height", ih - y(vout));
+      });
+    }
+    onResampleChanged.push(update);
+    update();
+  })();
+
+  // ── Generation · internal/external stub split ──
+  (function () {
+    const svg = d3.select("#stub-split");
+    if (svg.empty()) return;
+    svg.selectAll("*").remove();
+    const W = 640, H = 270;
+    const PAD = { top: 22, right: 20, bottom: 42, left: 46 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+    const x = d3.scaleBand().domain(d3.range(N_).map(String)).range([0, iw]).padding(0.12);
+    const y = d3.scaleLinear().domain([0, K_MAX + 1]).range([ih, 0]);
+
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).tickFormat("").tickSize(0));
+    g.append("g").call(d3.axisLeft(y).ticks(5))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10px");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+    svg.append("text").attr("x", W / 2).attr("y", H - 10)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px")
+      .text("resampled node rank");
+
+    const rows = g.selectAll(".split-row").data(d3.range(N_)).join("g")
+      .attr("class", "split-row")
+      .attr("transform", i => `translate(${x(String(i))},0)`);
+    rows.append("rect").attr("class", "split-ext")
+      .attr("x", 0).attr("width", x.bandwidth()).attr("y", ih).attr("height", 0);
+    rows.append("rect").attr("class", "split-int")
+      .attr("x", 0).attr("width", x.bandwidth()).attr("y", ih).attr("height", 0);
+
+    const splitSlider = document.getElementById("split-mu-slider");
+    const mainSlider = document.getElementById("mu-slider");
+    if (splitSlider && mainSlider) splitSlider.value = mainSlider.value;
+
+    function currentMu() {
+      if (mainSlider) return parseFloat(mainSlider.value);
+      if (splitSlider) return parseFloat(splitSlider.value);
+      return MU_MEAN;
+    }
+
+    function update() {
+      const mu = currentMu();
+      if (splitSlider) {
+        splitSlider.value = mu.toFixed(3);
+        document.getElementById("split-mu-val").textContent = mu.toFixed(2);
+      }
+      const degs = resampleDegrees(RESAMPLE_SEED);
+      const split = LFRKernel.sampleInternalDegrees({
+        degrees: degs,
+        mu,
+        rng: seededRng(RESAMPLE_SEED * 41 + 5),
+      });
+      const data = degs.map((d, i) => {
+        const din = Math.max(0, Math.min(d, split.internal[i] || 0));
+        return { degree: d, internal: din, external: d - din };
+      });
+      rows.data(data).each(function (d) {
+        d3.select(this).select(".split-ext")
+          .transition().duration(220)
+          .attr("y", y(d.degree))
+          .attr("height", ih - y(d.degree));
+        d3.select(this).select(".split-int")
+          .transition().duration(220)
+          .attr("y", y(d.internal))
+          .attr("height", ih - y(d.internal));
+      });
+      const intStubs = data.reduce((s, d) => s + d.internal, 0);
+      const extStubs = data.reduce((s, d) => s + d.external, 0);
+      const meanObserved = data.reduce((s, d) => s + (d.degree ? d.external / d.degree : 0), 0) / data.length;
+      document.getElementById("split-target").textContent = mu.toFixed(3);
+      document.getElementById("split-int-stubs").textContent = intStubs;
+      document.getElementById("split-ext-stubs").textContent = extStubs;
+      document.getElementById("split-mean").textContent = meanObserved.toFixed(3);
+    }
+
+    if (splitSlider) {
+      splitSlider.addEventListener("input", () => {
+        if (mainSlider) {
+          mainSlider.value = splitSlider.value;
+          mainSlider.dispatchEvent(new Event("input", { bubbles: true }));
+        } else {
+          update();
+        }
+      });
+    }
+    if (mainSlider) {
+      mainSlider.addEventListener("input", () => {
+        if (splitSlider) splitSlider.value = mainSlider.value;
+        update();
+      });
+    }
+    onResampleChanged.push(update);
+    update();
+  })();
+
+  // ── Generation · assignment step-through ──
+  // Live via LFRKernel.assignNodesToClusters: faithful port of
+  // benchm.cpp's bipartite greedy seed (build_bipartite_network) +
+  // 10 randomization swap passes + degree-feasibility node remap
+  // (internal_degree_and_membership). The step walker shows the four
+  // canonical phases (initial empty → seed → swap → remap).
+  (function () {
+    const viz = NETGEN.VIZ.init("g-assign-cy", { showLabels: true, edges: [] });
+
+    const CLUSTERS_COLORS = [COL.C1, COL.C2, COL.C3, COL.OUT, COL.azure_3 || COL.azure];
+
+    function runAssignment(seed, mu) {
+      const splitRng = seededRng(seed * 41 + 5);
+      const assignRng = seededRng(seed * 41 + 23);
+      const degs = resampleDegrees(seed);
+      const split = LFRKernel.sampleInternalDegrees({
+        degrees: degs, mu, rng: splitRng,
+      });
+      const maxIntDeg = split.internal.length ? Math.max(0, ...split.internal) : 0;
+      const sizes = resampleClusterSizes(seed, maxIntDeg);
+      const result = LFRKernel.assignNodesToClusters({
+        degrees: degs,
+        internalDegrees: split.internal,
+        sizes,
+        rng: assignRng,
+      });
+      // step walker snapshots: initial-empty + 3 canonical phases.
+      const empty = new Array(N_).fill(-1);
+      const iters = [
+        empty,
+        result.phases.seed.slice(),
+        result.phases.swap.slice(),
+        result.phases.remap.slice(),
+        result.assignment.slice(),
+      ];
+      return { iters, sizes, degs, internal: split.internal, assignment: result.assignment, ok: result.ok };
+    }
+
+    let lastRun = runAssignment(ASSIGN_SEED, 0.4);
+
+    function renderConstraintGrid(run) {
+      const host = document.getElementById("assign-constraint-table");
+      if (!host || !run) return;
+      const body = host.querySelector("tbody") || host;
+      const rows = run.sizes.map((size, cid) => {
+        const assigned = [];
+        run.assignment.forEach((c, i) => { if (c === cid) assigned.push(i); });
+        const maxInt = assigned.length ? Math.max(...assigned.map(i => run.internal[i] || 0)) : 0;
+        const ok = maxInt <= size - 1;
+        return '<tr>' +
+          '<th>community ' + (cid + 1) + '</th>' +
+          '<td class="val">' + maxInt + ' / ' + (size - 1) + '</td>' +
+          '<td class="desc">max d_int vs capacity; size ' + size + ' · ' + assigned.length + ' assigned node' + (assigned.length === 1 ? "" : "s") + (ok ? "" : " · retry needed") + '</td>' +
+          '</tr>';
+      }).join("");
+      body.innerHTML = rows || '<tr><th>no assignment</th><td class="val">retry</td><td class="desc">The sampled sizes could not host the internal-degree sequence.</td></tr>';
+    }
+
+    function render(step) {
+      const xi = parseFloat(document.getElementById("mu-slider").value);
+      const run = runAssignment(ASSIGN_SEED, xi);
+      lastRun = run;
+      renderConstraintGrid(run);
+      const ass = run.iters[Math.min(step, run.iters.length - 1)];
+      viz.nodesData.forEach((n, idx) => {
+        const nid = parseInt(n.id, 10);
+        const iid = nid - 1;
+        const cid = ass[iid];
+        n.color = cid >= 0 ? (CLUSTERS_COLORS[cid % CLUSTERS_COLORS.length] || COL.paper_3) : COL.paper_4;
+      });
+      viz.setEdges([]);
+      const STEP_LABELS = [
+        "step 0 · all nodes homeless (grey)",
+        "step 1 · bipartite greedy seed",
+        "step 2 · 10 randomization passes",
+        "step 3 · degree-feasibility remap",
+        "final",
+      ];
+      document.getElementById("g-assign-stage").textContent = STEP_LABELS[Math.min(step, 4)];
+      const STEP_DESCS = [
+        "Start: every node grey, no assignment. The sizes come from the resample above, so clusters have capacity from the fresh cluster-size list, not the input.",
+        "<code>build_bipartite_network</code> phase 1: walk node ids highest-to-lowest; each node attaches to the highest-capacity remaining community. Tie-break is insertion order in the canonical multimap.",
+        "<code>build_bipartite_network</code> phase 2: 10 randomization passes. Each pass iterates every (community, slot) pair; pick a random node, swap memberships if it preserves degree constraints, otherwise skip.",
+        "<code>internal_degree_and_membership</code> remap: for each node from highest to lowest degree, pick a random bipartite slot whose capacity \\(c_k - 1\\) covers the node's internal degree \\(d^{\\text{int}}_i\\). Up to \\(3N\\) retries per node before the cluster sizes are rebuilt.",
+        "All nodes placed; cluster sizes exactly match the resample; per-node \\(d^{\\text{int}}_i \\le c_k - 1\\).",
+      ];
+      const descEl = document.getElementById("g-assign-desc");
+      descEl.innerHTML = '<span class="st">' + STEP_LABELS[Math.min(step, 4)] + "</span> &middot; " + STEP_DESCS[Math.min(step, 4)];
+      NETGEN.retypeset(descEl);
+    }
+
+    const controller = NETGEN.rerollWalker({
+      prefix: "g-assign",
+      total: 5,
+      totalForCurrent: () => 5,
+      onRender: render,
+      onRandStep: rerollAssign,
+      // In-stage RandAll: bump the assign seed (the most-local for this
+      // walker), keeping the resampled degree multiset fixed.
+      onRandAll: rerollAssign,
+    });
+    onResampleChanged.push(() => render(controller.idx));
+    onAssignChanged.push(() => render(controller.idx));
+  })();
+
+  // ── Generation · per-pair config-model walker ──
+  // Walks LFR's seed phase (configuration-model stub pairing) and the
+  // multi-edge cleanup pass that follows. Step 0 = stubs ready; the
+  // first half of the trace is one entry per pre-pair, the second half
+  // is one entry per cleanup rewire op (cut p1 + p2, place newp1 +
+  // newp2 if legal). Each step highlights the active endpoints + dims
+  // the rest. The mu-targeted rewire pass is not in this trace; it
+  // reads as a continuation of the histogram below for now.
+  (function () {
+    const viz = NETGEN.VIZ.init("g-cm-cy", { showLabels: true, edges: [], pinned: true });
+    function dimAllExcept(keepIds) {
+      const keep = new Set((keepIds || []).map(Number));
+      viz.eachNode(n => {
+        const id = parseInt(n.id, 10);
+        if (keep.has(id)) viz.removeNodeClass(n.id, "dim");
+        else viz.addNodeClass(n.id, "dim");
+      });
+    }
+    function clearDimPick() {
+      viz.clearAllNodeClass("dim");
+      viz.clearAllNodeClass("pick");
+    }
+    function buildCmTrace(seed) {
+      const degs = resampleDegrees(seed);
+      const stubs = [];
+      for (let i = 0; i < degs.length; i++) {
+        for (let k = 0; k < degs[i]; k++) stubs.push(i);
+      }
+      const rng = seededRng(seed * 211 + 53);
+      const out = LFRKernel.configModelPairStubs({ stubs, rng, traceTest: true });
+      const cleanup = LFRKernel.cleanupMultigraph({
+        edges: out.edges, rng, maxRetries: 10, traceTest: true,
+      });
+      // stubLayout drives the pair-phase suffix-reseed. members = 1-based
+      // node ids (page convention), wIn[i] = degs[i] = number of stub
+      // copies of that node going into the shuffle. numPairs = total
+      // stubs / 2 = pair-phase walker length.
+      const members = [];
+      const wIn = [];
+      for (let i = 0; i < degs.length; i++) {
+        members.push(i + 1);
+        wIn.push(degs[i]);
+      }
+      return {
+        prePairs: (out.prePairs || []).map(p => ({
+          u: p.u + 1, v: p.v + 1, loop: p.loop, multi: p.multi,
+        })),
+        rewireOps: (cleanup.rewireOps || []).map(op => ({
+          p1: op.p1 ? [op.p1[0] + 1, op.p1[1] + 1] : null,
+          p2: op.p2 ? [op.p2[0] + 1, op.p2[1] + 1] : null,
+          newp1: op.newp1 ? [op.newp1[0] + 1, op.newp1[1] + 1] : null,
+          newp2: op.newp2 ? [op.newp2[0] + 1, op.newp2[1] + 1] : null,
+          success: !!op.success, reason: op.reason || null,
+        })),
+        kept: cleanup.kept.map(([a, b]) => [a + 1, b + 1]),
+        stubLayout: {
+          members, wIn,
+          numPairs: (out.prePairs || []).length,
+        },
+      };
+    }
+    let pairOverride = {};
+    function effectivePair(trace, i) { return pairOverride[i] || trace.prePairs[i]; }
+    function stateAfter(trace, step) {
+      // Mirror the kernel's bookkeeping: validSet collects clean pairs
+      // from prePairs first, then rewire ops mutate it. Returns a Map
+      // keyed by canonical-order edge string. Reads through
+      // effectivePair so pair-phase suffix-reseed overrides take
+      // effect; rewire ops keep referencing the original kernel trace.
+      const map = new Map();
+      const invalid = [];
+      const k = NETGEN.keyOf;
+      let processed = 0;
+      const total1 = trace.prePairs.length;
+      for (let i = 0; i < trace.prePairs.length && processed < step; i++) {
+        const p = effectivePair(trace, i);
+        const kk = k(p.u, p.v);
+        if (p.loop || map.has(kk)) {
+          invalid.push({ u: p.u, v: p.v, bad: true });
+        } else {
+          map.set(kk, { u: p.u, v: p.v, bad: false });
+        }
+        processed++;
+      }
+      // Drain remaining prePairs into invalid bucket if step is
+      // already inside the rewire phase. Mirrors kernel.
+      if (step > total1) {
+        for (let i = processed; i < trace.prePairs.length; i++) {
+          const p = effectivePair(trace, i);
+          const kk = k(p.u, p.v);
+          if (p.loop || map.has(kk)) invalid.push({ u: p.u, v: p.v, bad: true });
+          else map.set(kk, { u: p.u, v: p.v, bad: false });
+        }
+      }
+      const opIdx = Math.max(0, step - total1);
+      for (let i = 0; i < opIdx && i < trace.rewireOps.length; i++) {
+        const op = trace.rewireOps[i];
+        if (!op.success) continue;
+        if (op.p1) map.delete(k(op.p1[0], op.p1[1]));
+        if (op.p2) map.delete(k(op.p2[0], op.p2[1]));
+        [op.newp1, op.newp2].forEach(np => {
+          if (!np) return;
+          map.set(k(np[0], np[1]), { u: np[0], v: np[1], bad: false });
+        });
+      }
+      return { edges: map, invalid };
+    }
+    let CACHE_KEY = "", CACHE = null;
+    let lastStep = 0;
+    let lockBusy = false;
+    let ctl = null;
+    function setLock(b) {
+      if (lockBusy === b) return;
+      lockBusy = b;
+      if (ctl) ctl.refreshButtons();
+    }
+    const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setLock });
+    function getTrace() {
+      const key = EDGE_SEED + "|" + RESAMPLE_SEED;
+      if (CACHE_KEY === key) return CACHE;
+      CACHE_KEY = key;
+      CACHE = buildCmTrace(EDGE_SEED ^ (RESAMPLE_SEED * 17 + 3));
+      return CACHE;
+    }
+    function totalForCurrent() { return 1 + getTrace().prePairs.length + getTrace().rewireOps.length; }
+    const byNodeFromTrace = (trace) =>
+      NETGEN.spokeLayer.byNodeFromEdges(viz, trace.prePairs, COL.edge_inter);
+    function placedFromState(state, includeInvalid) {
+      const out = [];
+      state.edges.forEach((e, key) => {
+        out.push({
+          u: e.u, v: e.v, id: "lfr-cm-edge-" + key, bad: !!e.bad,
+          color: e.bad ? COL.edge_drop : COL.edge_inter, badColor: COL.edge_drop,
+        });
+      });
+      if (includeInvalid) {
+        state.invalid.forEach((e, k) => {
+          out.push({
+            u: e.u, v: e.v, id: "lfr-cm-bad-" + k, bad: true,
+            color: COL.edge_drop, badColor: COL.edge_drop,
+          });
+        });
+      }
+      return out;
+    }
+    function render(step) {
+      const trace = getTrace();
+      document.getElementById("g-cm-cur").textContent = String(step);
+      document.getElementById("g-cm-total").textContent = String(totalForCurrent() - 1);
+      const labelEl = document.getElementById("g-cm-stage");
+      const descEl = document.getElementById("g-cm-desc");
+      clearDimPick();
+
+      const total1 = trace.prePairs.length;
+      const byNode = byNodeFromTrace(trace);
+
+      if (step === 0) {
+        spokes.snapToState({ byNode, placed: [], just: null, justSeq: 0 });
+        labelEl.textContent = "stubs ready";
+        descEl.innerHTML = '<span class="st">stubs ready</span> &middot; ' +
+          trace.prePairs.length + " pre-pair step" +
+          (trace.prePairs.length === 1 ? "" : "s") + " then " +
+          trace.rewireOps.length + " cleanup op" +
+          (trace.rewireOps.length === 1 ? "" : "s") + " ahead.";
+        lastStep = step;
+        return;
+      }
+
+      const inPair = step <= total1;
+      const four = new Set();
+      let label, desc;
+      if (inPair) {
+        const p = effectivePair(trace, step - 1);
+        four.add(p.u); four.add(p.v);
+        const tag = p.loop ? " (self-loop)" : (p.multi ? " (parallel)" : "");
+        label = "pair " + step + " / " + total1 + tag;
+        desc = "Stub-pair " + p.u + " &harr; " + p.v + ".";
+      } else {
+        const opIdx = step - total1 - 1;
+        const op = trace.rewireOps[opIdx];
+        [op.p1, op.p2, op.newp1, op.newp2].forEach(p => {
+          if (p) { four.add(p[0]); four.add(p[1]); }
+        });
+        label = "cleanup op " + (opIdx + 1) + " / " + trace.rewireOps.length;
+        desc = op.success
+          ? "Cut <code>" + op.p1.join("&ndash;") + "</code> + <code>" + op.p2.join("&ndash;") +
+            "</code>; place <code>" + op.newp1.join("&ndash;") + "</code> + <code>" + op.newp2.join("&ndash;") + "</code>."
+          : "Could not place a clean pair for <code>" + (op.p1 ? op.p1.join("&ndash;") : "?") + "</code>.";
+      }
+      labelEl.textContent = label;
+      descEl.innerHTML = '<span class="st">' + label + "</span> &middot; " + desc;
+
+      const state = stateAfter(trace, step);
+      const isAdjCleanup = !inPair && (step === lastStep + 1 || step === lastStep - 1) && lastStep > total1;
+
+      // Pair phase + non-adjacent cleanup steps snap directly. Adjacent
+      // cleanup steps animate via playMany.
+      if (!isAdjCleanup) {
+        spokes.snapToState({
+          byNode, placed: placedFromState(state, inPair),
+          just: null, justSeq: step,
+        });
+        // Pair-phase keeps the dim cue so the active pair pops; cleanup
+        // settle drops it so the resolved state reads at full opacity.
+        if (inPair && four.size > 0) dimAllExcept([...four]);
+        lastStep = step;
+        return;
+      }
+
+      const before = stateAfter(trace, lastStep);
+      const beforeKeys = new Set(before.edges.keys());
+      const afterKeys = new Set(state.edges.keys());
+      const removes = [];
+      before.edges.forEach((e, key) => {
+        if (!afterKeys.has(key)) {
+          removes.push({
+            u: e.u, v: e.v, id: "lfr-cm-edge-" + key, bad: !!e.bad,
+            color: e.bad ? COL.edge_drop : COL.edge_inter, badColor: COL.edge_drop,
+          });
+        }
+      });
+      const adds = [];
+      state.edges.forEach((e, key) => {
+        if (!beforeKeys.has(key)) {
+          adds.push({
+            u: e.u, v: e.v, id: "lfr-cm-edge-" + key, bad: !!e.bad,
+            color: e.bad ? COL.edge_drop : COL.edge_inter, badColor: COL.edge_drop,
+          });
+        }
+      });
+      spokes.playMany(removes, adds, () => {});
+      lastStep = step;
+    }
+    // Random step: SBM-style suffix reseed in the pair phase only —
+    // keep prefix [0..idx-1] of prePairs verbatim, re-shuffle remaining
+    // stubs, re-pair the tail. Loop / multi flags recomputed against
+    // the kept-prefix set. In the rewire phase no override applies;
+    // suffix-reseed of individual rewire ops doesn't have a clean
+    // semantic, so we leave those steps unchanged (deterministic
+    // walker — random step is a no-op once past pair phase).
+    let cmPairRerollNonce = 0;
+    function rollPair(trace, idx) {
+      const lay = trace.stubLayout;
+      if (idx >= lay.numPairs) return;
+      const prefix = [];
+      for (let i = 0; i < idx; i++) prefix.push(effectivePair(trace, i));
+      cmPairRerollNonce += 1;
+      const fresh = seededRng(EDGE_SEED * 6271 + cmPairRerollNonce * 41 + idx * 113);
+      const newTail = NETGEN.stubPoolReseed({
+        layout: lay, prefix, rng: fresh,
+        classify: (a, b, ctx) => {
+          const loop = (a === b);
+          const kk = NETGEN.keyOf(a, b);
+          const multi = !loop && ctx.localEdges.has(kk);
+          if (!loop && !multi) ctx.add(kk);
+          return { u: a, v: b, loop, multi };
+        },
+      });
+      newTail.forEach((np, i) => { pairOverride[idx + i] = np; });
+    }
+    ctl = NETGEN.rerollWalker({
+      prefix: "g-cm",
+      total: totalForCurrent(),
+      totalForCurrent,
+      onRender: render,
+      getLocked: () => lockBusy,
+      onRandStep: (S) => {
+        if (lockBusy || S <= 0) return;
+        const trace = getTrace();
+        const total1 = trace.prePairs.length;
+        if (S <= total1) rollPair(trace, S - 1);
+      },
+      // In-stage RandAll: bump the edge seed (the most-local for the
+      // config-model walker), keeping resample + assign fixed.
+      onRandAll: () => { if (!lockBusy) rerollEdges(); },
+    });
+    function reconfigKeep() {
+      CACHE_KEY = ""; pairOverride = {};
+      NETGEN.followCursor(ctl, totalForCurrent());
+    }
+    onResampleChanged.push(reconfigKeep);
+    onEdgeChanged.push(reconfigKeep);
+  })();
+
+  // ── Generation · per-cluster build-subgraph walker ──
+  // Walks every cluster's Phase 2 (10 randomization passes 4-way swap)
+  // and Phase 3 (multi-edge rewire when merging into global E) ops in
+  // cluster order. Step 0 = clusters seeded but no swaps yet. Each
+  // step replays the trace forward to compute the current edge set.
+  (function () {
+    const viz = NETGEN.VIZ.init("g-bs-cy", { showLabels: true, edges: [], pinned: true });
+    function clearDimPick() {
+      viz.clearAllNodeClass("dim");
+      viz.clearAllNodeClass("pick");
+      viz.clearAllNodeClass("swap-pick");
+    }
+    let CACHE_KEY_BS = "", CACHE_BS = null;
+    function getRunBS() {
+      const key = EDGE_SEED + "|" + RESAMPLE_SEED + "|" +
+        document.getElementById("mu-slider").value;
+      if (CACHE_KEY_BS === key) return CACHE_BS;
+      CACHE_KEY_BS = key;
+      const mu = parseFloat(document.getElementById("mu-slider").value);
+      const rng = seededRng(EDGE_SEED * 53 + 9);
+      const r = LFRKernel.runFullPipeline({
+        N: N_, k_avg: K_MEAN, max_k: K_MAX, t1: T1,
+        c_min: C_MIN, c_max: C_MAX, t2: T2,
+        mu, rng, traceTest: true,
+      });
+      CACHE_BS = r;
+      return r;
+    }
+    // Trace = flat list of {cluster, kind: "p2"|"p3", op, clusterIdx}
+    function buildBsTrace(r) {
+      const t = [];
+      if (!r || !r.ok || !r.perCluster) return t;
+      for (let cIdx = 0; cIdx < r.perCluster.length; cIdx++) {
+        const c = r.perCluster[cIdx];
+        (c.phase2Ops || []).forEach((op, oi) => {
+          t.push({ cluster: cIdx, kind: "p2", opIdx: oi, op });
+        });
+        (c.phase3Ops || []).forEach((op, oi) => {
+          t.push({ cluster: cIdx, kind: "p3", opIdx: oi, op });
+        });
+      }
+      return t;
+    }
+    // Build the edge-set state at step k by replaying ops 0..k-1 on
+    // top of each cluster's Phase-1 seed (= phase2FinalEn rolled back
+    // through phase2Ops in reverse). Cleaner: derive Phase-1 seed by
+    // applying phase2 ops in REVERSE on phase2FinalEn; for the walker
+    // start at Phase-1 seed and apply forward.
+    function phase1SeedFor(c) {
+      // phase2FinalEn is the snapshot AFTER all phase2 ops.
+      // To get phase1 seed: invert each phase2 op (cuts <-> places).
+      const set = new Set();
+      const k = (a, b) => (a < b ? a + "|" + b : b + "|" + a);
+      (c.phase2FinalEn || []).forEach(([a, b]) => set.add(k(a, b)));
+      // Apply phase2 ops in REVERSE to invert.
+      const ops = (c.phase2Ops || []).slice().reverse();
+      ops.forEach(op => {
+        op.places.forEach(p => set.delete(k(p[0], p[1])));
+        op.cuts.forEach(p => set.add(k(p[0], p[1])));
+      });
+      return set;
+    }
+    function stateAtStep(r, trace, step) {
+      const k = (a, b) => (a < b ? a + "|" + b : b + "|" + a);
+      // Per-cluster current edge set.
+      const clusterSets = r.perCluster.map(c => phase1SeedFor(c));
+      // Replay ops 0..step-1.
+      for (let i = 0; i < step; i++) {
+        const t = trace[i];
+        const set = clusterSets[t.cluster];
+        if (t.kind === "p2") {
+          t.op.cuts.forEach(p => set.delete(k(p[0], p[1])));
+          t.op.places.forEach(p => set.add(k(p[0], p[1])));
+        } else {
+          // p3: multi-edge rewire op. Cuts a duplicate (after merging
+          // into global E) and one valid edge; places two replacements.
+          // For per-cluster view, keep showing cluster-local edges.
+          if (t.op.success) {
+            t.op.cuts.forEach(p => set.delete(k(p[0], p[1])));
+            t.op.places.forEach(p => {
+              // Phase 3 places might cross clusters; only re-add if
+              // both endpoints are in this cluster's node set.
+              const nodes = new Set(r.perCluster[t.cluster].nodes);
+              if (nodes.has(p[0]) && nodes.has(p[1])) set.add(k(p[0], p[1]));
+            });
+          }
+        }
+      }
+      return clusterSets;
+    }
+    let lastStep = 0;
+    let lockBusy = false;
+    let ctl = null;
+    function setLock(b) {
+      if (lockBusy === b) return;
+      lockBusy = b;
+      if (ctl) ctl.refreshButtons();
+    }
+    const spokesBs = NETGEN.spokeLayer.attach(viz, { onLockChange: setLock });
+    function totalForCurrent() {
+      const r = getRunBS();
+      return 1 + buildBsTrace(r).length;
+    }
+    // Edge entries from per-cluster sets, dedup-by-key in encounter
+    // order. Each entry's id is the canonical key string so cross-step
+    // diffs in playMany match by edge identity.
+    function placedFromClusterSets(clusterSets) {
+      const out = [];
+      const seen = new Set();
+      clusterSets.forEach(set => {
+        set.forEach(kk => {
+          if (seen.has(kk)) return;
+          seen.add(kk);
+          const [a, b] = kk.split("|").map(Number);
+          out.push({
+            u: a + 1, v: b + 1, id: "lfr-bs-" + kk, bad: false,
+            color: COL.edge_intra ? COL.edge_intra.C1 : COL.edge_stage2,
+          });
+        });
+      });
+      return out;
+    }
+    function bsByNode(clusterSets) {
+      // Flatten cluster sets to a dedup'd edge stream so the helper
+      // gets one entry per unique key.
+      const seen = new Set();
+      const flat = [];
+      clusterSets.forEach(set => set.forEach(kk => {
+        if (seen.has(kk)) return;
+        seen.add(kk);
+        const [a, b] = kk.split("|").map(Number);
+        flat.push({ u: a + 1, v: b + 1 });
+      }));
+      return NETGEN.spokeLayer.byNodeFromEdges(viz, flat,
+        COL.edge_intra ? COL.edge_intra.C1 : COL.edge_stage2);
+    }
+    function clusterSetsKeys(clusterSets) {
+      const set = new Set();
+      clusterSets.forEach(s => s.forEach(k => set.add(k)));
+      return set;
+    }
+    function render(step) {
+      const r = getRunBS();
+      const trace = buildBsTrace(r);
+      const total = 1 + trace.length;
+      document.getElementById("g-bs-cur").textContent = String(step);
+      document.getElementById("g-bs-total").textContent = String(total - 1);
+      const labelEl = document.getElementById("g-bs-stage");
+      const descEl = document.getElementById("g-bs-desc");
+      clearDimPick();
+      if (!r || !r.ok || !r.perCluster) {
+        viz.setEdges([]);
+        labelEl.textContent = "pipeline gave up";
+        descEl.innerHTML = '<span class="st">no trace</span> &middot; runFullPipeline returned !ok at this μ; reroll or change the slider.';
+        return;
+      }
+      const clusterSetsAfter = stateAtStep(r, trace, step);
+      const byNode = bsByNode(clusterSetsAfter);
+      const placedAfter = placedFromClusterSets(clusterSetsAfter);
+
+      let label, desc;
+      if (step === 0) {
+        spokesBs.snapToState({ byNode, placed: placedAfter, just: null, justSeq: 0 });
+        viz.clearAllNodeClass("dim");
+        viz.clearAllNodeClass("pick");
+        viz.clearAllNodeClass("swap-pick");
+        labelEl.textContent = "step 0 · all clusters seeded";
+        descEl.innerHTML = '<span class="st">step 0</span> &middot; ' + r.perCluster.length +
+          " cluster" + (r.perCluster.length === 1 ? "" : "s") + " seeded by Phase 1's deterministic multimap. " +
+          trace.length + " op" + (trace.length === 1 ? "" : "s") + " ahead (Phase 2 randomization swaps + Phase 3 multi-edge rewires).";
+        lastStep = step;
+        return;
+      }
+      const t = trace[step - 1];
+      const four = new Set();
+      if (t.kind === "p2") {
+        const op = t.op;
+        const c = r.perCluster[t.cluster];
+        // Phase-2 ops use 0-based local indices for nodeA/randomMate/oldNode/nodeH;
+        // ops.cuts/places already store node ids (page node id = id + 1).
+        op.cuts.concat(op.places).forEach(p => {
+          four.add(p[0] + 1); four.add(p[1] + 1);
+        });
+        label = "cluster " + t.cluster + " · phase 2 swap " + (t.opIdx + 1);
+        desc = '<span class="st">phase 2 swap</span> &middot; cluster ' + t.cluster +
+          " run " + op.run + ". Cut <code>" +
+          op.cuts.map(p => (p[0] + 1) + "&ndash;" + (p[1] + 1)).join("</code> + <code>") +
+          "</code>; place <code>" +
+          op.places.map(p => (p[0] + 1) + "&ndash;" + (p[1] + 1)).join("</code> + <code>") + "</code>.";
+      } else {
+        const op = t.op;
+        if (op.success) {
+          op.cuts.concat(op.places).forEach(p => {
+            four.add(p[0] + 1); four.add(p[1] + 1);
+          });
+          op.dupEdge.forEach(id => four.add(id + 1));
+        } else {
+          op.dupEdge.forEach(id => four.add(id + 1));
+        }
+        label = "cluster " + t.cluster + " · phase 3 multi-edge rewire " + (t.opIdx + 1);
+        if (op.success) {
+          desc = '<span class="st">phase 3 rewire</span> &middot; duplicate <code>' +
+            (op.dupEdge[0] + 1) + "&ndash;" + (op.dupEdge[1] + 1) + "</code> resolved. Cut <code>" +
+            op.cuts.map(p => (p[0] + 1) + "&ndash;" + (p[1] + 1)).join("</code> + <code>") +
+            "</code>; place <code>" +
+            op.places.map(p => (p[0] + 1) + "&ndash;" + (p[1] + 1)).join("</code> + <code>") + "</code>.";
+        } else {
+          desc = '<span class="st">phase 3 rewire</span> &middot; duplicate <code>' +
+            (op.dupEdge[0] + 1) + "&ndash;" + (op.dupEdge[1] + 1) + "</code> dropped (stopper exhausted).";
+        }
+      }
+
+      labelEl.textContent = label;
+      descEl.innerHTML = desc;
+      function clearAllDim() {
+        viz.clearAllNodeClass("dim");
+        viz.clearAllNodeClass("pick");
+        viz.clearAllNodeClass("swap-pick");
+      }
+      const isAdj = step === lastStep + 1 || step === lastStep - 1;
+      if (!isAdj) {
+        spokesBs.snapToState({ byNode, placed: placedAfter, just: null, justSeq: step });
+        clearAllDim();
+        lastStep = step;
+        return;
+      }
+      const beforeSets = stateAtStep(r, trace, lastStep);
+      const beforeKeys = clusterSetsKeys(beforeSets);
+      const afterKeys = clusterSetsKeys(clusterSetsAfter);
+      const removes = [], adds = [];
+      beforeKeys.forEach(kk => {
+        if (afterKeys.has(kk)) return;
+        const [a, b] = kk.split("|").map(Number);
+        removes.push({
+          u: a + 1, v: b + 1, id: "lfr-bs-" + kk, bad: false,
+          color: COL.edge_intra ? COL.edge_intra.C1 : COL.edge_stage2,
+        });
+      });
+      afterKeys.forEach(kk => {
+        if (beforeKeys.has(kk)) return;
+        const [a, b] = kk.split("|").map(Number);
+        adds.push({
+          u: a + 1, v: b + 1, id: "lfr-bs-" + kk, bad: false,
+          color: COL.edge_intra ? COL.edge_intra.C1 : COL.edge_stage2,
+        });
+      });
+      spokesBs.playMany(removes, adds, clearAllDim);
+      lastStep = step;
+    }
+    ctl = NETGEN.rerollWalker({
+      prefix: "g-bs",
+      total: totalForCurrent(),
+      totalForCurrent,
+      onRender: render,
+      getLocked: () => lockBusy,
+      onRandStep: () => { if (!lockBusy) rerollEdges(); },
+      // In-stage RandAll: edge seed only.
+      onRandAll: () => { if (!lockBusy) rerollEdges(); },
+    });
+    function reconfigKeep() { CACHE_KEY_BS = ""; NETGEN.followCursor(ctl, totalForCurrent()); }
+    onResampleChanged.push(reconfigKeep);
+    onAssignChanged.push(reconfigKeep);
+    onEdgeChanged.push(reconfigKeep);
+    document.getElementById("mu-slider").addEventListener("input", reconfigKeep);
+  })();
+
+  // ── Generation · mu rewire histogram ──
+  (function () {
+    const svg = d3.select("#mu-hist");
+    svg.selectAll("*").remove();
+    const W = 640, H = 260;
+    const PAD = { top: 20, right: 20, bottom: 36, left: 40 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+
+    const BINS = 20;
+    const x = d3.scaleLinear().domain([0, 1]).range([0, iw]);
+    const y = d3.scaleLinear().domain([0, N_ / 2]).range([ih, 0]);
+
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).ticks(6))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px");
+    g.append("g").call(d3.axisLeft(y).ticks(5))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+    svg.append("text").attr("x", W / 2).attr("y", H - 8)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px")
+      .text("μ_i (out / total)");
+
+    const bars = g.append("g");
+    const targetLine = g.append("line")
+      .attr("y1", 0).attr("y2", ih)
+      .attr("stroke", COL.mint).attr("stroke-width", 2)
+      .attr("stroke-dasharray", "4 4");
+
+    // Live per-node μ_i = ext_deg / total_deg, derived from
+    // LFRKernel.runFullPipeline. The kernel is a faithful port of
+    // benchm.cpp's `benchmark` driver end-to-end:
+    //   1. sampleDegreeSequence + sampleClusterSizes
+    //   2. sampleInternalDegrees (per-node split with excess/defect)
+    //   3. assignNodesToClusters (bipartite seed + 10 swaps + remap;
+    //      auto-resize via change_community_size if infeasible)
+    //   4. buildSubgraphs (per-cluster phase-1 multimap seed +
+    //      phase-2 randomization + phase-3 multi-edge rewire +
+    //      parity bump per cluster)
+    //   5. connectAllTheParts (global external config model with
+    //      multimap seed + 10 swaps + mate-rewire loop)
+    //   6. eraseLinks (drift correction under -sup / -inf flags)
+    function sampleMus(mu, edgeSeed) {
+      const rng = seededRng(edgeSeed * 53 + 9);
+      const r = LFRKernel.runFullPipeline({
+        N: N_, k_avg: K_MEAN, max_k: K_MAX, t1: T1,
+        c_min: C_MIN, c_max: C_MAX, t2: T2,
+        mu, rng,
+      });
+      if (!r.ok) {
+        return new Array(N_).fill(mu);  // viz fallback if pipeline gives up
+      }
+      const mus = [];
+      for (let i = 0; i < N_; i++) {
+        const total = r.E[i].size;
+        if (total === 0) { mus.push(0); continue; }
+        let intK = 0;
+        r.E[i].forEach(j => {
+          if (LFRKernel.theyAreMate(i, j, r.memberList)) intK += 1;
+        });
+        mus.push((total - intK) / total);
+      }
+      return mus;
+    }
+
+    function update() {
+      const mu = parseFloat(document.getElementById("mu-slider").value);
+      document.getElementById("mu-val").textContent = mu.toFixed(2);
+      const mus = sampleMus(mu, EDGE_SEED);
+      const bins = new Array(BINS).fill(0);
+      mus.forEach(v => {
+        const b = Math.min(BINS - 1, Math.floor(v * BINS));
+        bins[b] += 1;
+      });
+      const maxB = Math.max(1, d3.max(bins));
+      y.domain([0, maxB * 1.2]);
+      bars.selectAll("rect").data(bins).join("rect")
+        .transition().duration(200)
+        .attr("x", (_, i) => x(i / BINS))
+        .attr("width", iw / BINS - 2)
+        .attr("y", d => y(d))
+        .attr("height", d => ih - y(d))
+        .attr("fill", COL.cobalt).attr("opacity", 0.88);
+      targetLine.attr("x1", x(mu)).attr("x2", x(mu));
+      const mean = mus.reduce((a,b) => a+b, 0) / mus.length;
+      const close = mus.filter(v => Math.abs(v - mu) < 0.1).length;
+      document.getElementById("mu-target").textContent = mu.toFixed(3);
+      document.getElementById("mu-achieved").textContent = mean.toFixed(3);
+      document.getElementById("mu-close").textContent = close + "/" + mus.length;
+      // y-axis redraw
+      g.select("g.y-ax").remove();
+      g.append("g").attr("class", "y-ax").call(d3.axisLeft(y).ticks(5))
+        .selectAll("text").style("fill", "#6b6a54")
+          .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px");
+    }
+
+    const slider = document.getElementById("mu-slider");
+    slider.addEventListener("input", update);
+    document.getElementById("mu-snap").addEventListener("click", () => {
+      slider.value = MU_MEAN.toFixed(3);
+      slider.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    document.getElementById("mu-reroll").addEventListener("click", rerollEdges);
+    onResampleChanged.push(update);
+    onAssignChanged.push(update);
+    onEdgeChanged.push(update);
+    update();
+  })();
+
+  // ── Generation · mate-rewire walker ──
+  // Calls runFullPipeline with traceTest:true to surface mateOps +
+  // initial/final external-edge sets from LFR's connectAllTheParts
+  // Phase 3. Each op is a 4-way swap that pulls a same-cluster
+  // external edge out: cuts (a,b) + (randomMate, nodeH); places
+  // (a, randomMate) + (b, nodeH). Step k = state after the kth op.
+  (function () {
+    const viz = NETGEN.VIZ.init("g-mr-cy", { showLabels: true, edges: [], pinned: true });
+    function dimAllExcept(keepIds) {
+      const keep = new Set((keepIds || []).map(Number));
+      viz.eachNode(n => {
+        const id = parseInt(n.id, 10);
+        if (keep.has(id)) viz.removeNodeClass(n.id, "dim");
+        else viz.addNodeClass(n.id, "dim");
+      });
+    }
+    function clearDimPick() {
+      viz.clearAllNodeClass("dim");
+      viz.clearAllNodeClass("pick");
+    }
+    let CACHE_KEY = "", CACHE = null;
+    function getRun() {
+      const key = EDGE_SEED + "|" + RESAMPLE_SEED + "|" +
+        document.getElementById("mu-slider").value;
+      if (CACHE_KEY === key) return CACHE;
+      CACHE_KEY = key;
+      const mu = parseFloat(document.getElementById("mu-slider").value);
+      const rng = seededRng(EDGE_SEED * 53 + 9);
+      const r = LFRKernel.runFullPipeline({
+        N: N_, k_avg: K_MEAN, max_k: K_MAX, t1: T1,
+        c_min: C_MIN, c_max: C_MAX, t2: T2,
+        mu, rng, traceTest: true,
+      });
+      CACHE = r;
+      return r;
+    }
+    // Backdrop: per-cluster internal edges from the buildSubgraphs
+    // result. These don't change across mate-rewire ops.
+    function intraEdges(r) {
+      if (!r || !r.ok) return [];
+      const out = [];
+      for (let i = 0; i < r.E.length; i++) {
+        r.E[i].forEach(j => {
+          if (i < j && LFRKernel.theyAreMate(i, j, r.memberList)) {
+            out.push([i, j]);
+          }
+        });
+      }
+      return out;
+    }
+    function stateAfter(r, k) {
+      const map = new Map();
+      const key = (a, b) => (a < b ? a + "|" + b : b + "|" + a);
+      (r.mateInitialEn || []).forEach(([a, b]) => {
+        map.set(key(a, b), [a, b]);
+      });
+      for (let i = 0; i < k; i++) {
+        const op = r.mateOps[i];
+        if (!op) break;
+        op.cuts.forEach(c => map.delete(key(c[0], c[1])));
+        op.places.forEach(p => map.set(key(p[0], p[1]), p));
+      }
+      return map;
+    }
+    function totalForCurrent() {
+      const r = getRun();
+      return 1 + ((r && r.ok && r.mateOps) ? r.mateOps.length : 0);
+    }
+    let lastStep = 0;
+    let lockBusy = false;
+    let ctl = null;
+    function setLock(b) {
+      if (lockBusy === b) return;
+      lockBusy = b;
+      if (ctl) ctl.refreshButtons();
+    }
+    const spokesMr = NETGEN.spokeLayer.attach(viz, { onLockChange: setLock });
+    function mateExtPlaced(stateMap, r) {
+      const out = [];
+      stateMap.forEach(([a, b], key) => {
+        const u = a + 1, v = b + 1;
+        const sameCluster = LFRKernel.theyAreMate(a, b, r.memberList);
+        out.push({
+          u, v, id: "lfr-mr-ext-" + key, bad: !!sameCluster,
+          color: sameCluster ? COL.edge_drop : COL.edge_inter,
+          badColor: COL.edge_drop,
+        });
+      });
+      return out;
+    }
+    function mateByNode(stateMap) {
+      // mateInitialEn entries are 0-based [a,b] arrays; lift to {u,v}
+      // page-id form for the helper.
+      const flat = [];
+      stateMap.forEach(([a, b]) => flat.push({ u: a + 1, v: b + 1 }));
+      return NETGEN.spokeLayer.byNodeFromEdges(viz, flat, COL.edge_inter);
+    }
+    function render(step) {
+      const r = getRun();
+      const total = totalForCurrent();
+      document.getElementById("g-mr-cur").textContent = String(step);
+      document.getElementById("g-mr-total").textContent = String(total - 1);
+      const labelEl = document.getElementById("g-mr-stage");
+      const descEl = document.getElementById("g-mr-desc");
+      if (!r || !r.ok || !r.mateOps) {
+        viz.setEdges([]);
+        spokesMr.snapToState({ byNode: {}, placed: [], just: null, justSeq: 0 });
+        clearDimPick();
+        labelEl.textContent = "pipeline gave up";
+        descEl.innerHTML = '<span class="st">no trace</span> &middot; runFullPipeline returned !ok at this μ; reroll or change the slider.';
+        return;
+      }
+      const intra = intraEdges(r);
+      const intraEdgeViz = intra.map(([a, b], i) => ({
+        u: a + 1, v: b + 1, color: COL.edge_intra ? COL.edge_intra.C1 : COL.edge_stage2,
+        w: 1.2, id: "lfr-mr-intra-" + i, classes: "fade",
+      }));
+      // Intra-cluster edges paint as a backdrop via viz.setEdges (faint,
+      // never animated). Spoke layer carries the external-edge state on
+      // top with degree-spokes around each external-incident node.
+      viz.setEdges(intraEdgeViz);
+
+      const stateMap = stateAfter(r, step);
+      const byNode = mateByNode(stateMap);
+      const placedAfter = mateExtPlaced(stateMap, r);
+
+      const four = new Set();
+      let label, desc;
+      if (step === 0) {
+        label = "step 0 · mate-rewire init";
+        desc = '<span class="st">step 0 · mate-rewire init</span> &middot; ' +
+          (r.mateOps.length || 0) + " phase-3 swap op" +
+          (r.mateOps.length === 1 ? "" : "s") +
+          " ahead. Faint = intra-cluster (built earlier); coloured = external; red-dashed = same-cluster external (a mate edge that the rewire pass tries to break).";
+      } else {
+        const op = r.mateOps[step - 1];
+        [op.a, op.b, op.randomMate, op.nodeH].forEach(id => four.add(id + 1));
+        label = "mate-rewire op " + step + " / " + r.mateOps.length;
+        const cuts = op.cuts.map(c => "<code>" + (c[0] + 1) + "&ndash;" + (c[1] + 1) + "</code>").join(" + ");
+        const places = op.places.map(p => "<code>" + (p[0] + 1) + "&ndash;" + (p[1] + 1) + "</code>").join(" + ");
+        // The kernel records var_mate as it stood when this op fired
+        // (varMateBefore); the post-op tally is recomputed by the loop on
+        // the next sweep, so the trace carries only the before-count.
+        desc = '<span class="st">op ' + step + '</span> &middot; ' +
+          "Cut " + cuts + "; place " + places + ". " +
+          op.varMateBefore + " mate edge" + (op.varMateBefore === 1 ? "" : "s") +
+          " still inside a cluster when this swap fired.";
+      }
+      labelEl.textContent = label;
+      descEl.innerHTML = desc;
+      const isAdj = step !== 0 && (step === lastStep + 1 || step === lastStep - 1);
+      if (!isAdj) {
+        spokesMr.snapToState({ byNode, placed: placedAfter, just: null, justSeq: step });
+        clearDimPick();
+        lastStep = step;
+        return;
+      }
+      const before = stateAfter(r, lastStep);
+      const beforeKeys = new Set(before.keys());
+      const afterKeys = new Set(stateMap.keys());
+      const removes = [], adds = [];
+      before.forEach(([a, b], key) => {
+        if (afterKeys.has(key)) return;
+        const u = a + 1, v = b + 1;
+        const sameCluster = LFRKernel.theyAreMate(a, b, r.memberList);
+        removes.push({
+          u, v, id: "lfr-mr-ext-" + key, bad: !!sameCluster,
+          color: sameCluster ? COL.edge_drop : COL.edge_inter,
+          badColor: COL.edge_drop,
+        });
+      });
+      stateMap.forEach(([a, b], key) => {
+        if (beforeKeys.has(key)) return;
+        const u = a + 1, v = b + 1;
+        const sameCluster = LFRKernel.theyAreMate(a, b, r.memberList);
+        adds.push({
+          u, v, id: "lfr-mr-ext-" + key, bad: !!sameCluster,
+          color: sameCluster ? COL.edge_drop : COL.edge_inter,
+          badColor: COL.edge_drop,
+        });
+      });
+      spokesMr.playMany(removes, adds, () => {});
+      lastStep = step;
+    }
+    ctl = NETGEN.rerollWalker({
+      prefix: "g-mr",
+      total: totalForCurrent(),
+      totalForCurrent,
+      onRender: render,
+      getLocked: () => lockBusy,
+      onRandStep: () => { if (!lockBusy) rerollEdges(); },
+      // In-stage RandAll: edge seed only.
+      onRandAll: () => { if (!lockBusy) rerollEdges(); },
+    });
+    function reconfigKeep() { CACHE_KEY = ""; NETGEN.followCursor(ctl, totalForCurrent()); }
+    onResampleChanged.push(reconfigKeep);
+    onAssignChanged.push(reconfigKeep);
+    onEdgeChanged.push(reconfigKeep);
+    document.getElementById("mu-slider").addEventListener("input", reconfigKeep);
+  })();
+
+})();
+</script>
+</body>
+</html>

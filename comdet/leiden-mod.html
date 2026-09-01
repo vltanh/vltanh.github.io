@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Leiden-Mod &middot; Leiden with modularity | Community Detection Algorithms</title>
+<link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐖</text></svg>">
+<meta name="description" content="Leiden with the modularity objective, walked one small step at a time on a 32-node fixture. Per-step viz over a faithful libleidenalg port.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./shared.css">
+<style>
+.cand-table tr.cand-pick { background: rgba(95,160,179,.22); }
+.cand-table tr.cand-from td:last-child { font-style: italic; }
+.code-chip {
+  display: inline-block;
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: .74rem;
+  line-height: 1.35;
+  color: var(--cobalt);
+  border-bottom: 1px dashed var(--azure);
+}
+</style>
+</head>
+<body>
+<main class="page">
+
+<div id="links"></div>
+
+<header class="hdr">
+  <div class="kicker">community detection &middot; partition optimisation</div>
+  <h1><em>Leiden-Mod</em></h1>
+  <p class="fullname">Leiden with the modularity objective</p>
+  <p class="sub">Same kernel as Leiden-CPM with the quality function swapped to modularity. Walked one queue pop, one refinement visit, one collapse at a time on the 32-node comdet fixture.</p>
+</header>
+
+<div class="uc-banner">
+  <strong>Draft.</strong> Teaching trace over a JS port of libleidenalg 0.12, bit-equal to the reference at every collapse level under matching seed. Same kernel and walker primitives as <a href="./leiden-cpm.html">Leiden-CPM</a>; only the quality function differs. Refinement here is the greedy variant; the paper also describes a randomised variant with acceptance probability \(\propto \exp(\Delta Q / \theta)\) gated by a randomness parameter \(\theta > 0\), so the page emphasises the deterministic modularity path and calls out where modularity itself still limits the result.
+</div>
+
+<!-- ─────────── Hook ─────────── -->
+<section class="hook">
+  <p>This page runs Leiden under the <em>modularity</em> objective rather than CPM. The mechanics are identical to <a href="./leiden-cpm.html">Leiden-CPM</a> and to <a href="./louvain.html">Louvain</a>: local moving with a queue, refinement that re-partitions each community in isolation from singletons, aggregation that collapses refined sub-communities while carrying pre-refinement labels. The only thing that changes is the number the inner loop tries to maximise.</p>
+  <p>Modularity (Newman 2006, Blondel et al. 2008 eq. 1):</p>
+  <p style="text-align:center">\(Q = \frac{1}{2m} \sum_{i,j} \big[ A_{ij} - \frac{k_i k_j}{2m} \big] \delta(c_i, c_j)\)</p>
+  <p>In words: the sum runs over every pair of nodes that share a community label. Each pair scores one point per edge actually present between them, minus the expected count under a degree-preserving null with marginal degrees \(k_i\) and \(k_j\). Normalising by total edge weight puts \(Q\) in \([-1, 1]\) with \(0\) the random-graph baseline. The first term is non-zero only on intra-community edges, so a partition that puts unrelated nodes together gains nothing from it. The second term subtracts a configuration-model penalty proportional to per-community total degree, which is the source of modularity's <em>resolution limit</em>: communities whose total degree falls below \(\sqrt{2m}\) merge into larger ones under the modularity-optimal partition (Fortunato and Barthélemy 2007).</p>
+  <p>Two properties of the formula. The configuration-model null is degree-preserving: under the null, a community of total degree \(K\) gets an expected internal-edge weight of \(K^2 / (4m)\); the modularity contribution from that community is \(e_c - K^2 / (4m)\). And the formula is symmetric in \(i\) and \(j\), so on undirected graphs the double-counting in the sum cancels with the \(1/(2m)\) prefactor and the formula is effectively a sum over pairs (or equivalently a sum over edges with self-loops counted twice, matching the implementation).</p>
+  <p>The resolution limit is the practical reason this page sits alongside <a href="./leiden-cpm.html">Leiden-CPM</a>. CPM has no logarithm-of-edge-count term, so it does not suffer the limit. Modularity is the older and more familiar objective and remains the default for many community-detection pipelines, and it is the only objective <a href="./louvain.html">Louvain</a> ships with. Leiden adds connectivity guarantees that Louvain lacks but cannot escape the resolution limit; the limit is a property of modularity itself, not of the optimiser.</p>
+  <p>The run is the same queue-based Leiden body as <a href="./leiden-cpm.html">Leiden-CPM</a>, with only the quality function and \(\Delta\) calculation swapped. The local move phase visits nodes through a queue and moves a node only when a neighbour-community raises \(Q\). Neighbours whose answers became stale go back into the queue. Refinement then restarts each move-phase community from singletons, grows connected sub-communities with \(\Delta Q \ge 0\), and aggregation collapses those refined pieces into super-nodes whose starting labels are the pre-refinement move-phase labels.</p>
+  <p><strong>Step 1.</strong> Move nodes: ask where this one node raises modularity most, and repeat that question only where a neighbour move changed the local scores. <strong>Step 2.</strong> Refine communities: ask the question Louvain skips, namely which connected pieces can regrow inside a moved block without lowering \(Q\). <strong>Step 3.</strong> Aggregate pieces: replace each refined piece by one weighted super-node while keeping the pre-refinement label as the next level's starting membership. <strong>Step 4.</strong> Repeat on the smaller graph until a collapse no longer reduces the node count.</p>
+  <div class="callout">
+    <div class="tag">how to read the panels</div>
+    <p>The shared fixture is ground-truth coloured at the start. After singleton init, graph colours are current Leiden labels. The local-move walker shows queue pops and candidate \(\Delta Q\) rows; the refinement walker shows how disconnected move-phase pieces become connected super-nodes. The page stays Draft because the deterministic browser trace covers one Leiden iteration, while the canonical Python wrapper usually runs two.</p>
+  </div>
+  <p>The rest of the page walks through one full run on the 32-node comdet fixture under seed 42. Each stage pairs a formula with a plain-English read and a short list of properties; the side-panel walker plays the kernel's actual trace.</p>
+</section>
+
+<!-- ─────────── Stage 0 · The input ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 0 &middot; input</div>
+  <h2>The 32-node fixture, painted by planted ground-truth.</h2>
+  <p>Same fixture every page in the gallery uses. <em>A</em> (12 nodes, blue) is a \(K_5\) on nodes \(\{0,1,2,3,4\}\) with a 7-node periphery. <em>B</em> (8 nodes, ochre) is two \(K_4\)s joined by the single bridge edge \((15, 16)\). <em>C</em> (6 nodes, green) is two 3-cycles with no edge between them, both labelled the same in ground-truth. <em>D</em> (4 nodes, plum) is two 2-cliques connected by \((27, 28)\). Outliers 30 and 31 hang off the A periphery and carry the singleton ground-truth label \(-1\).</p>
+  <div class="graph" id="g-input">
+    <div class="graph-chrome">
+      <span>32 nodes &middot; 52 edges &middot; 4 planted communities + 2 outliers</span>
+      <span class="right">colour = planted ground-truth</span>
+    </div>
+    <div class="graph-canvas" id="g-input-cy"></div>
+  </div>
+  <p>The resolution limit shows up early on a graph this size. With \(2m = 104\), the threshold below which any community risks absorption is roughly \(\sqrt{2m} \approx 10.2\). Every planted community in the fixture sits at or below that threshold. Whether Leiden-Mod recovers them depends on how each community's degree mass interacts with the merge-or-split tradeoff at every level.</p>
+  <p>In words: Fortunato and Barthélemy 2007 establish that a modularity-optimal partition cannot keep two communities apart when their joint total degree is below \(\sqrt{2m}\). The reasoning is direct: if both communities are below the threshold, merging them produces a positive \(\Delta Q\) under modularity (the gain from one bridge edge exceeds the configuration-model penalty term, which is below 1). Two properties of the threshold: it scales as the square root of the total edge weight, so denser graphs have a sharper limit; and it depends on \(2m\) alone, not on the community structure of the input, so a planted small community can sit below threshold whenever the graph as a whole is large enough.</p>
+  <p>The <a href="./louvain.html">Louvain page</a> shows what happens when the same objective is optimised without Leiden's refinement step: every level keeps merging until the optimum is one community.</p>
+</section>
+
+<!-- ─────────── Stage 1 · Singleton init ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 1 &middot; singleton init &middot; \(Q_0\)</div>
+  <h2>Every node starts in its own community.</h2>
+  <p>Leiden begins from singletons (paper Fig. 3a). 32 nodes, 32 communities, one node each. With every community at size one, no edge has both endpoints sharing a label, so the first term of \(Q\) vanishes. The configuration-model penalty term remains:</p>
+  <p style="text-align:center">\(Q_0 = -\sum_c \big( k_c / 2m \big)^2\)</p>
+  <p>In words: every node still pays the configuration-model penalty for the degree mass it brings into its own singleton community, even though no community has any internal edges yet. On the 32-node fixture this evaluates to a small negative number around \(-0.027\). Two properties worth keeping in mind: a singleton partition is the worst possible \(Q\) for a connected graph (every other partition can only do better, since merging two adjacent nodes always brings a positive contribution from at least one edge), and \(Q_0\) shrinks toward zero as the graph gets denser, so the algorithm has more headroom on sparse networks than on dense ones.</p>
+  <div class="graph" id="g-singleton">
+    <div class="graph-chrome">
+      <span>singleton partition &middot; \(Q_0 \approx -0.027\)</span>
+      <span class="right">colour = community id (32 distinct hues)</span>
+    </div>
+    <div class="graph-canvas" id="g-singleton-cy"></div>
+  </div>
+  <p>From here every move either grows the intra-community edge total (which raises \(Q\)) or shifts a node into a community whose total degree is small enough that the penalty term softens. The next stages walk that pass.</p>
+</section>
+
+<!-- ─────────── Aside · the RNG and shuffle ─────────── -->
+<section class="stage">
+  <div class="stage-num">aside &middot; the visit order</div>
+  <h2>One pseudorandom sequence drives every shuffle.</h2>
+  <p>Leiden's local-move phase and refinement phase both draw their visit order from a single Mersenne-Twister stream, the same one used by the <a href="./leiden-cpm.html">Leiden-CPM page</a>. The kernel seeds an instance of MT19937 with the user's seed (seed 42 throughout the page) and calls Fisher-Yates backwards on the node list at the start of each phase.</p>
+  <p>The backwards Fisher-Yates form, in pseudo-code:</p>
+  <p style="text-align:center">\(\text{for } i = n-1 \text{ down to } 1: \quad j = \text{uniform}(0, i); \quad \text{swap}(\text{arr}[i], \text{arr}[j])\)</p>
+  <p>In words: walk the array from the back. At each step, swap the current slot with a uniformly chosen earlier slot (or itself). Two properties: every permutation of the array has equal probability under the algorithm (the standard Fisher-Yates correctness statement); and the swap sequence consumes exactly \(n-1\) integer-bounded random draws, so a graph of \(n\) nodes consumes a predictable budget out of the MT19937 stream per phase. The budget is what lets a tracer assert that two implementations of the algorithm have drawn the same number of RNG values at the same step.</p>
+  <p>Two practical consequences. The same fixture under two different seeds produces two different visit orders, and on tie-prone moves (where two candidates have equal \(\Delta Q\)) the visit order picks the winner. So the final partition is seed-dependent on hard graphs, even though every seed produces a partition that satisfies γ-separation and γ-connectivity (the modularity equivalents of these conditions translate into "no two communities would merge" and "every community is internally connected"). The integer-bounded draws use Lemire's debiased multiplication trick rather than naive modulo, so the distribution over indices is exactly uniform.</p>
+  <div class="callout">
+    <div class="tag">seed = 0 is a trap</div>
+    <p>The reference cpp Mersenne-Twister remaps a seed of zero to a hardcoded constant of 4357 inside its initialisation routine, a quirk inherited from the original Matsumoto-Nishimura 1998 reference C code. The JS walker on this page consumes the seed as supplied. The two implementations agree on every nonzero seed; on seed zero they diverge. The verification stress matrix avoids seed zero for this reason, and the page defaults to seed 42 so no one accidentally trips the divergence by re-running with seed zero.</p>
+  </div>
+</section>
+
+<!-- ─────────── Stage 2 · Move-phase queue init ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 2 &middot; move-phase queue init</div>
+  <h2>Every node enters the queue once, in shuffled order.</h2>
+  <p>The local-move phase starts with all 32 nodes in a FIFO queue. The order is the Fisher-Yates output from the previous aside; every node is marked stable on entry. The queue is the unit the kernel pops from one at a time. While the queue is non-empty, the front is removed, evaluated, possibly moved, and possibly responsible for re-queueing some of its neighbours.</p>
+  <p>Two properties of the initialisation. The queue contains exactly \(n\) entries at the start of the phase, one per node, and a node already in the queue is never pushed twice (the stable-bit gate prevents duplicates). And the queue is FIFO, so a node pushed back to the queue mid-pass waits behind whatever was already queued at the time of the push.</p>
+  <div class="graph" id="g-queue-init">
+    <div class="graph-chrome">
+      <span>queue at pass entry &middot; 32 entries</span>
+      <span class="right">all nodes stable, all in their own community</span>
+    </div>
+    <div class="graph-canvas" id="g-queue-init-cy"></div>
+  </div>
+  <p>The shuffled order is what makes the trace seed-dependent. On seed 42, the first node popped is whichever index Fisher-Yates landed at the front of the array; for any other seed, a different node opens the pass. The acceptance rule is symmetric in node identity, so a different opening node usually produces a permutation of the same final partition rather than a structurally different one.</p>
+</section>
+
+<!-- ─────────── Stage 3 · ΔQ formula ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 3 &middot; the per-visit decision rule</div>
+  <h2>One closed-form evaluated per candidate.</h2>
+  <p>Each pop evaluates the node's candidate moves and picks the one that raises \(Q\) the most. The per-visit decision rule, written explicitly:</p>
+  <p style="text-align:center">\(\Delta Q(v \to c) = \frac{1}{m} \Big[ \big( w_{\text{to,c}} + s_w - \tfrac{k_v K_{\text{c}}}{W} \big) - \big( w_{\text{to,v\_comm}} - \tfrac{k_v K_{\text{v\_comm,old}}}{W} \big) \Big]\)</p>
+  <p>(simplified to the undirected case where \(w_{\text{to}} = w_{\text{from}}\), \(k = k_{\text{in}} = k_{\text{out}}\), and \(K\) is the per-community total weight). In words: the change in \(Q\) from moving \(v\) into \(c\) is the new edges \(v\) brings into \(c\), plus its self-loop weight, minus the configuration-model expectation of those edges given \(v\)'s degree and \(c\)'s total degree, minus the same thing reversed for \(v\)'s old community.</p>
+  <p>Two properties of the formula. Every quantity in it is a per-community running sum that the partition admin already maintains, so a single \(\Delta Q\) costs constant time. And the expectation term \(k_v K_c / W\) is what produces the resolution limit, because it grows linearly in \(K_c\) and so a candidate community whose total degree is small offers a smaller penalty than a candidate community whose total degree is large.</p>
+  <p>Acceptance is strict-positive: the kernel requires \(\Delta Q > 10 \cdot \text{DBL\_EPSILON}\) for a move to fire, which is effectively strict positivity with the epsilon margin guarding against floating-point noise. A candidate with \(\Delta Q = 0\) does not move the node. The refinement phase (stage 7) uses \(\ge\) instead and accepts ties.</p>
+  <p><strong>Step 1.</strong> Temporarily read \(v\)'s old community as if \(v\) had left it, exposing the true cost of staying: lost edges to the old block and reduced degree mass there. <strong>Step 2.</strong> Walk \(v\)'s adjacency list once and cache total edge weight into each neighbouring community; those cached totals are the \(w_{\text{to,c}}\) values. <strong>Step 3.</strong> For each cached community, score observed edge weight into the block minus \(k_v K_c / W\). <strong>Step 4.</strong> Move only on strict improvement, then queue every stable neighbour outside the new community because its own candidate scores changed.</p>
+</section>
+
+<!-- ─────────── Aside · candidate enumeration ─────────── -->
+<section class="stage">
+  <div class="stage-num">aside &middot; how candidates are built</div>
+  <h2>Cached neighbour-community weights, then an empty-community option.</h2>
+  <p>Every visit's first step is to build the candidate set for the current node. The cost of doing this naively is proportional to the number of communities in the partition. The kernel uses a cached running tally instead. For the current node \(v\), the kernel walks \(v\)'s adjacency list once, accumulating weight per neighbour-community into a sparse cache. The set of keys with nonzero weight is the candidate set; the per-community weight is the running sum used as \(w_{\text{to,c}}\) in the \(\Delta Q\) formula. The cache fills in adjacency-list order, sorted by neighbour id ascending so the trace is reproducible.</p>
+  <p>The empty-community candidate is added only when the current community has more than one node. When the gate fires, the kernel pulls the most-recently-emptied community id off a LIFO stack and appends it to the candidate set; if no community is empty, the partition admin grows by one and the new id is appended. Selecting it would move \(v\) into a fresh empty community, giving up \(v\)'s contribution to its current community in exchange for whatever the configuration-model term says about a singleton at the current degree budget.</p>
+  <p>Two properties of the candidate set. Adjacency-order plus a strict-greater compare means that under tie-break the lowest-id neighbour-community wins the move slot, which is what makes the trace reproducible across runs. The empty-community gate (suppressed when the node is already alone) prevents the partition admin from leaking empty community slots: if every singleton were allowed to "move into a fresh empty community", the admin would grow without bound across a single pass.</p>
+</section>
+
+<!-- ─────────── Stage 4 · First visit ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 4 &middot; first visit of the pass</div>
+  <h2>Pop one node, evaluate, move, restabilise.</h2>
+  <p>The first pop of the pass is whichever node Fisher-Yates placed at index 0 of the shuffled queue. The visit runs four sub-steps in order: build the candidate set from cached neighbour-community weights; evaluate \(\Delta Q\) for every candidate (including an empty-community option when the gate fires); pick the argmax under strict-greater; commit the move and re-queue every previously-stable neighbour now in a different community from \(v\).</p>
+  <p>Re-queueing is the queue's restabilisation contract. When \(v\) moves into community \(c\), every neighbour \(u\) of \(v\) that was marked stable and is not currently in \(c\) gets pushed back into the queue and marked unstable. The reason: one of \(u\)'s neighbours sits in a different community now, so the \(\Delta Q\) row evaluated for \(u\) at its previous pop is stale.</p>
+  <p>Two properties of the restabilisation. Neighbours already in \(c\) are not re-queued: their situation has not changed by \(v\)'s arrival from outside. And neighbours that were already unstable (still queued) are not double-pushed: the stable-bit gate stops duplicate queue entries, so the worst-case queue size stays bounded by \(n\).</p>
+  <div class="graph" id="g-move">
+    <div class="graph-chrome">
+      <span><span class="level-pill" id="g-move-level">L0</span><span id="g-move-status">stage 0 · singleton init · 32 nodes alone</span></span>
+      <span class="right" id="g-move-stats">moves: 0 &middot; ΔQ cum: 0.0000</span>
+    </div>
+    <div class="graph-canvas" id="g-move-cy"></div>
+    <div class="widget-row">
+      <button class="btn" id="g-move-reset" type="button">reset</button>
+      <button class="btn" id="g-move-prev" type="button">back</button>
+      <button class="btn primary" id="g-move-next" type="button">next visit</button>
+      <button class="btn" id="g-move-end" type="button">finish pass</button>
+      <span class="step-label">visit <b id="g-move-cur">0</b> / <span id="g-move-total">0</span></span>
+    </div>
+  </div>
+  <p>The side panel lists every candidate community considered for the current node, each with its \(\Delta Q\). The chosen target is highlighted in mint; the node's current community is shown in grey and labelled "current". Stepping forward advances one queue pop; the widget runs the full pass to completion via the finish button. Modularity acceptance is strict-positive, so a candidate with \(\Delta Q = 0\) does not move the node.</p>
+  <div id="g-move-panel"></div>
+  <p>A worked example anchored in the fixture. Take node 5, a periphery node attached to a single \(K_5\) member (say node 1). At singleton init, every neighbour of node 5 is in its own community. Node 5's only candidate is "join one of its neighbours". \(\Delta Q\) for joining a neighbour \(u\) in singleton community \(\{u\}\) simplifies to \((1 - k_5 k_u / (2m)) / m\). On this fixture with \(k_5 = 1, k_u = \text{deg}(u)\), this gives roughly \(+0.009\) for a \(K_5\) member of degree 7. The move is accepted. Node 1 (the \(K_5\) member that just gained node 5) gets restabilised: now its neighbours might prefer to join it too. Several visits later, the \(K_5\) members all sit in the same community, and the periphery has gathered around them.</p>
+</section>
+
+<!-- ─────────── Stage 5 · Mid-queue dynamics ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 5 &middot; mid-queue dynamics</div>
+  <h2>The queue grows and shrinks as moves cascade.</h2>
+  <p>Past the first few visits, the queue is no longer a flat list of singletons. Some entries are nodes that have already moved into a non-trivial community; some are originally-stable neighbours that got pushed back because a previous move destabilised them; some are still in their starting singleton because their pop has not happened yet. Each of these three states gives rise to a different visit pattern.</p>
+  <p>Two properties of the mid-queue regime. A node may be popped, evaluated, and find that no move beats \(\Delta Q = 0\); the kernel records the visit with \(\text{moved} = \text{false}\) and the queue advances without restabilisation. And the same node may be popped multiple times across the pass (once per "destabilisation" event triggered by a neighbour move); each repeat starts from the current partition state and may decide differently from the previous visit.</p>
+  <div class="graph" id="g-move-mid">
+    <div class="graph-chrome">
+      <span><span class="level-pill">L0</span><span id="g-move-mid-status">mid-pass snapshot &middot; ~half the queue drained</span></span>
+      <span class="right" id="g-move-mid-stats">·</span>
+    </div>
+    <div class="graph-canvas" id="g-move-mid-cy"></div>
+  </div>
+  <p>This static panel shows the partition midway through the pass, taken at the same trace index visible on the main walker. It is a snapshot in time: the colour of each node is its current community label, the empty-looking regions are where singletons have not yet been touched, and the larger clusters are where the cascade has already pulled multiple nodes into one community.</p>
+</section>
+
+<!-- ─────────── Stage 6 · Move-phase convergence ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 6 &middot; move-phase convergence</div>
+  <h2>The queue drains. The partition is locally optimal at the node level.</h2>
+  <p>The move phase ends when the queue is empty. At that point every node sits in its locally best community: a hypothetical visit of any node would find \(\Delta Q \le 0\) for every candidate move, so no move would fire. This is the same fixed-point Louvain reaches with its full-sweep loop; Leiden gets there in fewer total visits because quiet regions of the graph are skipped once they stabilise.</p>
+  <p>Two properties of the fixed point. It is a node-level optimum, not a community-level optimum: no single node prefers a different community, but the partition as a whole may still be missing splits or merges that a community-level operator would catch. And it is reproducible per-seed: the same seed produces the same final partition for the move phase under the same RNG and adjacency-order conventions.</p>
+  <div class="graph" id="g-move-post">
+    <div class="graph-chrome">
+      <span>post-move partition &middot; one queue drain</span>
+      <span class="right">colour = community id (after move phase)</span>
+    </div>
+    <div class="graph-canvas" id="g-move-post-cy"></div>
+  </div>
+  <p>The cost of the queue version compared to a full sweep grows with moves performed rather than nodes times passes. On this fixture the move-only phase finishes in one queue drain.</p>
+  <div class="callout">
+    <div class="tag">why modularity behaves differently here</div>
+    <p>On the same fixture, <a href="./leiden-cpm.html">Leiden-CPM</a> at \(\gamma = 0.05\) settles on around 8 communities; Leiden-Mod settles on fewer because modularity's null-model penalty drops below the gain from any single bridge edge once both community degrees sit below \(\sqrt{2m}\). CPM's quality function has no per-community null term: each community's contribution is its intra edge count minus \(\gamma\) times the number of intra-pairs, evaluated on its own. Modularity's per-community contribution depends on \(2m\) through the null, so every candidate merge is scored against a degree-weighted reference rather than on its own.</p>
+  </div>
+  <div class="callout">
+    <div class="tag">acceptance, strict vs ties</div>
+    <p>The move phase requires \(\Delta Q > 10 \cdot \text{DBL\_EPSILON}\) for a move to fire; this is effectively strict positivity, with the epsilon margin guarding against floating-point noise. The refinement phase (next stage) accepts \(\Delta Q \ge 0\). The gap matters on this fixture in exactly one situation: two adjacent singletons whose join would produce a \(\Delta Q\) of exactly zero. Modularity rarely produces clean zeros at random seed because the degree-weighted null is rational with denominator \(4m^2\) and edge weights are integers, but it does happen when the graph is contrived (regular graphs, equal-degree pairs). The refinement phase will accept those ties and merge; the move phase will not.</p>
+  </div>
+</section>
+
+<!-- ─────────── Stage 7 · Refinement init ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 7 &middot; refinement init</div>
+  <h2>Re-singleton inside each move-phase community.</h2>
+  <p>Refinement starts by re-singletoning every node inside its move-phase community. Each move-phase community of size \(s\) becomes \(s\) refined singletons that all carry the same <em>constrained</em> label (the move-phase id), even though their refined sub-community ids are fresh and distinct. The constrained label is the gate refinement uses to keep merges from crossing move-phase boundaries.</p>
+  <p>Two properties of the refinement init. The constrained label is exactly the move-phase community label: refinement only considers merges whose source and target share a constrained label, so move-phase boundaries are not crossed. And refinement starts from a singleton partition inside each move-phase community, so any merge inside that community has to climb from scratch under its own local edge structure alone.</p>
+  <div class="graph" id="g-refine-init">
+    <div class="graph-chrome">
+      <span>refinement init &middot; each move-phase community re-singletoned</span>
+      <span class="right">colour rim = constrained (move-phase) label</span>
+    </div>
+    <div class="graph-canvas" id="g-refine-init-cy"></div>
+  </div>
+  <p>The graph painted above shows the constrained partition; the refined partition itself is 32 singletons, so its rendering would not differ from the singleton-init panel at the top of the page. The refined ids are integers 0 to \(n-1\); the constrained ids are inherited from stage 6.</p>
+</section>
+
+<!-- ─────────── Stage 8 · One refinement visit ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 8 &middot; one refinement visit</div>
+  <h2>Pick a node, scan only same-constrained candidates, accept on \(\ge 0\).</h2>
+  <p>Each refinement visit pops one node, evaluates \(\Delta Q\) against every refined sub-community that shares its constrained label, and accepts the largest non-negative gain. The decision rule:</p>
+  <p style="text-align:center">\(\text{accept}(v \to c) = \big[ \Delta Q(v \to c) \ge 0 \text{ and constrained}(c) = \text{constrained}(v) \big]\)</p>
+  <p>In words: \(v\) can move into refined sub-community \(c\) only when the move does not lower \(Q\) and \(c\) sits inside the same move-phase community that \(v\) is in. Two properties: ties propagate the move forward instead of leaving the node alone (refinement keeps merging at saddle points where the move phase would stop); and refinement processes only nodes that are still alone in their refined sub-community, so once a node has joined a refined sub-community it is locked in for the rest of the pass.</p>
+  <p>The acceptance rule is the \(\ge 0\) flavour rather than the move phase's strict-positive. The reason is asymmetric: at this point the move phase has already extracted every strictly-positive merge, so the only thing left to find is tie-merges (\(\Delta Q = 0\)) and connectivity-driven splits. The first gives refinement its tie-breaker power; the second is what feeds the connectivity guarantee.</p>
+  <p><strong>Step 1.</strong> Each node remembers the move-phase community it came from; that label is not the refined community, it is the boundary fence. <strong>Step 2.</strong> Inside each fence, refined ids start as singletons, so any multi-node refined community must be rebuilt by accepted local evidence. <strong>Step 3.</strong> The scan keeps only neighbouring refined communities with the same constrained label; cross-boundary candidates are ignored before scoring. <strong>Step 4.</strong> If a non-negative candidate exists, \(v\) joins it. After that \(v\) is no longer a singleton and will not initiate another refinement merge in this pass.</p>
+</section>
+
+<!-- ─────────── Stage 9 · Refinement walker ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 9 &middot; refinement walker</div>
+  <h2>One sweep through every still-singleton node.</h2>
+  <p>The walker below plays every refinement visit on the post-move partition. The refinement sweep processes only nodes still alone in their refined sub-community; once a node has joined a refined sub-community it is skipped on subsequent visits.</p>
+  <div class="graph" id="g-refine">
+    <div class="graph-chrome">
+      <span><span class="level-pill" id="g-refine-level">L0</span><span id="g-refine-status">starts from post-move &middot; 32 refined singletons</span></span>
+      <span class="right" id="g-refine-stats">merges: 0</span>
+    </div>
+    <div class="graph-canvas" id="g-refine-cy"></div>
+    <div class="widget-row">
+      <button class="btn" id="g-refine-reset" type="button">reset</button>
+      <button class="btn" id="g-refine-prev" type="button">back</button>
+      <button class="btn primary" id="g-refine-next" type="button">next visit</button>
+      <button class="btn" id="g-refine-end" type="button">finish pass</button>
+      <span class="step-label">visit <b id="g-refine-cur">0</b> / <span id="g-refine-total">0</span></span>
+    </div>
+  </div>
+  <p>On this 32-node fixture refinement is mostly a no-op for the same reason it is under CPM: the local-move pass already produced internally-connected communities, so refinement has nothing to split. The gap between Louvain and Leiden under modularity surfaces on larger sparse networks where the resolution limit bites hardest, and where the local-move pass occasionally accepts a disconnected community that refinement then breaks.</p>
+  <div class="callout">
+    <div class="tag">refinement-phase invariants</div>
+    <p>Two invariants hold across every refinement visit and are load-bearing for the connectivity guarantee. <em>Well-separated</em>: at the end of refinement, no two refined sub-communities inside the same move-phase community would prefer to merge if offered the move (a direct consequence of greedy acceptance with \(\Delta Q \ge 0\)). <em>Well-connected</em>: every refined sub-community is internally connected. The second invariant is what feeds into aggregation: each super-node represents a connected piece of the original graph, so a community at any subsequent level is a union of connected pieces sharing one label, never a disconnected union.</p>
+  </div>
+  <div class="callout">
+    <div class="tag">randomised refinement (paper canonical)</div>
+    <p>The paper's canonical recipe picks a candidate sub-community with probability \(P(c) \propto \exp(\Delta Q_c / \theta)\) for randomness parameter \(\theta > 0\). Greedy refinement is the limit \(\theta \to 0\). The randomised variant carries the asymptotic guarantees (uniform γ-density, subset optimality); the greedy variant still carries γ-connectivity, which is the main fix. libleidenalg 0.12 ships only the greedy variant, so this page walks that one. The asymptotic guarantees would require a second RNG stream and a per-visit candidate sample, both out of scope for the deterministic per-seed trace the page relies on.</p>
+  </div>
+</section>
+
+<!-- ─────────── Stage 10 · Post-refine state ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 10 &middot; the refined partition</div>
+  <h2>Sub-communities under each move-phase label.</h2>
+  <p>At the end of refinement the partition has two labels per node: the refined sub-community id (one of \(K_{\text{ref}}\)) and the constrained move-phase id (one of \(K_{\text{mov}}\)). The aggregation step uses both. Sub-community ids become super-nodes; move-phase ids become super-node membership labels.</p>
+  <p>Two properties of the refined partition. \(K_{\text{ref}} \ge K_{\text{mov}}\) always: refinement may split but never merges across constrained labels, so the refined partition is a (possibly trivial) subdivision of the move-phase partition. And the refined partition's \(Q\) on the input graph is at least as high as the move-phase partition's: refinement only accepts \(\Delta Q \ge 0\) moves, so the cumulative quality at refinement end is bounded below by the cumulative quality at move end.</p>
+  <div class="graph" id="g-refine-post">
+    <div class="graph-chrome">
+      <span>post-refine partition &middot; \(K_{\text{ref}}\) refined sub-communities</span>
+      <span class="right">colour = refined sub-community id</span>
+    </div>
+    <div class="graph-canvas" id="g-refine-post-cy"></div>
+  </div>
+  <p>On the 32-node fixture the panel above usually looks identical to the post-move panel from stage 6: refinement found no internal disconnections to split. The relabelling is invisible at this scale, but it matters for the super-graph the next stage builds.</p>
+</section>
+
+<!-- ─────────── Stage 11 · Aggregation ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 11 &middot; aggregation</div>
+  <h2>Collapse refined sub-communities, label them by the pre-refined partition.</h2>
+  <p>Aggregation builds a smaller graph for the next round (paper Fig. 3d, 3e). One super-node per refined sub-community; super-edges between two sub-communities sum into one weighted edge. <a href="./louvain.html">Louvain</a> aggregates the same way except for one detail. Louvain's super-node inherits the post-Phase-1 community id directly. Leiden's super-node inherits the pre-refinement community id from the move phase, so the next round of moves continues working on the same higher-level grouping the previous round just settled.</p>
+  <p>The collapse step itself is straightforward bookkeeping. Each original-graph edge \((u, v)\) becomes a super-edge between the refined sub-community of \(u\) and the refined sub-community of \(v\). Multiple original edges between the same pair of sub-communities sum into one weighted super-edge. Original-graph intra-edges (both endpoints inside the same sub-community) become super-node self-loops, encoding the sub-community's internal edge weight as the self-loop weight. The partition admin on the super-graph then reads those self-loop weights directly into the per-community intra-weight cache.</p>
+  <p>The two-label trick: if refinement split community 5 into pieces 5a, 5b, 5c, those three super-nodes all start the next level carrying the label 5. The next move phase can either recombine them (confirming the original community) or pull them apart (subdividing at the higher level). Relabelling by sub-community instead would make every super-node its own community, and the next round would waste effort rediscovering what the previous round had established.</p>
+  <p><strong>Step 1.</strong> Every refined sub-community becomes one super-node whose degree is the sum of original-node degrees inside it. <strong>Step 2.</strong> Fine edges crossing the same pair of refined pieces are added into one weighted super-edge, while fine internal edges become self-loops. <strong>Step 3.</strong> The graph structure follows refinement, but the starting partition on the new graph follows the pre-refinement move label. <strong>Step 4.</strong> The next level runs the same modularity move formula on this smaller weighted graph, with self-loops included.</p>
+  <table class="cluster-stats" aria-label="Two-label aggregation ledger">
+    <thead><tr><th>Object before collapse</th><th>Object after collapse</th><th>Stored implementation value</th><th>Why it matters</th></tr></thead>
+    <tbody>
+      <tr><td>refined sub-community \(r\)</td><td>super-node \(R\)</td><td><span class="code-chip">nodeOfRefined[r] = R</span></td><td>keeps each connected refined piece atomic at the next level</td></tr>
+      <tr><td>move-phase community \(c\)</td><td>starting label of \(R\)</td><td><span class="code-chip">membership[R] = c</span></td><td>preserves the grouping found before refinement</td></tr>
+      <tr><td>fine edge \((u, v)\)</td><td>weighted edge \((R_u, R_v)\)</td><td><span class="code-chip">weight += A[u,v]</span></td><td>lets the same \(\Delta Q\) formula run on the super-graph</td></tr>
+      <tr><td>fine internal edge</td><td>self-loop on \(R\)</td><td><span class="code-chip">loopWeight[R] += A[u,v]</span></td><td>carries internal modularity reward upward</td></tr>
+    </tbody>
+  </table>
+  <div class="graph" id="g-agg">
+    <div class="graph-chrome">
+      <span>before &middot; refined fine partition (\(n = 32\))</span>
+      <span class="right" id="g-agg-cap">after &middot; super-graph (\(n = \cdot\))</span>
+    </div>
+    <div class="graph-canvas" id="g-agg-cy"></div>
+    <div class="widget-row">
+      <button class="btn primary" id="g-agg-play" type="button">collapse</button>
+      <button class="btn" id="g-agg-reset" type="button">reset</button>
+      <span class="step-label">fine edges fade as super-edges aggregate by community pair</span>
+    </div>
+  </div>
+  <p>The outer loop terminates when an aggregation step no longer shrinks the graph. On this fixture under modularity that happens whenever local-move plus refinement produces a partition that is its own coarsening: the super-graph has the same node count as the previous level, so the kernel reports the partition and stops.</p>
+  <div class="callout">
+    <div class="tag">why aggregation builds from singletons</div>
+    <p>An alternative aggregation rule would be: each post-refinement sub-community becomes a super-node, and the next round of local moves restarts those super-nodes as their own singletons. <a href="./louvain.html">Louvain</a> effectively does this when it aggregates by post-Phase-1 community id. The cost is that any further structure the move phase had baked into the previous level gets thrown away at every collapse. Leiden's two-label trick preserves that information: the next level inherits both the sub-community decomposition (which the new super-graph encodes structurally) and the move-phase grouping (which the membership labels encode).</p>
+  </div>
+</section>
+
+<!-- ─────────── Stage 12 · Phase-2 move ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 12 &middot; outer iteration on the super-graph</div>
+  <h2>Move phase on level 1.</h2>
+  <p>The move phase repeats on the super-graph. Every super-node enters a fresh queue in shuffled order; the candidate enumeration walks the super-graph's adjacency (which sums original-graph multi-edges into one super-edge per pair); the \(\Delta Q\) formula reads the same per-community running sums; the acceptance is strict-positive again. The only thing that differs from level 0 is the input graph: it is smaller, weighted, and may have self-loops.</p>
+  <p>Two properties of the level-1 move phase. The starting partition is not singletons: each super-node already carries a move-phase label inherited from level 0, and the partition admin enters level 1 with those labels (refined sub-communities of the same pre-refinement community share a label). So move-phase work at level 1 is about merging super-communities, not building communities from scratch. And the per-super-node degree is the sum of original-graph degrees inside that super-node, so the resolution threshold at level 1 is the same numerical \(\sqrt{2m}\) but applied to super-node degrees, which may push merges that were below threshold at level 0 above it at level 1.</p>
+  <div class="graph" id="g-level1">
+    <div class="graph-chrome">
+      <span>level 1 &middot; super-graph after first collapse</span>
+      <span class="right" id="g-level1-cap">colour = move-phase label inherited from level 0</span>
+    </div>
+    <div class="graph-canvas" id="g-level1-cy"></div>
+  </div>
+  <p>If the level-1 move phase produces any merge, refinement runs again under the new constrained labels and aggregation produces a level-2 super-graph. If no merge fires, the level-1 super-graph is identical to the level-0 super-graph, the geometric shrink stops, and the outer loop exits.</p>
+</section>
+
+<!-- ─────────── Stage 13 · Outer loop ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 13 &middot; outer-loop convergence</div>
+  <h2>The aggregate graph stops shrinking.</h2>
+  <p>The outer loop's exit condition is geometric: continue iterating as long as the aggregate graph after collapse has strictly fewer nodes than before. When a move-plus-refine pass leaves the super-graph node count unchanged, the partition is fixed across one full outer iteration and the kernel returns.</p>
+  <p>The table below records one row per level on this fixture under seed 42. The columns track the super-graph node count entering the level, the number of communities the move phase found inside it, the super-graph node count after the collapse, the count of move-phase node-moves at the level, and the refinement-pass move count (zero on this fixture because every move-phase community is already internally connected).</p>
+  <table class="cluster-stats" id="g-levels-stats">
+    <thead><tr><th>level</th><th>vc-before</th><th>ncomm</th><th>vc-after</th><th>move-phase moves</th><th>refine moves</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <p>Two properties of the geometric exit. It does not guarantee monotone \(Q\) improvement at every level: a level whose move phase produces zero moves does not raise \(Q\) (the loop exits without an update). And the deepest level is not always the highest-\(Q\) level: under modularity's resolution limit, deeper aggregation tends to over-merge, so the highest-\(Q\) partition can sit one or two levels above the deepest. Leiden returns the deepest level by default; the alternative of returning the best-\(Q\) level requires an extra pass through the level cache.</p>
+  <div class="callout">
+    <div class="tag">stable iteration vs single iteration</div>
+    <p>The reference Python wrapper iterates the entire Leiden run multiple times by default (two outer Leiden iterations in its single-call entry point). Each outer iteration reuses the previous final partition as the new starting partition (skipping the singleton init) and re-runs move plus refine plus aggregate. A "stable iteration" is one where the partition does not change from start to finish; at that point Leiden has guaranteed γ-separation, γ-connectivity, node optimality, and subpartition γ-density (paper Table 1, rows 1-4). This page kernel runs one outer Leiden iteration to keep the trace cleanly anchored to a single seed-driven trajectory; the technical companion has the multi-iteration variant.</p>
+  </div>
+</section>
+
+<!-- ─────────── Aside · partition invariants ─────────── -->
+<section class="stage">
+  <div class="stage-num">aside &middot; partition admin invariants</div>
+  <h2>What holds at every step boundary.</h2>
+  <p>The partition data structure tracks several running sums so the \(\Delta Q\) formula can be evaluated in constant time per visit. Six invariants hold immediately after every move-node call.</p>
+  <p><strong>Membership sum</strong>: every node has exactly one community id in \([0, K)\) where \(K\) is the current community count. The partition admin never assigns more than one label to a node and never leaves a node unlabelled.</p>
+  <p><strong>Node count conservation</strong>: \(\sum_c n_c = n\). Every move-node call decrements the source community's count by one and increments the destination community's count by one, so the total stays at \(n\) across the entire run.</p>
+  <p><strong>Intra-weight total</strong>: \(\sum_c e_c = \text{total intra-community edge weight at the current partition}\). The partition admin updates this incrementally inside the move-node routine by walking \(v\)'s adjacency once per direction (out then in) and adding or subtracting per-edge contributions based on whether the edge is intra or inter with respect to the old and new communities.</p>
+  <p><strong>Empty-community LIFO</strong>: the set of community ids \(c\) with \(n_c = 0\) is maintained as a LIFO stack. The most-recently-emptied id sits on top; the empty-community candidate is pulled from the top. When a move empties a community, the id is pushed; when a move fills a previously-empty community, the id is removed from the stack via a linear search from the back.</p>
+  <p><strong>Renumber after every move phase</strong>: at the end of the move phase and at the end of the refinement phase, the partition admin runs a rank-order routine that sorts surviving communities by (size DESC, node-count DESC, original-id ASC) and relabels everything to land in \([0, K')\) where \(K'\) is the surviving count.</p>
+  <p>Two properties of the invariants. They are all maintained incrementally inside the move-node routine rather than recomputed from scratch, so the per-move cost stays constant in the graph size. And they are exactly what the tracer harness checks at every step boundary to assert byte-equality between the JS walker and the reference: every running sum has a hex representation, and the tracer diff is a bitwise comparison of those hex strings under matching seed.</p>
+</section>
+
+<!-- ─────────── Stage 14 · Final ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 14 &middot; final partition</div>
+  <h2>The Leiden-Mod output, side by side with planted ground-truth.</h2>
+  <p>Leiden's modularity-optimised partition sits on the left below, planted ground-truth on the right. Per-community size, internal edges, boundary edges, and conductance follow.</p>
+  <p style="text-align:center">\(\phi(c) = \dfrac{e_{out}(c)}{2 e_{in}(c) + e_{out}(c)}\)</p>
+  <p>In words: conductance measures the fraction of a community's incident edge endpoints that point outside the community. A perfectly isolated community has \(\phi = 0\); a community whose every node sits on the boundary has \(\phi\) approaching 1. Two properties: \(\phi\) does not depend on the size of the rest of the network, only on the community's own internal versus boundary endpoint counts; and \(\phi\) is dimensionless and scale-free, so the same value carries the same meaning across different fixtures. Singletons hit a degenerate zero divided by zero; the table reports zero.</p>
+  <div class="gt-compare">
+    <div class="panel-mini">
+      <div class="cap">Leiden-Mod output &middot; \(Q = \) <span id="g-final-Q">·</span></div>
+      <div class="graph-canvas" id="g-final-leiden" style="height: 280px"></div>
+    </div>
+    <div class="panel-mini">
+      <div class="cap">planted ground-truth &middot; 4 communities + 2 outliers</div>
+      <div class="graph-canvas" id="g-final-gt" style="height: 280px"></div>
+    </div>
+  </div>
+  <table class="cluster-stats" id="g-final-stats">
+    <thead><tr><th>community</th><th>size</th><th>edges in</th><th>edges out</th><th>conductance</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <div class="callout">
+    <div class="tag">on this fixture, by region</div>
+    <p>Modularity tends to merge wherever it can without paying too much penalty. A's \(K_5\) and most of its periphery cluster together; the \(K_5\) alone contributes 10 intra-edges of pure reward, and the periphery edges are individually weaker but cumulatively positive. B's two \(K_4\)s typically merge across the bridge into one block: the merge gains one bridge edge and the size penalty for an 8-node community sits below the absorption threshold. C's two 3-cycles still end up as two separate communities for the same reason CPM keeps them apart, since there is no edge to merge across regardless of objective. D's two 2-cliques often merge with their nearest A or B periphery rather than standing on their own.</p>
+  </div>
+  <div class="callout warn">
+    <div class="tag">caveat &middot; draft port</div>
+    <p>The kernel follows libleidenalg 0.12 default flow with the modularity quality function: move plus refine plus aggregate, greedy refinement, no fixed-membership mask, no maximum-community-size constraint. The JS kernel is bit-equal to libleidenalg under matching seed at every collapse level (verified by the 3-tier stress matrix; see the technical companion linked below). The partition shown is the algorithm's actual output under seed 42 on this fixture. One operational gap from the canonical Python wrapper: its single-call entry point defaults to two outer Leiden iterations; the page kernel runs one. On a 32-node fixture this typically does not change the partition; on larger inputs the second iteration occasionally peels off extra connectivity-driven splits.</p>
+  </div>
+</section>
+
+<!-- ─────────── Stage 15 · Why refinement (vs Louvain) ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 15 &middot; Louvain failure repair</div>
+  <h2>The connectivity failure modularity cannot catch on its own.</h2>
+  <p>Modularity by itself does not check connectivity. A community can collect a set of nodes that are all individually optimal where they sit, while losing the single bridge node that held the community together. <a href="./louvain.html">Louvain</a> accepts that configuration silently because its sweep is correct on a per-node basis at every step: when the bridge moves out, the move strictly improves \(Q\); when the orphans are visited later, no individual move improves \(Q\) for them. The partition is locally optimal at the node level. It is not locally optimal at the community level, because the community itself is no longer connected.</p>
+  <p><strong>Failure step.</strong> The bridge node leaves because its own \(\Delta Q\) is positive. Louvain is not wrong locally; the move obeys the objective. The remaining nodes may still share one community id even though no path connects the pieces inside that induced subgraph. Aggregation then treats the disconnected label as one super-node, so later levels cannot see the missing internal path.</p>
+  <p><strong>Leiden's repair.</strong> Refinement regrows the label from singletons by edges only. Disconnected pieces become separate refined sub-communities before collapse, and aggregation gives each piece its own super-node while preserving the old label as the starting membership.</p>
+  <p>Leiden's refinement phase is the community-level pass Louvain lacks. Refinement re-singletons each community and grows sub-communities by adjacency only: a node can only join a sub-community if it has at least one edge into it. Sub-communities therefore remain induced connected subgraphs by construction. The collapse step at the end of refinement preserves that property by labelling each super-node with its pre-refinement community id, so a community at any level of the Leiden hierarchy is a union of connected pieces.</p>
+  <p>Two properties of the fix. It is objective-agnostic: the same refinement pass runs under modularity (this page) and under CPM (the sibling <a href="./leiden-cpm.html">Leiden-CPM page</a>) with no change to the algorithm body. And it does not address the resolution limit: a single connected community produced by refinement may still be larger than the planted structure asks for if modularity rewards the merge. Connectivity and resolution are independent concerns; Leiden fixes the first, the choice of objective decides the second.</p>
+</section>
+
+<!-- ─────────── Stage 16 · Resolution-limit aside ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 16 &middot; the resolution limit, observed</div>
+  <h2>Communities below \(\sqrt{2m}\) total degree get absorbed.</h2>
+  <p>Fortunato and Barthélemy 2007 prove that modularity has a built-in scale: communities whose total degree falls below \(\sqrt{2m}\) cannot be kept apart by a modularity-optimal partition. The proof considers two candidate communities \(C_1, C_2\) connected by a bridge edge, computes the modularity contribution of keeping them apart vs merging, and shows the merge wins whenever \(K_1 K_2 < 2m\), which on equal-sized communities reduces to \(K < \sqrt{2m}\).</p>
+  <p>In words: modularity's null model says the expected number of edges between two communities of total degree \(K_1\) and \(K_2\) is \(K_1 K_2 / (2m)\). Below the threshold this expectation is less than 1, so a single observed bridge edge is "surprising" enough to reward the merge. Above the threshold the bridge stops being surprising, and the merge stops being profitable. Two properties of the threshold: it depends only on the graph's total edge weight, not on the structure of the community itself; and it is independent of the merging order, so even if the heuristic visits the merge late in the run, the merge would still be accepted if either intermediate partition has the relevant communities below the threshold.</p>
+  <p>On this 32-node fixture with \(2m = 104\), \(\sqrt{2m} \approx 10.2\). Every planted community has total degree at or below that, so the resolution limit is in play for every merge. Whether a given Leiden-Mod run recovers the planted partition depends on the exact visit order; on seed 42 the algorithm settles on a partition that mostly keeps A together, splits B and C as expected, and treats D's 2-cliques per the same logic.</p>
+  <p>The sibling <a href="./leiden-cpm.html">Leiden-CPM page</a> escapes this trap with a different quality function that has no log-of-edges term anywhere. The slider on that page sweeps the resolution explicitly. Modularity has no such knob; the implicit γ-equivalent is fixed at 1.</p>
+</section>
+
+<!-- ─────────── Stage 17 · γ in modularity ─────────── -->
+<section class="stage">
+  <div class="stage-num">stage 17 &middot; γ in modularity vs CPM</div>
+  <h2>Modularity has an implicit resolution; CPM exposes it.</h2>
+  <p>Modularity can be written as a special case of a one-parameter family. Reichardt and Bornholdt 2006 introduce the generalised form:</p>
+  <p style="text-align:center">\(Q_\gamma = \frac{1}{2m} \sum_{i,j} \big[ A_{ij} - \gamma \cdot \frac{k_i k_j}{2m} \big] \delta(c_i, c_j)\)</p>
+  <p>In words: the same modularity formula with a multiplicative γ on the configuration-model expectation. Standard modularity is \(\gamma = 1\). Smaller γ relaxes the penalty and lets communities grow; larger γ sharpens it and keeps communities small. On this page γ is implicitly fixed at 1; the <a href="./leiden-cpm.html">Leiden-CPM page</a> uses a different objective that has its own γ knob with a different meaning (penalty per pair, not multiplier on a null).</p>
+  <p>Two properties of the γ implicit in modularity. Setting \(\gamma \to 0\) reduces \(Q\) to "number of intra-community edges divided by \(2m\)", which is maximised by putting everything in one community; setting \(\gamma \to \infty\) blows up the penalty and pushes the optimum toward singletons. Standard modularity at \(\gamma = 1\) sits at a tradeoff that, on small graphs, falls on the wrong side of the resolution-limit threshold. The Leiden-Mod kernel takes \(\gamma = 1\) by default and does not surface a slider for it; switching to the generalised form would be a one-character change in the quality function, and is what the CPM page chose to expose instead.</p>
+</section>
+
+<!-- ─────────── Comparison · Leiden-Mod vs Louvain on the fixture ─────────── -->
+<section class="stage">
+  <div class="stage-num">comparison &middot; leiden-mod vs louvain on this fixture</div>
+  <h2>Same objective, two algorithms.</h2>
+  <p>Both <a href="./louvain.html">Louvain</a> and Leiden-Mod optimise modularity. They differ in two ways: Leiden adds a refinement phase that catches disconnected communities; and Leiden uses a queue-based move phase with restabilisation, while Louvain uses a deterministic sweep that re-walks every node every pass. On this fixture the two outputs differ on B and on what happens when a community would be internally disconnected.</p>
+  <p>On B, Louvain at modularity can accept a partition where the two \(K_4\)s sit in the same community across the bridge edge; modularity's resolution limit on a 32-node graph means the merge is rewarded even though structurally the two \(K_4\)s have only a single edge between them. Leiden-Mod will sometimes reach the same partition (when the move phase accepts the merge) but will then check connectivity at refinement; the partition is technically connected through the bridge, so refinement does not split it. The two algorithms agree on this case.</p>
+  <p>On C, both algorithms accept the two disconnected 3-cycles as one community at the move phase (no edge between them to add to the intra term, and none to subtract either; the partition's contribution is determined entirely by intra-edges of each 3-cycle). Leiden's refinement phase grows sub-communities by adjacency, so the two 3-cycles end up in separate refined sub-communities and the aggregation step keeps them apart; Louvain has no equivalent pass. This is the case where Leiden's connectivity guarantee earns its keep.</p>
+  <p>The general pattern: on densely connected graphs Leiden-Mod and Louvain are nearly identical; on graphs with disconnected planted communities or thin-bridge structure, Leiden produces partitions that Louvain cannot reach. The 32-node fixture sits in the middle, with C as the visible difference.</p>
+</section>
+
+<!-- ─────────── Bibliography ─────────── -->
+<section class="stage">
+  <div class="stage-num">bibliography</div>
+  <h2>The papers behind the page.</h2>
+  <p>The main paper:</p>
+  <ul style="margin-left:1.1rem;color:var(--paper-2);font-size:.95rem;line-height:1.7">
+    <li>Traag, V. A., Waltman, L., and van Eck, N. J. <em>From Louvain to Leiden: guaranteeing well-connected communities.</em> Scientific Reports 9, 5233 (2019). <a href="https://www.nature.com/articles/s41598-019-41695-z" target="_blank" rel="noopener">DOI 10.1038/s41598-019-41695-z</a>. Establishes the refinement phase, the two-label aggregation trick, and the guarantee ladder.</li>
+  </ul>
+  <p>The quality function:</p>
+  <ul style="margin-left:1.1rem;color:var(--paper-2);font-size:.95rem;line-height:1.7">
+    <li>Newman, M. E. J. <em>Modularity and community structure in networks.</em> Proceedings of the National Academy of Sciences 103, 8577-8582 (2006). The modularity formula used on this page.</li>
+    <li>Fortunato, S. and Barthélemy, M. <em>Resolution limit in community detection.</em> Proceedings of the National Academy of Sciences 104, 36-41 (2007). The proof of the resolution limit at \(\sqrt{2m}\).</li>
+    <li>Reichardt, J. and Bornholdt, S. <em>Statistical mechanics of community detection.</em> Physical Review E 74, 016110 (2006). The generalised modularity with explicit γ; modularity recovered at \(\gamma = 1\).</li>
+    <li>Blondel, V. D., Guillaume, J.-L., Lambiotte, R., and Lefebvre, E. <em>Fast unfolding of communities in large networks.</em> Journal of Statistical Mechanics: Theory and Experiment, P10008 (2008). The Louvain algorithm and the original modularity-with-aggregation heuristic.</li>
+  </ul>
+  <p>The fast local move:</p>
+  <ul style="margin-left:1.1rem;color:var(--paper-2);font-size:.95rem;line-height:1.7">
+    <li>Ozaki, N., Tezuka, H., and Inaba, M. <em>A simple acceleration method for the Louvain algorithm.</em> International Journal of Computer and Electrical Engineering 8, 207 (2016). The queue + restabilisation scheme that Leiden's local-move phase reuses.</li>
+  </ul>
+  <p>Implementation:</p>
+  <ul style="margin-left:1.1rem;color:var(--paper-2);font-size:.95rem;line-height:1.7">
+    <li>The reference Python wrapper: <a href="https://github.com/vtraag/leidenalg" target="_blank" rel="noopener">vtraag/leidenalg</a>. The reference C++ algorithm body: <a href="https://github.com/vtraag/libleidenalg" target="_blank" rel="noopener">vtraag/libleidenalg</a>. The technical companion has the line-level pointers.</li>
+  </ul>
+</section>
+
+<div id="kin"></div>
+
+<aside class="tech-companion">
+  <a href="https://github.com/vltanh/community-detection/blob/main/docs/algorithms/leiden.md" target="_blank" rel="noopener">technical companion: docs/algorithms/leiden.md</a>
+</aside>
+<footer class="ack">
+  <p class="tools">drawn with <a href="https://d3js.org" target="_blank" rel="noopener">d3</a></p>
+  <p class="credit">typed by vltanh, doodled with Claude</p>
+</footer>
+
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script>
+window.MathJax = {
+  tex: {
+    inlineMath: [['\\(', '\\)'], ['$', '$'], ['$$', '$$']],
+    displayMath: [['\\[', '\\]']]
+  },
+  chtml: { scale: 1.0 }
+};
+</script>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script src="./shared.js"></script>
+<script src="./js/fixture.js"></script>
+<script src="./js/common/common.js"></script>
+<script src="./js/leiden/leiden.js"></script>
+<script src="./js/comdet/page_helpers.js"></script>
+<script src="./js/leiden/page_mod.js"></script>
+
+</body>
+</html>

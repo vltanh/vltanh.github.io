@@ -1,0 +1,1897 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>SBM &middot; Degree-corrected Stochastic Block Model | Synthetic Network Generators</title>
+<link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐖</text></svg>">
+<meta name="description" content="The degree-corrected stochastic block model, walked through stage by stage on a small synthetic graph. Interactive: click edges to see the edge count matrix fill in, toggle simplify on and off.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Caveat+Brush&family=Special+Elite&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./shared.css">
+<style>
+.blockmat{
+  display:grid; gap:3px;
+  grid-template-columns:repeat(5, minmax(0, 1fr));
+  max-width:320px; margin:0 auto;
+  font-family:'Special Elite','Courier New',monospace;
+  font-size:.8rem;
+}
+.blockmat .cell{
+  background:var(--ink-3);
+  border:1px solid var(--rule);
+  aspect-ratio:1;
+  display:flex; align-items:center; justify-content:center;
+  color:var(--paper-2);
+  transition:background .2s ease, border-color .2s ease;
+  font-variant-numeric:tabular-nums;
+}
+.blockmat .cell:not(.head){ cursor:pointer; }
+.blockmat .cell.head{
+  background:transparent; border:none; color:var(--paper-3);
+  font-size:.68rem; letter-spacing:.1em; text-transform:uppercase;
+  cursor:default;
+}
+.blockmat .cell.on{
+  background:var(--cobalt); color:var(--ink); border-color:var(--cobalt);
+}
+.blockmat .cell.flash{ animation:flash 0.6s ease-out; }
+/* "Graph with a side panel" card: graph canvas on the left, a related
+   chart / matrix on the right, inside a single .graph card (one border,
+   one tape). Caption is shared above both columns so the panels line up
+   vertically even when their natural heights differ. On narrow screens
+   the side panel wraps under the graph. */
+.graph.g-with-side .side-caption{
+  font-family:'Special Elite','Courier New',monospace;
+  font-size:.76rem;
+  color:var(--paper-2);
+  padding:.15rem 0 .7rem;
+  margin-bottom:.55rem;
+  border-bottom:1px dashed rgba(139,117,65,.4);
+  line-height:1.45;
+}
+.graph.g-with-side .side-caption .st{
+  color:var(--azure);
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  margin-right:.25rem;
+}
+.graph.g-with-side .side-body{
+  display:grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: .4rem;
+}
+.graph.g-with-side .side-right{
+  display:flex; flex-direction:column;
+  align-items:stretch;
+  gap:.4rem;
+}
+.graph.g-with-side .side-right > svg{ width:100%; height:auto; }
+.graph.g-with-side .side-right > .blockmat{ width:100%; max-width:none; margin:0; }
+@media (max-width: 820px){
+  .graph.g-with-side .side-body{ grid-template-columns: 1fr; align-items: start; }
+}
+.viz-node.ringed{ stroke:#c7801e; stroke-width:3.4; }
+/* .deg-bar-row hover/dim/hot styles live in shared.css. */
+.deg-bar-row{ transition: opacity .12s ease; }
+.block-ring-label{
+  font-family:'Caveat Brush', cursive;
+  font-size:20px;
+  letter-spacing:.04em;
+}
+@keyframes flash{
+  0%{background:var(--hl-yellow); color:var(--paper);}
+  100%{background:var(--cobalt); color:var(--ink);}
+}
+.disk-panel{
+  padding:1rem; background:var(--ink-2); border:1px solid var(--rule);
+  border-radius:6px; margin:1rem 0;
+}
+.disk-panel svg{ width:100%; height:auto; display:block; }
+.step-desc{
+  font-family:'Special Elite','Courier New',monospace;
+  font-size:.78rem; color:var(--paper-2); margin-top:.6rem;
+}
+.step-desc .st{ color:var(--azure); letter-spacing:.1em; text-transform:uppercase; }
+.step-desc mjx-container{ font-size:1em !important; }
+.profile-table{ width:100%; border-collapse:collapse; margin:1rem 0; background:var(--ink-2); border:1px solid var(--rule); border-radius:4px; overflow:hidden; }
+.profile-table th, .profile-table td{ padding:.55rem .85rem; border-bottom:1px solid var(--rule); vertical-align:middle; text-align:left; }
+.profile-table tr:last-child th, .profile-table tr:last-child td{ border-bottom:none; }
+.profile-table th{ font-family:'Special Elite','Courier New',monospace; font-size:.72rem; letter-spacing:.15em; color:var(--paper-3); width:10%; white-space:nowrap; }
+.profile-table.dnc-stats th{ min-width:9rem; white-space:nowrap !important; }
+.profile-table td.val{ font-family:'Special Elite','Courier New',monospace; font-size:1.05rem; color:var(--azure); font-variant-numeric:tabular-nums; width:14%; white-space:nowrap; }
+.profile-table td.desc{ color:var(--paper-2); font-size:.88rem; line-height:1.45; }
+.readout{
+  display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:.8rem;
+  font-family:'Special Elite','Courier New',monospace; font-size:.78rem;
+}
+.readout .item{ color:var(--paper-3); }
+.readout .item b{ color:var(--azure); margin-left:.3rem; }
+.readout .item.diff b{ color:var(--signal); }
+.heat-cell{ cursor:default; }
+.heat-cell:hover{ stroke:#1b2033; stroke-width:.8; }
+/* Match the .graph-canvas aspect to the VIZ viewBox (720 x 720) so there
+   is no pillar/letterbox blank space around the rendered SVG on any of
+   the four graphs on this page. */
+.graph-canvas{
+  height:auto;
+  aspect-ratio: 1 / 1;
+  max-height: 560px;
+  position:relative; /* anchor for .gx-panel overlays */
+}
+.profile-table thead th{ font-size:.62rem; }
+/* .gx-panel + .gx-panel-toggle live in shared.css. */
+/* Centered captions above each case-study heatmap. */
+.heat-cap{ text-align:center; margin-bottom:.3rem; }
+/* .profile-table thead th + .widget-row.tight live in shared.css. */
+/* Inline grid cell styles for the half-edge budget table (rendered
+   into JS innerHTML on each step). */
+#g3-budget-tbl th{ font-weight:400; padding:2px 6px; color:var(--paper-3); font-size:.7rem; }
+#g3-budget-tbl tbody th{ text-align:right; }
+#g3-budget-tbl td{ padding:2px 6px; text-align:center; font-variant-numeric:tabular-nums; min-width:2.4rem; }
+#g3-budget-tbl td.lower{ color:var(--paper-4); }
+#g3-budget-tbl td.cell{ border:1px solid rgba(139,117,65,.3); }
+#g3-budget-tbl td.cell.dim{ opacity:.35; }
+#g3-budget-tbl td.cell.cur{ background:var(--mint); color:var(--ink); }
+</style>
+</head>
+<body>
+<main class="page">
+
+<div id="links"></div>
+
+
+<header class="hdr">
+  <div class="kicker">network-generation · sbm</div>
+  <h1><em>SBM</em></h1>
+  <p class="fullname">Degree-corrected stochastic block model</p>
+  <p class="sub">Freezes the block assignment, the per-pair edge counts, and the per-node degree sequence; the rest is random.</p>
+</header>
+
+<section class="hook">
+  <p>Given a network \(G\) with a block (or "community") structure, the goal is a synthetic twin that keeps the blocks and the per-node degrees while drawing every edge fresh. The stochastic block model picks the summaries of \(G\) that matter enough to freeze and randomises the rest.</p>
+  <p>Peixoto's micro-canonical degree-corrected SBM freezes three things: (1) each node's block label, (2) the edge count between every pair of blocks \(e_{rs}\), and (3) each node's degree \(k_i\). Any graph that meets those three constraints is equally likely under the model.</p>
+  <p>The catch is simplify. The sampler emits a multigraph where the constraints hit exactly; the simplify step then drops self-loops and parallel edges so the output is a simple graph. On dense blocks that loses a visible fraction of edges, and the three frozen quantities end up as upper bounds instead of targets hit.</p>
+</section>
+
+<!-- ─────────── Profiling · the shared fixture ─────────── -->
+<section class="stage">
+  <div class="stage-num">profiling · outliers as singletons</div>
+  <h2>Shared input graph: 18 clustered + 2 singletons.</h2>
+  <p>The 20-node fixture this page builds on, drawn under the shared singleton view: C1 (8), C2 (6), C3 (4), plus outliers 19 and 20 each in their own one-node cluster. Five clusters in total. SBM's profile then folds those two singletons into a single <code>__outliers__</code> pseudo-block (next section). This view is the baseline shared across pages.</p>
+  <div class="graph" id="g-shared-input">
+    <div class="graph-chrome">
+      <span>input G &middot; combined mode &middot; 4 blocks</span>
+      <span class="right">shared fixture</span>
+    </div>
+    <div class="graph-canvas" id="g-shared-input-cy"></div>
+  </div>
+</section>
+
+<!-- ─────────── Profiling · block assignment ─────────── -->
+<section class="stage">
+  <div class="stage-num">profiling · block assignment</div>
+  <h2>Three vectors and one matrix: the input contract.</h2>
+  <p>Profiling reads the reference network and its clustering and produces three things the sampler will try to match: a block label per node, a degree per node, and an edge count per block-pair. Anything else (mean degree, triangle count, pairwise distances) is not in the contract.</p>
+  <p>Write \(b\) for the block assignment (\(b_u \in \{1, \ldots, B\}\) for node \(u\)), \(k\) for the degree sequence (\(k_u\) = degree of \(u\)), and \(e\) for the block-pair count matrix (\(e_{rs}\) defined below). The next three sections visualise \(b\), then \(k\), then \(e\).</p>
+  <p>Outliers ride on the assignment. By default, every unclustered node and every size-1 cluster is folded into a single pseudo-block labelled <code>__outliers__</code>, so the sampler never has to treat them as a special case. Outlier-outlier edges survive into the pseudo-block's diagonal.</p>
+
+  <div class="graph" id="g-assign">
+    <div class="graph-chrome">
+      <span>input G &middot; dashed rings enclose each block</span>
+      <span class="right">assignment.csv</span>
+    </div>
+    <div class="graph-canvas" id="g-assign-cy"></div>
+  </div>
+</section>
+
+<!-- ─────────── Profiling · degree sequence ─────────── -->
+<section class="stage">
+  <div class="stage-num">profiling · degree sequence</div>
+  <h2>How many edges each node has.</h2>
+  <p>The second part of the contract is the per-node degree \(k_i\). The side panel below shows the sequence, one row per node sorted by degree (descending), coloured by block. Hover a node or a bar to link them. The edge count matrix is in the next section.</p>
+  <div class="graph" id="g-deg">
+    <div class="graph-chrome">
+      <span>input G &middot; hover a node or row to link</span>
+      <span class="right">degree.csv</span>
+    </div>
+    <div class="graph-canvas" id="g-deg-cy"></div>
+  </div>
+</section>
+
+<!-- ─────────── Profiling · edge count matrix ─────────── -->
+<section class="stage">
+  <div class="stage-num">profiling · the edge count matrix</div>
+  <h2>Count edges per block-pair. The only structure the sampler sees.</h2>
+  <p>Read \(e_{rs}\) as a stub (half-edge) count: how many half-edges from block \(r\) land in block \(s\). For \(r \neq s\), that is also the number of edges between the two blocks, and the matrix is symmetric \(e_{rs} = e_{sr}\). For \(r = s\), each intra-block edge has both of its half-edges inside \(r\), so it contributes twice:</p>
+  \[
+    e_{rr} \;=\; 2 \cdot \bigl| \{\, \{u, v\} \in E \,:\, b_u = b_v = r \,\} \bigr|.
+  \]
+  <p>The matrix has one row and column per block, so on this fixture it is a compact 4x4. Each edge contributes to exactly one cell (diagonal) or to a pair of cells \((r, s), (s, r)\) (off-diagonal). Hover an edge to highlight its cell, or hover a cell to light up every edge contributing to its count. The sampler will not remember which specific edges were there, only that the cell owes that many.</p>
+  <div class="graph" id="g2">
+    <div class="graph-chrome">
+      <span>input G &middot; hover an edge or a cell</span>
+      <span class="right" id="g2-cell">cell: (none)</span>
+    </div>
+    <div class="graph-canvas" id="g2-cy"></div>
+  </div>
+  <div class="callout">
+    <div class="tag">why this is the whole contract</div>
+    <p>Any two graphs with the same \(e_{rs}\) and the same degree sequence are equally likely under the degree-corrected SBM. The model cannot tell them apart, and the sampler spreads probability across them uniformly. SBM matches \(e_{rs}\) and \(k_i\) in distribution and reshuffles which specific pairs are connected, because specific pairs are not in the contract.</p>
+  </div>
+</section>
+
+<!-- ─────────── Generation · sample multigraph ─────────── -->
+<section class="stage">
+  <div class="stage-num">generation · sample the multigraph</div>
+  <h2>Stub-matching per block-pair, micro-canonical.</h2>
+  <p>Each node \(u\) has a target degree \(k_u\). Build one urn per block: for block \(r\), drop each node \(u\) with \(b_u = r\) into the urn \(k_u\) times. The urn is just a bag of half-edges; it does not remember which target block any particular half-edge was supposed to land in. The spokes around each node show its share of the urn.</p>
+  <p>For each block-pair \((r, s)\) with \(r \le s\), walk the edge count matrix in row-major order. The pair claims \(e_{rs}\) edges: for \(r = s\), pull two half-edges out of urn \(r\) per edge; for \(r \neq s\), pull one out of urn \(r\) and one out of urn \(s\). Sampling is uniform without replacement and every draw becomes an edge (including self-loops and parallels).</p>
+  <div class="callout">
+    <div class="tag">graph-tool accepts non-equality input</div>
+    <p>The graph-tool sampler is happy with a looser input than the identity above. The consistency check is the inequality \(\sum_{u \,:\, b_u = r} k_u \ge \sum_{s} e_{rs}\) (left = stubs available in block \(r\), right = edges incident to \(r\)). When the two sides are equal, stubs distribute the natural way. When they are not, some nodes return at a degree below the requested \(k\): graph-tool prioritises hitting \(e_{rs}\) over hitting \(k_u\).</p>
+    <p>Toy example: \(b = (1, 1)\), \(k = (3, 3)\), \(e = (4)\). Two nodes both asking for degree 3, four half-edges on the diagonal. The check \(3 + 3 \ge 4\) holds, but only strictly. Two of the six stubs go unused, so achieved degrees sum to 4 instead of 6 (most often both return at degree 2, occasionally one at 1 and the other at 3, never both at 3). The identities used on this page hit equality, which is why the runs above behave cleanly.</p>
+  </div>
+  <div class="callout warn">
+    <div class="tag">caveat: counts, not distinct pairs</div>
+    <p>The constraint is on counts, not distinct pairs. When a hub's stub lands next to one of its own other stubs in the same block (\(r = s\)), the sampler emits a self-loop. When two of a hub's stubs into block \(s\) pair with two stubs of another node in the same block, the sampler emits a parallel edge. Both are legal under the micro constraint, and the graph below flags both as red-dashed.</p>
+  </div>
+  <div class="graph" id="g3">
+    <div class="graph-chrome">
+      <span>stub-matching</span>
+      <span class="right" id="g3-stats">&middot;</span>
+    </div>
+    <div class="graph-canvas" id="g3-cy"></div>
+    <div class="widget-row tight" style="padding:.9rem 0 0;border-top:1px dashed rgba(139,117,65,.45)">
+      <button class="btn" id="g3-rand-step" type="button" title="random step: redraw the pair at the current step (and re-walk forward from there)">random step</button>
+      <button class="btn" id="g3-rand-all" type="button" title="random all: redraw every pair from step 1 up to and including the current step">random all</button>
+      <span class="step-label" id="g3-step-label">step <b id="g3-cur">0</b> / <span id="g3-total">0</span></span>
+    </div>
+    <div class="widget-row tight">
+      <button class="btn" id="g3-start" type="button">to start</button>
+      <button class="btn" id="g3-prev" type="button">back</button>
+      <button class="btn primary" id="g3-next" type="button">next</button>
+      <button class="btn" id="g3-end" type="button">to end</button>
+    </div>
+  </div>
+  <div class="callout">
+    <div class="tag">why not put each outlier in its own block?</div>
+    <p>The other option is to give every outlier its own size-1 block, in which case outlier-outlier edges come back exactly. The matrix below shows \(e\) on the 20-node fixture under that view; the bottom-right 2x2 corner (highlighted) is exactly the adjacency matrix on the outlier subgraph, and the sampler reproduces it bit-for-bit.</p>
+    <div id="g3-singleton-mat" style="margin:.6rem auto .8rem;display:flex;justify-content:center"></div>
+    <p>The cost: singleton blocks may carry over community structure that the reference clustering missed among the outliers. This project benchmarks community-detection algorithms; if hidden structure exists in the outlier subgraph and the synthetic faithfully replicates it, the ground truth still labels those nodes unclustered, so any algorithm that recovers the hidden communities looks wrong.</p>
+  </div>
+</section>
+
+<!-- ─────────── Generation · simplify ─────────── -->
+<section class="stage">
+  <div class="stage-num">generation · simplify</div>
+  <h2>Collapse parallels, drop self-loops. Degree sequence stops being exact.</h2>
+  <p>Every generator in this project ships a simple graph, so the last step is to collapse each parallel edge between \((u, v)\) to one, and drop every self-loop on \(u\). Each dropped half-edge is a unit of degree the sampler can no longer account for, so the output degree sequence ends up at-or-below the target.</p>
+  <p>The widget below replays the drop. The side panel tracks target vs achieved degree per node; a row that shrinks after the drop lost a duplicate or a self-loop.</p>
+  <div class="graph" id="g4">
+    <div class="graph-chrome">
+      <span id="g4-label">before simplify</span>
+      <span class="right" id="g4-edges">edges: &middot;</span>
+    </div>
+    <div class="graph-canvas" id="g4-cy"></div>
+    <div class="widget-row">
+      <button class="btn primary" id="g4-play" type="button">simplify</button>
+      <button class="btn" id="g4-reset" type="button">reset</button>
+      <span class="step-label">red-dashed edges = simplify drops them &middot; degree bars: target vs achieved (mint = achieved, faint red = lost)</span>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────── Top-up · match-degree ─────────── -->
+<section class="stage">
+  <div class="stage-num">top-up · match-degree</div>
+  <h2>Top-up closes most of the degree deficit.</h2>
+  <p>Simplify leaves several nodes short of their target degree (red tails in the side panel above). The pipeline runs a top-up pass that adds new edges between under-degree nodes, picked in a deterministic, degree-greedy order. The default keeps the block structure honest by spending edges out of a per-block-pair budget read from the reference clustering, rather than letting stubs leak across cluster boundaries. Most of the deficit clears; a few stubs may stay unplaced when every eligible partner is already a neighbour. See the <a href="./matcher.html">degree matcher page</a> for the full menu and how each variant handles the leftovers.</p>
+  <div class="graph" id="g5">
+    <div class="graph-chrome">
+      <span id="g5-label">before top-up</span>
+      <span class="right" id="g5-edges">edges: &middot;</span>
+    </div>
+    <div class="graph-canvas" id="g5-cy"></div>
+    <div class="widget-row">
+      <button class="btn primary" id="g5-play" type="button">match degrees</button>
+      <button class="btn" id="g5-reset" type="button">reset</button>
+      <span class="step-label">teal edges = top-up adds them &middot; degree bars: target vs achieved (mint = achieved, faint red = remaining deficit)</span>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────── Case study · dnc ─────────── -->
+<section class="stage">
+  <div class="stage-num">case study · dnc</div>
+  <h2>What you get on the shipped example.</h2>
+  <p>Default run on <code>dnc</code> + <code>sbm-flat-best+cc</code> at <code>--seed 1</code> (post top-up):</p>
+  <table class="profile-table dnc-stats">
+    <thead>
+      <tr><th>stat</th><th>input</th><th>sbm output</th><th>note</th></tr>
+    </thead>
+    <tbody>
+      <tr><th># nodes</th><td class="val">906</td><td class="val">904</td><td class="desc">The block-pair-aware top-up re-attaches two of the four post-simplify isolates; the other two stay isolated because no eligible partner remains in any block-pair the input had budget for.</td></tr>
+      <tr><th># clusters</th><td class="val">87</td><td class="val">87</td><td class="desc">Passes through the input clustering, minus size-1 clusters (the input has none).</td></tr>
+      <tr><th># edges</th><td class="val">10,429</td><td class="val">10,155</td><td class="desc">Sampler emits a 10,429-edge multigraph that simplifies to 7,438; the top-up then adds 2,717 edges by spending the per-block-pair budget read from the reference \(e_{rs}\), and stops with 274 stubs gridlocked when no eligible partner remains in budget.</td></tr>
+      <tr><th>global cc</th><td class="val">0.548</td><td class="val">0.557</td><td class="desc">The top-up spends budget where the input had \(e_{rs}\) left over, so most new edges land on the dense diagonals where simplify also bit. Cc lifts from the sampler-only 0.341 to a hair above the reference.</td></tr>
+      <tr><th>char. time</th><td class="val">40.41</td><td class="val">42.26</td><td class="desc">Random-walk mixing time. Top-up edges follow the input's \(e_{rs}\) shape rather than running long cross-graph shortcuts, so mixing barely shifts from the sampler-only 33.14; see caveat 3 below.</td></tr>
+      <tr><th>pseudo-diameter</th><td class="val">8</td><td class="val">9</td><td class="desc">One hop wider than the input. Top-up edges follow the input's \(e_{rs}\) shape, so they don't shorten any cross-cluster paths and the sampler's 9 stays.</td></tr>
+    </tbody>
+  </table>
+  <p>The edge count matrix on <code>dnc</code> has 696 non-zero cells over 88 blocks. The largest one sits on the diagonal of cluster C<sub>2</sub> (50 nodes, 2,450 half-edges, 1,225 intra-edges). Simplify lands hardest there: 894 half-edges collide, so 447 of those 1,225 intra-edges vanish. The outlier pseudo-block (355 nodes, 278 intra-edges before simplify) is next, losing 108.</p>
+  <p>Left: \(e_{rs}\) from the profile. Right: the same matrix recomputed on the output. Bottom: per-cell loss (input minus output), log-scaled so small cells still register. Blocks are sorted by size; the outlier pseudo-block (355 nodes) sits top-left. Hover any cell for its values.</p>
+  <div class="disk-panel" style="padding:1.1rem 1rem">
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem 1.1rem; align-items:end">
+      <div>
+        <div class="step-desc heat-cap"><span class="st">input</span> &middot; \(e_{rs}\) from <code>edge_counts.csv</code></div>
+        <svg id="heat-in" viewBox="0 0 320 320" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+      <div>
+        <div class="step-desc heat-cap"><span class="st">output</span> &middot; \(e_{rs}\) recomputed on <code>edge.csv</code></div>
+        <svg id="heat-out" viewBox="0 0 320 320" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+    </div>
+    <div style="margin-top:1rem">
+      <div class="step-desc heat-cap"><span class="st">per-cell simplify loss</span> &middot; input minus output, log-scaled. Darker red = more edges lost in that cell.</div>
+      <svg id="heat-loss" viewBox="0 0 320 320" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;margin:0 auto"></svg>
+      <div class="step-desc heat-cap" id="heat-loss-legend" style="margin-top:.3rem;margin-bottom:0"></div>
+    </div>
+    <div class="readout" style="justify-content:center">
+      <span class="item">edges in <b id="dnc-ein">&middot;</b></span>
+      <span class="item">edges out <b id="dnc-eout">&middot;</b></span>
+      <span class="item diff">lost <b id="dnc-loss">&middot;</b></span>
+    </div>
+  </div>
+  <div class="callout warn">
+    <div class="tag">caveat 1: simplify loss clusters on dense blocks</div>
+    <p>The red heatmap above is the sampler story. Parallels collide where stubs concentrate, so loss clusters on the diagonal of dense blocks and on the outlier pseudo-block; most off-diagonal cells keep their edges. On <code>dnc</code>, the worst-hit cell alone loses 894 half-edges out of 2,450, and the outlier block loses 108 of its 278 intra-edges. The top-up reads the input's \(e_{rs}\) and spends edges only where a block-pair still has unfilled budget, so it primarily refills diagonal cells where loss concentrated; off-diagonal cells get partial patching where their reference \(e_{rs}\) left room.</p>
+  </div>
+  <div class="callout warn">
+    <div class="tag">caveat 2: global cc is not a target</div>
+    <p>The micro constraint pins \(e_{rs}\) and \(k_i\) but says nothing about triangles. The sampler alone delivers cc 0.341, well below input 0.548. The block-pair-aware top-up lifts cc to 0.557 because the input's \(e_{rs}\) concentrates on dense diagonals, so most new edges land where triangle probability is already high; this is a side effect, not a target, and on inputs whose simplify deficit sits off-diagonal or whose \(e_{rs}\) is flatter, cc can still miss by a wide margin. If triangles need a real handle, ec-sbm-v1 and ec-sbm-v2 add that structure on top.</p>
+  </div>
+  <div class="callout warn">
+    <div class="tag">caveat 3: top-up follows \(e_{rs}\), not random walks</div>
+    <p>Two SBM runs side by side, same seed, same input:</p>
+    <table class="profile-table dnc-stats">
+      <thead>
+        <tr><th>stat</th><th>input</th><th>without top-up</th><th>with top-up</th></tr>
+      </thead>
+      <tbody>
+        <tr><th># edges</th><td class="val">10,429</td><td class="val">7,438</td><td class="val">10,155</td></tr>
+        <tr><th>char. time</th><td class="val">40.41</td><td class="val">33.14</td><td class="val">42.26</td></tr>
+        <tr><th>pseudo-diameter</th><td class="val">8</td><td class="val">9</td><td class="val">9</td></tr>
+      </tbody>
+    </table>
+    <p>The sampler-only graph mixes near the input rate (33 vs 40) and is one hop wider because it is sparser. The top-up adds 2,717 edges to whichever block-pairs the reference \(e_{rs}\) still has budget for; that follows the input's block shape rather than picking long cross-graph shortcuts, so mixing time stays near the sampler-only rate (42 vs 33) and the diameter holds at 9. The trade is \(e_{rs}\)-faithful densification (cc lifts) for no cross-cluster shape change.</p>
+  </div>
+</section>
+
+<div id="kin"></div>
+
+<footer class="ack">
+  <p class="tools">drawn with <a href="https://d3js.org" target="_blank" rel="noopener">d3</a></p>
+  <p class="credit">typed by vltanh, doodled with Claude</p>
+</footer>
+
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script>
+window.MathJax = {
+  tex: {
+    inlineMath: [['\\(', '\\)']],
+    displayMath: [['\\[', '\\]']]
+  },
+  chtml: { scale: 1.0 }
+};
+</script>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script src="./shared.js"></script>
+<script src="./js/spoke_layer.js"></script>
+<script src="./js/profile_kernel.js"></script>
+<script src="./js/sbm_kernel.js"></script>
+<script src="./js/match_degree_kernel.js"></script>
+<script id="sbm-dnc-data" type="application/json">
+{"B":88,"labels":["__outliers__","27","13","22","15","19","2","25","10","11","6","3","12","30","20","9","0","7","49","17","4","8","16","21","1","14","18","24","26","5","72","28","32","33","38","39","42","43","44","47","55","62","73","78","23","29","31","34","35","36","37","40","41","45","46","48","50","51","52","53","54","56","57","58","59","60","61","63","64","65","66","67","68","69","70","71","74","75","76","77","79","80","81","82","83","84","85","86"],"sizes":[355,52,50,36,33,33,29,19,15,14,14,12,10,10,9,9,8,8,7,6,6,6,5,5,4,4,4,4,4,4,4,3,3,3,3,3,3,3,3,3,3,3,3,3,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2],"cells":[[0,0,556,340],[0,1,21,20],[0,2,59,53],[0,3,35,33],[0,4,30,28],[0,5,35,32],[0,6,83,71],[0,8,50,45],[0,9,58,48],[0,10,33,29],[0,11,52,40],[0,12,42,33],[0,13,29,21],[0,14,2,2],[0,15,27,21],[0,16,3,3],[0,17,44,32],[0,19,25,16],[0,20,79,44],[0,21,28,23],[0,22,17,12],[0,24,38,24],[0,25,4,4],[0,26,18,16],[0,29,21,17],[0,31,3,3],[0,34,2,2],[0,35,3,3],[0,36,2,2],[0,37,1,1],[0,38,2,2],[0,39,1,1],[0,40,1,1],[0,42,2,2],[0,44,3,3],[0,45,3,3],[0,46,2,2],[0,49,2,2],[0,52,2,2],[0,53,2,2],[0,56,2,2],[0,59,2,2],[0,60,2,2],[0,61,2,2],[0,62,1,1],[0,63,1,1],[0,65,2,2],[0,80,2,2],[1,0,21,20],[1,1,270,240],[1,4,1,1],[1,5,8,8],[1,9,7,7],[1,11,23,21],[1,12,8,8],[1,17,1,1],[1,22,81,65],[1,24,1,1],[2,0,59,53],[2,2,2450,1556],[2,4,3,3],[2,9,700,442],[2,12,7,7],[2,14,2,2],[2,17,2,2],[2,19,2,2],[2,20,300,189],[2,21,2,2],[2,24,1,1],[2,25,4,4],[2,26,38,34],[2,29,200,135],[2,38,4,4],[3,0,35,33],[3,3,972,664],[4,0,30,28],[4,1,1,1],[4,2,3,3],[4,4,94,82],[4,6,4,4],[4,8,3,3],[4,9,14,14],[4,10,2,2],[4,11,1,1],[4,12,4,4],[4,13,1,1],[4,15,4,4],[4,17,22,22],[4,18,1,1],[4,19,35,31],[4,20,35,33],[4,21,28,27],[4,22,1,1],[4,24,25,25],[4,26,1,1],[4,29,1,1],[4,38,1,1],[5,0,35,32],[5,1,8,8],[5,5,132,114],[5,6,8,8],[5,8,3,3],[5,11,98,84],[5,12,6,6],[5,13,2,2],[5,14,2,2],[5,15,6,6],[5,17,5,5],[5,22,23,21],[5,24,7,7],[5,39,1,1],[5,41,3,3],[5,43,2,2],[5,47,1,1],[5,48,2,2],[5,63,1,1],[6,0,83,71],[6,4,4,4],[6,5,8,8],[6,6,314,250],[6,8,193,143],[6,9,23,23],[6,10,15,15],[6,11,117,97],[6,12,5,5],[6,13,37,33],[6,14,2,2],[6,15,167,117],[6,17,179,117],[6,19,3,3],[6,20,115,85],[6,21,43,38],[6,22,1,1],[6,24,45,39],[6,26,2,2],[6,29,72,48],[6,44,1,1],[6,61,1,1],[7,7,342,224],[7,22,19,18],[8,0,50,45],[8,4,3,3],[8,5,3,3],[8,6,193,143],[8,8,210,128],[8,9,167,112],[8,10,121,90],[8,11,109,82],[8,12,137,82],[8,13,4,4],[8,15,114,71],[8,17,120,78],[8,19,1,1],[8,20,90,60],[8,21,59,39],[8,22,1,1],[8,24,46,31],[8,26,2,2],[8,29,55,36],[8,38,1,1],[8,44,1,1],[9,0,58,48],[9,1,7,7],[9,2,700,442],[9,4,14,14],[9,6,23,23],[9,8,167,112],[9,9,182,118],[9,10,7,7],[9,11,5,5],[9,12,97,71],[9,13,3,3],[9,14,6,6],[9,15,18,17],[9,17,94,60],[9,18,1,1],[9,19,6,6],[9,20,84,50],[9,21,24,22],[9,22,2,2],[9,24,36,25],[9,25,14,12],[9,26,30,19],[9,29,56,37],[9,38,13,12],[9,44,2,2],[9,46,5,5],[9,59,2,2],[10,0,33,29],[10,4,2,2],[10,6,15,15],[10,8,121,90],[10,9,7,7],[10,10,100,72],[10,11,61,50],[10,12,3,3],[10,15,100,66],[10,17,107,64],[10,19,2,2],[10,20,62,47],[10,21,41,33],[10,24,4,4],[10,26,1,1],[10,29,45,33],[10,46,1,1],[11,0,52,40],[11,1,23,21],[11,4,1,1],[11,5,98,84],[11,6,117,97],[11,8,109,82],[11,9,5,5],[11,10,61,50],[11,11,110,70],[11,12,3,3],[11,13,3,3],[11,14,2,2],[11,15,87,60],[11,17,92,59],[11,20,52,41],[11,21,32,22],[11,22,15,14],[11,24,13,13],[11,29,39,26],[11,39,2,2],[11,55,2,2],[11,61,2,2],[11,75,1,1],[11,76,1,1],[12,0,42,33],[12,1,8,8],[12,2,7,7],[12,4,4,4],[12,5,6,6],[12,6,5,5],[12,8,137,82],[12,9,97,71],[12,10,3,3],[12,11,3,3],[12,12,84,52],[12,13,2,2],[12,15,2,2],[12,17,77,51],[12,19,6,6],[12,20,59,34],[12,21,3,3],[12,22,3,3],[12,24,36,24],[12,26,3,2],[12,29,11,10],[12,31,1,1],[12,38,1,1],[12,40,2,2],[12,44,1,1],[12,46,3,3],[12,59,1,1],[13,0,29,21],[13,4,1,1],[13,5,2,2],[13,6,37,33],[13,8,4,4],[13,9,3,3],[13,11,3,3],[13,12,2,2],[13,13,56,36],[13,15,33,29],[13,17,73,45],[13,19,5,5],[13,20,42,29],[13,21,16,14],[13,22,1,1],[13,24,27,20],[13,29,4,4],[13,35,3,3],[13,39,1,1],[13,61,1,1],[13,63,1,1],[14,0,2,2],[14,2,2,2],[14,5,2,2],[14,6,2,2],[14,9,6,6],[14,11,2,2],[14,14,58,36],[14,20,5,5],[14,21,5,4],[14,26,11,9],[14,29,1,1],[15,0,27,21],[15,4,4,4],[15,5,6,6],[15,6,167,117],[15,8,114,71],[15,9,18,17],[15,10,100,66],[15,11,87,60],[15,12,2,2],[15,13,33,29],[15,15,68,40],[15,17,71,49],[15,19,1,1],[15,20,52,38],[15,21,50,33],[15,24,27,17],[15,29,36,21],[16,0,3,3],[16,16,28,22],[17,0,44,32],[17,1,1,1],[17,2,2,2],[17,4,22,22],[17,5,5,5],[17,6,179,117],[17,8,120,78],[17,9,94,60],[17,10,107,64],[17,11,92,59],[17,12,77,51],[17,13,73,45],[17,15,71,49],[17,17,56,28],[17,19,14,12],[17,20,48,30],[17,21,48,32],[17,22,3,3],[17,24,32,20],[17,26,4,4],[17,29,32,20],[17,31,4,4],[17,45,5,5],[17,46,3,3],[17,53,2,2],[17,59,1,1],[17,60,4,4],[17,72,3,3],[17,80,2,1],[18,4,1,1],[18,9,1,1],[18,18,18,12],[19,0,25,16],[19,2,2,2],[19,4,35,31],[19,6,3,3],[19,8,1,1],[19,9,6,6],[19,10,2,2],[19,12,6,6],[19,13,5,5],[19,15,1,1],[19,17,14,12],[19,19,22,16],[19,20,19,15],[19,21,10,10],[19,24,20,14],[19,29,1,1],[19,31,11,8],[19,35,9,6],[19,37,2,2],[19,40,2,2],[19,44,1,1],[19,46,1,1],[19,59,2,1],[19,60,2,2],[19,69,1,1],[19,80,1,1],[20,0,79,44],[20,2,300,189],[20,4,35,33],[20,6,115,85],[20,8,90,60],[20,9,84,50],[20,10,62,47],[20,11,52,41],[20,12,59,34],[20,13,42,29],[20,14,5,5],[20,15,52,38],[20,17,48,30],[20,19,19,15],[20,20,30,14],[20,21,35,23],[20,22,1,1],[20,24,24,14],[20,25,4,3],[20,26,15,11],[20,29,24,17],[20,31,6,5],[20,34,1,1],[20,35,1,1],[20,37,2,2],[20,38,7,7],[20,44,4,3],[20,45,8,5],[20,46,2,2],[20,49,5,4],[20,51,1,1],[20,59,2,2],[20,66,2,2],[20,69,1,1],[20,73,1,1],[20,80,2,2],[21,0,28,23],[21,2,2,2],[21,4,28,27],[21,6,43,38],[21,8,59,39],[21,9,24,22],[21,10,41,33],[21,11,32,22],[21,12,3,3],[21,13,16,14],[21,14,5,4],[21,15,50,33],[21,17,48,32],[21,19,10,10],[21,20,35,23],[21,21,24,18],[21,24,18,14],[21,26,9,8],[21,29,21,16],[21,31,5,4],[21,36,3,2],[21,37,1,1],[21,38,1,1],[21,42,1,1],[21,44,2,2],[21,45,5,3],[21,59,1,1],[22,0,17,12],[22,1,81,65],[22,4,1,1],[22,5,23,21],[22,6,1,1],[22,7,19,18],[22,8,1,1],[22,9,2,2],[22,11,15,14],[22,12,3,3],[22,13,1,1],[22,17,3,3],[22,20,1,1],[22,22,14,10],[22,24,4,3],[22,28,4,4],[22,39,1,1],[22,76,2,2],[22,81,1,1],[23,23,20,14],[24,0,38,24],[24,1,1,1],[24,2,1,1],[24,4,25,25],[24,5,7,7],[24,6,45,39],[24,8,46,31],[24,9,36,25],[24,10,4,4],[24,11,13,13],[24,12,36,24],[24,13,27,20],[24,15,27,17],[24,17,32,20],[24,19,20,14],[24,20,24,14],[24,21,18,14],[24,22,4,3],[24,24,12,4],[24,26,1,1],[24,29,12,8],[24,31,7,5],[24,35,2,2],[24,36,3,3],[24,45,1,1],[24,46,1,1],[24,53,2,2],[24,59,2,2],[24,60,2,2],[25,0,4,4],[25,2,4,4],[25,9,14,12],[25,20,4,3],[25,25,6,2],[25,26,3,3],[25,29,2,2],[26,0,18,16],[26,2,38,34],[26,4,1,1],[26,6,2,2],[26,8,2,2],[26,9,30,19],[26,10,1,1],[26,12,3,2],[26,14,11,9],[26,17,4,4],[26,20,15,11],[26,21,9,8],[26,24,1,1],[26,25,3,3],[26,26,12,6],[26,29,4,4],[26,38,1,1],[27,27,12,8],[28,22,4,4],[28,28,12,8],[29,0,21,17],[29,2,200,135],[29,4,1,1],[29,6,72,48],[29,8,55,36],[29,9,56,37],[29,10,45,33],[29,11,39,26],[29,12,11,10],[29,13,4,4],[29,14,1,1],[29,15,36,21],[29,17,32,20],[29,19,1,1],[29,20,24,17],[29,21,21,16],[29,24,12,8],[29,25,2,2],[29,26,4,4],[29,29,12,12],[29,38,1,1],[29,45,3,3],[29,46,2,2],[30,30,8,8],[31,0,3,3],[31,12,1,1],[31,17,4,4],[31,19,11,8],[31,20,6,5],[31,21,5,4],[31,24,7,5],[31,31,4,4],[32,32,6,6],[33,33,6,2],[34,0,2,2],[34,20,1,1],[34,34,4,2],[35,0,3,3],[35,13,3,3],[35,19,9,6],[35,20,1,1],[35,24,2,2],[35,35,6,4],[36,0,2,2],[36,21,3,2],[36,24,3,3],[36,36,4,4],[37,0,1,1],[37,19,2,2],[37,20,2,2],[37,21,1,1],[37,37,4,2],[38,0,2,2],[38,2,4,4],[38,4,1,1],[38,8,1,1],[38,9,13,12],[38,12,1,1],[38,20,7,7],[38,21,1,1],[38,26,1,1],[38,29,1,1],[38,38,4,2],[39,0,1,1],[39,5,1,1],[39,11,2,2],[39,13,1,1],[39,22,1,1],[39,39,4,2],[40,0,1,1],[40,12,2,2],[40,19,2,2],[40,40,6,6],[41,5,3,3],[41,41,6,4],[42,0,2,2],[42,21,1,1],[42,42,4,4],[43,5,2,2],[43,43,4,2],[44,0,3,3],[44,6,1,1],[44,8,1,1],[44,9,2,2],[44,12,1,1],[44,19,1,1],[44,20,4,3],[44,21,2,2],[44,44,2,0],[45,0,3,3],[45,17,5,5],[45,20,8,5],[45,21,5,3],[45,24,1,1],[45,29,3,3],[45,45,2,2],[46,0,2,2],[46,9,5,5],[46,10,1,1],[46,12,3,3],[46,17,3,3],[46,19,1,1],[46,20,2,2],[46,24,1,1],[46,29,2,2],[46,46,2,0],[47,5,1,1],[47,47,2,0],[48,5,2,2],[48,48,2,2],[49,0,2,2],[49,20,5,4],[49,49,2,2],[50,50,2,2],[51,20,1,1],[51,51,2,2],[52,0,2,2],[52,52,2,2],[53,0,2,2],[53,17,2,2],[53,24,2,2],[53,53,2,0],[54,54,2,2],[55,11,2,2],[55,55,2,2],[56,0,2,2],[56,56,2,2],[57,57,2,2],[58,58,2,2],[59,0,2,2],[59,9,2,2],[59,12,1,1],[59,17,1,1],[59,19,2,1],[59,20,2,2],[59,21,1,1],[59,24,2,2],[59,59,2,0],[60,0,2,2],[60,17,4,4],[60,19,2,2],[60,24,2,2],[60,60,2,0],[61,0,2,2],[61,6,1,1],[61,11,2,2],[61,13,1,1],[61,61,2,0],[62,0,1,1],[62,62,2,2],[63,0,1,1],[63,5,1,1],[63,13,1,1],[63,63,2,0],[64,64,2,2],[65,0,2,2],[65,65,2,2],[66,20,2,2],[66,66,2,2],[67,67,2,2],[68,68,2,2],[69,19,1,1],[69,20,1,1],[69,69,2,0],[70,70,2,2],[71,71,2,2],[72,17,3,3],[72,72,2,0],[73,20,1,1],[73,73,2,2],[74,74,2,2],[75,11,1,1],[75,75,2,2],[76,11,1,1],[76,22,2,2],[76,76,2,2],[77,77,2,2],[78,78,2,2],[79,79,2,2],[80,0,2,2],[80,17,2,1],[80,19,1,1],[80,20,2,2],[80,80,2,2],[81,22,1,1],[81,81,2,2],[82,82,2,2],[83,83,2,2],[84,84,2,2],[85,85,2,2],[86,86,2,2],[87,87,2,2]]}
+</script>
+<script>
+(function () {
+  try {
+    const raw = document.getElementById("sbm-dnc-data").textContent;
+    window.NETGEN_SBM_DNC = JSON.parse(raw);
+    if (window.NETGEN_SBM_DNC.__placeholder__) window.NETGEN_SBM_DNC = null;
+  } catch (e) { window.NETGEN_SBM_DNC = null; }
+})();
+</script>
+<script>
+(function () {
+  document.getElementById("links").innerHTML = NETGEN.linksRow({gen: "sbm"});
+  // Extra links specific to SBM: the upstream paper + graph-tool code.
+  (function () {
+    const icons = document.querySelector("#links .top-icons");
+    if (!icons) return;
+    const extras = [
+      {
+        href: "https://doi.org/10.1103/PhysRevE.95.012317",
+        label: "paper",
+        svg: '<path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/>',
+      },
+    ];
+    // Repoint the default "source" link at src/sbm within this repo.
+    const sourceLink = icons.querySelector('a[aria-label="github repository"]');
+    if (sourceLink) {
+      sourceLink.setAttribute("href",
+        "https://github.com/vltanh/network-generation/tree/main/src/sbm");
+      const span = sourceLink.querySelector("span");
+      if (span) span.textContent = "code";
+    }
+    extras.forEach(x => {
+      const a = document.createElement("a");
+      a.href = x.href;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.setAttribute("aria-label", x.label);
+      a.innerHTML =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+        + 'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" '
+        + 'aria-hidden="true">' + x.svg + '</svg>'
+        + '<span>' + x.label + '</span>';
+      icons.appendChild(a);
+    });
+  })();
+  document.getElementById("kin").innerHTML = NETGEN.kinSection({
+    title: "similarity",
+    siblings: [
+      { gen: "ec-sbm-v1", label: "EC-SBM v1",
+        diff: "Micro-SBM sampling after a hand-built \\(K_{k+1}\\) core per cluster forces per-cluster edge connectivity \\(\\ge k\\). Outliers are singleton blocks; a greedy matcher tops up any residual degree." },
+      { gen: "ec-sbm-v2", label: "EC-SBM v2",
+        diff: "Same \\(K_{k+1}\\) core idea, but residual edges pass through a single SBM call over all blocks (including outliers) and a block-preserving 2-opt rewire replaces the brute simplify." },
+    ],
+  });
+
+  const COL = NETGEN.COLORS;
+  const EDGES = NETGEN.EDGES;
+  const CLUSTER_OF = NETGEN.CLUSTER_OF;
+  const NODES = NETGEN.NODES;
+  const C1 = NETGEN.C1, C2 = NETGEN.C2, C3 = NETGEN.C3, OUT_N = NETGEN.OUT;
+
+  function pickInputColor(e) {
+    if (e.kind === "outlier" || e.kind === "inter") return COL.edge_inter;
+    const c = CLUSTER_OF[e.u] || CLUSTER_OF[e.v];
+    return COL.edge_intra[c] || COL.edge_inter;
+  }
+
+  // ── Block indexing via ProfileKernel (combined outlier pseudo-block). ──
+  // sbm defaults (src/sbm/profile.py): outlier_mode=combined, drop_oo=false.
+  // Kernel emits node_id.csv, cluster_id.csv (size desc, id asc), assignment.csv,
+  // degree.csv, and edge_counts.csv. Inline UI labels keep the historical short
+  // form (OUT in place of the canonical __outliers__ id).
+  const PROF_KERNEL_OUT = ProfileKernel.runProfile({
+    gen: "sbm",
+    edgelist: EDGES.map(e => [String(e.u), String(e.v)]),
+    clustering: NODES.filter(n => CLUSTER_OF[n] !== "OUT")
+                     .map(n => [String(n), CLUSTER_OF[n]]),
+    outlier_mode: "combined",
+    drop_oo: false,
+  });
+  const BLOCK_LABELS = PROF_KERNEL_OUT.files["cluster_id.csv"].trim().split("\n");
+  const BLOCK_NAMES  = BLOCK_LABELS.map(c => c === ProfileKernel.COMBINED_OUTLIER_CLUSTER_ID ? "OUT" : c);
+  const BLOCK_NODES  = { "C1": C1, "C2": C2, "C3": C3, "OUT": OUT_N };
+  const BLOCK_COLOR  = { "C1": COL.C1, "C2": COL.C2, "C3": COL.C3, "OUT": COL.OUT };
+  const NUM_BLOCKS   = BLOCK_NAMES.length;
+  const blockOf = (n) => CLUSTER_OF[n];
+  const blockIdx = (n) => BLOCK_NAMES.indexOf(blockOf(n));
+
+  // bindPanelToggle hoisted to NETGEN.bindPanelToggle (shared.js).
+  const bindPanelToggle = NETGEN.bindPanelToggle;
+
+  // Mount a force-graph card with dashed block enclosures + tick-bound
+  // rect sync + per-block tooltip. Used by g-shared-input + g-assign,
+  // which share everything but their edge set + nodeColor option.
+  function mountBlockGraph(hostId, edges, opts) {
+    opts = opts || {};
+    const host = document.getElementById(hostId);
+    if (!host) return null;
+    host.innerHTML = "";
+    const svg = d3.select(host).append("svg")
+      .attr("class", "viz-svg")
+      .attr("viewBox", NETGEN.fitViewBoxAttr({ pad: 40 }))
+      .attr("preserveAspectRatio", "xMidYMid meet");
+    const syncBlockRects = makeBlockRects(svg);
+    const initOpts = { svg, showLabels: true, edges };
+    if (opts.nodeColor) initOpts.nodeColor = opts.nodeColor;
+    const viz = NETGEN.VIZ.init(hostId, initOpts);
+    const parentId = hostId.replace(/-cy$/, "");
+    NETGEN.makeTooltip(viz, document.getElementById(parentId));
+    syncBlockRects(viz);
+    viz.sim.on("tick.blockRects", () => syncBlockRects(viz));
+    return viz;
+  }
+
+  // bindFocusLink is the shared NETGEN.bindRowNodeHover helper, kept as
+  // a thin alias because g-deg + g4 call it positionally (viz, gBars).
+  const bindFocusLink = (viz, gBars) => NETGEN.bindRowNodeHover(gBars, viz);
+
+  // e_{rs}: kernel emits sparse triples; inflate into a dense NUM_BLOCKS x NUM_BLOCKS
+  // matrix. Diagonal is doubled and off-diagonal counted once per direction by the
+  // kernel's computeEdgeCount, so the matrix is symmetric and has graph-tool's
+  // half-edge convention baked in.
+  const EDGE_COUNTS = Array.from({length: NUM_BLOCKS}, () => new Array(NUM_BLOCKS).fill(0));
+  PROF_KERNEL_OUT.files["edge_counts.csv"].trim().split("\n").forEach(row => {
+    const [r, c, w] = row.split(",").map(Number);
+    EDGE_COUNTS[r][c] = w;
+  });
+
+  // Per-node target degree k_u, the second vector in the input contract
+  // (degree.csv). Block-pooled urn semantics; no per-target-block split.
+  const TARGET_DEG = {};
+  NODES.forEach(n => { TARGET_DEG[n] = 0; });
+  EDGES.forEach(e => { TARGET_DEG[e.u]++; TARGET_DEG[e.v]++; });
+
+  // Shared input opener · combined mode (sbm's profile default).
+  // Outliers fold into one __outliers__ pseudo-block, so the partition
+  // shows 3 real clusters + 1 combined block = 4 blocks total.
+  NETGEN.singletonOpener({
+    hostId: "g-shared-input-cy",
+    clusters: [
+      { id: "C1", nodes: C1, color: COL.C1, isOutlier: false },
+      { id: "C2", nodes: C2, color: COL.C2, isOutlier: false },
+      { id: "C3", nodes: C3, color: COL.C3, isOutlier: false },
+      { id: "__outliers__", nodes: OUT_N, color: COL.OUT, label: "__outliers__", isOutlier: true },
+    ],
+  });
+
+  // Helper: create one dashed rounded rectangle + handwritten label per
+  // block. Returns a callback that, given the force-sim `viz` handle,
+  // recomputes each rect's bounding box from the current node positions.
+  // Call it on every tick so the enclosure follows drags and relaxation.
+  function makeBlockRects(svg) {
+    const layer = svg.append("g").attr("class", "block-rects");
+    const shapes = BLOCK_NAMES.map((name, idx) => {
+      const ids = BLOCK_NODES[name];
+      if (!ids || ids.length === 0) return null;
+      const color = BLOCK_COLOR[name];
+      const rect = layer.append("rect")
+        .attr("rx", 10).attr("ry", 10)
+        .attr("fill", color).attr("fill-opacity", 0.07)
+        .attr("stroke", color).attr("stroke-width", 1.5)
+        .attr("stroke-dasharray", "7 5")
+        .attr("opacity", 0.92);
+      const label = layer.append("text")
+        .attr("class", "block-ring-label")
+        .attr("text-anchor", "start")
+        .attr("fill", color)
+        .attr("opacity", 0.95)
+        .text(BLOCK_LABELS[idx]);
+      return { ids, rect, label };
+    }).filter(Boolean);
+
+    return function syncBlockRects(viz) {
+      const padX = 34, padY = 38;
+      shapes.forEach(s => {
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        s.ids.forEach(id => {
+          const n = viz.nodeById[String(id)];
+          if (!n) return;
+          if (n.x < minX) minX = n.x;
+          if (n.x > maxX) maxX = n.x;
+          if (n.y < minY) minY = n.y;
+          if (n.y > maxY) maxY = n.y;
+        });
+        if (!isFinite(minX)) return;
+        let x = minX - padX, y = minY - padY;
+        let w = (maxX - minX) + 2 * padX;
+        let h = (maxY - minY) + 2 * padY;
+        // Grow width so the label fits inside (e.g. "__outliers__"
+        // overflows the tight 2-node bounding rect otherwise).
+        const labelW = s.label.node().getComputedTextLength
+          ? s.label.node().getComputedTextLength() : 0;
+        const wanted = labelW + 24;
+        if (w < wanted) {
+          // Expand symmetrically around the cluster's x-centre so the
+          // rect does not drift off to one side.
+          const cx = (minX + maxX) / 2;
+          w = wanted;
+          x = cx - w / 2;
+        }
+        s.rect.attr("x", x).attr("y", y).attr("width", w).attr("height", h);
+        s.label.attr("x", x + 6).attr("y", y - 6);
+      });
+    };
+  }
+
+  // ── Profiling · block assignment (graph with dashed block rings) ──
+  // Edges already showed up in the singleton-mode opener; the block-
+  // assignment stage is about the partition, not the edges, so the
+  // colours + enclosure rings carry the story alone.
+  mountBlockGraph("g-assign-cy", []);
+
+  // ── Profiling · degree sequence (horizontal bars + hover link) ──
+  (function () {
+    const edges = EDGES.map(e => ({
+      u: e.u, v: e.v, color: pickInputColor(e), w: 1.2,
+    }));
+    const viz = NETGEN.VIZ.init("g-deg-cy", {
+      showLabels: true, edges, pad: 40, padRight: 340,
+      nodeColor: (id) => BLOCK_COLOR[blockOf(parseInt(id, 10))] || COL.OUT,
+    });
+    NETGEN.makeTooltip(viz, document.getElementById("g-deg"));
+
+    NETGEN.mountGxPanel({
+      viz, hostId: "g-deg-cy", prefix: "g-deg",
+      title: "degrees", maxWidth: "26rem",
+      bodyHTML: '<svg id="deg-seq" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet" style="display:block;width:18rem;height:auto"></svg>',
+    });
+
+    const svg = d3.select("#deg-seq");
+    svg.selectAll("*").remove();
+    const W = 340, H = 420;
+    const PAD = { top: 12, right: 42, bottom: 28, left: 38 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+
+    const ordered = NODES.slice().sort((a, b) => TARGET_DEG[b] - TARGET_DEG[a] || a - b);
+    const maxDeg  = d3.max(NODES, n => TARGET_DEG[n]) || 1;
+    const y = d3.scaleBand().domain(ordered.map(String)).range([0, ih]).padding(0.22);
+    const x = d3.scaleLinear().domain([0, maxDeg + 1]).range([0, iw]);
+
+    g.append("g").call(d3.axisLeft(y).tickSize(0).tickPadding(6))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace")
+        .style("font-size", "10px");
+    g.append("g").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).ticks(4))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace")
+        .style("font-size", "10px");
+    g.selectAll(".domain").style("stroke", "#b9a263");
+    g.selectAll(".tick line").style("stroke", "#cdbf8d");
+    svg.append("text").attr("x", W / 2).attr("y", H - 4)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px")
+      .text("degree k_i");
+
+    const gBars = g.append("g").attr("class", "deg-seq-bars");
+    ordered.forEach(n => {
+      const row = gBars.append("g")
+        .attr("class", "deg-bar-row")
+        .attr("data-id", String(n))
+        .attr("transform", `translate(0,${y(String(n))})`);
+      row.append("rect").attr("class", "hitbox")
+        .attr("x", -PAD.left + 4).attr("y", 0)
+        .attr("width", iw + PAD.left + PAD.right - 8)
+        .attr("height", y.bandwidth())
+        .attr("fill", "transparent");
+      row.append("rect").attr("class", "bar")
+        .attr("x", 0).attr("y", 0)
+        .attr("width", x(TARGET_DEG[n]))
+        .attr("height", y.bandwidth())
+        .attr("fill", BLOCK_COLOR[blockOf(n)])
+        .attr("stroke", "transparent")
+        .attr("opacity", 0.92);
+      row.append("text").attr("class", "dlbl")
+        .attr("x", x(TARGET_DEG[n]) + 5)
+        .attr("y", y.bandwidth() / 2)
+        .attr("dominant-baseline", "central")
+        .attr("font-family", "Special Elite, Courier New, monospace")
+        .attr("font-size", "10px")
+        .attr("fill", "#2f3a54")
+        .text(TARGET_DEG[n]);
+    });
+
+    bindFocusLink(viz, gBars);
+  })();
+
+  // ── Profiling · edge count matrix + two-way edge↔cell interaction ──
+  (function () {
+    const edges = EDGES.map(e => ({
+      u: e.u, v: e.v,
+      color: pickInputColor(e), w: 1.4,
+      id: "e2-" + e.u + "-" + e.v,
+    }));
+    const viz = NETGEN.VIZ.init("g2-cy", { showLabels: true, edges, pad: 40, padRight: 340 });
+
+    NETGEN.mountGxPanel({
+      viz, hostId: "g2-cy", prefix: "g2-mat",
+      title: "edge count matrix", maxWidth: "26rem",
+      bodyHTML: '<div class="blockmat" id="g2-mat" style="max-width:24rem;font-size:1.15rem"></div>',
+    });
+
+    const gm = document.getElementById("g2-mat");
+    gm.innerHTML = "";
+    const cellFactory = (extraCls, text) => {
+      const d = document.createElement("div");
+      d.className = "cell " + extraCls;
+      d.textContent = text;
+      return d;
+    };
+    gm.appendChild(cellFactory("head", ""));
+    BLOCK_NAMES.forEach(n => gm.appendChild(cellFactory("head", n)));
+    for (let i = 0; i < NUM_BLOCKS; i++) {
+      gm.appendChild(cellFactory("head", BLOCK_NAMES[i]));
+      for (let j = 0; j < NUM_BLOCKS; j++) {
+        const c = cellFactory("", EDGE_COUNTS[i][j]);
+        c.dataset.cell = i + "-" + j;
+        gm.appendChild(c);
+      }
+    }
+
+    const readout = document.getElementById("g2-cell");
+
+    function clearAllHighlights() {
+      gm.querySelectorAll(".cell.on, .cell.hi, .cell.dim").forEach(c => {
+        c.classList.remove("on"); c.classList.remove("hi"); c.classList.remove("dim");
+      });
+      viz.clearAllEdgeClass("hi");
+      viz.clearAllEdgeClass("dim");
+      viz.clearAllNodeClass("hi");
+      viz.clearAllNodeClass("dim");
+    }
+    function focusOnPair(bu, bv) {
+      // Dim everything that doesn't match; thicken the (bu,bv)/(bv,bu)
+      // cells, edges in those cells, and every node incident to a
+      // matching edge. Same dim-others + .hi pattern bindRowNodeHover
+      // uses on the bar panels.
+      const wantBu = bu, wantBv = bv;
+      gm.querySelectorAll(".cell").forEach(c => {
+        if (c.classList.contains("head")) return;
+        const [cu, cv] = c.dataset.cell.split("-").map(Number);
+        const match = (cu === wantBu && cv === wantBv) || (cu === wantBv && cv === wantBu);
+        c.classList.add(match ? "hi" : "dim");
+      });
+      const liveNodes = new Set();
+      EDGES.forEach(e => {
+        const ru = blockIdx(e.u), rv = blockIdx(e.v);
+        const match = (ru === wantBu && rv === wantBv) || (ru === wantBv && rv === wantBu);
+        viz.addEdgeClass("e2-" + e.u + "-" + e.v, match ? "hi" : "dim");
+        if (match) { liveNodes.add(String(e.u)); liveNodes.add(String(e.v)); }
+      });
+      viz.eachNode(n => {
+        if (liveNodes.has(String(n.id))) viz.addNodeClass(n.id, "hi");
+        else viz.addNodeClass(n.id, "dim");
+      });
+    }
+    function edgesInPair(bu, bv) {
+      return EDGES.filter(e => {
+        const ru = blockIdx(e.u), rv = blockIdx(e.v);
+        return (ru === bu && rv === bv) || (ru === bv && rv === bu);
+      });
+    }
+    function resetReadout() {
+      readout.textContent = "cell: (none)";
+    }
+
+    viz.onEdgeHoverEnter((d) => {
+      const e = EDGES.find(x => "e2-" + x.u + "-" + x.v === d.id);
+      if (!e) return;
+      const bu = blockIdx(e.u), bv = blockIdx(e.v);
+      clearAllHighlights();
+      focusOnPair(bu, bv);
+      readout.textContent = "cell: (" + BLOCK_NAMES[bu] + ", " + BLOCK_NAMES[bv] + ") · edge (" + e.u + ", " + e.v + ")";
+    });
+    viz.onEdgeHoverLeave(() => {
+      clearAllHighlights();
+      resetReadout();
+    });
+
+    gm.addEventListener("mouseover", (ev) => {
+      const cell = ev.target.closest(".cell");
+      if (!cell || cell.classList.contains("head")) return;
+      const [bu, bv] = cell.dataset.cell.split("-").map(Number);
+      clearAllHighlights();
+      focusOnPair(bu, bv);
+      const cellVal = EDGE_COUNTS[bu][bv];
+      const matching = edgesInPair(bu, bv);
+      readout.textContent = "cell: (" + BLOCK_NAMES[bu] + ", " + BLOCK_NAMES[bv]
+        + ") · " + cellVal + " half-edges from " + matching.length + " edges";
+    });
+    gm.addEventListener("mouseleave", () => {
+      clearAllHighlights();
+      resetReadout();
+    });
+  })();
+
+  // ── Micro-SBM sample bus ──
+  // Stage-3's stub-pairing IIFE owns the sampler. It builds the trace
+  // via SBMKernel.buildTraceFrom, derives SAMPLE from the trace, and
+  // fires sampleListeners on each reroll. SAMPLE starts null; stage-3
+  // populates it synchronously during init, before stage-4's IIFE
+  // (which is the only consumer) runs.
+  let SAMPLE = null;
+  const sampleListeners = [];
+  function onSampleReroll(fn) { sampleListeners.push(fn); }
+
+  // ── Generation · stub-pairing, step by step ──
+  // Per-node spokes via NETGEN.spokeLayer; kernel trace assigns the
+  // exact geomIdx for each consumed stub on each side, so the layer
+  // runs in fixed-slot mode (no greedy partner-aim, no orbit). The
+  // bridge animates dashed → solid then persists as the edge.
+  (function () {
+    const viz = NETGEN.VIZ.init("g3-cy", {
+      showLabels: true, edges: [], pinned: true, pad: 110, padRight: 110,
+      nodeColor: n => COL[CLUSTER_OF[n]] || COL.OUT,
+    });
+    let lockOverride = false;
+    let ctl = null;
+    function setRandLock(locked) {
+      lockOverride = locked;
+      if (ctl) ctl.refreshButtons();
+    }
+    const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setRandLock });
+
+    // Top-right collapsible budget matrix: each cell is the remaining
+    // budget for block-pair (r, s). Decrements as pairs land. Helps
+    // explain why the kernel switches off intra-block before all
+    // cluster stubs are consumed.
+    NETGEN.mountGxPanel({
+      viz, hostId: "g3-cy", prefix: "g3-budget",
+      title: "half-edge budget",
+      bodyHTML: '<table id="g3-budget-tbl" style="border-collapse:collapse"></table><div style="margin-top:.3rem;font-size:.65rem;opacity:.7;line-height:1.3;max-width:11rem">cell = remaining (r,s) half-edges. dim = used up. mint = current pair.</div>',
+    });
+    // The matrix tracks graph-tool's mrs (stub-count) convention: each
+    // urn r holds Σ_s mrs[r][s] half-edges. An intra (r,r) pair pulls
+    // 2 stubs from urn r, an inter (r,s) pair pulls 1 from urn r and
+    // 1 from urn s. So the cell decrements by 2 for diagonal pairs
+    // and 1 for off-diagonal: same accounting graph-tool does on the
+    // urns under the hood.
+    function totalForPair(r, s) {
+      return EDGE_COUNTS[r][s] || 0;
+    }
+    function decFor(r, s) {
+      return r === s ? 2 : 1;
+    }
+    function renderBudget() {
+      const tbl = document.getElementById("g3-budget-tbl");
+      if (!tbl) return;
+      const remaining = {};
+      blockPairs.forEach(function (bp) { remaining[bp[0] + "|" + bp[1]] = totalForPair(bp[0], bp[1]); });
+      for (let i = 0; i < stepIdx; i++) {
+        const t = trace[i];
+        if (!t || !t.bp) continue;
+        const k = t.bp[0] + "|" + t.bp[1];
+        if (remaining[k] != null) remaining[k] -= decFor(t.bp[0], t.bp[1]);
+      }
+      const curBp = stepIdx > 0 && trace[stepIdx - 1] && trace[stepIdx - 1].bp
+        ? trace[stepIdx - 1].bp[0] + "|" + trace[stepIdx - 1].bp[1] : null;
+      let html = "<thead><tr><th></th>";
+      for (let s = 0; s < NUM_BLOCKS; s++) html += "<th>" + BLOCK_NAMES[s] + "</th>";
+      html += "</tr></thead><tbody>";
+      for (let r = 0; r < NUM_BLOCKS; r++) {
+        html += "<tr><th>" + BLOCK_NAMES[r] + "</th>";
+        for (let s = 0; s < NUM_BLOCKS; s++) {
+          if (s < r) { html += '<td class="lower">·</td>'; continue; }
+          const k = r + "|" + s;
+          const rem = remaining[k] || 0;
+          const total = totalForPair(r, s);
+          const cls = ["cell"];
+          if (rem === 0) cls.push("dim");
+          if (k === curBp) cls.push("cur");
+          html += '<td class="' + cls.join(" ") + '" title="total ' + total + '">' + rem + '</td>';
+        }
+        html += "</tr>";
+      }
+      html += "</tbody>";
+      tbl.innerHTML = html;
+    }
+
+    const blockPairs = [];
+    for (let r = 0; r < NUM_BLOCKS; r++)
+      for (let s = r; s < NUM_BLOCKS; s++) blockPairs.push([r, s]);
+
+    let currentSeed = 6320;
+    let trace = [];
+    let totalPairs = 0;
+    let stepIdx = 0;
+    // Bumped on every full-trace regeneration (initial init, random-all,
+    // reseedFrom edge-case fallback). Placed-edge ids embed the nonce
+    // so render()'s id-diff sees every old-trace entry as a remove and
+    // every new-trace entry as an add, which is what playMany needs to
+    // chain a full rewind+forward across the regen. reseedFrom proper
+    // does NOT bump — its prefix is preserved, so prefix ids stay
+    // stable and the diff only flags the resampled tail.
+    let traceNonce = 0;
+
+    function buildPairBudget() {
+      return SBMKernel.buildPairBudget(EDGE_COUNTS, blockPairs);
+    }
+    function buildFreshUrns() {
+      return BLOCK_NAMES.map((name) => {
+        const urn = [];
+        BLOCK_NODES[name].forEach(n => {
+          for (let i = 0; i < TARGET_DEG[n]; i++) urn.push({ node: n, geomIdx: i });
+        });
+        return urn;
+      });
+    }
+    function freshTrace(seed) {
+      traceNonce++;
+      const urns = buildFreshUrns();
+      const budget = buildPairBudget();
+      const seen = new Map();
+      trace = SBMKernel.buildTraceFrom(urns, budget, blockPairs, seen, d3.randomLcg(seed));
+      totalPairs = trace.length;
+      publishSample();
+    }
+    function deriveSampleFromTrace() {
+      const raw = trace.map(t => ({ u: t.u, v: t.v, intra: t.intra, loop: t.loop, multi: t.multi }));
+      const kept = raw.filter(e => !e.loop && !e.multi);
+      const dropped = raw.filter(e => e.loop || e.multi);
+      const achievedDeg = {};
+      NODES.forEach(n => { achievedDeg[n] = 0; });
+      kept.forEach(e => { achievedDeg[e.u]++; achievedDeg[e.v]++; });
+      const nLoops = raw.filter(t => t.loop).length;
+      const nParallels = raw.filter(t => t.multi).length;
+      return { all: raw, kept, dropped, achievedDeg,
+        stats: { preEdges: raw.length, postEdges: kept.length, nLoops, nParallels } };
+    }
+    function publishSample() {
+      SAMPLE = deriveSampleFromTrace();
+      sampleListeners.forEach(fn => fn(SAMPLE));
+    }
+    function reseedFrom(k) {
+      currentSeed += 1;
+      if (k <= 0 || k >= totalPairs) {
+        freshTrace(currentSeed);
+        stepIdx = 0;
+        return;
+      }
+      const tail = NETGEN.reseedSuffix({
+        prefix: trace.slice(0, k),
+        makeFreshState: () => ({
+          urns: buildFreshUrns(),
+          budget: buildPairBudget(),
+          seen: new Map(),
+        }),
+        replayPrefix: (s, prefix) => SBMKernel.replayTrace(s.urns, s.budget, s.seen, prefix),
+        sampleTail: (s, rng) => SBMKernel.buildTraceFrom(s.urns, s.budget, blockPairs, s.seen, rng),
+        rng: d3.randomLcg(currentSeed),
+      });
+      trace = trace.slice(0, k).concat(tail);
+      totalPairs = trace.length;
+      publishSample();
+    }
+
+    function pairColor(t) {
+      if (t.loop || t.multi) return COL.edge_drop;
+      return t.intra ? (COL.edge_intra[blockOf(t.u)] || COL.edge_stage2) : COL.edge_inter;
+    }
+    // The "good" colour of a pair, used during the animation. After
+    // the bridge settles, the layer recolors to badColor on its own
+    // when bad is true.
+    function pairGoodColor(t) {
+      return t.intra ? (COL.edge_intra[blockOf(t.u)] || COL.edge_stage2) : COL.edge_inter;
+    }
+    function spokeColor(n) { return COL[CLUSTER_OF[n]] || COL.OUT; }
+
+    // Build a placed-style entry for trace[i]. Id embeds traceNonce so
+    // a random-all (which bumps the nonce) yields entries that don't
+    // collide by id with the previous trace's entries — the diff at the
+    // top of render() classifies all old-nonce entries as removes and
+    // all new-nonce entries as adds, which is what the chained rewind+
+    // forward sequence needs.
+    function placedEntryAt(traceArr, i, nonce) {
+      const t = traceArr[i];
+      const bad = !!(t.loop || t.multi);
+      return {
+        u: t.u, v: t.v,
+        color: pairColor(t),
+        id: "ce-" + nonce + "-" + i,
+        bad,
+        badColor: bad ? COL.edge_drop : null,
+      };
+    }
+    function placedListUpTo(traceArr, idx, nonce) {
+      const out = [];
+      for (let i = 0; i < idx; i++) out.push(placedEntryAt(traceArr, i, nonce));
+      return out;
+    }
+    function spokeCfg() {
+      const cfg = {};
+      NODES.forEach(n => { cfg[n] = { count: TARGET_DEG[n] || 0, color: spokeColor(n) }; });
+      return cfg;
+    }
+
+    // Last list committed to spokes (placedLayer + bridgeLayer combined).
+    // render() diffs the new target list against this by edge id; same
+    // id with different (u, v) counts as a remove + add pair (the
+    // random-step case where the active pair gets resampled). Anything
+    // changed goes into one spokes.playMany call so every concurrent
+    // rewind / forward grow shares a single chained sequence.
+    let lastList = [];
+
+    function render() {
+      viz.setEdges([]);
+      syncStats();
+      renderBudget();
+      const target = placedListUpTo(trace, stepIdx, traceNonce);
+      const byNode = spokeCfg();
+      const beforeById = new Map(lastList.map(e => [e.id, e]));
+      const afterById = new Map(target.map(e => [e.id, e]));
+      const removes = [], adds = [];
+      beforeById.forEach((be, id) => {
+        const ae = afterById.get(id);
+        if (!ae) removes.push(be);
+        else if (ae.u !== be.u || ae.v !== be.v) { removes.push(be); adds.push(ae); }
+      });
+      afterById.forEach((ae, id) => {
+        if (!beforeById.has(id)) adds.push(ae);
+      });
+      lastList = target;
+      if (removes.length === 0 && adds.length === 0) {
+        spokes.snapToState({ byNode, placed: target, just: null, justSeq: stepIdx });
+        return;
+      }
+      spokes.playMany(removes, adds, () => {}, { byNode });
+    }
+
+    function syncStats() {
+      const statsEl = document.getElementById("g3-stats");
+      const curEl = document.getElementById("g3-cur");
+      const totEl = document.getElementById("g3-total");
+      let nLoops = 0, nMulti = 0;
+      for (let i = 0; i < stepIdx; i++) {
+        if (trace[i].loop) nLoops++;
+        if (trace[i].multi) nMulti++;
+      }
+      if (statsEl) {
+        let chrome = stepIdx + "/" + totalPairs;
+        if (nLoops) chrome += " · " + nLoops + "L";
+        if (nMulti) chrome += " · " + nMulti + "P";
+        if (stepIdx > 0) {
+          const t = trace[stepIdx - 1];
+          const r = t.bp[0], s = t.bp[1];
+          chrome += " · (" + BLOCK_NAMES[r] + "," + BLOCK_NAMES[s] + ") " + t.u + "↔" + t.v;
+        }
+        statsEl.textContent = chrome;
+      }
+      if (curEl) curEl.textContent = String(stepIdx);
+      if (totEl) totEl.textContent = String(totalPairs);
+    }
+
+    freshTrace(currentSeed);
+    ctl = NETGEN.rerollWalker({
+      prefix: "g3",
+      total: totalPairs + 1,
+      totalForCurrent: () => totalPairs + 1,
+      curId: "g3-cur", totId: "g3-total",
+      getLocked: () => lockOverride,
+      // Single render path for every cursor change — single-step nav,
+      // multi-step jumps (to-start / to-end), random-step, random-all.
+      // render() diffs against lastList and dispatches one playMany
+      // call, so a multi-step jump becomes a chained rewind / forward
+      // sequence with every changed pair animating concurrently.
+      onRender: (idx) => { stepIdx = idx; render(); },
+      onRandStep: (idx) => {
+        if (idx <= 0) return;
+        reseedFrom(idx - 1);
+      },
+      onRandAll: (idx) => {
+        if (idx <= 0) return;
+        currentSeed += 1;
+        freshTrace(currentSeed);
+      },
+    });
+  })();
+
+  // ── Generation · simplify (spoke-layer animation) + degree bars ──
+  // Spoke layer carries the pre-simplify multigraph (good edges in
+  // block colour, loop / parallel edges dashed red). The simplify
+  // button calls spokes.simplify(removes, …) which is the shared
+  // primitive used by every gen page's drop-stale step. byNode
+  // refreshes to the post-simplify degree count so spokes shrink with
+  // the dropped edges.
+  (function () {
+    const viz = NETGEN.VIZ.init("g4-cy", {
+      showLabels: true, edges: [], pinned: true,
+      pad: 40, padRight: 340,
+      nodeColor: n => COL[CLUSTER_OF[n]] || COL.OUT,
+    });
+    const label     = document.getElementById("g4-label");
+    const edgeCount = document.getElementById("g4-edges");
+    const playBtn   = document.getElementById("g4-play");
+    const resetBtn  = document.getElementById("g4-reset");
+
+    NETGEN.mountGxPanel({
+      viz, hostId: "g4-cy", prefix: "g4-deg",
+      title: "degrees", maxWidth: "26rem",
+      bodyHTML: '<svg id="deg-bars" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet" style="display:block;width:18rem;height:auto"></svg>',
+    });
+
+    let lockBusy = false;
+    function setLock(b) {
+      if (lockBusy === b) return;
+      lockBusy = b;
+      if (playBtn) playBtn.disabled = b || simplified;
+      if (resetBtn) resetBtn.disabled = b;
+    }
+    const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setLock });
+    let simplified = false;
+
+    function spokeColor(n) { return COL[CLUSTER_OF[n]] || COL.OUT; }
+    function placedFor(sample) {
+      return sample.all.map((e, i) => {
+        const bad = e.loop || e.multi;
+        return {
+          u: e.u, v: e.v,
+          color: bad ? COL.edge_drop
+                     : (e.intra ? (COL.edge_intra[blockOf(e.u)] || COL.edge_stage2) : COL.edge_inter),
+          badColor: COL.edge_drop, bad,
+          id: "s4-" + i,
+        };
+      });
+    }
+    function byNodeFor(sample, post) {
+      // Spoke counts reflect raw incidence on the current state. Pre-
+      // simplify: every entry in sample.all contributes; post-simplify:
+      // only sample.kept.
+      return NETGEN.spokeLayer.byNodeFromEdges(
+        viz, post ? sample.kept : sample.all,
+        n => spokeColor(parseInt(n.id, 10)),
+      );
+    }
+    function preLabel(sample) {
+      const pre = sample.stats.preEdges;
+      const drop = sample.stats.nLoops + sample.stats.nParallels;
+      label.textContent = "before simplify";
+      edgeCount.textContent = "edges: " + pre + " · " +
+        sample.stats.nLoops + " loop" + (sample.stats.nLoops === 1 ? "" : "s") + " + " +
+        sample.stats.nParallels + " parallel" + (sample.stats.nParallels === 1 ? "" : "s") +
+        " queued (" + drop + " to drop)";
+    }
+    function postLabel(sample) {
+      const pre  = sample.stats.preEdges;
+      const post = sample.stats.postEdges;
+      const lostPct = pre > 0 ? ((pre - post) / pre * 100).toFixed(1) : "0.0";
+      label.textContent = "after simplify";
+      edgeCount.textContent = "edges: " + pre + " → " + post + " (" + lostPct + "% lost)";
+    }
+    // Bar-anim duration roughly matches the spokes.simplify total
+    // (dashify 220 + fade 320 + idle 80 = 620ms) so the red tail
+    // finishes growing right as the bad edges finish dissolving.
+    const BAR_ANIM_MS_G4 = 620;
+    function snapPre(sample) {
+      simplified = false;
+      spokes.snapToState({
+        byNode: byNodeFor(sample, false),
+        placed: placedFor(sample),
+        just: null, justSeq: 0,
+      });
+      preLabel(sample);
+      if (playBtn) playBtn.disabled = false;
+    }
+    function playSimplify(sample) {
+      if (simplified || lockBusy) return;
+      const removes = placedFor(sample).filter(e => e.bad);
+      if (removes.length === 0) {
+        // No bad edges — already simple. Just update label.
+        simplified = true;
+        postLabel(sample);
+        if (playBtn) playBtn.disabled = true;
+        return;
+      }
+      // Edge animation = the existing dashify→fade simplify primitive.
+      // Bars animate the red tail growing from 0 to the actual loss in
+      // lockstep with the edge fade, instead of snapping at the end.
+      spokes.simplify(removes, () => {
+        simplified = true;
+        postLabel(sample);
+        if (playBtn) playBtn.disabled = true;
+      }, { byNode: byNodeFor(sample, true) });
+      renderDegBars(sample, true, { animate: true, duration: BAR_ANIM_MS_G4 });
+    }
+    function render(sample) { snapPre(sample); }
+
+    render(SAMPLE);
+    onSampleReroll((sample) => {
+      render(sample);
+      renderDegBars(sample, false);
+    });
+    if (playBtn) playBtn.addEventListener("click", () => playSimplify(SAMPLE));
+    if (resetBtn) resetBtn.addEventListener("click", () => {
+      if (lockBusy) return;
+      const sample = SAMPLE;
+      // If not currently simplified, snap to the pre-simplify state.
+      if (!simplified) { render(sample); return; }
+      // Reverse the simplify animation: bring the dropped bad edges
+      // back via unsimplify (faded-in dashed → un-dashify to solid).
+      const adds = placedFor(sample).filter(e => e.bad);
+      if (adds.length === 0 || !spokes.unsimplify) {
+        render(sample);
+        return;
+      }
+      spokes.unsimplify(adds, () => {
+        simplified = false;
+        preLabel(sample);
+        if (playBtn) playBtn.disabled = false;
+      }, { byNode: byNodeFor(sample, false) });
+      // Bars unwind: red tail shrinks back to 0.
+      renderDegBars(sample, false, { animate: true, duration: BAR_ANIM_MS_G4 });
+    });
+
+    // Target-vs-achieved degree bars, horizontal, one row per node.
+    // Stacked: mint segment = achieved, faint red tail = dropped
+    // (target minus achieved). Rows and graph nodes are hover-linked.
+    const svg = d3.select("#deg-bars");
+    const W = 340, H = 420;
+    const PAD = { top: 12, right: 44, bottom: 28, left: 38 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+
+    // Matcher-style layout: a vertical divider sits at maxAchieved and
+    // every row pivots around it. Achieved (mint) extends leftward from
+    // the divider, loss (red) extends rightward — so every dropped slice
+    // starts at the same vertical line. Sorted by loss desc.
+    const y = d3.scaleBand().domain(NODES.map(String)).range([0, ih]).padding(0.24);
+    const maxD = d3.max(NODES, n => TARGET_DEG[n]) || 1;
+    const yAxisG = g.append("g");
+    yAxisG.call(d3.axisLeft(y).tickSize(0).tickPadding(6))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace")
+        .style("font-size", "10px");
+
+    svg.append("text").attr("x", PAD.left - 26).attr("y", PAD.top - 4)
+      .style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10px")
+      .text("node");
+    svg.append("text").attr("x", W / 2).attr("y", H - 4)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px")
+      .text("degree (mint = kept, red = lost)");
+
+    const gBars = g.append("g").attr("class", "deg-bars");
+
+    function renderDegBars(sample, post, opts) {
+      opts = opts || {};
+      const animate = !!opts.animate;
+      const dur = opts.duration != null ? opts.duration : BAR_ANIM_MS_G4;
+      const achOf = (d) => post ? sample.achievedDeg[d] : TARGET_DEG[d];
+      const lossOf = (d) => Math.max(0, TARGET_DEG[d] - achOf(d));
+      // Target desc, id asc — stable across rerolls so the eye can track
+      // the same node. The dividerX pivot already makes loss scannable
+      // by red-tail length; resorting by loss adds nothing.
+      const orderedNodes = NODES.slice().sort((a, b) =>
+        (TARGET_DEG[b] - TARGET_DEG[a]) || (a - b)
+      );
+      y.domain(orderedNodes.map(String));
+      yAxisG.call(d3.axisLeft(y).tickSize(0).tickPadding(6));
+      yAxisG.selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace")
+        .style("font-size", "10px");
+      // dividerX = max achieved across rows. Each row's achieved bar
+      // right-anchors at dividerX, loss extends right of it.
+      const maxAchieved = d3.max(orderedNodes, achOf) || 1;
+      const maxLoss = d3.max(orderedNodes, lossOf) || 0;
+      const totalUnits = maxAchieved + maxLoss + 1;
+      const scale = iw / totalUnits;
+      const dividerX = maxAchieved * scale;
+      g.selectAll(".domain").style("stroke", "#b9a263");
+      g.selectAll(".tick line").style("stroke", "#cdbf8d");
+
+      const rows = gBars.selectAll(".deg-bar-row").data(orderedNodes, d => d);
+      rows.exit().remove();
+      const enter = rows.enter().append("g")
+        .attr("class", "deg-bar-row")
+        .attr("data-id", d => String(d));
+      enter.append("rect").attr("class", "hitbox")
+        .attr("x", -PAD.left + 4).attr("y", 0)
+        .attr("height", y.bandwidth())
+        .attr("width", iw + PAD.left + PAD.right - 8)
+        .attr("fill", "transparent");
+      enter.append("rect").attr("class", "achieved")
+        .attr("y", 0).attr("height", y.bandwidth())
+        .attr("fill", COL.mint).attr("opacity", 0.92);
+      enter.append("rect").attr("class", "dropped")
+        .attr("y", 0).attr("height", y.bandwidth())
+        .attr("fill", COL.edge_drop).attr("opacity", 0.35);
+      enter.append("text").attr("class", "dlbl")
+        .attr("dominant-baseline", "central")
+        .attr("y", y.bandwidth() / 2)
+        .attr("font-family", "Special Elite, Courier New, monospace")
+        .attr("font-size", "10px")
+        .attr("fill", "#2f3a54");
+
+      const merged = enter.merge(rows);
+      const ach = merged.select(".achieved");
+      const drp = merged.select(".dropped");
+      const lbl = merged.select(".dlbl");
+      const tform = d => `translate(0,${y(String(d))})`;
+      const achX = d => dividerX - achOf(d) * scale;
+      const achW = d => achOf(d) * scale;
+      const drpW = d => lossOf(d) * scale;
+      const lblX = d => dividerX + lossOf(d) * scale + 5;
+      const lblTxt = d => achOf(d) + "/" + TARGET_DEG[d];
+
+      if (animate) {
+        const ease = d3.easeCubicInOut;
+        merged.transition("g4-bar").duration(dur).ease(ease).attr("transform", tform);
+        ach.transition("g4-bar").duration(dur).ease(ease)
+          .attr("x", achX).attr("width", achW);
+        drp.transition("g4-bar").duration(dur).ease(ease)
+          .attr("x", dividerX).attr("width", drpW);
+        lbl.transition("g4-bar").duration(dur).ease(ease)
+          .attr("x", lblX)
+          .tween("text", function (d) {
+            const node = this;
+            const startAch = parseInt((node.textContent || "0").split("/")[0], 10) || 0;
+            const endAch = achOf(d);
+            const tgt = TARGET_DEG[d];
+            const i = d3.interpolateNumber(startAch, endAch);
+            return function (k) {
+              node.textContent = Math.round(i(k)) + "/" + tgt;
+            };
+          });
+      } else {
+        merged.attr("transform", tform);
+        ach.attr("x", achX).attr("width", achW);
+        drp.attr("x", dividerX).attr("width", drpW);
+        lbl.attr("x", lblX).text(lblTxt);
+      }
+    }
+    renderDegBars(SAMPLE, false);
+
+    bindFocusLink(viz, gBars);
+  })();
+
+  // ── Top-up · match-degree before/after viz + degree bars ──
+  // Same shape as g4: snapToState for the pre, playMany for the
+  // animated forward, reset returns to pre.
+  (function () {
+    const viz = NETGEN.VIZ.init("g5-cy", {
+      showLabels: true, edges: [], pinned: true,
+      pad: 40, padRight: 340,
+      nodeColor: n => COL[CLUSTER_OF[n]] || COL.OUT,
+    });
+    const label     = document.getElementById("g5-label");
+    const edgeCount = document.getElementById("g5-edges");
+    const playBtn   = document.getElementById("g5-play");
+    const resetBtn  = document.getElementById("g5-reset");
+
+    NETGEN.mountGxPanel({
+      viz, hostId: "g5-cy", prefix: "g5-deg",
+      title: "degrees", maxWidth: "26rem",
+      bodyHTML: '<svg id="g5-deg-bars" viewBox="0 0 340 420" preserveAspectRatio="xMidYMid meet" style="display:block;width:18rem;height:auto"></svg>',
+    });
+
+    let lockBusy = false;
+    function setLock(b) {
+      if (lockBusy === b) return;
+      lockBusy = b;
+      if (playBtn) playBtn.disabled = b || matched;
+      if (resetBtn) resetBtn.disabled = b;
+    }
+    const spokes = NETGEN.spokeLayer.attach(viz, { onLockChange: setLock });
+    let matched = false;
+    let matchEdges = [];
+    let postAchievedDeg = {};
+    let postUnplacedSum = 0;
+
+    function spokeColor(n) { return COL[CLUSTER_OF[n]] || COL.OUT; }
+
+    function computeMatch(sample) {
+      const baseAdj = {};
+      NODES.forEach(n => { baseAdj[n] = new Set(); });
+      sample.kept.forEach(e => {
+        baseAdj[e.u].add(e.v); baseAdj[e.v].add(e.u);
+      });
+      const deficit = {};
+      const iids = [];
+      NODES.forEach(n => {
+        const d = TARGET_DEG[n] - sample.achievedDeg[n];
+        if (d > 0) { deficit[n] = d; iids.push(n); }
+      });
+      postAchievedDeg = Object.assign({}, sample.achievedDeg);
+      postUnplacedSum = 0;
+      if (iids.length === 0) return [];
+      const b = {};
+      NODES.forEach(n => { b[n] = blockIdx(n); });
+      const stubs = {};
+      for (const k in deficit) {
+        const u = parseInt(k, 10);
+        if (deficit[u] > 0) stubs[b[u]] = (stubs[b[u]] || 0) + deficit[u];
+      }
+      const totalStubs = Object.values(stubs).reduce((a, c) => a + c, 0);
+      const bpBudget = {};
+      if (totalStubs >= 2) {
+        const bks = Object.keys(stubs).map(Number).sort((a, c) => a - c);
+        for (let i = 0; i < bks.length; i++) {
+          for (let j = i; j < bks.length; j++) {
+            const bi = bks[i], bj = bks[j];
+            const si = stubs[bi], sj = stubs[bj];
+            const exp = (bi === bj) ? si * (si - 1) / (2 * totalStubs) : si * sj / totalStubs;
+            bpBudget[bi + "-" + bj] = Math.max(1, Math.round(exp));
+          }
+        }
+      }
+      const steps = window.MatchDegreeKernel.runClusterPreservingTrueGreedy(
+        { iids, deficit, baseAdj, b, bpBudget }, {}
+      );
+      const final = steps[steps.length - 1];
+      final.edges.forEach(([u, v]) => {
+        postAchievedDeg[u] = (postAchievedDeg[u] || 0) + 1;
+        postAchievedDeg[v] = (postAchievedDeg[v] || 0) + 1;
+      });
+      const unplaced = final.unplaced || {};
+      for (const k in unplaced) postUnplacedSum += unplaced[k];
+      return final.edges.map(([u, v]) => [u, v]);
+    }
+
+    // Pre-top-up: kept sampler edges dim from the start so the panel
+    // reads as "the deficit picture" before the play button is hit.
+    // Match-degree edges land at full opacity + bumped width on top,
+    // and the existing playMatch fade keeps kept at the same dim level
+    // (KEPT_DIM, defined below) so there's no opacity jump.
+    function placedKept(sample) {
+      return sample.kept.map((e, i) => ({
+        u: e.u, v: e.v,
+        color: e.intra ? (COL.edge_intra[blockOf(e.u)] || COL.edge_stage2)
+                       : COL.edge_inter,
+        opacity: KEPT_DIM,
+        id: "g5-k-" + i,
+      }));
+    }
+    // Match-edge palette: same intra / inter colour each edge would get
+    // if the sampler had drawn it (so block-fidelity reads the same as
+    // every other edge on the page). Stroke is bumped to spoke_layer's
+    // highlight width (2.6 vs 1.6) so the top-up edges still pop next
+    // to the kept sampler edges.
+    const MATCH_EDGE_W = 2.6;
+    function matchEdgeColor(u, v) {
+      const bu = blockOf(u), bv = blockOf(v);
+      return (bu === bv) ? (COL.edge_intra[bu] || COL.edge_stage2)
+                         : COL.edge_inter;
+    }
+    function placedMatch(edges) {
+      return edges.map(([u, v], i) => ({
+        u, v,
+        color: matchEdgeColor(u, v),
+        w: MATCH_EDGE_W,
+        id: "g5-m-" + i,
+      }));
+    }
+    function byNodeFor(achieved) {
+      const cfg = {};
+      NODES.forEach(n => {
+        cfg[n] = { count: achieved[n] || 0, color: spokeColor(n) };
+      });
+      return cfg;
+    }
+
+    function preLabel(sample) {
+      const need = matchEdges.length;
+      label.textContent = "before top-up";
+      edgeCount.innerHTML = "edges: " + sample.kept.length +
+        " &middot; deficit: " + (need * 2) + " stub" + (need * 2 === 1 ? "" : "s") +
+        " (" + need + " edge" + (need === 1 ? "" : "s") + " to add)";
+    }
+    function postLabel(sample) {
+      const total = sample.kept.length + matchEdges.length;
+      label.textContent = "after top-up";
+      let l1 = 0;
+      NODES.forEach(n => { l1 += Math.abs(TARGET_DEG[n] - postAchievedDeg[n]); });
+      const tail = postUnplacedSum > 0
+        ? " &middot; " + postUnplacedSum + " stub" + (postUnplacedSum === 1 ? "" : "s") +
+          " gridlocked &middot; L1 = " + l1
+        : " (L1 = 0)";
+      edgeCount.innerHTML = "edges: " + sample.kept.length + " &rarr; " + total +
+        " (+" + matchEdges.length + ")" + tail;
+    }
+
+    function snapPre(sample) {
+      matched = false;
+      matchEdges = computeMatch(sample);
+      spokes.snapToState({
+        byNode: byNodeFor(sample.achievedDeg),
+        placed: placedKept(sample),
+        just: null, justSeq: 0,
+      });
+      preLabel(sample);
+      if (playBtn) playBtn.disabled = matchEdges.length === 0;
+    }
+    const FADE_MS = 480;
+    const KEPT_DIM = 0.22;
+    function matchPathSel() {
+      // Teal match-edge paths in placedLayer, picked by id prefix.
+      return d3.select("#g5-cy").selectAll("path.sp-placed-edge")
+        .filter(function (d) { return d && typeof d.id === "string" && d.id.indexOf("g5-m-") === 0; });
+    }
+    function keptPathSel() {
+      // Kept (sampler) edges in placedLayer.
+      return d3.select("#g5-cy").selectAll("path.sp-placed-edge")
+        .filter(function (d) { return d && typeof d.id === "string" && d.id.indexOf("g5-k-") === 0; });
+    }
+    function playMatch(sample) {
+      if (matched || lockBusy) return;
+      const adds = placedMatch(matchEdges);
+      if (adds.length === 0) {
+        matched = true;
+        postLabel(sample);
+        if (playBtn) playBtn.disabled = true;
+        renderDegBars(sample, true);
+        return;
+      }
+      // Snap with amber entries already in placedLayer at opacity 0,
+      // then fade-in via d3 transition. Simpler than playMany — no
+      // orbit / grow / fan / colorize phases since match edges have no
+      // build story to tell. Disable buttons manually rather than via
+      // setLock: spokes.snapToState fires onLockChange(false) which
+      // would clobber a setLock(true) called before it.
+      if (playBtn) playBtn.disabled = true;
+      if (resetBtn) resetBtn.disabled = true;
+      spokes.snapToState({
+        byNode: byNodeFor(postAchievedDeg),
+        placed: placedKept(sample).concat(adds.map(e => Object.assign({}, e, { opacity: 0 }))),
+        just: null, justSeq: 0,
+      });
+      if (playBtn) playBtn.disabled = true;
+      if (resetBtn) resetBtn.disabled = true;
+      let fired = false;
+      // Kept (sampler) edges already render at KEPT_DIM via placedKept's
+      // data-side opacity, so no fade transition on them — only the
+      // match edges need to fade in. Avoids a stale-attr flash where
+      // d3's transition would briefly read opacity=1 between snapToState
+      // and the first frame, undimming the kept edges for a tick.
+      matchPathSel()
+        .attr("opacity", 0)
+        .transition("g5-fade").duration(FADE_MS).ease(d3.easeCubicInOut)
+        .attr("opacity", 1)
+        .on("end", function () {
+          if (fired) return;
+          fired = true;
+          matched = true;
+          postLabel(sample);
+          if (playBtn) playBtn.disabled = true;
+          if (resetBtn) resetBtn.disabled = false;
+        });
+      // Bars animate alongside the edge fade so achieved widens / loss
+      // shrinks continuously rather than snapping at fade end.
+      renderDegBars(sample, true, { animate: true });
+    }
+    function resetFade(sample) {
+      if (lockBusy || !matched) { render(sample); return; }
+      const sel = matchPathSel();
+      if (sel.empty()) { render(sample); return; }
+      if (playBtn) playBtn.disabled = true;
+      if (resetBtn) resetBtn.disabled = true;
+      let fired = false;
+      // Kept edges stay at their data-side KEPT_DIM throughout reset —
+      // no transition on them avoids the brief un-dim flash that d3's
+      // attr-tween read produced when starting from a possibly-stale
+      // opacity value.
+      sel.transition("g5-fade").duration(FADE_MS).ease(d3.easeCubicInOut)
+        .attr("opacity", 0)
+        .on("end", function () {
+          if (fired) return;
+          fired = true;
+          // Don't call render() here — it would re-snap the bars. Roll
+          // back state manually so the bar transition (kicked off
+          // below) is the only thing repainting them.
+          matched = false;
+          matchEdges = computeMatch(sample);
+          spokes.snapToState({
+            byNode: byNodeFor(sample.achievedDeg),
+            placed: placedKept(sample),
+            just: null, justSeq: 0,
+          });
+          preLabel(sample);
+          if (playBtn) playBtn.disabled = matchEdges.length === 0;
+          if (resetBtn) resetBtn.disabled = false;
+        });
+      // Bars unwind in lockstep with the fade-out so achieved shrinks
+      // back to pre values while teal edges dissolve.
+      renderDegBars(sample, false, { animate: true });
+    }
+    function render(sample) { snapPre(sample); renderDegBars(sample, false); }
+
+    const svg = d3.select("#g5-deg-bars");
+    const W = 340, H = 420;
+    const PAD = { top: 12, right: 44, bottom: 28, left: 38 };
+    const iw = W - PAD.left - PAD.right;
+    const ih = H - PAD.top - PAD.bottom;
+    const g = svg.append("g").attr("transform", `translate(${PAD.left},${PAD.top})`);
+    const y = d3.scaleBand().domain(NODES.map(String)).range([0, ih]).padding(0.24);
+    const yAxisG = g.append("g");
+    yAxisG.call(d3.axisLeft(y).tickSize(0).tickPadding(6))
+      .selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace")
+        .style("font-size", "10px");
+    svg.append("text").attr("x", PAD.left - 26).attr("y", PAD.top - 4)
+      .style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10px")
+      .text("node");
+    svg.append("text").attr("x", W / 2).attr("y", H - 4)
+      .attr("text-anchor", "middle").style("fill", "#6b6a54")
+      .style("font-family", "Special Elite, Courier New, monospace").style("font-size", "10.5px")
+      .text("degree (mint = achieved, red = deficit)");
+    const gBars = g.append("g").attr("class", "g5-deg-bars");
+
+    function renderDegBars(sample, post, opts) {
+      opts = opts || {};
+      const animate = !!opts.animate;
+      const dur = opts.duration != null ? opts.duration : FADE_MS;
+      const achOf = (d) => post ? (postAchievedDeg[d] || 0) : sample.achievedDeg[d];
+      const lossOf = (d) => Math.max(0, TARGET_DEG[d] - achOf(d));
+      const orderedNodes = NODES.slice().sort((a, b) =>
+        (TARGET_DEG[b] - TARGET_DEG[a]) || (a - b)
+      );
+      y.domain(orderedNodes.map(String));
+      yAxisG.call(d3.axisLeft(y).tickSize(0).tickPadding(6));
+      yAxisG.selectAll("text").style("fill", "#6b6a54")
+        .style("font-family", "Special Elite, Courier New, monospace")
+        .style("font-size", "10px");
+      const maxAchieved = d3.max(orderedNodes, achOf) || 1;
+      const maxLoss = d3.max(orderedNodes, lossOf) || 0;
+      const totalUnits = maxAchieved + maxLoss + 1;
+      const scale = iw / totalUnits;
+      const dividerX = maxAchieved * scale;
+      g.selectAll(".domain").style("stroke", "#b9a263");
+      g.selectAll(".tick line").style("stroke", "#cdbf8d");
+
+      const rows = gBars.selectAll(".deg-bar-row").data(orderedNodes, d => d);
+      rows.exit().remove();
+      const enter = rows.enter().append("g")
+        .attr("class", "deg-bar-row")
+        .attr("data-id", d => String(d));
+      enter.append("rect").attr("class", "hitbox")
+        .attr("x", -PAD.left + 4).attr("y", 0)
+        .attr("height", y.bandwidth())
+        .attr("width", iw + PAD.left + PAD.right - 8)
+        .attr("fill", "transparent");
+      enter.append("rect").attr("class", "achieved bar")
+        .attr("y", 0).attr("height", y.bandwidth())
+        .attr("fill", COL.mint).attr("opacity", 0.92);
+      enter.append("rect").attr("class", "dropped")
+        .attr("y", 0).attr("height", y.bandwidth())
+        .attr("fill", COL.edge_drop).attr("opacity", 0.35);
+      enter.append("text").attr("class", "dlbl")
+        .attr("dominant-baseline", "central")
+        .attr("y", y.bandwidth() / 2)
+        .attr("font-family", "Special Elite, Courier New, monospace")
+        .attr("font-size", "10px")
+        .attr("fill", "#2f3a54");
+
+      const merged = enter.merge(rows);
+      // Pick a target (selection or transition) to drive geometry.
+      // Animate path runs the same set of attrs through a d3 transition
+      // so achieved widens, dropped shrinks, divider/label slide
+      // continuously from the pre to post snapshot.
+      const ach = merged.select(".achieved");
+      const drp = merged.select(".dropped");
+      const lbl = merged.select(".dlbl");
+      const tform = d => `translate(0,${y(String(d))})`;
+      const achX = d => dividerX - achOf(d) * scale;
+      const achW = d => achOf(d) * scale;
+      const drpW = d => lossOf(d) * scale;
+      const lblX = d => dividerX + lossOf(d) * scale + 5;
+      const lblTxt = d => achOf(d) + "/" + TARGET_DEG[d];
+
+      if (animate) {
+        const ease = d3.easeCubicInOut;
+        merged.transition("g5-bar").duration(dur).ease(ease).attr("transform", tform);
+        ach.transition("g5-bar").duration(dur).ease(ease)
+          .attr("x", achX).attr("width", achW);
+        drp.transition("g5-bar").duration(dur).ease(ease)
+          .attr("x", dividerX).attr("width", drpW);
+        lbl.transition("g5-bar").duration(dur).ease(ease)
+          .attr("x", lblX)
+          .tween("text", function (d) {
+            // Tween the integer "achieved" between the rendered value
+            // and its target so the label counts up / down with the bar
+            // instead of snapping at transition end.
+            const node = this;
+            const startAch = parseInt((node.textContent || "0").split("/")[0], 10) || 0;
+            const endAch = achOf(d);
+            const tgt = TARGET_DEG[d];
+            const i = d3.interpolateNumber(startAch, endAch);
+            return function (k) {
+              node.textContent = Math.round(i(k)) + "/" + tgt;
+            };
+          });
+      } else {
+        merged.attr("transform", tform);
+        ach.attr("x", achX).attr("width", achW);
+        drp.attr("x", dividerX).attr("width", drpW);
+        lbl.attr("x", lblX).text(lblTxt);
+      }
+    }
+
+    if (SAMPLE) render(SAMPLE);
+    onSampleReroll((sample) => render(sample));
+    if (playBtn) playBtn.addEventListener("click", () => playMatch(SAMPLE));
+    if (resetBtn) resetBtn.addEventListener("click", () => resetFade(SAMPLE));
+
+    bindFocusLink(viz, gBars);
+  })();
+
+  // ── Choice callout · singleton-mode e on the 20-node fixture ──
+  // Renders e_{rs} with each cluster + each outlier as its own block.
+  // The outlier-outlier corner is exactly the (graph-tool half-edge
+  // convention) adjacency matrix on the outlier subgraph.
+  (function () {
+    const host = document.getElementById("g3-singleton-mat");
+    if (!host) return;
+    const clusterBlocks = ["C1", "C2", "C3"];
+    const outlierIds = NODES.filter(n => CLUSTER_OF[n] === "OUT");
+    const blockOfNode = (n) => CLUSTER_OF[n] === "OUT" ? String(n) : CLUSTER_OF[n];
+    const labels = clusterBlocks.concat(outlierIds.map(String));
+    const idx = {};
+    labels.forEach((l, i) => { idx[l] = i; });
+    const B = labels.length;
+    const e = Array.from({ length: B }, () => new Array(B).fill(0));
+    EDGES.forEach(ed => {
+      const bu = idx[blockOfNode(ed.u)];
+      const bv = idx[blockOfNode(ed.v)];
+      if (bu == null || bv == null) return;
+      if (bu === bv) e[bu][bv] += 2;       // half-edge convention: diagonal doubled
+      else { e[bu][bv] += 1; e[bv][bu] += 1; }
+    });
+    const outlierStart = clusterBlocks.length;
+    const cell = (cls, txt, hl) => {
+      const d = document.createElement("div");
+      d.className = "cell " + (cls || "");
+      d.textContent = txt;
+      if (hl) d.style.cssText = "background:rgba(199,128,30,.18);border-color:#c7801e;color:var(--paper)";
+      return d;
+    };
+    const wrap = document.createElement("div");
+    wrap.className = "blockmat";
+    wrap.style.cssText = "max-width:340px;grid-template-columns:repeat(" + (B + 1) + ", minmax(0, 1fr));margin:0";
+    wrap.appendChild(cell("head", ""));
+    labels.forEach(l => wrap.appendChild(cell("head", l)));
+    for (let i = 0; i < B; i++) {
+      wrap.appendChild(cell("head", labels[i]));
+      for (let j = 0; j < B; j++) {
+        const hl = i >= outlierStart && j >= outlierStart;
+        wrap.appendChild(cell("", String(e[i][j]), hl));
+      }
+    }
+    host.appendChild(wrap);
+  })();
+
+  // ── Centerpiece: dnc input vs output block heatmaps + per-cell loss ──
+  (function () {
+    if (!window.NETGEN_SBM_DNC) return;
+    const d = window.NETGEN_SBM_DNC;  // { B, labels, sizes, cells: [[i,j,p,e],...] }
+    const B = d.B;
+
+    // Normalise cell arrays into dense-ish maps for lookup.
+    const getCell = (i, j) => {
+      // linear search is OK: 696 cells, lookups only on hover.
+      const row = d.cells.find(c => c[0] === i && c[1] === j);
+      return row ? { p: row[2], e: row[3] } : { p: 0, e: 0 };
+    };
+
+    const maxVal = d3.max(d.cells, c => Math.max(c[2], c[3])) || 1;
+    const colorIn  = d3.scaleSequential(d3.interpolateBlues).domain([0, Math.log1p(maxVal)]);
+    const colorOut = d3.scaleSequential(d3.interpolateBlues).domain([0, Math.log1p(maxVal)]);
+
+    // Hardest-hit cell = max (input - output) over all cells. On dnc this is
+    // the 50-node diagonal cell (labels[2] = "13"), 2450 → 1556 half-edges.
+    const hardest = d.cells.reduce((best, c) => {
+      const loss = c[2] - c[3];
+      return (best == null || loss > best.loss) ? { i: c[0], j: c[1], loss } : best;
+    }, null);
+
+    function drawRingHighlight(g, cellSize, i, j, color) {
+      g.append("rect")
+        .attr("x", j * cellSize).attr("y", i * cellSize)
+        .attr("width", cellSize).attr("height", cellSize)
+        .attr("fill", "none").attr("stroke", color).attr("stroke-width", 1.6)
+        .attr("stroke-dasharray", "3 2");
+    }
+
+    function drawHeat(svgSel, getVal, color, { highlights } = {}) {
+      const svg = d3.select(svgSel);
+      svg.selectAll("*").remove();
+      const size = 300, pad = 10;
+      const cellSize = size / B;
+      const g = svg.append("g").attr("transform", `translate(${pad},${pad})`);
+      // Background
+      g.append("rect")
+        .attr("x", 0).attr("y", 0)
+        .attr("width", size).attr("height", size)
+        .attr("fill", "#ede4c9").attr("stroke", "#8e7a3c").attr("stroke-width", 1);
+
+      for (let i = 0; i < B; i++) {
+        for (let j = 0; j < B; j++) {
+          const v = getVal(i, j);
+          if (v <= 0) continue;
+          g.append("rect")
+            .attr("class", "heat-cell")
+            .attr("x", j * cellSize).attr("y", i * cellSize)
+            .attr("width", cellSize + 0.5).attr("height", cellSize + 0.5)
+            .attr("fill", color(Math.log1p(v)))
+            .attr("opacity", 0.95);
+        }
+      }
+      // Diagonal guide (drawn before highlights so rings sit on top).
+      g.append("line")
+        .attr("x1", 0).attr("y1", 0).attr("x2", size).attr("y2", size)
+        .attr("stroke", "#b9a263").attr("stroke-dasharray", "2 3").attr("opacity", 0.35);
+      (highlights || []).forEach(h => drawRingHighlight(g, cellSize, h.i, h.j, h.color));
+    }
+
+    const stdHighlights = [
+      { i: 0, j: 0, color: "#c92a2a" },       // outlier pseudo-block
+      { i: hardest.i, j: hardest.j, color: "#c7801e" },  // hardest-hit
+    ];
+    drawHeat("#heat-in",  (i, j) => getCell(i, j).p, colorIn,  { highlights: stdHighlights });
+    drawHeat("#heat-out", (i, j) => getCell(i, j).e, colorOut, { highlights: stdHighlights });
+
+    // Loss heatmap shares drawHeat with the input/output pair; legend
+    // is a sibling .step-desc so the SVG itself stays just the data.
+    const maxLoss = d3.max(d.cells, c => Math.max(c[2] - c[3], 0)) || 1;
+    const colorLoss = d3.scaleSequential(d3.interpolateReds)
+      .domain([0, Math.log1p(maxLoss)]);
+    drawHeat("#heat-loss",
+      (i, j) => Math.max(getCell(i, j).p - getCell(i, j).e, 0),
+      colorLoss, { highlights: stdHighlights });
+    document.getElementById("heat-loss-legend").textContent =
+      "red = outlier pseudo-block · amber = hardest-hit cell (loss " + maxLoss + " half-edges)";
+
+    // Hover tooltip over the three heatmaps: piggyback on a shared div.
+    const container = document.querySelector("#heat-in").closest(".disk-panel");
+    const tip = document.createElement("div");
+    tip.className = "cy-tooltip";
+    if (getComputedStyle(container).position === "static") container.style.position = "relative";
+    container.appendChild(tip);
+    function place(ev) {
+      const rect = container.getBoundingClientRect();
+      let x = ev.clientX - rect.left + 14;
+      let y = ev.clientY - rect.top + 14;
+      const tw = tip.offsetWidth, th = tip.offsetHeight;
+      if (x + tw > rect.width - 8) x = ev.clientX - rect.left - tw - 12;
+      if (y + th > rect.height - 8) y = ev.clientY - rect.top - th - 8;
+      tip.style.left = x + "px";
+      tip.style.top = y + "px";
+    }
+    function attachHover(svgSel) {
+      d3.select(svgSel).selectAll(".heat-cell")
+        .on("mouseenter", function (ev) {
+          const rect = this.getBoundingClientRect();
+          const cellSvg = d3.select(this.closest("svg")).node();
+          const svgRect = cellSvg.getBoundingClientRect();
+          // Recover (i, j) from the rect's x/y attributes via parent transform.
+          const r = d3.select(this);
+          const cx = parseFloat(r.attr("x"));
+          const cy = parseFloat(r.attr("y"));
+          const cellSize = parseFloat(r.attr("width")) - 0.5;
+          const j = Math.round(cx / cellSize);
+          const i = Math.round(cy / cellSize);
+          const c = getCell(i, j);
+          const li = d.labels[i] || "?";
+          const lj = d.labels[j] || "?";
+          tip.innerHTML =
+            '<div class="hd">block ' + li + " · " + lj + '</div>' +
+            '<div>input <b>' + c.p + '</b></div>' +
+            '<div>output <b>' + c.e + '</b></div>' +
+            '<div>loss <b>' + (c.p - c.e) + '</b></div>';
+          tip.classList.add("on");
+          place(ev);
+        })
+        .on("mousemove", function (ev) { place(ev); })
+        .on("mouseleave", function () { tip.classList.remove("on"); });
+    }
+    attachHover("#heat-in");
+    attachHover("#heat-out");
+    attachHover("#heat-loss");
+
+    // Readout totals
+    let sumIn = 0, sumOut = 0;
+    d.cells.forEach(c => { sumIn += c[2]; sumOut += c[3]; });
+    document.getElementById("dnc-ein").textContent  = (sumIn  / 2).toLocaleString();
+    document.getElementById("dnc-eout").textContent = (sumOut / 2).toLocaleString();
+    document.getElementById("dnc-loss").textContent = ((sumIn - sumOut) / 2).toLocaleString()
+      + " (" + ((1 - sumOut / sumIn) * 100).toFixed(1) + "%)";
+  })();
+
+})();
+</script>
+</body>
+</html>
