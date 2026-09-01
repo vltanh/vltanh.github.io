@@ -21,7 +21,7 @@
   };
 
   const initFallbackTooltips = (root = document) => {
-    root.querySelectorAll('[data-toggle="tooltip"]').forEach((trigger) => {
+    root.querySelectorAll('[data-toggle="tooltip"], [data-af-tooltip]').forEach((trigger) => {
       if (trigger.dataset.afTooltipBound === "true") {
         return;
       }
@@ -54,7 +54,7 @@
   };
 
   const initFallbackPopovers = (root = document) => {
-    root.querySelectorAll('[data-toggle="popover"]').forEach((trigger) => {
+    root.querySelectorAll('[data-toggle="popover"], [data-af-popover]').forEach((trigger) => {
       if (trigger.dataset.afPopoverBound === "true") {
         return;
       }

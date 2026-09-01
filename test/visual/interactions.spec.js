@@ -22,7 +22,7 @@ test("publication popover works without bootstrap compat runtime", async ({ page
   await page.goto("/al-folio/publications/", { waitUntil: "networkidle" });
   await stabilizeVisuals(page);
 
-  const popoverTrigger = page.locator('[data-toggle="popover"]').first();
+  const popoverTrigger = page.locator("[data-af-popover]").first();
   test.skip((await popoverTrigger.count()) === 0, "no popover trigger found in fixture data");
 
   await popoverTrigger.hover();

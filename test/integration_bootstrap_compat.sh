@@ -11,6 +11,7 @@ site_no_compat="${tmp_dir}/site-no-compat"
 site_with_compat="${tmp_dir}/site-with-compat"
 override_file="${tmp_dir}/compat-override.yml"
 no_compat_override_file="${tmp_dir}/no-compat-override.yml"
+no_compat_log="${tmp_dir}/no-compat.log"
 
 cat >"${no_compat_override_file}" <<'YAML'
 al_folio:
@@ -19,7 +20,13 @@ al_folio:
       enabled: false
 YAML
 
-bundle exec jekyll build --disable-disk-cache --config "_config.yml,${no_compat_override_file}" -d "${site_no_compat}" >/dev/null
+bundle exec jekyll build --disable-disk-cache --config "_config.yml,${no_compat_override_file}" -d "${site_no_compat}" >"${no_compat_log}" 2>&1
+
+if grep -q 'legacy bootstrap-marked content detected' "${no_compat_log}"; then
+  echo "legacy Bootstrap markers remain while compatibility is disabled" >&2
+  cat "${no_compat_log}" >&2
+  exit 1
+fi
 
 index_no_compat="${site_no_compat}/index.html"
 grep -q '/assets/css/tailwind.css' "${index_no_compat}"
