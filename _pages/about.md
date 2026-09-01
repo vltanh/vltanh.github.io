@@ -3,7 +3,7 @@ layout: about
 title: about
 permalink: /
 subtitle:
-description: The-Anh Vu-Le (Nah) — fourth-year Ph.D. student at the University of Illinois Urbana-Champaign, advised by Professor Tandy Warnow. Research on network science, community detection, and graph algorithms.
+description: The-Anh Vu-Le (Nah) — fifth-year Ph.D. student at the University of Illinois Urbana-Champaign, advised by Professor Tandy Warnow. Research on network science, community detection, and graph algorithms.
 keywords: The-Anh Vu-Le, vltanh, UIUC, Tandy Warnow, network science, community detection, graph algorithms, machine learning, PhD student
 # subtitle: <a href='#'>Affiliations</a>. Address. Contacts. Motto. Etc.
 
@@ -43,11 +43,13 @@ latest_posts:
 
 Greetings. :heart_eyes:
 
-I am a fourth-year Ph.D. student at the [Siebel School of Computing and Data Science](https://siebelschool.illinois.edu/), [University of Illinois Urbana-Champaign](https://illinois.edu/) (UIUC). I also earned my Master's degree along the way from UIUC.
+I am a fifth-year Ph.D. student at the [Siebel School of Computing and Data Science](https://siebelschool.illinois.edu/), [University of Illinois Urbana-Champaign](https://illinois.edu/) (UIUC). I also earned my Master's degree along the way from UIUC.
 
 I am blessed to be advised by Professor [Tandy Warnow](https://tandy.cs.illinois.edu/), who is both a great mentor and scientist. I am also fortunate to receive guidance from Professor [George Chacko](https://siebelschool.illinois.edu/about/people/faculty/chackoge), who is just as brilliant.
 
-**Research** My main research focus is network science, specifically detection and analysis of community structures in large and complex networks. Previously, I studied the theoretical aspect of machine learning and related fields, especially deep learning, generative models, reinforcement learning, and many other cool things. I also dabbled in pure mathematics, with a keen interest in using Lean to formalize theorems and proofs in various fields.
+**Research** My main research focus is network science, specifically detection and analysis of community structures in large and complex networks. My work revolve around four main topics: 1. the generation of synthetic networks with planted community structures, 2. the development of algorithms for community detection based on iterative extraction of quality communities, 3. post-processing of detected communities to improve their quality, and 4. ensemble methods for community detection.
+
+**Research Interests** I am fascinated by the theoretical aspect of machine learning and related fields, especially deep learning, generative models, reinforcement learning, and many other cool things. I also dabble in pure mathematics, with a keen interest in using Lean to formalize theorems and proofs in various fields.
 
 **Past study** I received my Bachelor's degree in Nov 2020 from the Honors Program of the [Faculty of Information Technology](https://www.fit.hcmus.edu.vn/vn/), [University of Science](https://hcmus.edu.vn/), [Vietnam National University, Ho Chi Minh City](https://vnuhcm.edu.vn/) (VNU-HCMUS). In 2021, I took graduate-level courses from a Master's program at the [John Von Neumann Institute](http://www.jvn.edu.vn/), [Vietnam National University, Ho Chi Minh City](https://vnuhcm.edu.vn/) (JVN).
 
