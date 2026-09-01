@@ -2,7 +2,9 @@
 layout: distill
 title: Hồi quy Softmax hay Tôi đã tốn một buổi chiều thứ Tư như thế nào?
 date: 2021-06-16
-description:
+description: Xây dựng hồi quy Softmax cho bài toán phân lớp đơn nhãn, từ hàm mất mát cross-entropy đến lan truyền xuôi, lan truyền ngược, và cài đặt.
+lang: vi
+math: true
 tags: math
 categories:
 giscus_comments: true

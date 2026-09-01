@@ -1,19 +1,27 @@
 $(document).ready(function () {
-  // add toggle functionality to abstract, award and bibtex buttons
-  $("a.abstract").click(function () {
-    $(this).parent().parent().find(".abstract.hidden").toggleClass("open");
-    $(this).parent().parent().find(".award.hidden.open").toggleClass("open");
-    $(this).parent().parent().find(".bibtex.hidden.open").toggleClass("open");
-  });
-  $("a.award").click(function () {
-    $(this).parent().parent().find(".abstract.hidden.open").toggleClass("open");
-    $(this).parent().parent().find(".award.hidden").toggleClass("open");
-    $(this).parent().parent().find(".bibtex.hidden.open").toggleClass("open");
-  });
-  $("a.bibtex").click(function () {
-    $(this).parent().parent().find(".abstract.hidden.open").toggleClass("open");
-    $(this).parent().parent().find(".award.hidden.open").toggleClass("open");
-    $(this).parent().parent().find(".bibtex.hidden").toggleClass("open");
+  // Toggle publication details while keeping keyboard and screen-reader state in sync.
+  $(".publication-toggle").click(function () {
+    var $button = $(this);
+    var targetId = $button.attr("data-toggle-target");
+    var target = document.getElementById(targetId);
+    if (!target) return;
+
+    var shouldOpen = !$(target).hasClass("open");
+    $button
+      .closest(".links")
+      .find(".publication-toggle")
+      .each(function () {
+        var siblingTarget = document.getElementById($(this).attr("data-toggle-target"));
+        if (siblingTarget) {
+          $(siblingTarget).removeClass("open").attr({ "aria-hidden": "true", inert: "" });
+        }
+        $(this).attr("aria-expanded", "false");
+      });
+
+    if (shouldOpen) {
+      $(target).addClass("open").attr("aria-hidden", "false").removeAttr("inert");
+      $button.attr("aria-expanded", "true");
+    }
   });
   $("a").removeClass("waves-effect waves-light");
 
@@ -77,9 +85,7 @@ $(document).ready(function () {
       var glyphs = ["💖", "💕", "💗", "💘", "❤️", "💞"];
       for (var i = 0; i < count; i++) {
         (function (n) {
-          var $h = $('<span class="profile-gallery-heart"></span>').text(
-            glyphs[Math.floor(Math.random() * glyphs.length)]
-          );
+          var $h = $('<span class="profile-gallery-heart"></span>').text(glyphs[Math.floor(Math.random() * glyphs.length)]);
           var angle = -Math.PI / 2 + (Math.random() - 0.5) * (Math.PI * 0.9);
           var dist = 80 + Math.random() * 70;
           var dx = Math.cos(angle) * dist;
@@ -94,9 +100,12 @@ $(document).ready(function () {
             "font-size": 1.3 + Math.random() * 0.9 + "rem",
           });
           $hearts.append($h);
-          setTimeout(function () {
-            $h.remove();
-          }, 1400 + n * 40);
+          setTimeout(
+            function () {
+              $h.remove();
+            },
+            1400 + n * 40
+          );
         })(i);
       }
     };
@@ -105,20 +114,18 @@ $(document).ready(function () {
       if (!gallery.length || $flipper.hasClass("is-flipping")) return;
       var idx = ((parseInt($profileGallery.attr("data-index"), 10) || 0) + 1) % gallery.length;
       var item = gallery[idx];
-      var reduceMotion =
-        window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
       var swap = function () {
         $img.removeAttr("srcset").removeAttr("data-src");
         $img.closest("picture").find("source").remove();
         $img.attr("src", item.src).attr("alt", item.alt || "");
         $profileGallery.attr("data-index", idx);
-        $flipper.attr("aria-label", (item.alt || "") + " (click to see more)");
+        $flipper.attr("aria-label", (item.alt || "Photo") + "; show next photo");
       };
 
       // Hearts only when landing on the engagement photo. 💖
-      var isEngagement =
-        (item.src && /engaged/i.test(item.src)) || (item.alt && /married|engaged/i.test(item.alt));
+      var isEngagement = (item.src && /engaged/i.test(item.src)) || (item.alt && /married|engaged/i.test(item.alt));
       if (isEngagement) {
         spawnHearts(9);
       }
@@ -136,5 +143,6 @@ $(document).ready(function () {
     };
 
     $flipper.on("click", advance);
+    $cue.on("click", advance);
   }
 });

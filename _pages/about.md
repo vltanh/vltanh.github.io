@@ -19,13 +19,15 @@ profile:
   image_circular: true # crops the image to make it circular
   gallery:
     - image: prof_pic.jpg
-      alt: prof_pic
+      alt: Portrait of The-Anh Vu-Le
     - image: engaged_cropped.jpg
-      alt: happily married
+      alt: The-Anh Vu-Le with his wife, Mai
   address: >
     <p>Urbana, Illinois, 61801</p>
 
 selected_papers: true # includes a list of papers marked as "selected={true}"
+publication_badges: true
+math: true
 social: true # includes social icons at the bottom of the page
 
 announcements:

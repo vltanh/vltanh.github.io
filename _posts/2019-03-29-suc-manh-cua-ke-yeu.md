@@ -2,7 +2,9 @@
 layout: distill
 title: Sức mạnh của kẻ yếu
 date: 2019-03-29
-description:
+description: Phân tích bài toán đấu súng ba người và nghịch lý chiến lược giúp xạ thủ yếu nhất có cơ hội sống sót cao nhất.
+lang: vi
+math: true
 tags: math
 categories:
 giscus_comments: true

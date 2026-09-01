@@ -2,7 +2,10 @@
 layout: distill
 title: Chọn ngẫu nhiên điểm trong hình tròn
 date: 2022-03-23
-description:
+description: Vì sao lấy bán kính đều không tạo ra điểm đều trong hình tròn, và cách sửa bằng lấy mẫu nghịch đảo hoặc lấy mẫu từ chối.
+lang: vi
+math: true
+zoomable: true
 og_image: /assets/img/2022-03-24_images/gen1.png
 tags: math
 categories:
@@ -60,7 +63,7 @@ def gen1(N):
 
 Làm theo cách này, kết quả thu được sẽ như hình dưới ($$N = 5000$$).
 
-{% include figure.liquid path="assets/img/2022-03-24_images/gen1.png" class="img-fluid" zoomable=true %}
+{% include figure.liquid path="assets/img/2022-03-24_images/gen1.png" alt="Các điểm lấy mẫu sai bị tập trung quá nhiều gần tâm hình tròn" class="img-fluid" zoomable=true %}
 
 Nếu để ý kỹ, mọi người sẽ nhận ra có một vấn đề với cách tiếp cận này: Có vẻ như là các điểm được chọn co cụm về tâm nhiều hơn.
 
@@ -198,7 +201,7 @@ def gen2(N):
 
 Kết quả thu được như hình bên dưới ($$N = 5000$$).
 
-{% include figure.liquid path="assets/img/2022-03-24_images/gen2.png" class="img-fluid" zoomable=true %}
+{% include figure.liquid path="assets/img/2022-03-24_images/gen2.png" alt="Các điểm được lấy mẫu đều trên toàn bộ diện tích hình tròn" class="img-fluid" zoomable=true %}
 
 ### Lấy mẫu từ chối
 

@@ -2,7 +2,10 @@
 layout: distill
 title: Hai thế giới
 date: 2019-03-31
-description:
+description: Dùng bài toán ném xiên để tìm đường bao của các quỹ đạo và giải thích ranh giới cong giữa hai miền trong một bức tranh giả tưởng.
+lang: vi
+math: true
+zoomable: true
 og_image: /assets/img/2019-03-31_images/two-worlds.png
 tags: math
 categories:
@@ -28,7 +31,7 @@ toc:
 
 Ở vương quốc nọ có cô họa sĩ nổi danh với nhiều tác phẩm độc, lạ, được thực hiện bằng nhiều cách thức độc đáo khác nhau. Một trong những tuyệt tác của cô là tác phẩm ``Hai thế giới'' (xem hình). Ở đó, cô đã phác họa nên sự phân biệt rạch ròi của hai vương quốc, một vương quốc thì rực rỡ sắc màu, trong khi vương quốc còn lại thì chìm trong một màu trắng mờ nhạt.
 
-{% include figure.liquid path="assets/img/2019-03-31_images/two-worlds.png" class="img-fluid" zoomable=true %}
+{% include figure.liquid path="assets/img/2019-03-31_images/two-worlds.png" alt="Bức tranh Hai thế giới với một miền đầy màu sắc và một miền màu trắng" class="img-fluid" zoomable=true %}
 
 Trong một buổi phỏng vấn, cô đã tiết lộ phương pháp thú vị mà cô đã dùng để vẽ nên bức tranh đặc biệt này:
 

@@ -1029,8 +1029,8 @@
     return `
   <div class="byline grid">
     <div class="authors-affiliations grid">
-      <h3>Authors</h3>
-      <h3>Affiliations</h3>
+      <p class="byline-heading">Authors</p>
+      <p class="byline-heading">Affiliations</p>
       ${frontMatter.authors
         .map(
           (author) => `
@@ -1057,7 +1057,7 @@
         .join("")}
     </div>
     <div>
-      <h3>Published</h3>
+      <p class="byline-heading">Published</p>
       ${
         frontMatter.publishedDate
           ? `

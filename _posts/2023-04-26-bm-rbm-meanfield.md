@@ -2,7 +2,9 @@
 layout: distill
 title: Máy Boltzmann (Phần 1)
 date: 2023-04-26
-description:
+description: Tổng quan về mô hình năng lượng, máy Boltzmann, máy Boltzmann giới hạn, và cách xấp xỉ mean-field tạo chặn dưới biến phân.
+lang: vi
+math: true
 tags: math
 categories:
 giscus_comments: true

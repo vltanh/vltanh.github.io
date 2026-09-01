@@ -2073,8 +2073,8 @@ d-appendix > distill-appendix {
     return `
   <div class="byline grid">
     <div class="authors-affiliations grid">
-      <h3>Authors</h3>
-      <h3>Affiliations</h3>
+      <p class="byline-heading">Authors</p>
+      <p class="byline-heading">Affiliations</p>
       ${frontMatter.authors
         .map(
           (author) => `
@@ -2101,7 +2101,7 @@ d-appendix > distill-appendix {
         .join("")}
     </div>
     <div>
-      <h3>Published</h3>
+      <p class="byline-heading">Published</p>
       ${
         frontMatter.publishedDate
           ? `

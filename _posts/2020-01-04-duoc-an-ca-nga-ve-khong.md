@@ -2,7 +2,9 @@
 layout: distill
 title: Được ăn cả, ngã về không
 date: 2020-01-04
-description:
+description: So sánh chiến thuật đặt cược thận trọng và tất tay trong bài toán phá sản của con bạc bằng xác suất hấp thụ của chuỗi Markov.
+lang: vi
+math: true
 tags: math
 categories:
 giscus_comments: true

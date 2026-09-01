@@ -2,7 +2,9 @@
 layout: distill
 title: Nên đánh hay nên hòa
 date: 2019-04-14
-description:
+description: Giới thiệu phân tích cạnh tranh qua bài toán thuê ván trượt, từ chiến thuật tất định đến chiến thuật ngẫu nhiên tối ưu.
+lang: vi
+math: true
 tags: math
 categories:
 giscus_comments: true

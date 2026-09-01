@@ -21,7 +21,14 @@ manage_gemfile_lock() {
 
 start_jekyll() {
     manage_gemfile_lock
-    bundle exec jekyll serve --watch --port=8080 --host=0.0.0.0 --livereload --verbose --trace --force_polling &
+    # The repository is bind-mounted from the host. Disk cache files can be
+    # left behind under a different UID by another image or a host Jekyll run,
+    # which makes the next container fail before the server starts. The cache
+    # is only a build-speed optimization, so keep local Docker serving
+    # stateless and avoid writing .jekyll-cache altogether. Build into /tmp
+    # for the same reason: _site is generated output and should not make the
+    # bind-mounted source depend on a container UID.
+    bundle exec jekyll serve --watch --port=8080 --host=0.0.0.0 --livereload --verbose --trace --force_polling --disable-disk-cache --destination=/tmp/jekyll-site &
 }
 
 start_jekyll

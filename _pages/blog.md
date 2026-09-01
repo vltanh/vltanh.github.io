@@ -2,6 +2,7 @@
 layout: default
 permalink: /blog/
 title: blog
+description: Notes in Vietnamese and English on mathematics, machine learning, algorithms, and occasional CTF write-ups by The-Anh Vu-Le.
 nav: true
 nav_order: 1
 pagination:

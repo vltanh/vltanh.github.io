@@ -2,7 +2,7 @@
 layout: page
 permalink: /repositories/
 title: repositories
-description: code I write, break, and occasionally ship
+description: Open-source research software and personal coding projects by The-Anh Vu-Le.
 nav: true
 nav_order: 5
 ---
@@ -22,6 +22,7 @@ nav_order: 5
 {% if site.data.repositories.github_users.size > 1 %}
 
 ### {{ user }}
+
 {% endif %}
 
 <div class="repositories repositories--trophies">

@@ -2,7 +2,10 @@
 layout: distill
 title: Chia đôi một góc
 date: 2025-11-13
-description:
+description: Dựng đường phân giác bằng thước thẳng và compa theo phương pháp cổ điển và đại số, rồi mở rộng sang căn bậc hai số phức và chia ba góc.
+lang: vi
+math: true
+zoomable: true
 og_image: /assets/img/2025-11-13_images/bai-toan.png
 tags: math
 categories:
@@ -50,7 +53,7 @@ $$
 2. Chọn ba điểm $$A$$, $$B$$ và $$C$$ không nhất thiết khác nhau bất kì. Vẽ một đường tròn với tâm tại điểm $$C$$ và bán kính là khoảng cách giữa hai điểm $$A$$ và $$B$$. Hãy hình dung việc mở rộng compa cho đến ngang bằng khoảng cách giữa hai điểm $$A$$ và $$B$$, sau đó vẽ đường tròn với tâm tại $$C$$.
 3. Thêm giao điểm giữa hai đường thẳng, hoặc giữa hai đường tròn, hoặc giữa một đường thẳng và một đường tròn vào tập hợp các điểm mà ta có thể sử dụng trong các bước tiếp theo.
 
-{% include figure.liquid path="assets/img/2025-11-13_images/bai-toan.png" class="img-fluid" zoomable=true %}
+{% include figure.liquid path="assets/img/2025-11-13_images/bai-toan.png" alt="Góc AOB và tia phân giác OC cần dựng" class="img-fluid" zoomable=true %}
 
 ## Giải quyết
 
@@ -67,7 +70,7 @@ Phương pháp này hoàn toàn đối xứng, tức là nếu ta đổi vai tr�
 
 Minh họa các bước trên như sau:
 
-{% include figure.liquid path="assets/img/2025-11-13_images/pp-codien.png" class="img-fluid" zoomable=true %}
+{% include figure.liquid path="assets/img/2025-11-13_images/pp-codien.png" alt="Các bước dựng đường phân giác bằng phương pháp cổ điển" class="img-fluid" zoomable=true %}
 
 Việc chứng minh rằng tia $$OC$$ chia đôi góc $$\angle AOB$$ rất đơn giản, chỉ cần nhận thấy $$OBCD$$ là một hình thoi ($$BC = BO = DO = DC$$).
 
@@ -81,7 +84,7 @@ Trước hết, để đơn giản hóa bài toán mà không làm mất tính t
 - Điểm $$A$$ tương ứng với điểm $$(1,0)$$.
 - Điểm $$B$$ nằm trên đường tròn đơn vị (tâm tại gốc tọa độ và bán kính bằng $$1$$). Điều này không làm mất tính tổng quát vì ta có thể xét giao điểm của tia $$OB$$ với đường tròn đơn vị thay vì điểm $$B$$ ban đầu.
 
-{% include figure.liquid path="assets/img/2025-11-13_images/bai-toan-don-gian.png" class="img-fluid" zoomable=true %}
+{% include figure.liquid path="assets/img/2025-11-13_images/bai-toan-don-gian.png" alt="Bài toán đường phân giác được chuẩn hóa trên đường tròn đơn vị" class="img-fluid" zoomable=true %}
 
 Với những giả sử này, ta biết được điểm $$B$$ có tọa độ $$(\cos x, \sin x)$$. Đặc biệt hơn, ta cũng biết được điểm $$C$$ cần tìm sẽ có tọa độ dạng $$(\cos \frac{x}{2}, \sin \frac{x}{2})$$. Câu hỏi lúc này trở thành: làm thế nào để dựng được điểm có tọa độ $$(\cos \frac{x}{2}, \sin \frac{x}{2})$$ chỉ sử dụng thước thẳng và compa, biết rằng ta đã có sẵn điểm $$(1,0)$$ và điểm $$(\cos x, \sin x)$$?
 
@@ -115,7 +118,7 @@ Từ đó, ta sẽ lần lượt tìm cách dựng được các điểm tương
 
 Minh họa các bước trên như sau:
 
-{% include figure.liquid path="assets/img/2025-11-13_images/pp-phuctap.png" class="img-fluid" zoomable=true %}
+{% include figure.liquid path="assets/img/2025-11-13_images/pp-phuctap.png" alt="Các bước dựng đường phân giác bằng phương pháp đại số phức tạp" class="img-fluid" zoomable=true %}
 
 Bạn đọc tinh ý sẽ ngay lập tức nhận ra vấn đề ở các bước 1, 3, và 4. Bởi vì các bước này đều yêu cầu nhiều hơn một thao tác dựng hình cơ bản. Cụ thể,
 
@@ -135,7 +138,7 @@ Ta xét cụ thể trường hợp cần dóng từ điểm $$B$$ vuông góc v�
 
 Ta có thể dễ dàng chứng minh rằng đường thẳng $$BG$$ vuông góc với đường thẳng $$OA$$ bằng cách nhận thấy tứ giác $$OGFG'$$ là hình thoi ($$OG = OF = FG = FG'$$) và việc $$BO = BF$$ cho thấy $$B$$ nằm trên đường trung trực của đoạn thẳng $$OF$$, chính là $$GG'$$.
 
-{% include figure.liquid path="assets/img/2025-11-13_images/vuonggoc.png" class="img-fluid" zoomable=true %}
+{% include figure.liquid path="assets/img/2025-11-13_images/vuonggoc.png" alt="Cách dựng đường thẳng vuông góc bằng thước thẳng và compa" class="img-fluid" zoomable=true %}
 
 #### Tìm trung điểm của đoạn thẳng
 
@@ -146,7 +149,7 @@ Ta xét cụ thể trường hợp cần tìm trung điểm của đoạn thẳn
 
 Tương tự như trên, ta có thể dễ dàng chứng minh rằng $$E$$ là trung điểm của đoạn thẳng $$OD$$ bằng cách nhận thấy tứ giác $$OHH'D$$ là hình thoi ($$OH = OD = DH = DH'$$).
 
-{% include figure.liquid path="assets/img/2025-11-13_images/trungdiem.png" class="img-fluid" zoomable=true %}
+{% include figure.liquid path="assets/img/2025-11-13_images/trungdiem.png" alt="Cách dựng trung điểm của một đoạn thẳng" class="img-fluid" zoomable=true %}
 
 #### Lấy căn bậc hai độ dài của đoạn thẳng
 
@@ -162,7 +165,7 @@ Gọi $$c > 0$$ là độ dài của đoạn thẳng $$OE$$. Ta xét cụ thể 
 
 Thực tế, đây cũng chính là cách để tìm đoạn thẳng có độ dài là trung bình hình học của hai độ dài cho trước (ở đây là $$c$$ và $$1$$). Việc chứng minh rằng $$EK = \sqrt{c}$$ dựa trên đẳng thức $$EK^2 = EO \cdot EI = c \cdot 1 = c$$ ($$EK$$ vuông góc $$OI$$) của $$\Delta OKI$$ vuông tại $$K$$ ($$OI$$ là đường kính hình tròn tâm $$J$$).
 
-{% include figure.liquid path="assets/img/2025-11-13_images/canbac2.png" class="img-fluid" zoomable=true %}
+{% include figure.liquid path="assets/img/2025-11-13_images/canbac2.png" alt="Cách dựng đoạn thẳng có độ dài bằng căn bậc hai của một độ dài cho trước" class="img-fluid" zoomable=true %}
 
 ## Mở rộng
 

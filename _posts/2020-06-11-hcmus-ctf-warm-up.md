@@ -2,7 +2,9 @@
 layout: distill
 title: Write-up for HCMUS-CTF Warm-Up Stage
 date: 2020-06-11
-description:
+description: Solutions and walkthroughs for the Misc, Forensics, Cryptography, Web, Pwn, and Reverse Engineering challenges from the HCMUS-CTF Warm-Up Stage.
+lang: en
+zoomable: true
 og_image: /assets/img/2020-06-11_images/Logo.png
 tags: ctf
 categories:
@@ -41,7 +43,7 @@ As the title suggests, check the logo but on a light-colored background to see t
 
 Like this:
 
-{% include figure.liquid path="assets/img/2020-06-11_images/Logo.png" class="img-fluid" zoomable=true %}
+{% include figure.liquid path="assets/img/2020-06-11_images/Logo.png" alt="HCMUS-CTF logo revealing a hidden flag on a light background" class="img-fluid" zoomable=true %}
 
 **==>** `HCMUS-CTF{this_is_a_function_not_a_bug_at_all}` **<==**
 
@@ -108,7 +110,7 @@ https://drive.google.com/open?id=1tfJYN6wwd-yoAfnfVl-eNBKbbh6HQBxa
 
 Use `audacity` to load the WAV file. It is common to hide the message in the Spectrogram format so we switch to that view. Check 1:41 to 1:47. Voila?
 
-{% include figure.liquid path="assets/img/2020-06-11_images/galaxy.png" class="img-fluid" zoomable=true %}
+{% include figure.liquid path="assets/img/2020-06-11_images/galaxy.png" alt="Galaxy challenge image used for steganography analysis" class="img-fluid" zoomable=true %}
 
 **==>** `HCMUS-CTF{sound_likes_Outer_Space}` **<==**
 
@@ -139,7 +141,7 @@ File: unknown
 
 Now this one is real funny. `hexdump -C unknown` shows that it is a PNG image. However it is corrupted somehow. Normal people might use [PCRT](https://github.com/sherlly/PCRT) for this b...but... I used [this non-free service](https://online.officerecovery.com/pixrecovery/) instead. And it gave me a watermarked version. Luckily I was able to make out the flag (can you?).
 
-{% include figure.liquid path="assets/img/2020-06-11_images/unknown.png" class="img-fluid" zoomable=true %}
+{% include figure.liquid path="assets/img/2020-06-11_images/unknown.png" alt="Unknown challenge image with embedded forensic clues" class="img-fluid" zoomable=true %}
 
 **==>** `HCMUS-CTF{l0l_CMU_da_b3s}` **<==**
 

@@ -8,6 +8,7 @@ og_image: /assets/img/netgen/feature.png
 importance: 3
 category: work
 project_intro: true
+math: true
 icons:
   - file: python/python-original.svg
     site: devicons
@@ -19,7 +20,7 @@ repository:
   - vltanh/network-generation
 ---
 
-Given a network $$G$$ (undirected, unweighted, simple) with a community structure $$\mathcal{C}$$ on its nodes, we want to sample a family of networks that are *statistically similar* to $$G$$ and $$\mathcal{C}$$ without being identical. $$\mathcal{C}$$ can be ground-truth or produced by a community-detection algorithm; the generator does not care which. What "statistically similar" means differs from one generator to the next: each freezes a different summary of $$G$$ and $$\mathcal{C}$$, and randomises the rest.
+Given a network $$G$$ (undirected, unweighted, simple) with a community structure $$\mathcal{C}$$ on its nodes, we want to sample a family of networks that are _statistically similar_ to $$G$$ and $$\mathcal{C}$$ without being identical. $$\mathcal{C}$$ can be ground-truth or produced by a community-detection algorithm; the generator does not care which. What "statistically similar" means differs from one generator to the next: each freezes a different summary of $$G$$ and $$\mathcal{C}$$, and randomises the rest.
 
 Scoring a community-detection algorithm requires networks whose answer can be checked. An empirical network gives only one labelling, which may itself be wrong, and a single network is a sample of one. Synthetics fix that: each generator emits a network and its ground-truth clustering together, across as many seeds, sizes, and noise levels as the test demands.
 
@@ -38,6 +39,7 @@ This project wraps seven such generators under a single pipeline that is shared 
 Each generator has its own page: a vertical scroll that starts with the question the generator tries to answer, meets the shared input, walks through the stages one widget at a time, and ends with a plain note on what is preserved and what drifts.
 
 Two labels recur across the pages: a node is either inside a non-trivial community or standing alone, and generators treat the two cases differently.
+
 - **clustered**: node that belongs to a community of size $$\geq 2$$.
 - **outlier**: node that is unclustered, or the sole member of a singleton community.
 
@@ -63,7 +65,7 @@ Every generator runs the same three stages.
 
 1. **Profile.** Read $$G$$ and $$\mathcal{C}$$, extract only the summary the generator needs (block edge counts, degree sequence, mixing parameter, power-law fits, etc.), and write it out as the gen stage's only input.
 2. **Generate.** Consume the profile and sample a fresh graph. This stage runs standalone and never reads the original network.
-3. **Post-process.** Up to three optional steps. *Match-degree* rewires the generated edges so the output degree sequence aligns to the input (see the [degree-matcher comparison](/netgen/matcher.html)). *Simplify* collapses parallel edges and drops self-loops. *Singleton drop* removes size-1 clusters and relabels the lone inhabitant as an outlier.
+3. **Post-process.** Up to three optional steps. _Match-degree_ rewires the generated edges so the output degree sequence aligns to the input (see the [degree-matcher comparison](/netgen/matcher.html)). _Simplify_ collapses parallel edges and drops self-loops. _Singleton drop_ removes size-1 clusters and relabels the lone inhabitant as an outlier.
 
 ## Reproducibility
 

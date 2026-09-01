@@ -2,7 +2,9 @@
 layout: page
 permalink: /publications/
 title: publications
-description:
+description: Publications by The-Anh Vu-Le on network science, community detection, graph algorithms, machine learning, and computer vision.
+publication_badges: true
+math: true
 years: [2022, 2023, 2025]
 nav: true
 nav_order: 2

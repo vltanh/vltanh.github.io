@@ -2,7 +2,7 @@
 layout: page
 title: projects
 permalink: /projects/
-description: things I enjoy
+description: Research and personal software projects by The-Anh Vu-Le, spanning network science, formalized mathematics, and computational experiments.
 nav: true
 nav_order: 3
 display_categories: [fun, work]
