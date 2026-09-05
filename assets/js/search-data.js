@@ -44,7 +44,18 @@ ninja.data = [{
           handler: () => {
             window.location.href = "/repositories/";
           },
-        },{id: "post-chia-đôi-một-góc",
+        },{id: "post-trại-súc-vật",
+        
+          title: "Trại súc vật",
+        
+        description: "",
+        section: "Posts",
+        handler: () => {
+          
+            window.location.href = "/blog/2026/trai-suc-vat/";
+          
+        },
+      },{id: "post-chia-đôi-một-góc",
         
           title: "Chia đôi một góc",
         
