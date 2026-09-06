@@ -20,8 +20,8 @@ toc:
   - name: Giải pháp đầu tiên
   - name: Giải pháp thứ hai
     subsections:
-      - name: Sơ khởi
-      - name: "Cải tiến"
+      - name: Mô phỏng hai băng chuyền
+      - name: Ghép cặp trực tiếp
   - name: Giải pháp thứ ba
 ---
 
@@ -73,7 +73,7 @@ Trường hợp còn lại là cả hai nhãn đều nằm trên con vật. Hệ
 
 Mai nhận xét rằng mỗi bước của chương trình hai băng giờ được thay bằng một lượt mô phỏng gồm nhiều bước trên một băng. Phần thời gian tăng thêm chủ yếu đến từ việc máy ảnh phải đi lại giữa hai đoạn dữ liệu. Mặc dù chi phí rẻ hơn khi xây dựng hệ thống một băng là một đánh đổi xứng đáng cho việc tốn nhiều bước hơn, Mai vẫn muốn tìm một giải pháp tốt hơn nữa.
 
-### “Cải tiến”: Ghép cặp trực tiếp
+### Ghép cặp trực tiếp
 
 Đúng lúc ấy, Thế Anh nảy ra một ý tưởng. Theo anh, Mai đã quá chú tâm vào việc mô phỏng hệ thống hai băng, trong khi chương trình trên một băng có thể đơn giản hơn nhiều. Chỉ cần giữ hòn đá mốc ở đầu, bỏ hai hòn đá còn lại. Việc tháo nhãn để chuyển sang con tiếp theo cũng không cần thiết: tại sao không giữ nguyên nhãn trên những con đã được ghép cặp?
 
@@ -87,7 +87,7 @@ Mai đồng ý rằng cách này đơn giản hơn hẳn. Tuy vậy, tốc độ
 
 ## Giải pháp thứ ba
 
-Mai cho rằng hoàn toàn có thể dán nhãn cho xấp xỉ một nửa số con mỗi loài trong một lượt di chuyển máy ảnh từ đầu tới cuối băng chuyền. Ý tưởng là so sánh các chữ số trong biểu diễn nhị phân của số gà và số lợn, bắt đầu từ chữ số ngoài cùng bên phải. Hai số bằng nhau thì có cùng số dư khi chia cho 2 và cùng thương nguyên. Vì vậy, ta có thể so sánh số dư trước, rồi tiếp tục lặp lại một cách đệ quy với hai thương nguyên vừa thu được. Nếu hai số ban đầu khác nhau, sẽ có một vòng mà hai số dư khác nhau.
+Mai cho rằng hoàn toàn có thể dán nhãn cho xấp xỉ một nửa số con mỗi loài trong một lượt di chuyển máy ảnh từ đầu tới cuối băng chuyền. Ý tưởng là so sánh các chữ số trong biểu diễn nhị phân của số gà và số lợn, bắt đầu từ chữ số ngoài cùng bên phải. Hai số bằng nhau khi và chỉ khi chúng có cùng số dư khi chia cho 2 và cùng thương nguyên. Vì vậy, ta có thể so sánh số dư trước, rồi lặp lại phép so sánh với hai thương nguyên vừa thu được. Nếu hai số ban đầu khác nhau, sẽ có một vòng mà hai số dư khác nhau.
 
 Cách bố trí băng giống giải pháp ghép cặp: hòn đá mốc, dãy gà, dãy lợn, rồi đến các ô trống. Ban đầu, tất cả các con vật đều chưa có nhãn. Mỗi vòng lặp gồm hai lượt quét từ trái sang phải, và máy ảnh quay về hòn đá mốc giữa các lượt.
 
