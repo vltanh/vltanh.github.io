@@ -2,11 +2,11 @@
 layout: distill
 title: Trại súc vật
 date: 2026-09-04
-description: 
+description:
 lang: vi
 math: true
 zoomable: true
-og_image: 
+og_image:
 tags: math
 categories:
 giscus_comments: true
