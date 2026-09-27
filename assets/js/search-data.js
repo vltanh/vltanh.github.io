@@ -235,6 +235,11 @@ ninja.data = [{
           description: "A pipeline-unified gallery of community-aware synthetic network generators, each illustrated stage by stage on the same small example.",
           section: "Projects",handler: () => {
               window.location.href = "/projects/network-generation/";
+            },},{id: "projects-formalization-of-squares-in-circles-in-lean-4",
+          title: 'Formalization of “Squares in Circles” in Lean 4',
+          description: "Lean 4 proofs of the smallest circle that holds n unit squares, and of every packing that achieves it, for n = 1 to 5 and n = 7.",
+          section: "Projects",handler: () => {
+              window.location.href = "/projects/lean4-squares-in-circles/";
             },},{
         id: 'social-discord',
         title: 'Discord',
