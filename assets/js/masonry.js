@@ -1,1 +1,22 @@
-document.addEventListener("DOMContentLoaded",()=>{const o=document.querySelector(".grid");if(!o||"function"!=typeof window.Masonry)return;const e=new window.Masonry(o,{gutter:10,horizontalOrder:!0,itemSelector:".grid-item"});if("function"==typeof window.imagesLoaded){const n=window.imagesLoaded(o);if(n&&"function"==typeof n.on)return void n.on("progress",()=>e.layout())}e.layout()});
+document.addEventListener("DOMContentLoaded", () => {
+  const grid = document.querySelector(".grid");
+  if (!grid || typeof window.Masonry !== "function") {
+    return;
+  }
+
+  const masonry = new window.Masonry(grid, {
+    gutter: 10,
+    horizontalOrder: true,
+    itemSelector: ".grid-item",
+  });
+
+  if (typeof window.imagesLoaded === "function") {
+    const tracker = window.imagesLoaded(grid);
+    if (tracker && typeof tracker.on === "function") {
+      tracker.on("progress", () => masonry.layout());
+      return;
+    }
+  }
+
+  masonry.layout();
+});
