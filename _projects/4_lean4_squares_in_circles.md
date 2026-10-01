@@ -10,7 +10,7 @@ category: fun
 project_intro: true
 math: true
 icons:
-  - file: assets/img/lean4-analysis-tao/lean_logo.svg
+  - file: assets/img/icons/lean_logo.svg
 repository:
   - vltanh/lean4-squares-in-circles
 _styles: >-
