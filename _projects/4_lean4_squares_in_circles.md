@@ -63,7 +63,7 @@ Seven squares need a different idea, because the arcs come up short. In the disk
 
 The radius follows in every case: a packing in a smaller disk would also lie in the disk of radius $$R_n$$ with the same centre, so it would be one of these packings, but those have corners on the circle of radius $$R_n$$.
 
-Lean checks every step, and nothing is assumed beyond Lean's three standard axioms. The repository is also set up for the [Palomar](https://palomar-registry.org/) registry, which replays the proofs through two more kernels, NanoDa and con-ron. The details are in [docs/proof/](https://github.com/vltanh/lean4-squares-in-circles/blob/main/docs/proof/README.md), an illustrated textbook with one chapter per case, where every result links to the Lean code that proves it.
+Lean checks every step, and nothing is assumed beyond Lean's three standard axioms. The proofs are registered in the [Palomar registry](https://palomar-registry.org/entry.html?id=PALOMAR-2026-10-02-000002&version=1) as PALOMAR-2026-10-02-000002, and Palomar's check replays them through two more kernels, NanoDa and con-ron. The details are in [docs/proof/](https://github.com/vltanh/lean4-squares-in-circles/blob/main/docs/proof/README.md), an illustrated textbook with one chapter per case, where every result links to the Lean code that proves it.
 
 ## What's next
 
