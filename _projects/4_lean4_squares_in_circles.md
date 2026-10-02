@@ -75,7 +75,7 @@ Larger packings eventually grow extra layers, and the outer squares never come n
 
 ## Contributors
 
-ChatGPT 6 Pro and Claude Opus 5 and 5.5 wrote the proofs and the Lean code, and I directed and reviewed the work. The first proof for six squares, with numerical certificates, came from ChatGPT's latest model and Claude Opus 5.5 working together ([PR #6](https://github.com/vltanh/lean4-squares-in-circles/pull/6)); ChatGPT 6 Pro turned it into the analytical proof and its Lean code. Who did what, and when, is in [docs/contributors.md](https://github.com/vltanh/lean4-squares-in-circles/blob/main/docs/contributors.md).
+ChatGPT 6 Pro and Claude Opus 5 and 5.5 wrote the proofs and the Lean code, and I directed and reviewed the work. Who did what, and when, is in [docs/contributors.md](https://github.com/vltanh/lean4-squares-in-circles/blob/main/docs/contributors.md).
 
 ## References
 
