@@ -240,6 +240,16 @@ ninja.data = [{
           description: "Lean 4 proofs of the smallest circle that holds n unit squares, and of every packing that achieves it, for n = 1 to 7.",
           section: "Projects",handler: () => {
               window.location.href = "/projects/lean4-squares-in-circles/";
+            },},{id: "projects-optimality-and-uniqueness-of-gerver-39-s-sofa-in-lean-4",
+          title: 'Optimality and uniqueness of Gerver&amp;#39;s sofa in Lean 4',
+          description: "Lean 4 proofs that Gerver&#39;s sofa is the largest shape that can be carried around the corner of a hallway, and that it is the only one, up to rigid motions.",
+          section: "Projects",handler: () => {
+              window.location.href = "/projects/lean4-moving-sofa/";
+            },},{id: "projects-formalize-math-paper-an-agent-skill-for-formalizing-papers-in-lean-4",
+          title: 'formalize-math-paper, an agent skill for formalizing papers in Lean 4',
+          description: "An Agent Skill that guides an AI coding agent through formalizing a mathematics paper in Lean 4, from reading the paper to an audited project ready for the Palomar registry.",
+          section: "Projects",handler: () => {
+              window.location.href = "/projects/formalize-math-paper/";
             },},{
         id: 'social-discord',
         title: 'Discord',
