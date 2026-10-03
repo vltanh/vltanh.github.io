@@ -22,7 +22,7 @@ Agents can now write a lot of Lean, but a formalization is only worth something 
 
 <div class="row justify-content-center">
   <div class="col-sm-12 mt-3 mt-md-0">
-    <img src="/assets/img/formalize-math-paper/workflow.svg" class="img-fluid" alt="The ten phases of the skill, in two rows of five boxes joined by arrows: configure, inventory, project, statements; stage 1 and stage 2, the proofs; verify and cleanup; audit and package">
+    {% include figure.liquid path="assets/img/formalize-math-paper/workflow.svg" class="img-fluid" alt="The ten phases of the skill, in two rows of five boxes joined by arrows: configure, inventory, project, statements; stage 1 and stage 2, the proofs; verify and cleanup; audit and package" %}
   </div>
 </div>
 

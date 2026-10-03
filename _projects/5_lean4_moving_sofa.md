@@ -19,10 +19,9 @@ Anyone who has moved a couch knows the moment: the hallway turns a corner, and t
 
 <div class="row justify-content-center">
   <div class="col-sm-8 mt-3 mt-md-0">
-    <img src="/assets/img/lean4-moving-sofa/gerver-moving.gif" class="img-fluid rounded" alt="Gerver's sofa slides along the horizontal side of an L-shaped hallway of unit width, turns the corner, and leaves along the vertical side">
+    {% include figure.liquid path="assets/img/lean4-moving-sofa/gerver-moving.gif" class="img-fluid rounded mx-auto d-block" width="480" avoid_scaling=true alt="Gerver's sofa slides along the horizontal side of an L-shaped hallway of unit width, turns the corner, and leaves along the vertical side" caption="Gerver's sofa going around the corner. The animation is computed from the same definitions as the proofs." %}
   </div>
 </div>
-<div class="caption">Gerver's sofa going around the corner. The animation is computed from the same definitions as the proofs.</div>
 
 The best shape known is Gerver's sofa, found by Joseph Gerver in 1992, of area $$2.2195\ldots$$. Its boundary is made of 18 pieces of curves, and it is the sofa above. In 2024, Jineon Baek proved that no moving sofa is larger. This project checks that proof in Lean 4, and adds two results of its own:
 
@@ -48,10 +47,9 @@ Baek's proof narrows down what a largest sofa can look like until the upper boun
 
 <div class="row justify-content-center">
   <div class="col-sm-9 mt-3 mt-md-0">
-    <img src="/assets/img/lean4-moving-sofa/gerver-sofa.svg" class="img-fluid" alt="Gerver's sofa between the lines y = 0 and y = 1, with the arch of its niche traced by the inner corner of the moving hallway">
+    {% include figure.liquid path="assets/img/lean4-moving-sofa/gerver-sofa.svg" class="img-fluid" alt="Gerver's sofa between the lines y = 0 and y = 1, with the arch of its niche traced by the inner corner of the moving hallway" caption="Gerver's sofa, seen from the sofa as the hallway moves around it. The inner corner of the hallway traces the arch underneath (orange), its rotation path." %}
   </div>
 </div>
-<div class="caption">Gerver's sofa, seen from the sofa as the hallway moves around it. The inner corner of the hallway traces the arch underneath (orange), its rotation path.</div>
 
 Seen from the sofa, the hallway rotates and slides around it, and the sofa fits inside every position of the hallway. A largest sofa can be taken to be _monotone_: the intersection of the hallways that touch it from outside. Such a sofa is a convex _cap_ minus the _niche_ carved out by the inner corner, so the problem becomes one about convex bodies. Next, a largest sofa is a limit of polygons whose opposite sides balance in length, an idea of Gerver's that Baek repairs, because Gerver's argument could disconnect the sofa. Balance gives room for a full right-angle turn, and a differential inequality on the balanced sides then shows that the corner's path, the arch above, never loops back. For such sofas, Baek encloses the sofa in a region shaped like Gerver's sofa, and its area $$\mathcal{Q}$$ is a quadratic function of three convex bodies. Mamikon's theorem on swept areas makes it concave, and Romik's differential equations show that no direction increases it at Gerver's sofa, which is therefore its maximum.
 
