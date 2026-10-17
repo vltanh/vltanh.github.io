@@ -291,6 +291,13 @@ ninja.data = [{
           window.open("https://www.linkedin.com/in/vltanh", "_blank");
         },
       },{
+        id: 'social-mastodon',
+        title: 'Mastodon',
+        section: 'Socials',
+        handler: () => {
+          window.open("https://mathstodon.xyz/@vltanh", "_blank");
+        },
+      },{
         id: 'social-scholar',
         title: 'Google Scholar',
         section: 'Socials',
