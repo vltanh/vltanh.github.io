@@ -5,6 +5,22 @@ echo "Entry point script running"
 
 CONFIG_FILE=_config.yml
 DOCKER_DESTINATION=/tmp/_site
+jekyll_pid=
+watcher_pid=
+
+cleanup() {
+    if [ -n "$watcher_pid" ]; then
+        kill "$watcher_pid" 2>/dev/null || true
+        wait "$watcher_pid" 2>/dev/null || true
+    fi
+    if [ -n "$jekyll_pid" ]; then
+        kill "$jekyll_pid" 2>/dev/null || true
+        wait "$jekyll_pid" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # Function to manage Gemfile.lock
 manage_gemfile_lock() {
@@ -34,17 +50,28 @@ start_jekyll() {
     manage_gemfile_lock
     ensure_bundle_deps
     mkdir -p "$DOCKER_DESTINATION"
-    bundle exec jekyll serve --watch --port=8080 --host=0.0.0.0 --livereload --verbose --trace --force_polling --destination "$DOCKER_DESTINATION" --config "$CONFIG_FILE" &
+    # Use memory caching so host-owned disk cache files cannot block startup.
+    bundle exec jekyll serve --watch --port=8080 --host=0.0.0.0 --livereload --verbose --trace --force_polling --disable-disk-cache --destination "$DOCKER_DESTINATION" --config "$CONFIG_FILE" &
+    jekyll_pid=$!
 }
 
-start_jekyll
-
 while true; do
-    inotifywait -q -e modify,move,create,delete $CONFIG_FILE
-    if [ $? -eq 0 ]; then
-        echo "Change detected to $CONFIG_FILE, restarting Jekyll"
-        jekyll_pid=$(pgrep -f jekyll)
-        kill -KILL $jekyll_pid
-        start_jekyll
+    start_jekyll
+    inotifywait -q -e modify,move,create,delete "$CONFIG_FILE" &
+    watcher_pid=$!
+
+    # Stop the container if Jekyll fails instead of leaving only the watcher alive.
+    if wait -n "$jekyll_pid" "$watcher_pid"; then
+        if ! kill -0 "$jekyll_pid" 2>/dev/null; then
+            exit 0
+        fi
+    else
+        exit $?
     fi
+
+    echo "Change detected to $CONFIG_FILE, restarting Jekyll"
+    watcher_pid=
+    kill "$jekyll_pid" 2>/dev/null || true
+    wait "$jekyll_pid" 2>/dev/null || true
+    jekyll_pid=
 done
