@@ -54,6 +54,8 @@ Left alone, an agent drifts: it weakens a theorem when the proof gets hard, adds
 
 The skill was first written down from earlier work such as [lean4-graham-rearrangement-conjecture](https://github.com/vltanh/lean4-graham-rearrangement-conjecture) (Pham and Sauermann, 2026): a ChatGPT draft that Claude made compile and audited on the day the skill began.
 
+Thank you to the authors of these papers: Jineon Baek; Elizabeth S. Allman, James H. Degnan and John A. Rhodes; James Willson and Tandy Warnow; Eyal Markman; BaoLinh Tran and Van Vu; and Huy Tuan Pham and Lisa Sauermann. I formalized and audited your papers, and published the results, without asking you first. I apologize for that.
+
 ## Versions
 
 A major version changes what the skill delivers. The last of each series is a [release](https://github.com/vltanh/formalize-math-paper/releases): [3.0.0](https://github.com/vltanh/formalize-math-paper/releases/tag/v3.0.0), the current one, adds `NEXT.md` and the `External` library; [2.5.1](https://github.com/vltanh/formalize-math-paper/releases/tag/v2.5.1) has the report's literature and what's next, `CREDITS.md` and `Basic`; [1.4.0](https://github.com/vltanh/formalize-math-paper/releases/tag/v1.4.0) has the workflow, Palomar packaging and proofs that follow the paper's.
