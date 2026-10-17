@@ -15,7 +15,7 @@ repository:
   - vltanh/lean4-ambidextrous-sofa
 ---
 
-The [moving sofa problem](/projects/lean4-moving-sofa/) asks for the largest shape that can be carried around the corner of a hallway of width $$1$$ that turns right. Its _ambidextrous_ variant asks for a shape that, from the same starting position, can also go around the corner of a hallway that turns left. A sofa that has to fit both ways must be smaller.
+The [moving sofa problem](/projects/lean4-moving-sofa/) asks for the largest shape that can be carried around the corner of a hallway of width $$1$$ that turns right. In its _ambidextrous_ variant the shape must also get around a hallway that turns left, from the same starting position, so the sofa must be smaller.
 
 <div class="row justify-content-center">
   <div class="col-sm-8 mt-3 mt-md-0">
@@ -23,7 +23,7 @@ The [moving sofa problem](/projects/lean4-moving-sofa/) asks for the largest sha
   </div>
 </div>
 
-In 2016 Dan Romik built a shape for this problem out of differential equations, and proposed it as a likely solution. Its area is
+In 2016 Dan Romik built a shape for this problem from differential equations and proposed it as a likely solution. Its area is
 
 $$M = 1 + 4Y^2 + \arctan Y = 1.64495\ldots,$$
 
@@ -33,7 +33,7 @@ where $$Y = 0.2980\ldots$$ is the positive root of $$4Y^3 + 3Y = 1$$. This proje
 
 The plane is $$\mathbb{R}^2$$, and the area of a set is its Lebesgue measure. Both hallways come in along the arm $$(-\infty, 1] \times [0, 1]$$. The one that turns right leaves along $$[0, 1] \times (-\infty, 1]$$, and the one that turns left along $$[0, 1] \times [0, \infty)$$. An ambidextrous sofa is a compact connected set that moves through both hallways by two continuous rigid motions, starting with the same orientation. The motions may pause, turn back, and turn through any angle.
 
-The common starting orientation matters. Gerver's sofa, the answer to the ordinary problem, is symmetric in a vertical line, so after a half turn it would pass the left-turning hallway too, and without that condition the answer would be Gerver's area $$2.2195\ldots$$.
+Without the common starting orientation the answer would be Gerver's area $$2.2195\ldots$$: Gerver's sofa, the answer to the ordinary problem, is symmetric in a vertical line, so after a half turn it passes the left-turning hallway too.
 
 <div class="row justify-content-center">
   <div class="col-sm-9 mt-3 mt-md-0">
@@ -41,11 +41,11 @@ The common starting orientation matters. Gerver's sofa, the answer to the ordina
   </div>
 </div>
 
-Romik's sofa is given by the support function of its convex hull, an explicit formula in three phases. Two open regions are removed from the hull: the niche swept by the inner corner of the right-turning hallway as the hallway turns about the sofa, and its mirror image for the left-turning hallway. The sofa is symmetric in the line $$y = 1/2$$, so uniqueness up to rotations and translations is uniqueness up to congruence.
+Romik's sofa is given by the support function of its convex hull, an explicit formula in three phases, with two open regions removed from the hull: the niche swept by the inner corner of the right-turning hallway as the hallway turns about the sofa, and its mirror image for the left-turning hallway. The sofa is symmetric in the line $$y = 1/2$$, so uniqueness up to rotations and translations is uniqueness up to congruence.
 
 ## The results
 
-The project states nine theorems, in a file that imports only Mathlib. The main ones are:
+The project states nine theorems in a file that imports only Mathlib. The main ones are:
 
 - Every ambidextrous sofa has area at most $$M$$.
 - An ambidextrous sofa has area $$M$$ if and only if it is a rotated and translated copy of Romik's sofa.
@@ -67,9 +67,9 @@ A sofa whose motions turn it by at most $$\pi/4$$ has area at most $$\sqrt2 < M$
 
 The main step bounds the score of a single cap: $$P_\alpha(U) \le M/2$$, with equality only for $$\alpha = \pi/2$$ and $$U$$ a translate of Romik's cap. For a full quarter turn, a cap of maximal score exists by compactness, and approximating it by polygons gives it curvature densities and conditions at its endpoints. A tilted middle roof is then ruled out, and a horizontal one is compared with a functional whose maximum $$M/2$$ is reached only at Romik's cap. For a partial turn, the score keeps the whole outgoing wall of the hallway, which makes it strictly smaller. Two of these exclusions use the bound $$2.2199$$ on the ordinary problem, which comes from Jineon Baek's theorem that Gerver's sofa is optimal.
 
-If the sofa has area $$M$$, both caps have score $$M/2$$. Then both motions make a full quarter turn and both caps are Romik's, and an exact identity for the area lost recovers the sofa from its caps.
+If the sofa has area $$M$$, both caps have score $$M/2$$, so both motions make a full quarter turn and both caps are Romik's. An exact identity for the area lost then recovers the sofa from its caps.
 
-A [draft paper](https://github.com/vltanh/lean4-ambidextrous-sofa/blob/main/docs/paper/main.pdf), 109 pages long, writes the proof out by hand.
+A 109-page [draft paper](https://github.com/vltanh/lean4-ambidextrous-sofa/blob/main/docs/paper/main.pdf) writes the proof out by hand.
 
 ## Prior work
 
@@ -79,7 +79,7 @@ The proof uses Baek's theorem through its Lean formalization in [lean4-moving-so
 
 ## Verification
 
-Lean checks every proof, and nothing is assumed beyond Lean's three standard axioms. The nine theorems are stated in a self-contained Challenge file, and [Comparator](https://github.com/leanprover/comparator) checks, with Lean's kernel and with NanoDa, that the Solution proves exactly those statements. The project is registered in the [Palomar registry](https://palomar-registry.org/entry?id=PALOMAR-2026-10-13-000003) as PALOMAR-2026-10-13-000003. No person has checked the proofs; Lean's kernel checks all of them.
+Lean's kernel checks every proof, and no person has checked them. Nothing is assumed beyond Lean's three standard axioms. The nine theorems are stated in a self-contained Challenge file, and [Comparator](https://github.com/leanprover/comparator) checks, with Lean's kernel and with NanoDa, that the Solution proves exactly those statements. The project is registered in the [Palomar registry](https://palomar-registry.org/entry?id=PALOMAR-2026-10-13-000003) as PALOMAR-2026-10-13-000003.
 
 ## Contributors
 

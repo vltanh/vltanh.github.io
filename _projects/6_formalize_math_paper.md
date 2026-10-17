@@ -16,7 +16,7 @@ repository:
 
 [formalize-math-paper](https://github.com/vltanh/formalize-math-paper) is an [Agent Skill](https://agentskills.io): instructions, guides and scripts that an AI coding agent loads to formalize a mathematics paper in [Lean 4](https://lean-lang.org/) with [Mathlib](https://leanprover-community.github.io/). It works with any agent that reads `SKILL.md` (Claude Code, Codex, Gemini CLI, Antigravity, Copilot, Cursor), and an arXiv link is enough to start.
 
-Left alone, an agent drifts: it weakens a theorem when the proof gets hard, adds a hypothesis, swaps the paper's argument for an easier one, guesses a Mathlib name, or declares an axiom and moves on. The skill is the discipline that keeps a long formalization honest.
+Left alone, an agent drifts: it weakens a theorem when the proof gets hard, adds a hypothesis, swaps the paper's argument for an easier one, guesses a Mathlib name, or declares an axiom and moves on. The skill keeps a long formalization from drifting this way.
 
 ## The workflow
 
@@ -30,10 +30,10 @@ Left alone, an agent drifts: it weakens a theorem when the proof gets hard, adds
 - **Set up.** Three libraries, in layers: `Basic` for general mathematics, filed as Mathlib would file it; `External` for the cited results, stated in their sources' terms; and the paper's own results.
 - **State.** Every result is stated before any is proved, and a second agent checks each statement against the TeX.
 - **Prove.** First what the paper proves, then what it cites, each by the paper's own argument. A proof departs only when the paper's step is wrong, needs mathematics Lean lacks, or has no meaning in the formalization, and every departure is reported. A cited result out of reach becomes a visible hypothesis, and the result is reported as conditional.
-- **Check.** Only Lean's three standard axioms; a route check compares each proof's dependencies with what the paper's proof cites; [Comparator](https://github.com/leanprover/comparator) confirms the statements of record; cleanup removes unused hypotheses without changing any argument.
+- **Check.** Proofs use only Lean's three standard axioms. A route check compares each proof's dependencies with what the paper's proof cites, [Comparator](https://github.com/leanprover/comparator) confirms the statements of record, and cleanup removes unused hypotheses without changing any argument.
 - **Report.** `REPORT.md` audits the paper (errors, gaps, missing and redundant hypotheses, departures, each confirmed by a second reader), places it in the literature, and lists what's next. `CREDITS.md` records the agents, models, time and effort.
-- **Next paper.** A private `NEXT.md` asks what paper you could write next. It keeps only directions that would be papers of their own, and works the best few through to the step where the paper's method stops, with attempts, evidence and partial results, each marked as proved, checked or conjectured. It stays out of git.
-- **Package.** The [Palomar](https://palomar-registry.org) files, and, with your permission, publishing and the preflight.
+- **Next paper.** A private `NEXT.md`, kept out of git, asks what paper you could write next. It keeps only directions that would be papers of their own and works the best few through to the step where the paper's method stops, with attempts, evidence and partial results, each marked as proved, checked or conjectured.
+- **Package.** Write the [Palomar](https://palomar-registry.org) files and, with your permission, publish and run the preflight.
 
 ## Principles
 
@@ -41,18 +41,18 @@ Left alone, an agent drifts: it weakens a theorem when the proof gets hard, adds
 - Proofs follow the paper's arguments, and every departure is necessary and reported.
 - A formalization nobody compiled is a draft. Mathlib names are checked, never guessed.
 - "Standard" and "routine" still need proofs.
-- A skipped step, a failing proof or a changed statement is said, not smoothed over.
+- A skipped step, a failing proof or a changed statement is reported.
 
 ## Examples
 
-- [**The moving sofa**](/projects/lean4-moving-sofa/): Baek's 119-page proof that Gerver's sofa is optimal, with one agent and 19 sub-agents in about four hours, on an early version of the skill.
-- [**lean4-adr11**](https://github.com/vltanh/lean4-adr11): Allman, Degnan and Rhodes (2011), identifying the species tree from unrooted gene trees. 6.4 hours; no result of the paper is wrong.
-- [**lean4-ecsbm**](https://github.com/vltanh/lean4-ecsbm): the two theorems of the EC-SBM network generator (2025). 1.5 hours; every proof follows the paper's.
-- [**lean4-camus**](https://github.com/vltanh/lean4-camus): the optimality of CAMUS (2026), made with Codex and then Claude. Claims of Sections 2.4 and 3.2 fail as printed; Theorem 1 holds.
-- [**lean4-markman25-hodge-abelian-fourfolds**](https://github.com/vltanh/lean4-markman25-hodge-abelian-fourfolds): Markman's Weil classes on abelian sixfolds and the Hodge conjecture for abelian fourfolds, conditional on its sheaf theory and cited results on cycles. Eleven statements are false or misprinted as printed.
-- [**lean4-power-of-few-sparse**](https://github.com/vltanh/lean4-power-of-few-sparse): two papers of Tran and Vu on majority dynamics on `G(n, p)`. Three theorems are false as printed; Lean proves counterexamples and corrected versions.
+- [The moving sofa](/projects/lean4-moving-sofa/): Baek's 119-page proof that Gerver's sofa is optimal, with one agent and 19 sub-agents in about four hours, on an early version of the skill.
+- [lean4-adr11](https://github.com/vltanh/lean4-adr11): Allman, Degnan and Rhodes (2011), identifying the species tree from unrooted gene trees. Made in 6.4 hours; no result of the paper is wrong.
+- [lean4-ecsbm](https://github.com/vltanh/lean4-ecsbm): the two theorems of the EC-SBM network generator (2025), in 1.5 hours; every proof follows the paper's.
+- [lean4-camus](https://github.com/vltanh/lean4-camus): the optimality of CAMUS (2026), made with Codex and then Claude. Claims of Sections 2.4 and 3.2 fail as printed; Theorem 1 holds.
+- [lean4-markman25-hodge-abelian-fourfolds](https://github.com/vltanh/lean4-markman25-hodge-abelian-fourfolds): Markman's Weil classes on abelian sixfolds and the Hodge conjecture for abelian fourfolds, conditional on its sheaf theory and cited results on cycles. Eleven statements are false as printed or misprinted, and corrected.
+- [lean4-power-of-few-sparse](https://github.com/vltanh/lean4-power-of-few-sparse): two papers of Tran and Vu on majority dynamics on `G(n, p)`. Three theorems are false as printed; Lean proves counterexamples and corrected versions.
 
-The skill was first written down from earlier work such as [**lean4-graham-rearrangement-conjecture**](https://github.com/vltanh/lean4-graham-rearrangement-conjecture) (Pham and Sauermann, 2026): a ChatGPT draft that Claude made compile and audited on the day the skill began.
+The skill was first written down from earlier work such as [lean4-graham-rearrangement-conjecture](https://github.com/vltanh/lean4-graham-rearrangement-conjecture) (Pham and Sauermann, 2026): a ChatGPT draft that Claude made compile and audited on the day the skill began.
 
 ## Versions
 

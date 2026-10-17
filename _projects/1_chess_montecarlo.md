@@ -17,7 +17,7 @@ repository:
   - vltanh/chess-monte-carlo
 ---
 
-Inspired by a Reddit post on tournament modeling, I built a Chess Monte Carlo simulation engine to track the 2026 Candidates. The goal was to move beyond the limitations of static pre-tournament ratings, which can quickly become outdated in a high-pressure, three-week event. Instead, the model treats player strength as **dynamic**, letting ratings update in real time as games are played.
+Inspired by a Reddit post on tournament modeling, I built a Chess Monte Carlo simulation engine to track the 2026 Candidates. Static pre-tournament ratings can go stale over a high-pressure, three-week event, so the model treats player strength as dynamic and updates ratings in real time as games are played.
 
 <div class="row justify-content-center">
     <div class="col-sm-10 mt-3 mt-md-0">
@@ -25,18 +25,18 @@ Inspired by a Reddit post on tournament modeling, I built a Chess Monte Carlo si
     </div>
 </div>
 
-## Live Dashboards
+## Live dashboards
 
-- [FIDE Candidates 2026 - Open](/chess-mc/candidates2026.html)
-- [FIDE Candidates 2026 - Women](/chess-mc/candidateswomen2026.html)
+- [FIDE Candidates 2026 (Open)](/chess-mc/candidates2026.html)
+- [FIDE Candidates 2026 (Women)](/chess-mc/candidateswomen2026.html)
 
-## The Simulation Engine
+## The simulation engine
 
-The core is built in **C++**, simulating the remainder of the tournament **one million times after each round**. Key features:
+The engine is written in C++ and simulates the rest of the tournament one million times after each round.
 
-- **Form extrapolation.** The engine identifies players on an upswing by analyzing velocity trends across their Classical, Rapid, and Blitz histories, giving credit to those entering with genuine momentum across all three time controls, not just the headline classical number.
-- **Dynamic aggression.** Instead of fixed draw rates, the model adjusts based on standings: a leader's incentive to draw rises near the finish line, trailing contenders must take risks, and eliminated players may coast toward safer play.
-- **Hyperparameter tuning.** I used Optuna to calibrate the engine against historical data from the 2022 and 2024 Candidates, finding the Pareto balance between per-game accuracy and final-leaderboard accuracy.
+- Form extrapolation finds players on an upswing from velocity trends in their Classical, Rapid, and Blitz histories, and credits momentum across all three time controls instead of reading only the headline classical number.
+- Dynamic aggression replaces fixed draw rates with rates that depend on the standings: a leader's incentive to draw rises near the finish line, trailing contenders must take risks, and eliminated players may coast toward safer play.
+- I tuned the hyperparameters with Optuna against historical data from the 2022 and 2024 Candidates, looking for the Pareto balance between per-game accuracy and final-leaderboard accuracy.
 
 <div class="row justify-content-center">
     <div class="col-sm-10 mt-3 mt-md-0">
@@ -44,45 +44,45 @@ The core is built in **C++**, simulating the remainder of the tournament **one m
     </div>
 </div>
 
-## Monte Carlo Simulation
+## Monte Carlo simulation
 
-The results live on an interactive dashboard that visualizes the tournament's "multiverse": not a single forecast but the full distribution of futures consistent with what has happened so far.
+The interactive dashboard shows the tournament's "multiverse", the full distribution of futures consistent with what has happened so far.
 
-**Win-probability timeline.** Each player's chance of winning the tournament is tracked round by round, so it's easy to see the exact moment a leader pulls away or a contender collapses.
+The win-probability timeline tracks each player's chance of winning the tournament round by round, so you can see the exact moment a leader pulls away or a contender collapses.
 
 <div class="row justify-content-center">
     <div class="col-sm-10 mt-3 mt-md-0">
-        {% include figure.liquid path="assets/img/chess/winning_chance_evo.png" title="Win-probability evolution across rounds" class="img-fluid rounded z-depth-1" caption="Win probability for each player tracked round by round, making breakaways and collapses visible as clean divergences from the pack." %}
+        {% include figure.liquid path="assets/img/chess/winning_chance_evo.png" title="Win-probability evolution across rounds" class="img-fluid rounded z-depth-1" caption="Win probability for each player, round by round. Breakaways and collapses show up as divergences from the pack." %}
     </div>
 </div>
 
-**Rank distribution heatmap.** Beyond "who wins?", the dashboard shows the full distribution of where each player is likely to finish, useful for spotting players who are safe in the top half even if the title itself is out of reach.
+The rank distribution heatmap goes past "who wins?" to show where each player is likely to finish, which picks out players who are safe in the top half even when the title is out of reach.
 
 <div class="row justify-content-center">
     <div class="col-sm-10 mt-3 mt-md-0">
-        {% include figure.liquid path="assets/img/chess/rank_distribution.png" title="Rank distribution heatmap" class="img-fluid rounded z-depth-1" caption="Probability of finishing in each rank after a given round. Rows sum to 100%, making it easy to spot players locked into the top half even when the title is out of reach." %}
+        {% include figure.liquid path="assets/img/chess/rank_distribution.png" title="Rank distribution heatmap" class="img-fluid rounded z-depth-1" caption="Probability of finishing in each rank after a given round. Rows sum to 100%, so players locked into the top half stand out even when the title is out of reach." %}
     </div>
 </div>
 
 ## The Scenario Explorer
 
-The centerpiece of the dashboard is the Scenario Explorer: an interactive decision tree for asking "what if?" questions about the rest of the tournament.
+The Scenario Explorer is an interactive decision tree for "what if?" questions about the rest of the tournament.
 
-**Contender determination.** Before exploring branches, the engine resolves who is still mathematically alive. A 4-phase algorithm (max-reachable points → per-game guaranteed floor → 1M uniform sampling → exhaustive DFS) separates genuine contenders from players who have been eliminated, so the tree only branches on outcomes that actually matter. A naive max-points check is not enough: in the figure below, Divya and Tan Zhongyi can still climb from 5 to the leader's current 7 in the two remaining rounds on paper, but the fixed Round 13 and 14 pairings already guarantee the leader at least 7.5, so the deeper phases correctly rule them out.
+Before exploring branches, the engine works out who is still mathematically alive. A 4-phase algorithm (max reachable points, then a per-game guaranteed floor, then 1M uniform samples, then exhaustive DFS) separates contenders from eliminated players, so the tree only branches on outcomes that matter. A naive max-points check is not enough. In the figure below, Divya and Tan Zhongyi could on paper climb from 5 to the leader's current 7 in the two remaining rounds, but the fixed Round 13 and 14 pairings already guarantee the leader at least 7.5, so the deeper phases rule them out.
 
 <div class="row justify-content-center">
     <div class="col-sm-10 mt-3 mt-md-0">
-        {% include figure.liquid path="assets/img/chess/contention.png" title="Contender determination: who is still mathematically alive" class="img-fluid rounded z-depth-1" caption="Title race with 2 rounds remaining in the Women's section. Bars show each player's max reachable points against the leader's current 7. Divya and Tan Zhongyi sit at 5 and could arithmetically climb to 7 in 2 rounds, but the Round 13 pairing guarantees the eventual leader at least 7.5, so neither of them can actually finish on top." %}
+        {% include figure.liquid path="assets/img/chess/contention.png" title="Contender determination: who is still mathematically alive" class="img-fluid rounded z-depth-1" caption="Title race with 2 rounds remaining in the Women's section. Bars show each player's max reachable points against the leader's current 7. Divya and Tan Zhongyi sit at 5 and could arithmetically climb to 7 in 2 rounds, but the Round 13 pairing guarantees the eventual leader at least 7.5, so neither can finish on top." %}
     </div>
 </div>
 
-**Interactive decision trees.** Navigate branches of hypothetical results and watch how specific outcomes reshape the remaining win conditions for each player, turning an abstract probability distribution into a concrete story about which games carry the tournament.
+In the decision tree you navigate branches of hypothetical results and watch how specific outcomes change each player's remaining win conditions, which shows which games carry the tournament.
 
-**Miracle-path search.** For trailing players, a weighted random path sampler looks for likely revival routes first, then falls back to exhaustive DFS for low-probability scenarios or forced tiebreak paths.
+For trailing players, a miracle-path search uses a weighted random path sampler to find likely revival routes first, then falls back to exhaustive DFS for low-probability scenarios or forced tiebreak paths.
 
 <div class="row justify-content-center">
     <div class="col-sm-10 mt-3 mt-md-0">
-        {% include figure.liquid path="assets/img/chess/scenario_explorer.png" title="Scenario explorer: decision tree with hypothetical results" class="img-fluid rounded z-depth-1" caption="Branching tree for a single pairing with two rounds remaining. Each outcome (1-0, 1/2-1/2, 0-1) forks into updated scenarios, letting you walk the tree to see exactly the winning path for each player." %}
+        {% include figure.liquid path="assets/img/chess/scenario_explorer.png" title="Scenario explorer: decision tree with hypothetical results" class="img-fluid rounded z-depth-1" caption="Branching tree for a single pairing with two rounds remaining. Each outcome (1-0, 1/2-1/2, 0-1) forks into updated scenarios, and walking the tree shows the exact winning path for each player." %}
     </div>
 </div>
 
@@ -91,5 +91,5 @@ The centerpiece of the dashboard is the Scenario Explorer: an interactive decisi
 - Inspired by [Thomas Dondorf](https://github.com/thomasdondorf)'s Reddit posts on Candidates simulations.
 - Tournament schedules and live results via the [Lichess broadcast API](https://lichess.org/api).
 - Player ratings and rating histories via [FIDE](https://ratings.fide.com/).
-- Model design and C++/Python implementation developed with help from [**Google Gemini**](https://gemini.google.com/) and [**Anthropic Claude**](https://claude.ai/).
-- Interactive dashboard designed with [**Claude**](https://claude.ai/) via the [`/frontend-design`](https://github.com/anthropics/skills/blob/main/skills/frontend-design/) skill.
+- Model design and C++/Python implementation developed with help from [Google Gemini](https://gemini.google.com/) and [Anthropic Claude](https://claude.ai/).
+- Interactive dashboard designed with [Claude](https://claude.ai/) via the [`/frontend-design`](https://github.com/anthropics/skills/blob/main/skills/frontend-design/) skill.

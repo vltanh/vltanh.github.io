@@ -17,9 +17,9 @@ _styles: >-
   article table td { vertical-align: middle; }
 ---
 
-This project started with a Reddit post of someone frying tofu, showing off how they had packed the squares into a round pan. They had reason to be proud, since packing squares into a circle is surprisingly hard.
+This project started with a Reddit post of someone frying tofu, proud of how they had packed the squares into a round pan. They had reason to be: packing squares into a circle is surprisingly hard.
 
-The mathematical version asks how small a circle can be if it has to hold $$n$$ unit squares that don't overlap. Erich Friedman's [Packing Center](https://erich-friedman.github.io/packing/squincir/) collects the best packings anyone has found, and for most $$n$$ nobody has proved them optimal. This project settles the first seven cases in Lean 4, $$n = 1, \dots, 7$$, proving both the smallest radius and every packing that reaches it.
+The mathematical version asks how small a circle can be if it has to hold $$n$$ unit squares that don't overlap. Erich Friedman's [Packing Center](https://erich-friedman.github.io/packing/squincir/) collects the best packings anyone has found, and for most $$n$$ nobody has proved them optimal. This project settles the first seven cases, $$n = 1, \dots, 7$$, in Lean 4, proving the smallest radius and every packing that reaches it.
 
 | $$n$$ |          optimal radius          |                                                                         an optimal packing                                                                          |
 | :---: | :------------------------------: | :-----------------------------------------------------------------------------------------------------------------------------------------------------------------: |
@@ -41,9 +41,9 @@ A packing of $$n$$ squares (a centre and a rotation each) lives in $$3n$$ real d
 
 ## Prior work
 
-One and two squares are folklore. For three, Montanher et al. (2019) enclosed the radius in an interval of width $$6 \cdot 10^{-14}$$ by interval branch and bound. Convincing, but it trusts C++ code and interval rounding, and gives neither the exact radius nor uniqueness, both of which this project proves. Four squares were Problem 6 of IMSC 2026, whose official solution proves the radius. An unpublished note by Wei Zhao, shared by Friedman, also proves that the 2×2 block is the only optimal packing, with the same quarter-circle argument used here. This proof was written without the note, but the note was also developed with Claude, so the two may not be independent. For five, six and seven squares, no earlier proof turned up. For six, Friedman's page gives the exact radius of the best known packing, found by David Ellsworth in 2023, and it agrees with the one proved here.
+One and two squares are folklore. For three, Montanher et al. (2019) enclosed the radius in an interval of width $$6 \cdot 10^{-14}$$ by interval branch and bound. The result is convincing, but it relies on C++ code and interval rounding, and it gives neither the exact radius nor uniqueness, which this project proves. Four squares were Problem 6 of IMSC 2026, whose official solution proves the radius. An unpublished note by Wei Zhao, shared by Friedman, also proves that the 2×2 block is the only optimal packing, with the same quarter-circle argument used here. This proof was written without the note, but the note was also developed with Claude, so the two may not be independent. For five, six and seven squares, no earlier proof turned up. For six, Friedman's page gives the exact radius of the best known packing, found by David Ellsworth in 2023, and it agrees with the one proved here.
 
-Proof assistants have verified other packing theorems, the Kepler conjecture in HOL Light and Isabelle and sphere packing in dimension 8 in Lean, but I found no earlier formal proof of an optimal packing of squares or circles in a circle or a square. More detail is in [docs/prior-work.md](https://github.com/vltanh/lean4-squares-in-circles/blob/main/docs/prior-work.md).
+Proof assistants have verified other packing theorems (the Kepler conjecture in HOL Light and Isabelle, and sphere packing in dimension 8 in Lean), but I found no earlier formal proof of an optimal packing of squares or circles in a circle or a square. More detail is in [docs/prior-work.md](https://github.com/vltanh/lean4-squares-in-circles/blob/main/docs/prior-work.md).
 
 ## The proof
 
@@ -63,11 +63,11 @@ Seven squares need a different idea, because the arcs come up short. In the disk
 
 The radius follows in every case: a packing in a smaller disk would also lie in the disk of radius $$R_n$$ with the same centre, so it would be one of these packings, but those have corners on the circle of radius $$R_n$$.
 
-Lean checks every step, and nothing is assumed beyond Lean's three standard axioms. The proofs are registered in the [Palomar registry](https://palomar-registry.org/entry.html?id=PALOMAR-2026-10-02-000002&version=1) as PALOMAR-2026-10-02-000002, and Palomar's check replays them through two more kernels, NanoDa and con-ron. The details are in [docs/proof/](https://github.com/vltanh/lean4-squares-in-circles/blob/main/docs/proof/README.md), an illustrated textbook with one chapter per case, where every result links to the Lean code that proves it.
+Lean checks every step, assuming nothing beyond its three standard axioms. The proofs are registered in the [Palomar registry](https://palomar-registry.org/entry.html?id=PALOMAR-2026-10-02-000002&version=1) as PALOMAR-2026-10-02-000002, and Palomar's check replays them through two more kernels, NanoDa and con-ron. The details are in [docs/proof/](https://github.com/vltanh/lean4-squares-in-circles/blob/main/docs/proof/README.md), an illustrated textbook with one chapter per case, where every result links to the Lean code that proves it.
 
 ## What's next
 
-Every proof here comes down to how the squares share the room around the disk centre. That works because, at these sizes, at most one square sits in the middle and the rest form a single ring around it, so every square comes close to the centre.
+Counting how the squares share the room around the disk centre works because, at these sizes, at most one square sits in the middle and the rest form a single ring around it, so every square comes close to the centre.
 
 Eight squares are the natural next case, since they still have that shape: in the best known packing, found by David W. Cantrell in 2002, one square covers the disk centre and the other seven surround it. But the ring is irregular. Two of the seven squares are turned against the rest, and some squares can still move, so the argument for seven squares, which ends in a regular hexagon, has nothing regular to land on. That packing is also not known to be optimal.
 
