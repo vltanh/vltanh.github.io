@@ -61,6 +61,10 @@ Optimality does not give uniqueness for free. Baek's argument proves the needed 
 
 Lean checks every proof, and nothing is assumed beyond Lean's three standard axioms. The theorems are restated in a self-contained file, with copies of the definitions in Mathlib's vocabulary, and [Comparator](https://github.com/leanprover/comparator) checks that the proofs prove exactly those statements. The project is registered in the [Palomar registry](https://palomar-registry.org/entry.html?id=PALOMAR-2026-10-02-000008) as PALOMAR-2026-10-02-000008, whose check replays the proofs through the kernels NanoDa and con-ron as well. The proofs are written out in [docs/proof/](https://github.com/vltanh/lean4-moving-sofa/blob/main/docs/proof/README.md), an illustrated textbook in which every result links to the Lean code that proves it.
 
+## Follow-up
+
+The [ambidextrous sofa project](/projects/lean4-ambidextrous-sofa/) uses this formalization of Baek's theorem to prove that Romik's ambidextrous sofa, which turns both right and left, is the largest sofa of its kind.
+
 ## Contributors
 
 Claude Opus 5.5 formalized Baek's paper, wrote the audit of the paper, and completed the uniqueness proof and the bridge from Lean drafts by ChatGPT Pro 6, which also wrote the uniqueness argument. I directed the work. The agents followed my skill for formalizing papers, [formalize-math-paper](/projects/formalize-math-paper/); the repository's [contributors page](https://github.com/vltanh/lean4-moving-sofa/blob/main/docs/contributors.md) records who did what, and how long each part took.
