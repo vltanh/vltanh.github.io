@@ -250,6 +250,11 @@ ninja.data = [{
           description: "An Agent Skill that guides an AI coding agent through formalizing a mathematics paper in Lean 4, from reading the paper to an audited project ready for the Palomar registry.",
           section: "Projects",handler: () => {
               window.location.href = "/projects/formalize-math-paper/";
+            },},{id: "projects-optimality-and-uniqueness-of-romik-39-s-ambidextrous-sofa-in-lean-4",
+          title: 'Optimality and uniqueness of Romik&amp;#39;s ambidextrous sofa in Lean 4',
+          description: "A Lean 4 proof that Romik&#39;s ambidextrous sofa is the largest shape that can turn both right and left around the corner of a hallway, and that it is the only one, up to rigid motions.",
+          section: "Projects",handler: () => {
+              window.location.href = "/projects/lean4-ambidextrous-sofa/";
             },},{
         id: 'social-discord',
         title: 'Discord',
