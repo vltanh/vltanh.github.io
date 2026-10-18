@@ -38,6 +38,8 @@ Seven squares have infinitely many optimal packings. The three squares in the mi
 
 Eight squares have even more freedom. Five squares are fixed, each with a corner on the circle, but the top square slides up and down, one of the two turned squares slides along the other, and the square in the middle moves and turns in the room the others leave. The optimal packings form a family with five parameters, together with its mirror images. The radius has no closed form. Given a squared radius $$q$$, the height $$y$$ at which the lower right square meets the circle and the tilt $$t$$ of the two turned squares, four axis-parallel squares with a corner on the circle are fixed, and so is a turned square resting against them, whose outer corner sticks out of the circle by some amount $$F(q, y, t)$$. The least $$q$$ at which $$F$$ can vanish is $$q_8 \approx 3.9155$$; there $$F$$ and its derivatives in $$y$$ and $$t$$ vanish together, three equations with exactly one solution.
 
+<p style="text-align:center; margin-top:1rem;"><a href="/squares-in-circles/">play with the packings &rarr;</a></p>
+
 ## Why it's hard
 
 A packing of $$n$$ squares (a centre and a rotation each) lives in $$3n$$ real dimensions, constrained by the disk and $$\binom{n}{2}$$ pairwise non-overlap conditions. Proving that the T is the best packing of three squares means covering all nine dimensions at once: no way of placing and turning three squares fits them in a smaller circle, and every way that fits them in the T's circle is congruent to the T.
@@ -47,6 +49,14 @@ A packing of $$n$$ squares (a centre and a rotation each) lives in $$3n$$ real d
 One and two squares are folklore. For three, Montanher et al. (2019) enclosed the radius in an interval of width $$6 \cdot 10^{-14}$$ by interval branch and bound. The result is convincing, but it relies on C++ code and interval rounding, and it gives neither the exact radius nor uniqueness, which this project proves. Four squares were Problem 6 of IMSC 2026, whose official solution proves the radius. An unpublished note by Wei Zhao, shared by Friedman, also proves that the 2×2 block is the only optimal packing, with the same quarter-circle argument used here. This proof was written without the note, but the note was also developed with Claude, so the two may not be independent. For five to eight squares, no earlier proof turned up. For six, Friedman's page gives the exact radius of the best known packing, found by David Ellsworth in 2023, and for eight it lists the packing found by David W. Cantrell in 2002, of radius 1.97877…; both agree with the radii proved here.
 
 Proof assistants have verified other packing theorems (the Kepler conjecture in HOL Light and Isabelle, and sphere packing in dimension 8 in Lean), but I found no earlier formal proof of an optimal packing of squares or circles in a circle or a square. More detail is in [docs/prior-work.md](https://github.com/vltanh/lean4-squares-in-circles/blob/main/docs/prior-work.md).
+
+## Timeline
+
+- **22 September 2026.** One to five squares, all on the same day.
+- **23 September.** Seven squares, the first case with infinitely many optimal packings.
+- **30 September.** Six squares, the first case with a turned square, after four days of work.
+- **2 October.** The proofs of one to seven squares are registered in the Palomar registry.
+- **18 October.** Eight squares, two and a half weeks after the work on them began.
 
 ## The proof
 
