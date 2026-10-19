@@ -397,6 +397,8 @@ function syncSliders(full = true) {
 function familyNote() {
   const f = family();
   const note = $('family-note');
+  const legend = $('family-legend');
+  legend.innerHTML = '';
   if (!f) {
     $('family-title').textContent = 'The only one';
     note.textContent = optimal()
@@ -409,11 +411,12 @@ function familyNote() {
     note.textContent = 'A square has left the family, so the sliders are off. Reset brings the squares back.';
     return;
   }
-  const legend = optimal()
+  if (!optimal()) legend.innerHTML = '<span class="key band"></span>the circle stays at its least <span class="key grow"></span>it grows';
+  const spans = optimal()
     ? 'Each slider spans what its parameter can do with the others held, so moving one changes the ranges of the others.'
-    : '<span class="key band"></span>the circle stays at its least <span class="key grow"></span>it grows. Each slider spans what its parameter can do with the others held.';
+    : 'Each slider spans what its parameter can do with the others held.';
   const turn = n === 8 ? ' To turn <i>K</i> far, drag its knob on the board: it shifts to make room.' : '';
-  note.innerHTML = legend + turn;
+  note.innerHTML = spans + turn;
 }
 
 // Moves the squares to the packing of the parameters fam, each square keeping
