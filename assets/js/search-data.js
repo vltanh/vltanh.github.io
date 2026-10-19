@@ -237,7 +237,7 @@ ninja.data = [{
               window.location.href = "/projects/network-generation/";
             },},{id: "projects-formalization-of-squares-in-circles-in-lean-4",
           title: 'Formalization of “Squares in Circles” in Lean 4',
-          description: "Lean 4 proofs of the smallest circle that holds n unit squares, and of every packing that achieves it, for n = 1 to 7.",
+          description: "Lean 4 proofs of the smallest circle that holds n unit squares, and of every packing that achieves it, for n = 1 to 8.",
           section: "Projects",handler: () => {
               window.location.href = "/projects/lean4-squares-in-circles/";
             },},{id: "projects-optimality-and-uniqueness-of-gerver-39-s-sofa-in-lean-4",

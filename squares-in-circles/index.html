@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Squares in Circles Playground</title>
+    <meta
+      name="description"
+      content="Move unit squares around and watch the smallest circle that holds them: the optimal packings of one to eight squares in a circle, proved in Lean 4."
+    />
+    <meta property="og:title" content="Squares in Circles Playground" />
+    <meta property="og:description" content="Move the squares of the optimal packings of one to eight unit squares in a circle, proved in Lean 4, and watch the circle." />
+    <meta property="og:image" content="https://vltanh.me/assets/img/lean4-squares-in-circles/front-optimal.png" />
+    <meta property="og:url" content="https://vltanh.me/squares-in-circles/" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14.6' fill='%23fbf8f1' stroke='%231f2937' stroke-width='1.6'/%3E%3Crect x='5.2' y='14' width='10.8' height='10.8' fill='%23dbeafe' stroke='%232563eb' stroke-width='1.4'/%3E%3Crect x='16' y='14' width='10.8' height='10.8' fill='%23ffedd5' stroke='%23ea580c' stroke-width='1.4'/%3E%3Crect x='10.6' y='3.2' width='10.8' height='10.8' fill='%23dcfce7' stroke='%2316a34a' stroke-width='1.4'/%3E%3C/svg%3E"preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..700;1,6..72,300..700&display=swap" rel="stylesheet" />
+    <script>
+      // The colour theme stored by vltanh.me, applied before the page is drawn.
+      try {
+        const t = localStorage.getItem('theme');
+        if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+    <link rel="stylesheet" href="style.css" />
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="top">
+        <a href="/projects/lean4-squares-in-circles/">&larr; The project</a>
+        <span class="top-end">
+          <a href="https://github.com/vltanh/lean4-squares-in-circles">The Lean proofs</a>
+          <button type="button" class="theme" id="theme" aria-label="Colour theme"></button>
+        </span>
+      </header>
+
+      <section class="intro">
+        <p class="kicker">Playground</p>
+        <h1>Squares in Circles</h1>
+        <p class="lede">
+          How small can a circle be if it has to hold <i>n</i> unit squares that don't overlap? For <i>n</i> = 1 to 8, Lean proves the least radius and
+          finds every packing that reaches it. Here you can move the squares and watch the smallest circle around them. It never gets smaller than
+          the proved minimum.
+        </p>
+      </section>
+
+      <nav class="cases" id="cases" aria-label="Number of squares"></nav>
+
+      <section class="play">
+        <div class="board-wrap">
+          <div class="board-box">
+          <svg id="board" role="application" tabindex="0" aria-describedby="hint" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <pattern id="hatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                <rect width="7" height="7" class="hatch-wash" />
+                <line x1="0" y1="0" x2="0" y2="7" class="hatch-line" />
+              </pattern>
+            </defs>
+            <g class="grid"></g>
+            <path class="excess" fill-rule="evenodd" />
+            <circle class="minimum" />
+            <g class="tracks"></g>
+            <g class="squares"></g>
+            <circle class="live" />
+            <g class="marks"></g>
+            <g class="handle">
+              <line />
+              <circle class="knob" r="8" />
+            </g>
+          </svg>
+          <p class="board-readout" aria-hidden="true"><i>R</i> = <span id="board-r"></span> <span class="extra" id="board-extra"></span></p>
+          </div>
+        </div>
+
+        <aside class="panel">
+          <section class="readout">
+            <p class="cap">Radius of the smallest circle</p>
+            <p class="big"><i>R</i> = <span id="r-live">0</span></p>
+            <p class="least">Least possible, proved in Lean: <span id="r-min"></span> <span class="extra" id="r-extra"></span></p>
+            <p class="status" id="status" aria-live="polite"></p>
+          </section>
+
+          <section class="controls">
+            <div class="modes" role="group" aria-label="How the squares move">
+              <button type="button" class="mode" data-mode="free" aria-pressed="true">Free</button>
+              <button type="button" class="mode" data-mode="optimal" aria-pressed="false">Optimal</button>
+            </div>
+            <div class="actions">
+              <button type="button" id="reset">Reset</button>
+              <button type="button" id="shuffle">Shuffle</button>
+              <button type="button" id="animate" aria-pressed="false">Animate</button>
+            </div>
+          </section>
+
+          <section class="family" id="family">
+            <h3 id="family-title"></h3>
+            <div id="sliders"></div>
+            <p class="note legend" id="family-legend"></p>
+            <button type="button" class="toggle" id="mirror" aria-pressed="false">Mirror image</button>
+          </section>
+
+          <section class="selected none" id="selected">
+            <h3 id="sel-name">No square selected</h3>
+            <p class="note" id="sel-role" hidden></p>
+            <p class="note when-none">Click a square to see where it is, or to type a position.</p>
+            <div class="fields when-some">
+              <label><span>centre, <i>x</i></span><input id="sel-x" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" /></label>
+              <label><span>centre, <i>y</i></span><input id="sel-y" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" /></label>
+              <label><span>turn, in °</span><input id="sel-a" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" /></label>
+            </div>
+            <p class="note blocked" id="sel-blocked" hidden>A neighbour is in the way, so the square stopped where it met it.</p>
+          </section>
+
+        </aside>
+      </section>
+
+      <section class="notes">
+        <div class="case-info">
+          <h2 id="case-name"></h2>
+          <p id="case-note"></p>
+          <details class="more" id="case-more" hidden>
+            <summary id="case-more-title"></summary>
+            <div id="case-more-body"></div>
+          </details>
+        </div>
+        <div class="how">
+          <h3>How to play</h3>
+          <p class="mode-note" id="mode-note"></p>
+          <p class="note" id="family-note"></p>
+          <p class="hint" id="hint">
+            Drag a square to move it, and drag the knob beside a selected square to turn it. Squares are solid: they stop at their neighbours and
+            slide along them.
+          </p>
+          <p class="hint keys">Keys, on the board: Enter picks a square, the arrows move it, <kbd>[</kbd>&nbsp;and&nbsp;<kbd>]</kbd> turn it, and Shift takes bigger steps.</p>
+        </div>
+      </section>
+
+      <footer>
+        <p>
+          The radii and the packings are those of the Lean library
+          <a href="https://github.com/vltanh/lean4-squares-in-circles">lean4-squares-in-circles</a>, and the proofs are explained in its
+          <a href="https://github.com/vltanh/lean4-squares-in-circles/blob/main/docs/proof/README.md">illustrated textbook</a>. More on the project:
+          <a href="/projects/lean4-squares-in-circles/">Formalization of “Squares in Circles” in Lean 4</a>.
+        </p>
+      </footer>
+    </div>
+  </body>
+</html>
