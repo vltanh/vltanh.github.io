@@ -19,6 +19,12 @@ import {
   symmetricPolygon,
   polygonShape,
   shoelace,
+  solidMove,
+  separate,
+  det,
+  norm,
+  sub,
+  add,
 } from "./geometry.js";
 
 const cases = [
@@ -81,6 +87,50 @@ for (let trial = 0; trial < 300; trial++) {
 }
 assert.ok(lowest > DELTA_REGULAR_OCTAGON - 1e-7, `an octagon below the regular one: ${lowest}`);
 console.log(`lowest of the random octagons: ${lowest.toFixed(6)}`);
+
+// Section 1: the copies are solid. Random drags of either lattice vector, from
+// the densest packing, short and long, towards the centre and away, never let
+// two copies overlap (every lattice vector has gauge at least 2), never give
+// a density above the densest, and still let the copies slide.
+for (const [name, shape, best] of [
+  ["disk", diskShape(), DELTA_DISK],
+  ["square", regularPolygon(4), 1],
+  ["regular hexagon", regularPolygon(6), 1],
+  ["regular octagon", regularPolygon(8), DELTA_REGULAR_OCTAGON],
+  ["smoothed octagon", smoothedOctagon(), DELTA_OCT],
+]) {
+  const r = densestLattice(shape);
+  let B = [mul(r.p, 2), mul(r.q, 2)];
+  assert.ok(leastGauge(shape, B[0], B[1]) >= 2 - 1e-9, `${name}: the densest packing is a packing`);
+  let moved = 0;
+  let worst = Infinity;
+  let densest = 0;
+  for (let k = 0; k < 1500; k++) {
+    const i = k % 2;
+    const a = rand() * 2 * Math.PI;
+    const len = [0.05, 0.4, 2, 6][Math.floor(rand() * 4)];
+    const target = k % 7 === 0 ? [0, 0] : add(B[i], [len * Math.cos(a), len * Math.sin(a)]);
+    const before = B[i];
+    B = solidMove(shape, B, i, target, { maxLen: 4.4 });
+    const g = leastGauge(shape, B[0], B[1]);
+    worst = Math.min(worst, g);
+    densest = Math.max(densest, shape.area / Math.abs(det(B[0], B[1])));
+    if (norm(sub(B[i], before)) > 0.01) moved++;
+    assert.ok(g >= 2 - 1e-11, `${name}: copies overlap after move ${k} (least gauge ${g})`);
+    assert.ok(norm(B[i]) <= 4.4 + 1e-9);
+  }
+  assert.ok(densest <= best + 1e-6, `${name}: density ${densest} above the densest ${best}`);
+  assert.ok(moved > 300, `${name}: the copies hardly move (${moved})`);
+  // no jumping: from the densest packing, a copy dragged through the middle
+  // copy to the far side stays on its own side
+  const D = [mul(r.p, 2), mul(r.q, 2)];
+  const far = solidMove(shape, D, 0, mul(D[0], -1));
+  assert.ok(norm(sub(far[0], D[0])) < norm(D[0]), `${name}: a copy jumped over the middle one`);
+  // pulling overlapping copies apart
+  const S = separate(shape, [mul(D[0], 0.8), mul(D[1], 0.8)]);
+  assert.ok(leastGauge(shape, S[0], S[1]) >= 2 - 1e-9);
+  console.log(`ok   solid ${name.padEnd(17)} least gauge ${worst.toFixed(12)}, highest density ${densest.toFixed(6)}, ${moved}/1500 moves`);
+}
 
 if (failed) {
   console.error(`${failed} densities off`);

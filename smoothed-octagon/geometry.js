@@ -332,12 +332,20 @@ export function latticePoints(u, v, x0, x1, y0, y1) {
   return out;
 }
 
-// The nonzero lattice vectors w, one of each pair ±w, with ‖w‖ < 2: the
-// copies K and K + w then overlap.
-export function overlapVectors(shape, u, v, tol = 1e-9) {
+// The largest distance from the centre to the boundary, with a margin: a
+// lattice vector w with ‖w‖ < 2 has length below twice this.
+const radiusOf = (shape) => {
+  if (shape.radius === undefined) shape.radius = 1.01 * Math.max(...shape.outline.map(norm)) + 1e-6;
+  return shape.radius;
+};
+
+// The nonzero lattice vectors w = c₀u + c₁v with |w| ≤ R, one of each pair ±w,
+// with their integer coefficients (c₀, c₁), enumerated through a reduced
+// basis so that none is missed.
+export function latticeVectors(u, v, R) {
   const [a, b] = reduce(u, v);
   const D = Math.abs(det(a, b));
-  const R = 2 * Math.max(...shape.outline.map(norm)) + 1e-9;
+  const Duv = det(u, v);
   const mi = Math.ceil((R * norm(b)) / D);
   const mj = Math.ceil((R * norm(a)) / D);
   const out = [];
@@ -345,58 +353,107 @@ export function overlapVectors(shape, u, v, tol = 1e-9) {
     for (let j = -mj; j <= mj; j++) {
       if (i === 0 && j <= 0) continue;
       const w = [i * a[0] + j * b[0], i * a[1] + j * b[1]];
-      const g = shape.gauge(w[0], w[1]);
-      if (g < 2 - tol) out.push({ w, g });
+      if (norm(w) > R) continue;
+      out.push({ w, c: [Math.round(det(w, v) / Duv), Math.round(det(u, w) / Duv)] });
     }
   }
   return out;
 }
 
-// The least gauge of a nonzero lattice vector: the copies overlap when it is
-// below 2 and touch when it equals 2.
+// The least gauge of a nonzero lattice vector. Two copies K + x and K + y of
+// the lattice packing overlap exactly when ‖x − y‖ < 2, and x − y is a lattice
+// vector, so this checks every pair of copies at once: they overlap when it is
+// below 2 and the closest touch when it equals 2.
 export function leastGauge(shape, u, v) {
-  const [a, b] = reduce(u, v);
-  const D = Math.abs(det(a, b));
-  const R = 2 * Math.max(...shape.outline.map(norm)) + 1;
-  const mi = Math.ceil((R * norm(b)) / D);
-  const mj = Math.ceil((R * norm(a)) / D);
+  if (Math.abs(det(u, v)) < 1e-9) return 0;
   let best = Infinity;
-  for (let i = 0; i <= mi; i++) {
-    for (let j = -mj; j <= mj; j++) {
-      if (i === 0 && j <= 0) continue;
-      const g = shape.gauge(i * a[0] + j * b[0], i * a[1] + j * b[1]);
-      if (g < best) best = g;
-    }
+  for (const { w } of latticeVectors(u, v, 2 * radiusOf(shape))) {
+    const g = shape.gauge(w[0], w[1]);
+    if (g < best) best = g;
   }
   return best;
 }
 
-// The part of the convex polygon `subject` inside the convex polygon `clip`
-// (both counterclockwise), by Sutherland and Hodgman.
-export function clipConvex(subject, clip) {
-  let out = subject;
-  for (let i = 0; i < clip.length && out.length; i++) {
-    const a = clip[i];
-    const b = clip[(i + 1) % clip.length];
-    const inside = (p) => (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]) >= 0;
-    const cut = (p, q) => {
-      const d1 = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
-      const d2 = (b[0] - a[0]) * (q[1] - a[1]) - (b[1] - a[1]) * (q[0] - a[0]);
-      const s = d1 / (d1 - d2);
-      return [p[0] + s * (q[0] - p[0]), p[1] + s * (q[1] - p[1])];
-    };
-    const input = out;
-    out = [];
-    for (let k = 0; k < input.length; k++) {
-      const p = input[k];
-      const q = input[(k + 1) % input.length];
-      if (inside(q)) {
-        if (!inside(p)) out.push(cut(p, q));
-        out.push(q);
-      } else if (inside(p)) out.push(cut(p, q));
+export const SOLID_TOL = 1e-11;
+export const isPacking = (shape, u, v) => leastGauge(shape, u, v) >= 2 - SOLID_TOL;
+
+// Pulls the copies apart, scaling the lattice about the origin, until no two
+// overlap.
+export function separate(shape, basis) {
+  const g = leastGauge(shape, basis[0], basis[1]);
+  if (g >= 2 - SOLID_TOL) return basis;
+  const f = (2 / g) * (1 + 1e-12);
+  return [mul(basis[0], f), mul(basis[1], f)];
+}
+
+// Moves the basis vector i of a lattice packing (copies of the shape at the
+// points of the lattice spanned by `basis`) towards `target`, with the copies
+// solid: no two copies of the packing ever overlap. The move goes in short
+// steps, so that no copy can jump over another; each step stops where two
+// copies meet (by bisection) and slides the rest of the step along the
+// contact. Returns the new basis, which is a packing if the old one was.
+export function solidMove(shape, basis, i, target, opts = {}) {
+  const step = opts.step || 0.03;
+  const maxLen = opts.maxLen || Infinity;
+  const R = 2 * radiusOf(shape);
+  let B = [basis[0], basis[1]];
+  const at = (x) => (i === 0 ? [x, B[1]] : [B[0], x]);
+  const ok = (b) => norm(b[i]) <= maxLen && isPacking(shape, b[0], b[1]);
+  // the furthest point towards `to` on the segment from B[i] that keeps a packing
+  const reach = (to) => {
+    if (ok(at(to))) return to;
+    const from = B[i];
+    const d = sub(to, from);
+    let lo = 0;
+    let hi = 1;
+    for (let k = 0; k < 44; k++) {
+      const mid = (lo + hi) / 2;
+      if (ok(at(add(from, mul(d, mid))))) lo = mid;
+      else hi = mid;
     }
+    return add(from, mul(d, lo));
+  };
+  // the unit normal, in the plane of vector i, of the contact that blocks the
+  // move to `to`: among the pairs of copies in contact whose offset depends on
+  // vector i, the one the move would push deepest
+  const blocking = (to) => {
+    const delta = sub(to, B[i]);
+    let best = null;
+    for (const { w, c } of latticeVectors(B[0], B[1], R)) {
+      const k = c[i];
+      if (!k || shape.gauge(w[0], w[1]) > 2 + 1e-6) continue;
+      const g1 = shape.gauge(w[0] + k * delta[0], w[1] + k * delta[1]);
+      if (!best || g1 < best.g1) best = { w, k, g1 };
+    }
+    if (!best) return null;
+    const { w, k } = best;
+    const e = 1e-7 * Math.max(1, norm(w));
+    const gx = (shape.gauge(w[0] + e, w[1]) - shape.gauge(w[0] - e, w[1])) / (2 * e);
+    const gy = (shape.gauge(w[0], w[1] + e) - shape.gauge(w[0], w[1] - e)) / (2 * e);
+    const n = mul([gx, gy], Math.sign(k));
+    const l = norm(n);
+    return l > 0 ? mul(n, 1 / l) : null;
+  };
+  for (let iter = 0; iter < (opts.maxSteps || 600); iter++) {
+    const rest = sub(target, B[i]);
+    const len = norm(rest);
+    if (len < 1e-10) break;
+    const to = len > step ? add(B[i], mul(rest, step / len)) : target;
+    let p = reach(to);
+    if (norm(sub(p, to)) > 1e-13) {
+      B = at(p);
+      const n = blocking(to);
+      if (n) {
+        const r = sub(to, p);
+        const along = sub(r, mul(n, dot(r, n)));
+        if (norm(along) > 1e-13) p = reach(add(p, along));
+      }
+    }
+    const gain = len - norm(sub(target, p));
+    B = at(p);
+    if (gain < 1e-10) break;
   }
-  return out;
+  return B;
 }
 
 // --------------------------------------------- centrally symmetric polygons

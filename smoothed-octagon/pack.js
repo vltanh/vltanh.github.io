@@ -1,20 +1,22 @@
 // 1. Pack it yourself: copies of a shape on a lattice spanned by two vectors
-// that the reader drags, with the overlaps hatched and the density live.
+// that the reader drags, with the density live. The copies are solid: a drag
+// stops where two copies of the packing meet and slides along the contact,
+// so no two copies ever overlap (see solidMove in geometry.js).
 import {
   add,
-  clipConvex,
   densestLattice,
   det,
   diskShape,
   hexagonAt,
-  leastGauge,
+  isPacking,
+  latticePoints,
   mul,
   norm,
-  overlapVectors,
-  latticePoints,
   reduce,
   regularPolygon,
+  separate,
   smoothedOctagon,
+  solidMove,
   sub,
 } from "./geometry.js";
 import { $, Board, make, pct, tween } from "./common.js";
@@ -72,25 +74,17 @@ for (const s of SHAPES) {
   // every position of the smoothed octagon's family is densest; start from the
   // one of the project's figures, in which copies side by side share an edge
   if (s.key === "smoothed") s.best = { ...hexagonAt(s.shape, 0), density: s.best.density };
-  [s.b1, s.b2] = niceBasis(mul(s.best.p, 2), mul(s.best.q, 2));
+  [s.b1, s.b2] = separate(s.shape, niceBasis(mul(s.best.p, 2), mul(s.best.q, 2)));
   s.radius = Math.max(...s.shape.outline.map(norm));
 }
 
-const MIN_DET = 1.2;
-const MIN_LEN = 0.6;
-const MAX_LEN = 4.4;
-
-const MODE_NOTES = {
-  free: "The copies may overlap; the overlaps are hatched.",
-  solid: "The copies are solid: a copy stops where it meets another and slides along it.",
-};
+const MAX_LEN = 4.4; // keeps the two copies on the board
 
 export function initPack() {
   const svg = $("pack-board");
   const layer = {
     defs: svg.querySelector("defs"),
     copies: svg.querySelector(".copies"),
-    lenses: svg.querySelector(".lenses"),
     arrows: svg.querySelector(".arrows"),
     movers: svg.querySelector(".movers"),
   };
@@ -98,87 +92,23 @@ export function initPack() {
 
   let cur = SHAPES[4];
   let v = [cur.b1, cur.b2];
-  let mode = "free";
   let sel = null; // the vector the keys move
   let drag = null;
   let stop = () => {};
 
   const shapeDefs = make("path", { id: "pack-shape" }, layer.defs);
 
-  const valid = (w) => {
-    const [a] = reduce(w[0], w[1]);
-    if (Math.abs(det(w[0], w[1])) < MIN_DET || norm(a) < MIN_LEN) return false;
-    if (w.some((x) => norm(x) > MAX_LEN || norm(x) < MIN_LEN)) return false;
-    return mode === "free" || leastGauge(cur.shape, w[0], w[1]) >= 2 - 1e-9;
-  };
-
-  // Moves vector i towards the target, as far as the copies allow, then
-  // slides it along the copy it met.
+  // Moves vector i towards the target; the copies stop and slide at contact.
   function moveTo(i, target) {
-    const at = (x) => (i === 0 ? [x, v[1]] : [v[0], x]);
-    if (valid(at(target))) {
-      v = at(target);
-      return;
-    }
-    let from = v[i];
-    for (let round = 0; round < 3; round++) {
-      let lo = 0;
-      let hi = 1;
-      const seg = sub(target, from);
-      for (let k = 0; k < 30; k++) {
-        const mid = (lo + hi) / 2;
-        if (valid(at(add(from, mul(seg, mid))))) lo = mid;
-        else hi = mid;
-      }
-      from = add(from, mul(seg, lo));
-      if (mode !== "solid") break;
-      // slide: keep the part of the remaining move along the contact
-      const rest = sub(target, from);
-      const n = contactNormal(i, at(from));
-      if (!n) break;
-      const along = sub(rest, mul(n, rest[0] * n[0] + rest[1] * n[1]));
-      if (norm(along) < 1e-6) break;
-      target = add(from, along);
-      if (valid(at(target))) {
-        from = target;
-        break;
-      }
-    }
-    v = at(from);
-  }
-
-  // The normal, in the plane of vector i, of the contact that blocks it.
-  function contactNormal(i, w) {
-    const [a, b] = reduce(w[0], w[1]);
-    const D = det(w[0], w[1]);
-    let best = null;
-    for (let p = -3; p <= 3; p++) {
-      for (let q = -3; q <= 3; q++) {
-        if (!p && !q) continue;
-        const x = add(mul(a, p), mul(b, q));
-        const g = cur.shape.gauge(x[0], x[1]);
-        if (!best || g < best.g) best = { x, g };
-      }
-    }
-    if (!best || best.g > 2 + 1e-3) return null;
-    const coef = i === 0 ? det(best.x, w[1]) / D : det(w[0], best.x) / D;
-    if (Math.abs(coef) < 0.5) return null;
-    const e = 1e-6;
-    const gx = (cur.shape.gauge(best.x[0] + e, best.x[1]) - cur.shape.gauge(best.x[0] - e, best.x[1])) / (2 * e);
-    const gy = (cur.shape.gauge(best.x[0], best.x[1] + e) - cur.shape.gauge(best.x[0], best.x[1] - e)) / (2 * e);
-    const n = mul([gx, gy], Math.sign(coef));
-    const l = norm(n);
-    return l ? mul(n, 1 / l) : null;
+    v = solidMove(cur.shape, v, i, target, { maxLen: MAX_LEN });
   }
 
   function draw() {
     const k = board.k;
     shapeDefs.setAttribute("d", board.localPath(cur.shape.outline));
     layer.copies.replaceChildren();
-    layer.lenses.replaceChildren();
     layer.arrows.replaceChildren();
     layer.movers.replaceChildren();
-    for (const old of layer.defs.querySelectorAll(".lens-def")) old.remove();
 
     const [x0, x1, y0, y1] = board.bounds(cur.radius + 0.1);
     const pts = latticePoints(v[0], v[1], x0, x1, y0, y1);
@@ -191,19 +121,6 @@ export function initPack() {
         layer.copies
       );
     }
-
-    // the overlaps: K ∩ (K + w) for each short lattice vector w, at every copy
-    const over = overlapVectors(cur.shape, v[0], v[1]);
-    over.forEach(({ w }, j) => {
-      const lens = clipConvex(
-        cur.shape.outline,
-        cur.shape.outline.map((p) => add(p, w))
-      );
-      if (lens.length < 3) return;
-      make("path", { id: `pack-lens-${j}`, class: "lens-def", d: board.localPath(lens) }, layer.defs);
-      for (const c of pts)
-        make("use", { href: `#pack-lens-${j}`, x: board.X(c[0]).toFixed(2), y: board.Y(c[1]).toFixed(2), class: "lens" }, layer.lenses);
-    });
 
     // the two copies that the reader moves, and the vectors to them
     v.forEach((w, i) => {
@@ -230,32 +147,21 @@ export function initPack() {
       make("circle", { cx: bx, cy: by, r: 3.2, class: `tip c${i + 1}` }, layer.arrows);
     });
     make("circle", { cx: board.X(0), cy: board.Y(0), r: 3.2, class: "tip origin" }, layer.arrows);
-    readout(over.length > 0);
+    readout();
   }
 
-  function readout(overlapping) {
+  function readout() {
     const d = cur.shape.area / Math.abs(det(v[0], v[1]));
-    const big = $("pack-density");
-    big.textContent = pct(d);
-    big.classList.toggle("over", overlapping);
+    $("pack-density").textContent = pct(d);
     $("pack-board-density").textContent = pct(d);
-    $("pack-board-density").classList.toggle("over", overlapping);
     $("pack-best").textContent = pct(cur.best.density);
     const status = $("pack-status");
-    status.classList.remove("good", "bad");
-    if (overlapping) {
-      status.textContent = "The copies overlap where hatched, so some of the plane is counted twice: this is not a packing.";
-      status.classList.add("bad");
-    } else if (d > cur.best.density - 5e-5) {
+    status.classList.remove("good");
+    if (d > cur.best.density - 5e-5) {
       status.textContent = `A densest packing: no packing of the ${cur.name.toLowerCase()} covers more.`;
       status.classList.add("good");
-    } else {
-      status.textContent = `A packing, with ${pct(1 - d)} of the plane left uncovered.`;
-    }
-    svg.setAttribute(
-      "aria-label",
-      `Copies of the ${cur.name.toLowerCase()} on a lattice, covering ${pct(d)} of the plane${overlapping ? ", with overlaps" : ""}`
-    );
+    } else status.textContent = `A packing, with ${pct(1 - d)} of the plane left uncovered.`;
+    svg.setAttribute("aria-label", `Copies of the ${cur.name.toLowerCase()} on a lattice, covering ${pct(d)} of the plane`);
   }
 
   // The basis of the densest lattice nearest to the present vectors.
@@ -284,11 +190,13 @@ export function initPack() {
     stop = tween(
       450,
       (s) => {
-        v = [add(from[0], mul(sub(target[0], from[0]), s)), add(from[1], mul(sub(target[1], from[1]), s))];
+        // a straight path between two packings may pass through overlaps:
+        // each frame is pulled apart as far as needed
+        v = separate(cur.shape, [add(from[0], mul(sub(target[0], from[0]), s)), add(from[1], mul(sub(target[1], from[1]), s))]);
         draw();
       },
       () => {
-        v = target;
+        v = isPacking(cur.shape, target[0], target[1]) ? target : separate(cur.shape, target);
         draw();
       }
     );
@@ -302,17 +210,6 @@ export function initPack() {
     $("pack-shape-name").textContent = s.name;
     $("pack-shape-note").textContent = s.note;
     draw();
-  }
-
-  function setMode(m) {
-    mode = m;
-    for (const b of document.querySelectorAll("#pack-modes .mode")) b.setAttribute("aria-pressed", String(b.dataset.mode === m));
-    $("pack-mode-note").textContent = MODE_NOTES[m];
-    if (m === "solid" && leastGauge(cur.shape, v[0], v[1]) < 2 - 1e-9) {
-      // pull the copies apart until they no longer overlap
-      const g = leastGauge(cur.shape, v[0], v[1]);
-      glideTo([mul(v[0], 2 / g + 1e-6), mul(v[1], 2 / g + 1e-6)]);
-    } else draw();
   }
 
   // the thumbnails of the shapes
@@ -379,13 +276,11 @@ export function initPack() {
     draw();
   });
 
-  for (const b of document.querySelectorAll("#pack-modes .mode")) b.addEventListener("click", () => setMode(b.dataset.mode));
   $("pack-densest").addEventListener("click", () => glideTo(nearestBest()));
   $("pack-spread").addEventListener("click", () => {
     const f = Math.min(1.18, MAX_LEN / Math.max(norm(v[0]), norm(v[1])));
     glideTo([mul(v[0], f), mul(v[1], f)]);
   });
 
-  setMode("free");
   choose(cur);
 }
