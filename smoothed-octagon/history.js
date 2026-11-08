@@ -50,13 +50,13 @@ const ENTRIES = [
   {
     year: "2011, 2017",
     who: "Thomas Hales",
-    text: "Recasts the problem in the calculus of variations, then as a problem of optimal control. The circle is not a minimizer, a minimizer that is piecewise analytic is a smoothed polygon, and the smoothed octagon is “a strict (micro) local minimum”.",
+    text: "Recasts the problem in the calculus of variations, then as a problem of optimal control. He shows that the circle is not a minimizer, that a minimizer that is piecewise analytic is a smoothed polygon, and that the smoothed octagon is “a strict (micro) local minimum”. The smoothed octagon, and more generally every smoothed regular polygon with 6<i>k</i> + 2 sides, is a Pontryagin extremal of the control problem.",
     floor: 0.892656,
   },
   {
     year: "2024",
     who: "Thomas Hales and Koundinya Vajjha",
-    text: "In the 283-page book <i>Packings of Smoothed Polygons</i>, prove Mahler’s first conjecture: a worst shape is a smoothed polygon with finitely many sides. Reinhardt’s conjecture “remains open”.",
+    text: "In the 283-page book <i>Packings of Smoothed Polygons</i>, prove Mahler’s first conjecture: a worst shape is a smoothed polygon with finitely many sides. The known extremals are the smoothed polygons with 8, 14, 20, … sides and their limit, the circle, and the octagon packs worst among them. A proof that no other extremals exist “would complete a proof of the Reinhardt conjecture”, which “remains open”.",
     floor: 0.892656,
   },
   {

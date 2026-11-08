@@ -4,7 +4,7 @@
 // packing in which each copy touches six others. Moving p along the boundary
 // slides the copies. For the smoothed octagon the hexagon's area never
 // changes, so every position is a densest packing.
-import { densestLattice, diskShape, hexagonAt, latticePoints, mul, norm, regularPolygon, smoothedOctagon, sub } from "./geometry.js";
+import { densestLattice, diskShape, hexagonAt, latticePoints, mul, norm, regularPolygon, roundedPolygon, smoothedOctagon, sub } from "./geometry.js";
 import { $, Board, make, pct, reducedMotion } from "./common.js";
 
 const SAMPLES = 240;
@@ -14,15 +14,23 @@ const SHAPES = [
   {
     key: "smoothed",
     name: "Smoothed octagon",
-    short: "Smoothed",
+    short: "Smoothed octagon",
     color: "oct",
     shape: smoothedOctagon(),
     note: "The density never changes: every position is a densest packing, and the copies keep their orientation. Greg Egan animated this family in 2014.",
   },
   {
+    key: "smoothed14",
+    name: "Smoothed 14-gon",
+    short: "Smoothed 14-gon",
+    color: "s14",
+    shape: roundedPolygon(14, 1, { name: "smoothed 14-gon" }),
+    note: "The smoothed 14-gon slides like the smoothed octagon: every position is a densest packing, at 90.61%.",
+  },
+  {
     key: "octagon",
     name: "Regular octagon",
-    short: "Octagon",
+    short: "Regular octagon",
     color: "reg",
     shape: regularPolygon(8),
     note: "The copies still touch six others all the way, but the density dips as they slide, and only isolated positions are densest.",
@@ -33,14 +41,14 @@ const SHAPES = [
     short: "Disk",
     color: "disk",
     shape: diskShape(),
-    note: "The density never changes, but nothing new happens: the whole honeycomb only turns about the middle disk. Disks have a single densest lattice packing, up to turning it.",
+    note: "The density stays at 90.69% because the whole honeycomb only turns about the middle disk: disks have a single densest lattice packing, up to turning it.",
   },
 ];
 
 for (const s of SHAPES) {
   // the slide starts at a densest packing (for the smoothed octagon, the one
   // in which copies side by side share an edge) and ends at the same lattice
-  const start = s.key === "smoothed" ? hexagonAt(s.shape, 0) : densestLattice(s.shape);
+  const start = s.key.startsWith("smoothed") ? hexagonAt(s.shape, 0) : densestLattice(s.shape);
   s.phi0 = start.phi;
   s.phi1 = start.psi;
   s.radius = Math.max(...s.shape.outline.map(norm));

@@ -14,6 +14,7 @@ import {
   norm,
   reduce,
   regularPolygon,
+  roundedPolygon,
   separate,
   smoothedOctagon,
   solidMove,
@@ -44,7 +45,13 @@ export const SHAPES = [
     key: "octagon",
     name: "Octagon",
     shape: regularPolygon(8),
-    note: "The regular octagon packs a little worse than the disk. Mahler found in 1947 that no centrally symmetric octagon does worse: “This result is rather surprising.”",
+    note: "The regular octagon packs a little worse than the disk, which Mahler called “rather surprising” in 1947. He also proved that no centrally symmetric octagon packs worse.",
+  },
+  {
+    key: "smoothed14",
+    name: "Smoothed 14-gon",
+    shape: roundedPolygon(14, 1, { name: "smoothed 14-gon" }),
+    note: "The next smoothed polygon in Hales’s family after the octagon: a regular 14-gon with its corners cut by hyperbolas. It covers a little less than the regular octagon and more than the smoothed octagon.",
   },
   {
     key: "smoothed",
@@ -71,9 +78,10 @@ function niceBasis(u, v) {
 
 for (const s of SHAPES) {
   s.best = densestLattice(s.shape);
-  // every position of the smoothed octagon's family is densest; start from the
-  // one of the project's figures, in which copies side by side share an edge
-  if (s.key === "smoothed") s.best = { ...hexagonAt(s.shape, 0), density: s.best.density };
+  // every position of a smoothed polygon's sliding family is densest; start
+  // from the one of the project's figures, in which copies side by side share
+  // an edge
+  if (s.key.startsWith("smoothed")) s.best = { ...hexagonAt(s.shape, 0), density: s.best.density };
   [s.b1, s.b2] = separate(s.shape, niceBasis(mul(s.best.p, 2), mul(s.best.q, 2)));
   s.radius = Math.max(...s.shape.outline.map(norm));
 }
@@ -90,7 +98,7 @@ export function initPack() {
   };
   const board = new Board(svg, { cx: 0, cy: 0, half: 4.2 }, () => draw());
 
-  let cur = SHAPES[4];
+  let cur = SHAPES[5];
   let v = [cur.b1, cur.b2];
   let sel = null; // the vector the keys move
   let drag = null;

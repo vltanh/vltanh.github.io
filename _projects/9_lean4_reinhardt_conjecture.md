@@ -5,7 +5,7 @@ permalink: /projects/lean4-reinhardt-conjecture/
 description: A Lean 4 proof, in progress, that Reinhardt's smoothed octagon packs the plane worst among centrally symmetric convex shapes.
 img: assets/img/lean4-reinhardt-conjecture/octagon-tiling.svg
 og_image: /assets/img/lean4-reinhardt-conjecture/octagon-tiling.png
-importance: 8
+importance: 9
 category: fun
 project_intro: true
 math: true
@@ -15,11 +15,11 @@ repository:
   - vltanh/lean4-smoothed-octagon
 ---
 
-Which convex shape packs the plane worst? Copies of a disk, packed as tightly as possible, cover $$\pi/\sqrt{12} = 90.69\ldots\%$$ of the plane, while squares and regular hexagons cover all of it. In 1934 Karl Reinhardt conjectured that among centrally symmetric convex shapes, those that look the same after a half turn, the worst is the _smoothed octagon_, a regular octagon whose corners are cut off by arcs of hyperbolas. Its densest packing has density
+Copies of a disk, packed as tightly as possible, cover $$\pi/\sqrt{12} = 90.69\ldots\%$$ of the plane, while squares and regular hexagons cover all of it. In 1934 Karl Reinhardt conjectured that among centrally symmetric convex shapes, those that look the same after a half turn, the one that packs worst is the _smoothed octagon_, a regular octagon whose corners are cut off by arcs of hyperbolas. Its densest packing has density
 
 $$\delta_{\mathrm{oct}} = \frac{8 - 4\sqrt2 - \log 2}{2\sqrt2 - 1} = 0.902414\ldots,$$
 
-and Reinhardt conjectured that it is the only worst shape, up to affine maps. Kurt Mahler reached the same octagon independently in 1947. The conjecture is still open. This project is writing a Lean 4 proof of it, which is not finished yet.
+and he conjectured that it is the only worst shape, up to affine maps. Kurt Mahler reached the same octagon independently in 1947. The conjecture is still open, and the Lean 4 proof that this project is writing is not finished.
 
 <div class="row justify-content-center">
   <div class="col-sm-8 mt-3 mt-md-0">
@@ -51,6 +51,8 @@ For a centrally symmetric convex shape, László Fejes Tóth proved in 1950 that
   </div>
 </div>
 
+The smoothed 14-gon in the figure belongs to the same family as the octagon. Hales showed in 2017 that the smoothed regular polygons with $$6k + 2$$ sides, $$8, 14, 20, \dots$$, are all Pontryagin extremals of his control problem: they satisfy the conditions that Pontryagin's maximum principle sets for a worst shape. Their densities increase with $$k$$ towards the disk's $$\pi/\sqrt{12}$$, and the octagon's is the least: $$0.902414$$ for $$k = 1$$, $$0.906052$$ for $$k = 2$$, just below the regular octagon's $$0.906164$$, and $$0.906607$$ for $$k = 3$$. Hales and Vajjha found no other extremals, and they wrote in 2024 that "a proof that no other extremals exist would complete a proof of the Reinhardt conjecture".
+
 ## The statements
 
 The definitions and statements are in a Challenge file that imports only Mathlib, copied word for word from [lean4-smoothed-polygon](https://github.com/vltanh/lean4-smoothed-polygon), a formalization of Hales and Vajjha's book _Packings of Smoothed Polygons_ on which this project builds. The density of a shape is the supremum of the densities of packings of the plane by congruent copies of it. The four theorems say:
@@ -74,7 +76,7 @@ The proof has five stages. The foundations show that the conjecture is equivalen
 
 ## Status
 
-The proof is not finished, and nothing here claims that the conjecture is proved. The informal proof that the project formalizes was written by ChatGPT Pro, in notes that rely in part on interval arithmetic computed in C++, and it has not been peer reviewed. In Lean, the main theorem is proved from the stages below, under two named hypotheses: Hales and Vajjha's compactness theorem (Theorem 5.0.2 of their book), until its formalization in lean4-smoothed-polygon is complete, and seven interval-arithmetic covers used in two of the five cases, stated as the C++ programs certify them. As of 7 November 2026:
+The proof is not finished. The informal proof that the project formalizes was written by ChatGPT Pro, in notes that rely in part on interval arithmetic computed in C++, and it has not been peer reviewed. In Lean, the main theorem is proved from the stages below, under two named hypotheses: Hales and Vajjha's compactness theorem (Theorem 5.0.2 of their book), until its formalization in lean4-smoothed-polygon is complete, and seven interval-arithmetic covers used in two of the five cases, stated as the C++ programs certify them. As of 7 November 2026:
 
 | Stage                                      | State                               |
 | :----------------------------------------- | :---------------------------------- |

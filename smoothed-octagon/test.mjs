@@ -49,6 +49,26 @@ for (const [name, shape, expected] of cases) {
   assert.ok(Math.abs(g - 2) < 1e-6, `${name}: the copies touch (least gauge ${g})`);
 }
 
+// The smoothed regular (6k + 2)-gons, drawn here as regular polygons whose
+// corners are cut by hyperbolas asymptotic to the lines k sides beyond the
+// corner, against the densities of the project's numeric model, which builds
+// them from the trajectories of Hales's control problem
+// (scripts/figures/octagon.py, SmoothedPolygon(k).density()). Each also has a
+// continuum of densest packings: all its inscribed hexagons have one area.
+const MODEL = [0.9024141829971578, 0.9060517532039851, 0.9066066235063395, 0.9067656455168379, 0.9068275491313229, 0.9068565024252699];
+MODEL.forEach((expected, i) => {
+  const k = i + 1;
+  const P = roundedPolygon(6 * k + 2, 1);
+  const d = densestLattice(P).density;
+  const ok = Math.abs(d - expected) < 1e-8;
+  if (!ok) failed++;
+  const dets = [];
+  for (let j = 0; j < 40; j++) dets.push(hexagonAt(P, (j / 40) * Math.PI).det);
+  assert.ok(Math.max(...dets) - Math.min(...dets) < 1e-9, `the smoothed ${6 * k + 2}-gon slides`);
+  console.log(`${ok ? "ok  " : "FAIL"} smoothed ${String(6 * k + 2).padStart(2)}-gon (k = ${k})  ${d.toFixed(10)}  model ${expected.toFixed(10)}`);
+});
+for (let i = 1; i < MODEL.length; i++) assert.ok(MODEL[i] > MODEL[i - 1] && MODEL[i] < DELTA_DISK);
+
 // The smoothed octagon: its area, the corner arc, and the continuum of densest
 // packings (every inscribed affinely regular hexagon has the same area).
 const K = smoothedOctagon();
@@ -97,6 +117,7 @@ for (const [name, shape, best] of [
   ["square", regularPolygon(4), 1],
   ["regular hexagon", regularPolygon(6), 1],
   ["regular octagon", regularPolygon(8), DELTA_REGULAR_OCTAGON],
+  ["smoothed 14-gon", roundedPolygon(14, 1), DELTA_SMOOTHED_14],
   ["smoothed octagon", smoothedOctagon(), DELTA_OCT],
 ]) {
   const r = densestLattice(shape);
@@ -119,7 +140,7 @@ for (const [name, shape, best] of [
     assert.ok(g >= 2 - 1e-11, `${name}: copies overlap after move ${k} (least gauge ${g})`);
     assert.ok(norm(B[i]) <= 4.4 + 1e-9);
   }
-  assert.ok(densest <= best + 1e-6, `${name}: density ${densest} above the densest ${best}`);
+  assert.ok(densest <= r.density + 1e-9 && Math.abs(r.density - best) < 5e-6, `${name}: density ${densest} above the densest ${best}`);
   assert.ok(moved > 300, `${name}: the copies hardly move (${moved})`);
   // no jumping: from the densest packing, a copy dragged through the middle
   // copy to the far side stays on its own side

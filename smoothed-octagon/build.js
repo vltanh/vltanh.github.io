@@ -3,7 +3,7 @@
 // d · d′ = c, where d = 1 − y is the distance to the line y = 1 and
 // d′ = (√2 − x + y)/√2 the distance to the line x − y = √2, the lines of the
 // next two sides. At c = √2/4 the curve touches both sides of the corner.
-import { SQRT2, densestLattice, regularPolygon, roundedPolygon } from "./geometry.js";
+import { SQRT2, densestLattice, hexagonAt, regularPolygon, roundedPolygon } from "./geometry.js";
 import { $, Board, make, pct, tween } from "./common.js";
 
 const OCTAGON = regularPolygon(8);
@@ -36,12 +36,12 @@ const STEPS = [
   {
     title: "Cut the corner",
     view: "corner",
-    text: "Why √2/4? With that product the curve just touches the two sides of the corner, at <i>T</i><sub>1</sub> and <i>T</i><sub>2</sub>. Cut the corner off along the curve between them, and the boundary has no corner left. A smaller product (move the slider) makes the curve cross the sides, and the cut leaves two smaller corners.",
+    text: "With the product √2/4, the curve just touches the two sides of the corner, at <i>T</i><sub>1</sub> and <i>T</i><sub>2</sub>. Cutting the corner off along the curve between them leaves a boundary with no corner. With a smaller product (move the slider), the curve crosses the sides and the cut leaves two smaller corners.",
   },
   {
     title: "All eight corners",
     view: "whole",
-    text: "Cut all eight corners the same way. Each side keeps a straight middle part of length 2 − √2 ≈ 0.586, and each corner loses a sliver about 0.023 deep. That is Reinhardt’s smoothed octagon. Its densest packing covers 90.24% of the plane. The slider rounds the corners gradually; the density falls the whole way.",
+    text: "Cutting all eight corners the same way gives Reinhardt’s smoothed octagon. Each side keeps a straight middle part of length 2 − √2 ≈ 0.586, and each corner loses a sliver about 0.023 deep. Its densest packing covers 90.24% of the plane. As the slider rounds the corners, the density falls the whole way.",
   },
 ];
 
@@ -338,6 +338,20 @@ export function initBuild() {
   $("build-back").addEventListener("click", () => goTo(step - 1));
   $("build-next").addEventListener("click", () => goTo(step + 1));
   $("build-c").addEventListener("input", (e) => setRounding(+e.target.value / 1000));
+
+  // the smoothed polygons with 6k + 2 sides, k = 1, 2, 3; every inscribed
+  // hexagon of the kind that gives a lattice packing has the same area, so
+  // any one of them gives the density
+  for (const k of [1, 2, 3]) {
+    const P = roundedPolygon(6 * k + 2, 1);
+    const li = document.createElement("li");
+    const t = make("svg", { viewBox: "-1.12 -1.12 2.24 2.24", "aria-hidden": "true" }, li);
+    make("path", { d: `${P.outline.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(4)} ${(-y).toFixed(4)}`).join("")}Z`, class: "thumb" }, t);
+    const cap = document.createElement("span");
+    cap.innerHTML = `<i>k</i> = ${k}, ${6 * k + 2} sides<br>${pct(P.area / (4 * hexagonAt(P, 0).det))}`;
+    li.append(cap);
+    $("family").append(li);
+  }
 
   goTo(0, false);
 }
