@@ -89,14 +89,6 @@ export function initHistory() {
     list.append(li);
   });
 
-  list.addEventListener("keydown", (e) => {
-    const n = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[e.key];
-    if (!n) return;
-    e.preventDefault();
-    select(Math.max(0, Math.min(ENTRIES.length - 1, sel + n)));
-    list.querySelectorAll(".event")[sel].focus();
-  });
-
   function drawLine() {
     line.replaceChildren();
     // drawn at the size it is shown, so that the text keeps its size
@@ -146,7 +138,6 @@ export function initHistory() {
     sel = i;
     list.querySelectorAll(".event").forEach((b, j) => {
       b.setAttribute("aria-current", String(j === i));
-      b.tabIndex = j === i ? 0 : -1;
     });
     const e = ENTRIES[i];
     $("history-caption").textContent = e.floor

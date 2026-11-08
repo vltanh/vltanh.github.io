@@ -26,6 +26,7 @@ import {
   sub,
   add,
 } from "./geometry.js";
+import { SHAPES } from "./pack.js";
 
 const cases = [
   ["disk", diskShape(), DELTA_DISK],
@@ -107,6 +108,31 @@ for (let trial = 0; trial < 300; trial++) {
 }
 assert.ok(lowest > DELTA_REGULAR_OCTAGON - 1e-7, `an octagon below the regular one: ${lowest}`);
 console.log(`lowest of the random octagons: ${lowest.toFixed(6)}`);
+
+// Section 1: the shape buttons go from the best packer to the worst, by the
+// densities the page computes, and end on the smoothed octagon.
+const dens = SHAPES.map((s) => s.best.density);
+for (let i = 1; i < dens.length; i++) assert.ok(dens[i] <= dens[i - 1] + 1e-9, `shape ${SHAPES[i].key} out of order`);
+assert.equal(SHAPES[SHAPES.length - 1].key, "smoothed");
+console.log(`ok   shape order: ${SHAPES.map((s) => `${s.name} ${(100 * s.best.density).toFixed(2)}%`).join(", ")}`);
+
+// Section 3: regular polygons with more corners than the octagon still pack
+// better than the disk (the 20-gon is a starting shape); the octagon is the
+// exception.
+for (const [n, expected] of [
+  [10, 0.91372],
+  [12, 0.928203],
+  [14, 0.907466],
+  [16, 0.909017],
+  [20, 0.907339],
+  [24, 0.912115],
+  [32, 0.907127],
+]) {
+  const d = densestLattice(regularPolygon(n)).density;
+  assert.ok(Math.abs(d - expected) < 1e-6 && d > DELTA_DISK, `regular ${n}-gon: ${d}`);
+}
+assert.ok(densestLattice(regularPolygon(8)).density < DELTA_DISK);
+console.log("ok   regular 10- to 32-gons pack better than the disk (20-gon 0.907339), the octagon worse");
 
 // Section 1: the copies are solid. Random drags of either lattice vector, from
 // the densest packing, short and long, towards the centre and away, never let

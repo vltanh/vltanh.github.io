@@ -34,7 +34,7 @@ const PRESETS = [
   { key: "square", name: "Square", half: () => firstHalf(regularPolygon(4).outline) },
   { key: "hexagon", name: "Hexagon", half: () => firstHalf(regularPolygon(6).outline) },
   { key: "octagon", name: "Octagon", half: () => firstHalf(regularPolygon(8).outline) },
-  { key: "round", name: "Round", half: () => firstHalf(regularPolygon(20).outline) },
+  { key: "20gon", name: "20-gon", half: () => firstHalf(regularPolygon(20).outline) },
   { key: "near", name: "Near Reinhardt’s", half: () => firstHalf(smoothedOctagon({ arcSamples: 2 }).outline) },
 ];
 
@@ -48,28 +48,34 @@ export function drawGauge(gauge, d) {
   gauge.replaceChildren();
   const W = Math.max(240, Math.round(gauge.getBoundingClientRect().width) || 340);
   const H = 116;
-  const L = 12;
-  const R = 18;
+  const M = 6; // the margin kept clear around everything drawn
+  const L = M + 12; // 89.8%, right of the arrowhead at the left end
+  const R = 24; // room for the 100% label right of the axis' end
   const axis = 66;
   const GAP = 12;
   gauge.setAttribute("viewBox", `0 0 ${W} ${H}`);
-  const B = L + 0.8 * (W - L - R); // where the axis breaks, at 91%
+  const B = L + 0.84 * (W - L - R); // where the axis breaks, at 91%
   const X = (x) => {
     const v = Math.min(1, Math.max(LO, x));
     return v <= HI ? L + ((v - LO) / (HI - LO)) * (B - L) : B + GAP + ((v - HI) / (1 - HI)) * (W - R - B - GAP);
   };
-  // every label is kept inside the gauge
+  // every label, with its halo, is kept the margin inside the gauge
   const text = (str, x, y, cls) => {
     const t = make("text", { x, y, class: cls }, gauge);
     t.textContent = str;
     const b = t.getBBox();
-    if (b.width && b.x < 2) t.setAttribute("x", x + 2 - b.x);
-    else if (b.width && b.x + b.width > W - 2) t.setAttribute("x", x - (b.x + b.width - (W - 2)));
+    if (b.width && b.x < M) t.setAttribute("x", x + M - b.x);
+    else if (b.width && b.x + b.width > W - M) t.setAttribute("x", x - (b.x + b.width - (W - M)));
     return t;
   };
-  make("rect", { x: X(LO), y: axis - 6, width: X(DELTA_OCT) - X(LO), height: 12, class: "zone" }, gauge);
-  make("line", { x1: X(LO), x2: B, y1: axis, y2: axis, class: "axis" }, gauge);
+  // the axis goes on to the left, towards worse packers: an arrowhead inside
+  // the margin, and the zone below the smoothed octagon starting after it
+  make("rect", { x: M + 9, y: axis - 6, width: X(DELTA_OCT) - (M + 9), height: 12, class: "zone" }, gauge);
+  make("path", { d: `M${M} ${axis}l9 -4.5v9z`, class: "arrowhead" }, gauge);
+  make("line", { x1: M + 8, x2: B, y1: axis, y2: axis, class: "axis" }, gauge);
   make("line", { x1: B + GAP, x2: X(1), y1: axis, y2: axis, class: "axis" }, gauge);
+  // the axis ends at 100%, the most any packing covers: an end cap, no arrow
+  make("line", { x1: X(1), x2: X(1), y1: axis - 6, y2: axis + 6, class: "axis end-cap" }, gauge);
   for (const x of [B + 2, B + GAP - 2]) make("line", { x1: x - 3, x2: x + 3, y1: axis + 5, y2: axis - 5, class: "axis" }, gauge);
   for (const [t, label] of [
     [0.9, "90%"],
@@ -90,7 +96,7 @@ export function drawGauge(gauge, d) {
     make("line", { x1: X(x), x2: X(x), y1: y - 5, y2: axis + 6, class: `mark ${cls}` }, gauge);
     text(name, X(x) - 4, y, `mark-label ${cls}`);
   }
-  text("← packs worse, the goal", X(LO), axis + 40, "hint-label start");
+  text("← packs worse, the goal", M, axis + 40, "hint-label start");
   make("circle", { cx: X(d), cy: axis, r: 7, class: "you" }, gauge);
 }
 
@@ -104,7 +110,7 @@ export function initBeat() {
 
   let H = PRESETS[2].half(); // the first half of the corners, counterclockwise
   let preset = "octagon";
-  let sel = null; // the corner pair the keys move
+  let sel = null; // the corner pair last grabbed, joined through the centre
   let drag = null;
   let result = null;
 
@@ -261,6 +267,9 @@ export function initBeat() {
     const n = 2 * H.length;
     let msg;
     if (n <= 6) msg = `A ${n === 4 ? "parallelogram" : "hexagon"} like this tiles the plane and leaves no gaps. Add corners.`;
+    else if (preset === "20gon")
+      msg =
+        "The regular 20-gon packs better than the disk, as do the regular polygons with 10, 12, 14, 16, 24 and 32 corners; the regular octagon is the exception. Drag the corners to make the gaps bigger.";
     else if (d < DELTA_OCT - 1e-7) msg = "Below 90.24% would disprove Reinhardt’s conjecture, so a rounding error in this page is far more likely.";
     else if (d < DELTA_OCT + 0.001) {
       msg = "Within 0.1 points of the smoothed octagon. Nazarov proved in 1986 that shapes close enough to it pack at least as densely as it does.";
@@ -335,8 +344,7 @@ export function initBeat() {
       drag = { i: h.i, sign, off: sub(w, mul(H[h.i], sign)) };
     }
     svg.setPointerCapture(e.pointerId);
-    svg.classList.add("dragging", "pointer");
-    svg.focus({ preventScroll: true, focusVisible: false });
+    svg.classList.add("dragging");
     e.preventDefault();
     draw();
   });
@@ -357,29 +365,6 @@ export function initBeat() {
   };
   svg.addEventListener("pointerup", end);
   svg.addEventListener("pointercancel", end);
-  svg.addEventListener("blur", () => svg.classList.remove("pointer"));
-  svg.addEventListener("keydown", (e) => {
-    svg.classList.remove("pointer");
-    const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] };
-    if (e.key === "Enter" || e.key === " ") sel = sel === null ? 0 : (sel + 1) % H.length;
-    else if (e.key === "Escape") sel = null;
-    else if (sel !== null && arrows[e.key]) {
-      preset = null;
-      moveTo(sel, add(H[sel], mul(arrows[e.key], e.shiftKey ? 0.1 : 0.01)));
-      compute();
-    } else if (sel !== null && (e.key === "Delete" || e.key === "Backspace")) {
-      preset = null;
-      removeCorners(sel);
-      sel = null;
-      compute();
-    } else if (e.key === "+" || e.key === "=") {
-      preset = null;
-      sel = addCorners();
-      compute();
-    } else return;
-    e.preventDefault();
-    draw();
-  });
 
   for (const p of PRESETS) {
     const b = document.createElement("button");

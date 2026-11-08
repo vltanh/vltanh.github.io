@@ -296,8 +296,7 @@ export function initBuild() {
     dragging = true;
     d = nearest(board.toWorld(e));
     svg.setPointerCapture(e.pointerId);
-    svg.classList.add("dragging", "pointer");
-    svg.focus({ preventScroll: true, focusVisible: false });
+    svg.classList.add("dragging");
     e.preventDefault();
     draw();
   });
@@ -312,18 +311,6 @@ export function initBuild() {
   };
   svg.addEventListener("pointerup", end);
   svg.addEventListener("pointercancel", end);
-  svg.addEventListener("blur", () => svg.classList.remove("pointer"));
-  svg.addEventListener("keydown", (e) => {
-    svg.classList.remove("pointer");
-    if (e.key === "PageDown" || (e.key === "Enter" && !e.shiftKey)) goTo(step + 1);
-    else if (e.key === "PageUp" || (e.key === "Enter" && e.shiftKey)) goTo(step - 1);
-    else if (visible("point") && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) {
-      const f = e.shiftKey ? 1.1 : 1.02;
-      d = Math.max(0.03, Math.min(3.5, e.key === "ArrowUp" || e.key === "ArrowLeft" ? d / f : d * f));
-      draw();
-    } else return;
-    e.preventDefault();
-  });
 
   const dots = $("build-dots");
   STEPS.forEach((s, i) => {

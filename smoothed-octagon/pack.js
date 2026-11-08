@@ -86,6 +86,10 @@ for (const s of SHAPES) {
   s.radius = Math.max(...s.shape.outline.map(norm));
 }
 
+// The buttons go from the best packer to the worst, by the computed densities
+// (the square and the hexagon tie at 100% and keep their order).
+SHAPES.sort((a, b) => (Math.abs(a.best.density - b.best.density) < 1e-9 ? 0 : b.best.density - a.best.density));
+
 const MAX_LEN = 4.4; // keeps the two copies on the board
 
 export function initPack() {
@@ -98,9 +102,9 @@ export function initPack() {
   };
   const board = new Board(svg, { cx: 0, cy: 0, half: 4.2 }, () => draw());
 
-  let cur = SHAPES[5];
+  let cur = SHAPES.find((s) => s.key === "smoothed");
   let v = [cur.b1, cur.b2];
-  let sel = null; // the vector the keys move
+  let sel = null; // the vector last grabbed, drawn with a thicker outline
   let drag = null;
   let stop = () => {};
 
@@ -253,8 +257,7 @@ export function initPack() {
     const w = board.toWorld(e);
     drag = { i: sel, off: sub(w, v[sel]) };
     svg.setPointerCapture(e.pointerId);
-    svg.classList.add("dragging", "pointer");
-    svg.focus({ preventScroll: true, focusVisible: false });
+    svg.classList.add("dragging");
     e.preventDefault();
     draw();
   });
@@ -269,20 +272,6 @@ export function initPack() {
   };
   svg.addEventListener("pointerup", end);
   svg.addEventListener("pointercancel", end);
-  svg.addEventListener("blur", () => svg.classList.remove("pointer"));
-  svg.addEventListener("keydown", (e) => {
-    svg.classList.remove("pointer");
-    const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] };
-    if (e.key === "Enter" || e.key === " ") sel = sel === 0 ? 1 : 0;
-    else if (e.key === "Escape") sel = null;
-    else if (sel !== null && arrows[e.key]) {
-      stop();
-      const d = e.shiftKey ? 0.1 : 0.02;
-      moveTo(sel, add(v[sel], mul(arrows[e.key], d)));
-    } else return;
-    e.preventDefault();
-    draw();
-  });
 
   $("pack-densest").addEventListener("click", () => glideTo(nearestBest()));
   $("pack-spread").addEventListener("click", () => {
