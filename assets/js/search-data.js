@@ -264,6 +264,11 @@ ninja.data = [{
           description: "A Lean 4 proof that Romik&#39;s ambidextrous sofa is the largest shape that can turn both right and left around the corner of a hallway, and that it is the only one, up to rigid motions.",
           section: "Projects",handler: () => {
               window.location.href = "/projects/lean4-ambidextrous-sofa/";
+            },},{id: "projects-if-only-they-voted",
+          title: 'If Only They Voted',
+          description: "Who would have won U.S. elections from 2012 to 2024 if only some voters were counted, for president, Senate, House and governor.",
+          section: "Projects",handler: () => {
+              window.location.href = "/projects/us-elections/";
             },},{
         id: 'social-discord',
         title: 'Discord',
