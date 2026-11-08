@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>If Only They Voted</title>
+    <meta
+      name="description"
+      content="Who wins U.S. elections from 2012 to 2024 if only the voters you pick are counted: president, Senate, House and governor, state by state and district by district."
+    />
+    <meta property="og:title" content="If Only They Voted" />
+    <meta
+      property="og:description"
+      content="Pick who gets counted by race, education, income, gender and age, and watch the 2012–2024 election maps redraw."
+    />
+    <meta property="og:image" content="https://vltanh.me/assets/img/us-elections/og.png" />
+    <meta property="og:url" content="https://vltanh.me/us-elections/" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='3' y='2' width='26' height='28' rx='2' fill='%23ffffff' stroke='%23121418' stroke-width='1.6'/%3E%3Cellipse cx='11' cy='11' rx='4.6' ry='2.9' fill='%23121418'/%3E%3Cellipse cx='11' cy='21' rx='4.6' ry='2.9' fill='none' stroke='%23121418' stroke-width='1.4'/%3E%3Crect x='17.5' y='9.5' width='8' height='3' fill='%2327549e'/%3E%3Crect x='17.5' y='19.5' width='8' height='3' fill='%239f3326'/%3E%3C/svg%3E"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&family=IBM+Plex+Mono:wght@400;500;600&family=Public+Sans:ital,wght@0,400..700;1,400&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      // The colour theme stored by vltanh.me, applied before the page is drawn.
+      try {
+        const t = localStorage.getItem("theme");
+        if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+    <link rel="stylesheet" href="style.css" />
+    <script src="model.js" defer></script>
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="top">
+        <a href="/projects/us-elections/">&larr; The project</a>
+        <span class="top-end">
+          <a href="#method">How it works</a>
+          <button type="button" class="theme" id="theme" aria-label="Colour theme"></button>
+        </span>
+      </header>
+
+      <section class="masthead">
+        <p class="eyebrow">U.S. elections, 2012–2024</p>
+        <h1 class="title">If only they voted</h1>
+        <p class="deck">
+          Mark the groups to count. Every state and district is tallied again using only those voters' ballots, for president, Senate, House and
+          governor.
+        </p>
+      </section>
+
+      <div class="controls">
+        <label class="field"><span>Year</span><select id="year"></select></label>
+        <label class="field"><span>Office</span><select id="office"></select></label>
+        <label class="check"><input type="checkbox" id="shade" checked /> Shade by margin</label>
+      </div>
+
+      <div class="layout">
+        <aside class="ballot" id="ballot" aria-labelledby="ballotTitle">
+          <div class="timing" aria-hidden="true"></div>
+          <div class="ballot-body">
+            <header class="ballot-head">
+              <p class="ballot-code"><span>Official ballot</span><span id="ballotCode">2024 · President</span></p>
+              <h2 id="ballotTitle">Who counts?</h2>
+              <p class="instr">
+                <b>Fill in an oval</b> to count only that group. Marks in one contest add groups together; marks in different contests must all match.
+                A blank contest counts everyone.
+              </p>
+            </header>
+            <div class="contest-cols" aria-hidden="true"><span></span><span></span><span>Share</span><span>Lean</span><span></span></div>
+            <div id="contests"></div>
+            <footer class="ballot-foot">
+              <button type="button" class="erase" id="erase">Erase all marks</button>
+              <span id="ballotNote">Bars: how each group voted, given your other marks.</span>
+            </footer>
+          </div>
+        </aside>
+
+        <main class="results">
+          <section class="verdict" aria-live="polite">
+            <div class="counting" id="counting"></div>
+            <h2 class="headline" id="headline">&nbsp;</h2>
+            <p class="facts" id="facts"></p>
+            <div class="tally" id="tally"></div>
+          </section>
+          <div class="board-head"><div class="legend" id="legend"></div></div>
+          <div>
+            <div class="mapbox" id="mapbox"><div class="loading">Loading…</div></div>
+            <p class="mapnote" id="mapnote"></p>
+          </div>
+          <section class="panel" id="keyPanel">
+            <h2 id="keyTitle">Key races</h2>
+            <p class="hint" id="keyHint"></p>
+            <ul class="keylist" id="keyList"></ul>
+          </section>
+          <details class="panel" id="tablePanel">
+            <summary id="tableSummary">All races</summary>
+            <div class="tablewrap"><table id="table"></table></div>
+          </details>
+        </main>
+      </div>
+
+      <section class="method" id="method">
+        <h2>How the count is made</h2>
+        <div>
+          <h3>1 · Who voted</h3>
+          <p>
+            The Census Bureau's November voting survey (CPS) gives each state's voters by race and ethnicity, education, family income, gender and age:
+            800 combinations in all. For a House district, the state's electorate is reshaped to Census ACS figures for that district's citizen
+            adults, weighted by how often each group turns out.
+          </p>
+        </div>
+        <div>
+          <h3>2 · How they voted</h3>
+          <p>
+            The Cooperative Election Study interviews about 60,000 Americans each cycle and checks them against voter files. A regression on its
+            verified voters estimates each group's Democratic-versus-Republican vote, letting the pattern differ by state and region. National group
+            results are then brought in line with Pew Research Center's validated-voter studies (2016–2024).
+          </p>
+        </div>
+        <div>
+          <h3>3 · Matching the real results</h3>
+          <p>
+            Each race is shifted so that counting everyone reproduces its certified result exactly. Erasing groups then shows what that same
+            electorate would have decided without them. Turnout stays at its actual level: the map counts the ballots each group really cast and does
+            not guess how many more of them might have voted.
+          </p>
+        </div>
+        <div>
+          <h3>4 · One state up close</h3>
+          <p>
+            Click a state to see its congressional districts as circles, placed where they are and sized by the ballots counted in each. For the
+            House these are the real races. For president, Senate and governor, district results are estimates: each district's mix of voters plus
+            its lean in House races, adjusted so the districts add up to the statewide result. A popular House member can tilt that estimate.
+          </p>
+        </div>
+        <div>
+          <h3>Read with care</h3>
+          <ul>
+            <li>These are estimates. Narrow groups in small states, like Asian voters in Wyoming, rest on few survey respondents.</li>
+            <li>
+              Two-party vote only. Independents who ran as the main opponent of the Republican (Sanders, King, Osborn, McMullin) count on the
+              Democratic side.
+            </li>
+            <li>Maine's and Nebraska's district electors are not modeled, so every state is winner-take-all.</li>
+            <li>Seats with no candidate from one side keep their winner under every filter.</li>
+            <li>Income brackets are in each year's dollars, not adjusted for inflation.</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Sources</h3>
+          <ul>
+            <li><a href="https://cces.gov.harvard.edu/">Cooperative Election Study</a>, cumulative file by Shiro Kuriwaki</li>
+            <li>
+              <a href="https://www.census.gov/topics/public-sector/voting.html">Census CPS Voting Supplement</a> and
+              <a href="https://www.census.gov/programs-surveys/acs">American Community Survey</a>
+            </li>
+            <li>
+              <a href="https://www.pewresearch.org/politics/2025/06/26/behind-trumps-2024-victory-a-more-racially-and-ethnically-diverse-voter-coalition/"
+                >Pew Research Center validated voters</a
+              >
+            </li>
+            <li>
+              Results from the <a href="https://www.fec.gov/introduction-campaign-finance/election-results-and-voting-information/">FEC</a>, the
+              <a href="https://history.house.gov/Institution/Election-Statistics/">House Clerk</a> and the
+              <a href="https://electionlab.mit.edu/data">MIT Election Lab</a>; Census boundary files
+            </li>
+          </ul>
+        </div>
+        <div id="benchBox"></div>
+      </section>
+
+      <footer class="site-foot">
+        Made by <a href="/">The-Anh Vu-Le</a>. More on the method and the data on <a href="/projects/us-elections/">the project page</a>.
+      </footer>
+    </div>
+    <div class="tip" id="tip" hidden></div>
+  </body>
+</html>
