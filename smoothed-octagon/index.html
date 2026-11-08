@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Smoothed Octagon Playground</title>
+    <meta
+      name="description"
+      content="Pack shapes yourself, build Reinhardt's smoothed octagon, look for a shape that packs worse, and watch its densest packings slide. The Reinhardt conjecture is proved in Lean 4."
+    />
+    <meta property="og:title" content="Smoothed Octagon Playground" />
+    <meta
+      property="og:description"
+      content="Which convex shape packs the plane worst? Pack shapes yourself, build Reinhardt's smoothed octagon, and try to beat its 90.24%."
+    />
+    <meta property="og:image" content="https://vltanh.me/assets/img/lean4-reinhardt-conjecture/octagon-tiling.png" />
+    <meta property="og:url" content="https://vltanh.me/smoothed-octagon/" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M29.6 12.0L29.5 11.2L29.3 10.5L28.9 9.8L28.4 9.2L22.8 3.6L22.2 3.1L21.5 2.7L20.8 2.5L20.0 2.4L12.0 2.4L11.2 2.5L10.5 2.7L9.8 3.1L9.2 3.6L3.6 9.2L3.1 9.8L2.7 10.5L2.5 11.2L2.4 12.0L2.4 20.0L2.5 20.8L2.7 21.5L3.1 22.2L3.6 22.8L9.2 28.4L9.8 28.9L10.5 29.3L11.2 29.5L12.0 29.6L20.0 29.6L20.8 29.5L21.5 29.3L22.2 28.9L22.8 28.4L28.4 22.8L28.9 22.2L29.3 21.5L29.5 20.8L29.6 20.0Z' fill='%23dbeafe' stroke='%232563eb' stroke-width='1.6' stroke-linejoin='round'/%3E%3C/svg%3E"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..700;1,6..72,300..700&display=swap" rel="stylesheet" />
+    <script>
+      // The colour theme stored by vltanh.me, applied before the page is drawn.
+      try {
+        const t = localStorage.getItem("theme");
+        if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+    <link rel="stylesheet" href="style.css" />
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="top">
+        <a href="/projects/lean4-reinhardt-conjecture/">&larr; The project</a>
+        <span class="top-end">
+          <a href="https://github.com/vltanh/lean4-smoothed-octagon">The Lean proof</a>
+          <button type="button" class="theme" id="theme" aria-label="Colour theme"></button>
+        </span>
+      </header>
+
+      <section class="intro">
+        <p class="kicker">Playground</p>
+        <h1>The Smoothed Octagon</h1>
+        <p class="lede">
+          Squares and hexagons can tile a floor with nothing left over. Disks can't: packed as tightly as possible, they cover 90.69% of the plane. In
+          1934 Karl Reinhardt asked which shape packs worst, among the convex shapes that look the same after a half turn, and he guessed this one: a
+          regular octagon with its corners rounded off by hyperbolas. Its densest packing covers 90.24%. The conjecture was open for ninety years, and
+          it is now <a href="https://github.com/vltanh/lean4-smoothed-octagon">proved in Lean 4</a>: no shape of this kind packs worse.
+        </p>
+      </section>
+
+      <nav class="toc" aria-label="Sections">
+        <a href="#pack"><span class="n">1</span> Pack it yourself</a>
+        <a href="#build"><span class="n">2</span> Build the octagon</a>
+        <a href="#beat"><span class="n">3</span> Try to beat it</a>
+        <a href="#slide"><span class="n">4</span> The sliding packings</a>
+        <a href="#history"><span class="n">5</span> Ninety years</a>
+      </nav>
+
+      <!-- 1 ------------------------------------------------------------ -->
+      <section class="part" id="pack" aria-labelledby="pack-title">
+        <header class="part-head">
+          <p class="num">1</p>
+          <div>
+            <h2 id="pack-title">Pack it yourself</h2>
+            <p>
+              Pick a shape and drag the orange and the green copy. The other copies follow, so they always sit on a <i>lattice</i>, a grid of equal
+              parallelograms. Copies can't overlap, so squeezing them together finds the densest packing. For shapes like these, László Fejes Tóth
+              proved in 1950 that the best lattice packing is as good as any packing.
+            </p>
+          </div>
+        </header>
+
+        <nav class="shapes" id="shapes" aria-label="Shape"></nav>
+
+        <div class="play">
+          <div class="board-wrap">
+            <div class="board-box">
+              <svg id="pack-board" class="board" role="img" aria-describedby="pack-hint" xmlns="http://www.w3.org/2000/svg">
+                <defs></defs>
+                <g class="copies"></g>
+                <g class="movers"></g>
+                <g class="arrows"></g>
+              </svg>
+              <p class="board-readout" aria-hidden="true"><span id="pack-board-density"></span></p>
+            </div>
+            <p class="hint" id="pack-hint">Drag the orange or the green copy; it stops where it meets another copy and slides along it.</p>
+          </div>
+
+          <aside class="panel">
+            <section class="readout">
+              <p class="cap">Plane covered by the copies</p>
+              <p class="big" id="pack-density">0%</p>
+              <p class="least">Densest possible: <span id="pack-best"></span></p>
+              <p class="status" id="pack-status" aria-live="polite"></p>
+            </section>
+            <section class="controls">
+              <div class="actions">
+                <button type="button" id="pack-densest">Densest</button>
+                <button type="button" id="pack-spread">Spread</button>
+              </div>
+            </section>
+            <section>
+              <h3 id="pack-shape-name"></h3>
+              <p class="note" id="pack-shape-note"></p>
+            </section>
+          </aside>
+        </div>
+      </section>
+
+      <!-- 2 ------------------------------------------------------------ -->
+      <section class="part" id="build" aria-labelledby="build-title">
+        <header class="part-head">
+          <p class="num">2</p>
+          <div>
+            <h2 id="build-title">Build the octagon</h2>
+            <p>Reinhardt’s shape starts as a regular octagon, and each corner is cut off along a curve. Step through one corner, then all eight.</p>
+          </div>
+        </header>
+
+        <div class="play">
+          <div class="board-wrap">
+            <div class="board-box">
+              <svg id="build-board" class="board" role="img" aria-describedby="build-hint" xmlns="http://www.w3.org/2000/svg">
+                <g class="grid"></g>
+                <g class="octagon"></g>
+                <g class="shape"></g>
+                <g class="ghosts"></g>
+                <g class="lines"></g>
+                <g class="curve"></g>
+                <g class="arc"></g>
+                <g class="drops"></g>
+                <g class="marks"></g>
+                <g class="point"></g>
+              </svg>
+            </div>
+            <p class="hint" id="build-hint">In steps 3 and 4, drag the point along the curve.</p>
+          </div>
+
+          <aside class="panel">
+            <section class="stepper">
+              <div class="step-nav">
+                <p class="cap" id="build-count"></p>
+                <div class="dots" id="build-dots" role="group" aria-label="Steps"></div>
+              </div>
+              <h3 id="build-step-title"></h3>
+              <p class="step-text" id="build-step-text" aria-live="polite"></p>
+              <div class="actions">
+                <button type="button" id="build-back">&larr; Back</button>
+                <button type="button" id="build-next">Next &rarr;</button>
+              </div>
+            </section>
+            <section class="readout" id="build-product" hidden>
+              <p class="cap">The two distances</p>
+              <p class="pair"><i>d</i> = <span id="build-d"></span>, &nbsp;<i>d</i>′ = <span id="build-d2"></span></p>
+              <p class="big"><i>d</i> &times; <i>d</i>′ = <span id="build-cval"></span></p>
+              <p class="least" id="build-cnote"></p>
+            </section>
+            <section class="readout" id="build-density">
+              <p class="cap">Densest packing covers</p>
+              <p class="big" id="build-dval"></p>
+              <p class="least" id="build-dnote"></p>
+            </section>
+            <section id="build-rounding" hidden>
+              <label class="slider">
+                <span>Product</span>
+                <input type="range" id="build-c" min="0" max="1000" step="1" value="1000" />
+                <output id="build-c-out" for="build-c"></output>
+              </label>
+              <p class="ends"><span>no cut</span><span>√2/4: smooth</span></p>
+            </section>
+          </aside>
+        </div>
+
+        <div class="family">
+          <ul class="family-shapes" id="family" aria-label="Smoothed polygons with 8, 14 and 20 sides"></ul>
+          <div class="family-text">
+            <h3>A family of smoothed polygons</h3>
+            <p>
+              Hales showed in 2017 that the smoothed octagon belongs to a family. The smoothed regular polygons with 6<i>k</i> + 2 sides (8, 14, 20,
+              …) are all Pontryagin extremals of his control problem: they satisfy the conditions that Pontryagin's maximum principle sets for a worst
+              shape. Their densities grow with <i>k</i> towards the disk's, and the octagon's is the least. No other extremals have been found, and
+              Hales and Vajjha wrote in 2024 that a proof that none exist would complete a proof of the conjecture.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3 ------------------------------------------------------------ -->
+      <section class="part" id="beat" aria-labelledby="beat-title">
+        <header class="part-head">
+          <p class="num">3</p>
+          <div>
+            <h2 id="beat-title">Try to beat it</h2>
+            <p>
+              No convex shape that looks the same after a half turn packs worse than the smoothed octagon: Reinhardt conjectured it, and the Lean
+              proof shows it. See how close you can get: drag the corners of the dark shape and watch its densest packing rearrange around it.
+            </p>
+          </div>
+        </header>
+
+        <div class="play">
+          <div class="board-wrap">
+            <div class="board-box">
+              <svg id="beat-board" class="board" role="img" aria-describedby="beat-hint" xmlns="http://www.w3.org/2000/svg">
+                <defs></defs>
+                <g class="copies"></g>
+                <g class="shape"></g>
+                <g class="marks"></g>
+                <g class="handles"></g>
+              </svg>
+              <p class="board-readout" aria-hidden="true"><span id="beat-board-density"></span></p>
+            </div>
+            <p class="hint" id="beat-hint">
+              Drag a corner; the opposite corner moves with it, and the shape stays convex. Click an edge to add a pair of corners there.
+            </p>
+          </div>
+
+          <aside class="panel">
+            <section class="goal">
+              <p class="cap">The goal</p>
+              <p class="goal-text">A shape whose densest packing covers as close to 90.24% of the plane as you can get.</p>
+              <p class="note">The orange gaps are the part of the plane the copies miss: make them bigger.</p>
+            </section>
+            <section class="readout">
+              <p class="cap">Your shape covers</p>
+              <p class="big" id="beat-density"></p>
+              <svg class="gauge" id="beat-gauge" aria-hidden="true"></svg>
+              <p class="status" id="beat-status" aria-live="polite"></p>
+            </section>
+            <section>
+              <p class="cap">Start from</p>
+              <div class="modes presets" id="beat-presets" role="group" aria-label="Start from"></div>
+              <div class="corners-row">
+                <button type="button" class="round" id="beat-fewer" aria-label="Fewer corners">&minus;</button>
+                <span id="beat-count"></span>
+                <button type="button" class="round" id="beat-more" aria-label="More corners">+</button>
+              </div>
+            </section>
+          </aside>
+        </div>
+
+        <div class="aside-notes">
+          <p>
+            With eight corners you can't win: Mahler proved in 1947 that no octagon of this kind packs worse than the regular one. In 1949 Ledermann
+            and Mahler found the worst decagon, at 90.54%, and it is not the regular one. Polygons with more corners get closer to 90.24%, and none
+            gets below it: that is Reinhardt's conjecture, now proved in Lean 4. Near the smoothed octagon itself, Nazarov had proved in 1986 that
+            every shape close enough to it packs at least as densely.
+          </p>
+          <details class="more">
+            <summary>How the densest packing is found</summary>
+            <p>
+              Inscribe in the shape a hexagon with corners <i>p</i>, <i>q</i>, <i>q</i> − <i>p</i>, −<i>p</i>, −<i>q</i>, <i>p</i> − <i>q</i>, all on
+              its boundary. Copies of the shape centred at the points 2(<i>ip</i> + <i>jq</i>), for all whole numbers <i>i</i> and <i>j</i>, then form
+              a packing in which every copy touches six others, at the corners of the hexagon. The densest lattice packing comes from the hexagon of
+              least area (Minkowski, Reinhardt, Mahler), and its density is three times the area of the shape over four times the area of the hexagon.
+              The page tries every starting corner <i>p</i> on the boundary, finds <i>q</i> by bisection, and keeps the smallest hexagon.
+            </p>
+          </details>
+        </div>
+      </section>
+
+      <!-- 4 ------------------------------------------------------------ -->
+      <section class="part" id="slide" aria-labelledby="slide-title">
+        <header class="part-head">
+          <p class="num">4</p>
+          <div>
+            <h2 id="slide-title">The sliding packings</h2>
+            <p>
+              Every shape of this kind has packings in which each copy touches six others, and they can slide: move one corner of the inscribed
+              hexagon along the boundary and the whole packing shifts. For most shapes the density changes as it slides. For the smoothed octagon it
+              stays the same, so all these packings are densest.
+            </p>
+          </div>
+        </header>
+
+        <div class="play">
+          <div class="board-wrap">
+            <div class="board-box">
+              <svg id="slide-board" class="board" role="img" aria-describedby="slide-hint" xmlns="http://www.w3.org/2000/svg">
+                <defs></defs>
+                <g class="copies"></g>
+                <g class="marks"></g>
+              </svg>
+              <p class="board-readout" aria-hidden="true"><span id="slide-board-density"></span></p>
+            </div>
+            <p class="hint" id="slide-hint">Drag the slider or press Play. The dots are where the middle copy touches its six neighbours.</p>
+          </div>
+
+          <aside class="panel">
+            <section class="controls">
+              <div class="modes wide" id="slide-shapes" role="group" aria-label="Shape"></div>
+            </section>
+            <section class="readout">
+              <p class="cap">Plane covered</p>
+              <p class="big" id="slide-density"></p>
+              <p class="least">Densest possible: <span id="slide-best"></span></p>
+            </section>
+            <section>
+              <label class="slider">
+                <span>Slide</span>
+                <input type="range" id="slide-t" min="0" max="1000" step="1" value="0" />
+                <button type="button" class="toggle small" id="slide-play" aria-pressed="false">Play</button>
+              </label>
+              <svg
+                class="chart"
+                id="slide-chart"
+                role="img"
+                aria-label="The density along one slide for the four shapes: flat for the smoothed octagon, the smoothed 14-gon and the disk, dipping for the regular octagon"
+              ></svg>
+              <ul class="key inline" aria-hidden="true">
+                <li><span class="sw oct"></span>smoothed octagon</li>
+                <li><span class="sw s14"></span>smoothed 14-gon</li>
+                <li><span class="sw reg"></span>regular octagon</li>
+                <li><span class="sw disk"></span>disk</li>
+              </ul>
+              <p class="note" id="slide-note"></p>
+            </section>
+          </aside>
+        </div>
+      </section>
+
+      <!-- 5 ------------------------------------------------------------ -->
+      <section class="part" id="history" aria-labelledby="history-title">
+        <header class="part-head">
+          <p class="num">5</p>
+          <div>
+            <h2 id="history-title">Ninety years</h2>
+            <p>From 1934 to now. Pick a date to see how far the proved lower bound had come.</p>
+          </div>
+        </header>
+
+        <div class="history">
+          <div class="line-box">
+            <svg class="numberline" id="history-line" role="img" aria-labelledby="history-caption"></svg>
+            <p class="caption" id="history-caption" aria-live="polite"></p>
+          </div>
+          <ol class="timeline" id="timeline" aria-label="Timeline"></ol>
+        </div>
+      </section>
+
+      <footer>
+        <p>
+          The shapes and the densities follow the Lean project <a href="https://github.com/vltanh/lean4-smoothed-octagon">lean4-smoothed-octagon</a>
+          and its figures, and the history follows its survey of prior work. The Lean project proves the conjecture; no person has checked the proofs,
+          and Lean's kernel checks all of them. More on the project:
+          <a href="/projects/lean4-reinhardt-conjecture/">The Reinhardt conjecture in Lean 4</a>.
+        </p>
+      </footer>
+    </div>
+  </body>
+</html>

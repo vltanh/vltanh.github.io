@@ -1,0 +1,1 @@
+import{$,themeToggle}from"./common.js";import{initPack}from"./pack.js";import{initBuild}from"./build.js";import{initBeat}from"./beat.js";import{initSlide}from"./slide.js";import{initHistory}from"./history.js";themeToggle($("theme")),initPack(),initBuild(),initBeat(),initSlide(),initHistory();

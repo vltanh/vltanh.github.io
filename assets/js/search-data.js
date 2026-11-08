@@ -269,6 +269,11 @@ ninja.data = [{
           description: "Who would have won U.S. elections from 2012 to 2024 if only some voters were counted, for president, Senate, House and governor.",
           section: "Projects",handler: () => {
               window.location.href = "/projects/us-elections/";
+            },},{id: "projects-the-reinhardt-conjecture-in-lean-4",
+          title: 'The Reinhardt conjecture in Lean 4',
+          description: "A Lean 4 proof that Reinhardt&#39;s smoothed octagon packs the plane worst among centrally symmetric convex shapes, and that it is the only worst shape, up to affine maps.",
+          section: "Projects",handler: () => {
+              window.location.href = "/projects/lean4-reinhardt-conjecture/";
             },},{
         id: 'social-discord',
         title: 'Discord',
