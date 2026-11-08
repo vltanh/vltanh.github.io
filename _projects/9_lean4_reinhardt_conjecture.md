@@ -55,12 +55,13 @@ The smoothed 14-gon in the figure belongs to the same family as the octagon. Hal
 
 ## The statements
 
-The project proves four theorems. Their definitions and statements are in a Challenge file that imports only Mathlib, copied word for word from [lean4-smoothed-polygon](https://github.com/vltanh/lean4-smoothed-polygon), a formalization of Hales and Vajjha's book _Packings of Smoothed Polygons_ on which this project builds. The density of a shape is the supremum of the densities of packings of the plane by congruent copies of it. The four theorems say:
+The project proves three theorems. They are stated in a Challenge file that imports only Mathlib, with two kinds of definitions copied word for word: the packing definitions of [lean4-smoothed-polygon](https://github.com/vltanh/lean4-smoothed-polygon), a formalization of Hales and Vajjha's book _Packings of Smoothed Polygons_ on which this project builds, and Reinhardt's construction of the smoothed octagon above. The density of a shape is the supremum of the densities of packings of the plane by congruent copies of it. The three theorems say:
 
+- the smoothed octagon is a centrally symmetric convex disk whose greatest packing density is $$\delta_{\mathrm{oct}}$$;
 - every centrally symmetric convex disk has greatest packing density at least $$\delta_{\mathrm{oct}}$$;
-- equality holds exactly for the images of the smoothed octagon under invertible affine maps;
-- every trajectory of Hales's control problem with the boundary conditions costs at least $$\sqrt{12}\,\delta_{\mathrm{oct}}$$;
-- the smoothed octagon, defined from its trajectory, has area $$\sqrt{12}\,\delta_{\mathrm{oct}}$$ and density $$\delta_{\mathrm{oct}}$$.
+- equality holds exactly for the images of the smoothed octagon under invertible affine maps.
+
+The library also proves the control form of the conjecture: every trajectory of Hales's control problem with the boundary conditions costs at least $$\sqrt{12}\,\delta_{\mathrm{oct}}$$.
 
 ## The proof, in brief
 
@@ -76,9 +77,9 @@ The proof has five stages. The foundations show that the conjecture is equivalen
 
 ## Verification
 
-Lean's kernel checks every proof, and no person has checked them. Nothing is assumed beyond Lean's three standard axioms, `propext`, `Classical.choice` and `Quot.sound`. The four theorems are stated in a Challenge file, and a Solution file restates them word for word and proves them from the library, with no hypothesis and no `sorry`. An audit checks that all 96,916 declarations of the library depend only on the standard axioms.
+Lean's kernel checks every proof, and no person has checked them. Nothing is assumed beyond Lean's three standard axioms, `propext`, `Classical.choice` and `Quot.sound`. The three theorems are stated in a Challenge file, and the root of the library restates them word for word and proves them, with no hypothesis and no `sorry`. An audit checks that all 8,295 declarations of the library depend only on the standard axioms, and Comparator, the checker of the [Palomar registry](https://palomar-registry.org), confirms that the proof establishes exactly the Challenge's statements, under Lean's kernel and the independent NanoDa kernel.
 
-The informal proof was partly computer-assisted: it used seven interval-arithmetic covers, run in C++ with MPFR. Six of them were replaced by hand arguments, and their Lean proofs follow those arguments. Lean's kernel checks the seventh itself: the project includes a verified interval arithmetic, with outward-rounded fixed-point intervals and proved enclosures of $$\sqrt{x}$$, $$\log$$ and $$\arctan$$, and a certificate of 337,399 boxes checked by `decide`, without `native_decide`. Several steps are proved by shorter routes than the informal notes.
+The scalar estimates of the proof are inequalities, polynomial identities, monotonicity and convexity arguments; a few polynomial signs are checked by explicit Bernstein expansions. A full build takes about 18 minutes on 20 cores.
 
 ## Prior work
 
@@ -86,7 +87,7 @@ Reinhardt posed the problem in 1934 and proposed the smoothed octagon. Mahler, i
 
 ## Contributors
 
-ChatGPT Pro found the proof, starting from Hales's formulation of the problem as optimal control and from Hales and Vajjha's book. Its notes first closed the argument with seven interval-arithmetic covers computed in C++, then replaced six of them by hand arguments. Claude Opus 5.5, in Claude Code, wrote the Lean formalization from 7 to 8 November 2026, coordinating sub-agents that inventoried the notes, stated each stage and proved the stages in parallel. It also wrote the verified interval arithmetic and the kernel-checked certificate of the remaining cover, the figures, the playground and the documentation, following my skill for formalizing papers, [formalize-math-paper](/projects/formalize-math-paper/). I directed the work. The formalization builds on two of my Lean libraries, lean4-smoothed-polygon and lean4-optimal-control, the second for Filippov's theorem and the Pontryagin maximum principle.
+The proof was written in the repository. ChatGPT Pro drafted the argument, starting from Hales's formulation of the problem as optimal control and from Hales and Vajjha's book. Claude Opus 5.5, in Claude Code, wrote the Lean proof and organized it, with sub-agents that stated and proved the stages in parallel, and wrote the figures, the playground and the documentation, following my skill for formalizing papers, [formalize-math-paper](/projects/formalize-math-paper/). I chose the problem and directed the work. The proof builds on two of my Lean libraries, lean4-smoothed-polygon and lean4-optimal-control, the second for Filippov's theorem and the Pontryagin maximum principle.
 
 ## References
 
