@@ -38,10 +38,10 @@ const PRESETS = [
   { key: "near", name: "Near Reinhardt’s", half: () => firstHalf(smoothedOctagon({ arcSamples: 2 }).outline) },
 ];
 
-// The gauge: a scale from 89.8% to 91% (where the shapes worth comparing
+// The gauge: a scale from 89.6% to 91% (where the shapes worth comparing
 // lie), then a break, then 91% to 100% compressed, so that every density a
 // shape can have, up to the 100% of a tiling, has a place on it.
-const LO = 0.898;
+const LO = 0.896;
 const HI = 0.91;
 
 export function drawGauge(gauge, d) {
@@ -49,7 +49,7 @@ export function drawGauge(gauge, d) {
   const W = Math.max(240, Math.round(gauge.getBoundingClientRect().width) || 340);
   const H = 116;
   const M = 6; // the margin kept clear around everything drawn
-  const L = M + 12; // 89.8%, right of the arrowhead at the left end
+  const L = M + 12; // 89.6%, right of the arrowhead at the left end
   const R = 24; // room for the 100% label right of the axis' end
   const axis = 66;
   const GAP = 12;
@@ -94,7 +94,10 @@ export function drawGauge(gauge, d) {
     [DELTA_OCT, "smoothed octagon", "oct", 48],
   ]) {
     make("line", { x1: X(x), x2: X(x), y1: y - 5, y2: axis + 6, class: `mark ${cls}` }, gauge);
-    text(name, X(x) - 4, y, `mark-label ${cls}`);
+    // left of its leader and clear of it; a little smaller where room is short
+    const t = make("text", { x: X(x) - 5, y, class: `mark-label ${cls}` }, gauge);
+    t.textContent = name;
+    for (let size = 12.5; size >= 9.5 && t.getBBox().x < M; size -= 0.5) t.style.fontSize = `${size}px`;
   }
   text("← packs worse, the goal", M, axis + 40, "hint-label start");
   make("circle", { cx: X(d), cy: axis, r: 7, class: "you" }, gauge);
