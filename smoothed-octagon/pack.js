@@ -57,7 +57,7 @@ export const SHAPES = [
     key: "smoothed",
     name: "Smoothed octagon",
     shape: smoothedOctagon(),
-    note: "Reinhardt’s smoothed octagon: its densest packing covers (8 − 4√2 − log 2)/(2√2 − 1) of the plane. He conjectured in 1934 that no centrally symmetric convex shape does worse.",
+    note: "Reinhardt’s smoothed octagon: its densest packing covers (8 − 4√2 − log 2)/(2√2 − 1) of the plane. He conjectured in 1934 that no centrally symmetric convex shape does worse, and this is now proved in Lean 4.",
   },
 ];
 

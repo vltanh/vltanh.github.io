@@ -237,7 +237,7 @@ export function initBuild() {
         step === 0
           ? "Disks cover 90.69%."
           : t > 0.9999
-            ? "Reinhardt conjectured that no shape of this kind does worse."
+            ? "No shape of this kind does worse: Reinhardt conjectured it, and it is now proved in Lean 4."
             : `The regular octagon covers ${pct(OCTAGON_DENSITY)}, the smoothed octagon 90.24%.`;
     }
     $("build-c").value = String(Math.round(t * 1000));

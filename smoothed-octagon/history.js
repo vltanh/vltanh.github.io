@@ -62,8 +62,8 @@ const ENTRIES = [
   {
     year: "2026",
     who: "Lean 4",
-    text: "Chapters of Hales and Vajjha’s book are formalized in Lean 4, with the Pontryagin maximum principle they rely on. On top of them, Claude Opus 5.5 is writing a Lean 4 proof of the conjecture from informal notes by ChatGPT Pro. It is not finished: some steps are not yet proved in Lean, and two results are assumed for now.",
-    floor: 0.892656,
+    text: "The conjecture is proved in Lean 4, with its equality case. ChatGPT Pro found the proof, building on Hales’s control problem and Hales and Vajjha’s book, and replaced by hand arguments six of the seven interval computations it first relied on. Claude Opus 5.5 wrote the Lean proof, on Lean formalizations of results of the book and of the Pontryagin maximum principle; Lean’s kernel checks the seventh computation itself. No person has checked the proofs; Lean’s kernel checks all of them.",
+    floor: DELTA_OCT,
     lean: true,
   },
 ];
@@ -116,7 +116,7 @@ export function initHistory() {
     const marks = [
       [DELTA_DISK, "disk", "disk", -66],
       [DELTA_REGULAR_OCTAGON, narrow ? "octagon" : "regular octagon", "reg", -46],
-      [DELTA_OCT, narrow ? "smoothed octagon" : "smoothed octagon, conjectured worst", "oct", -26],
+      [DELTA_OCT, "smoothed octagon", "oct", -26],
     ];
     for (const [d, name, cls, dy] of marks) {
       make("line", { x1: X(d), x2: X(d), y1: base + dy - 5, y2: base, class: `mark ${cls}` }, line);
@@ -140,9 +140,11 @@ export function initHistory() {
       b.setAttribute("aria-current", String(j === i));
     });
     const e = ENTRIES[i];
-    $("history-caption").textContent = e.floor
-      ? `By ${e.year.split(/[–,]/)[0]}, every centrally symmetric convex shape was known to pack at least ${(100 * e.floor).toFixed(e.floor === 0.88 ? 0 : 2)}% of the plane. The conjecture says ${(100 * DELTA_OCT).toFixed(2)}%, and the gap between ${i === ENTRIES.length - 1 ? "is still open" : "was still open"}.`
-      : `In ${e.year} no lower bound was known yet. The conjecture says ${(100 * DELTA_OCT).toFixed(2)}%.`;
+    $("history-caption").textContent = e.lean
+      ? `The Lean proof closes the gap: every centrally symmetric convex shape packs at least ${(100 * DELTA_OCT).toFixed(2)}% of the plane, as Reinhardt conjectured.`
+      : e.floor
+        ? `By ${e.year.split(/[–,]/)[0]}, every centrally symmetric convex shape was known to pack at least ${(100 * e.floor).toFixed(e.floor === 0.88 ? 0 : 2)}% of the plane. The conjecture says ${(100 * DELTA_OCT).toFixed(2)}%, and the gap between was open.`
+        : `In ${e.year} no lower bound was known yet. The conjecture says ${(100 * DELTA_OCT).toFixed(2)}%.`;
     drawLine();
   }
 

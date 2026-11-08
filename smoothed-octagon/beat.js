@@ -273,7 +273,8 @@ export function initBeat() {
     else if (preset === "20gon")
       msg =
         "The regular 20-gon packs better than the disk, as do the regular polygons with 10, 12, 14, 16, 24 and 32 corners; the regular octagon is the exception. Drag the corners to make the gaps bigger.";
-    else if (d < DELTA_OCT - 1e-7) msg = "Below 90.24% would disprove Reinhardt’s conjecture, so a rounding error in this page is far more likely.";
+    else if (d < DELTA_OCT - 1e-7)
+      msg = "Below 90.24% is impossible: the Lean proof shows that no shape of this kind packs worse, so this is a rounding error in the page.";
     else if (d < DELTA_OCT + 0.001) {
       msg = "Within 0.1 points of the smoothed octagon. Nazarov proved in 1986 that shapes close enough to it pack at least as densely as it does.";
       status.classList.add("good");

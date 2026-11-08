@@ -1,8 +1,8 @@
 ---
 layout: page
-title: Toward the Reinhardt conjecture in Lean 4
+title: The Reinhardt conjecture in Lean 4
 permalink: /projects/lean4-reinhardt-conjecture/
-description: A Lean 4 proof, in progress, that Reinhardt's smoothed octagon packs the plane worst among centrally symmetric convex shapes.
+description: A Lean 4 proof that Reinhardt's smoothed octagon packs the plane worst among centrally symmetric convex shapes, and that it is the only worst shape, up to affine maps.
 img: assets/img/lean4-reinhardt-conjecture/octagon-tiling.svg
 og_image: /assets/img/lean4-reinhardt-conjecture/octagon-tiling.png
 importance: 9
@@ -19,7 +19,7 @@ Copies of a disk, packed as tightly as possible, cover $$\pi/\sqrt{12} = 90.69\l
 
 $$\delta_{\mathrm{oct}} = \frac{8 - 4\sqrt2 - \log 2}{2\sqrt2 - 1} = 0.902414\ldots,$$
 
-and he conjectured that it is the only worst shape, up to affine maps. Kurt Mahler reached the same octagon independently in 1947. The conjecture is still open, and the Lean 4 proof that this project is writing is not finished.
+and he conjectured that it is the only worst shape, up to affine maps. Kurt Mahler reached the same octagon independently in 1947. [This project](https://github.com/vltanh/lean4-smoothed-octagon) proves both in Lean 4: every centrally symmetric convex shape has a packing of density at least $$\delta_{\mathrm{oct}}$$, and equality holds only for the images of the smoothed octagon under invertible affine maps.
 
 <div class="row justify-content-center">
   <div class="col-sm-8 mt-3 mt-md-0">
@@ -55,7 +55,7 @@ The smoothed 14-gon in the figure belongs to the same family as the octagon. Hal
 
 ## The statements
 
-The definitions and statements are in a Challenge file that imports only Mathlib, copied word for word from [lean4-smoothed-polygon](https://github.com/vltanh/lean4-smoothed-polygon), a formalization of Hales and Vajjha's book _Packings of Smoothed Polygons_ on which this project builds. The density of a shape is the supremum of the densities of packings of the plane by congruent copies of it. The four theorems say:
+The project proves four theorems. Their definitions and statements are in a Challenge file that imports only Mathlib, copied word for word from [lean4-smoothed-polygon](https://github.com/vltanh/lean4-smoothed-polygon), a formalization of Hales and Vajjha's book _Packings of Smoothed Polygons_ on which this project builds. The density of a shape is the supremum of the densities of packings of the plane by congruent copies of it. The four theorems say:
 
 - every centrally symmetric convex disk has greatest packing density at least $$\delta_{\mathrm{oct}}$$;
 - equality holds exactly for the images of the smoothed octagon under invertible affine maps;
@@ -72,33 +72,21 @@ Following Thomas Hales, the problem becomes a problem of optimal control on $$\m
   </div>
 </div>
 
-The proof has five stages. The foundations show that the conjecture is equivalent to a lower bound on the cost of every admissible trajectory, and that a worst shape gives a global minimizer of the control problem. The reduction shows that a global minimizer stays in a compact part of the state space, satisfies Pontryagin's maximum principle (proved in Lean in [lean4-optimal-control](https://github.com/vltanh/lean4-optimal-control)), switches between the three vertices of the control simplex finitely many times, and is normal. Read around a period, the switches then fall into five classes when there are six or more pieces, and each class is excluded. A period with at most five pieces costs at least $$\sqrt{12}\,\delta_{\mathrm{oct}}$$, with equality only for the octagon's four-piece control with equal durations. Finally, a worst shape has the octagon's trajectory, so it is a linear image of the octagon.
+The proof has five stages. The foundations show that the conjecture is equivalent to a lower bound on the cost of every admissible trajectory, and that a worst shape gives a global minimizer of the control problem. The reduction shows that a global minimizer stays in a compact part of the state space, lifts to a Pontryagin extremal (proved in lean4-smoothed-polygon from the maximum principle of [lean4-optimal-control](https://github.com/vltanh/lean4-optimal-control)), switches between the three vertices of the control simplex finitely many times, and is normal. Read around a period, the switches then fall into five classes when there are six or more pieces, and each class is excluded. A period with at most five pieces costs at least $$\sqrt{12}\,\delta_{\mathrm{oct}}$$, with equality only for the octagon's four-piece control with equal durations. Finally, a worst shape has the octagon's trajectory, so it is a linear image of the octagon, and conversely linear images of the octagon pack equally badly.
 
-## Status
+## Verification
 
-The proof is not finished. The informal proof that the project formalizes was written by ChatGPT Pro, in notes that rely in part on interval arithmetic computed in C++, and it has not been peer reviewed. In Lean, the main theorem is proved from the stages below, under two named hypotheses: Hales and Vajjha's compactness theorem (Theorem 5.0.2 of their book), until its formalization in lean4-smoothed-polygon is complete, and seven interval-arithmetic covers used in two of the five cases, stated as the C++ programs certify them. As of 7 November 2026:
+Lean's kernel checks every proof, and no person has checked them. Nothing is assumed beyond Lean's three standard axioms, `propext`, `Classical.choice` and `Quot.sound`. The four theorems are stated in a Challenge file, and a Solution file restates them word for word and proves them from the library, with no hypothesis and no `sorry`. An audit checks that all 96,916 declarations of the library depend only on the standard axioms.
 
-| Stage                                      | State                               |
-| :----------------------------------------- | :---------------------------------- |
-| Foundations                                | proved                              |
-| Reduction to a finite normal period        | proved, given Theorem 5.0.2         |
-| Splitting periods into five classes        | proved                              |
-| Excluding two of the classes               | in progress                         |
-| Excluding a third class                    | stated                              |
-| Excluding the last two classes             | stated, from the interval covers    |
-| Periods with at most five pieces           | proved from four lemmas in progress |
-| Equality and its converse                  | proved                              |
-| The four statements, from the stages above | proved                              |
-
-The project will restate the Challenge in a Solution file once no `sorry` and no hypothesis remain.
+The informal proof was partly computer-assisted: it used seven interval-arithmetic covers, run in C++ with MPFR. Six of them were replaced by hand arguments, and their Lean proofs follow those arguments. Lean's kernel checks the seventh itself: the project includes a verified interval arithmetic, with outward-rounded fixed-point intervals and proved enclosures of $$\sqrt{x}$$, $$\log$$ and $$\arctan$$, and a certificate of 337,399 boxes checked by `decide`, without `native_decide`. Several steps are proved by shorter routes than the informal notes.
 
 ## Prior work
 
-Reinhardt posed the problem in 1934 and proposed the smoothed octagon. Mahler, independently, proved in 1946 that every centrally symmetric convex shape packs at least $$\sqrt3/2$$, and in 1947 that a worst shape exists and that among octagons the regular one is worst; he built the smoothed octagon as "possibly even" the answer. Walter Ledermann and Mahler named it in 1949. Fejes Tóth reduced the problem to lattice packings in 1950. V. Ennola and P. P. Tammela raised the lower bound to $$0.88$$ in 1961 and to $$0.892656$$ in 1970, and F. L. Nazarov proved in 1986 that the smoothed octagon is a local minimum. Hales recast the problem in the calculus of variations in 2011 and as optimal control in 2017, and in 2024 Hales and Koundinya Vajjha proved in _Packings of Smoothed Polygons_ that a worst shape is a smoothed polygon with finitely many sides, Mahler's first conjecture, adding that Reinhardt's conjecture "remains open". Chapters 2–4, 6 and 7 of their book are formalized in Lean in lean4-smoothed-polygon, and the repository's prior-work notes give the full history with references.
+Reinhardt posed the problem in 1934 and proposed the smoothed octagon. Mahler, independently, proved in 1946 that every centrally symmetric convex shape packs at least $$\sqrt3/2$$, and in 1947 that a worst shape exists and that among octagons the regular one is worst; he built the smoothed octagon as "possibly even" the answer. Walter Ledermann and Mahler named it in 1949. Fejes Tóth reduced the problem to lattice packings in 1950. V. Ennola and P. P. Tammela raised the lower bound to $$0.88$$ in 1961 and to $$0.892656$$ in 1970, and F. L. Nazarov proved in 1986 that the smoothed octagon is a local minimum. Hales recast the problem in the calculus of variations in 2011 and as optimal control in 2017, and in 2024 Hales and Koundinya Vajjha proved in _Packings of Smoothed Polygons_ that a worst shape is a smoothed polygon with finitely many sides, Mahler's first conjecture, adding that Reinhardt's conjecture "remains open". lean4-smoothed-polygon formalizes the parts of their book that this proof uses, and the repository's prior-work notes give the full history with references.
 
 ## Contributors
 
-ChatGPT Pro wrote the informal proof, with its computer-assisted parts. Claude Opus 5.5, in Claude Code, writes the Lean formalization, the figures and the documentation, and made the playground. I direct the work. The geometric and control-theoretic foundations come from lean4-smoothed-polygon and lean4-optimal-control.
+ChatGPT Pro found the proof, starting from Hales's formulation of the problem as optimal control and from Hales and Vajjha's book. Its notes first closed the argument with seven interval-arithmetic covers computed in C++, then replaced six of them by hand arguments. Claude Opus 5.5, in Claude Code, wrote the Lean formalization from 7 to 8 November 2026, coordinating sub-agents that inventoried the notes, stated each stage and proved the stages in parallel. It also wrote the verified interval arithmetic and the kernel-checked certificate of the remaining cover, the figures, the playground and the documentation, following my skill for formalizing papers, [formalize-math-paper](/projects/formalize-math-paper/). I directed the work. The formalization builds on two of my Lean libraries, lean4-smoothed-polygon and lean4-optimal-control, the second for Filippov's theorem and the Pontryagin maximum principle.
 
 ## References
 
