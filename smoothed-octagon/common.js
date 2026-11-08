@@ -132,20 +132,3 @@ export function themeToggle(button) {
   });
   applyTheme(button, storedTheme());
 }
-
-// Per-viewer storage, which may be missing or blocked.
-export function load(key) {
-  try {
-    return JSON.parse(localStorage.getItem(key));
-  } catch {
-    return null;
-  }
-}
-
-export function save(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // Without storage the value lasts until the page is left.
-  }
-}

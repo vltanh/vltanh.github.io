@@ -20,9 +20,8 @@ import {
   sub,
   symmetricPolygon,
 } from "./geometry.js";
-import { $, Board, load, make, pct, save } from "./common.js";
+import { $, Board, make, pct } from "./common.js";
 
-const STORE = "smoothed-octagon-lowest";
 const MAX_R = 2.05; // keeps the shape on the board
 const EPS = 0.02; // the least sine of the turn at a corner
 const MIN_PAIRS = 2;
@@ -39,9 +38,61 @@ const PRESETS = [
   { key: "near", name: "Near Reinhardt’s", half: () => firstHalf(smoothedOctagon({ arcSamples: 2 }).outline) },
 ];
 
-// the scale of the gauge
+// The gauge: a scale from 89.8% to 91% (where the shapes worth comparing
+// lie), then a break, then 91% to 100% compressed, so that every density a
+// shape can have, up to the 100% of a tiling, has a place on it.
 const LO = 0.898;
 const HI = 0.91;
+
+export function drawGauge(gauge, d) {
+  gauge.replaceChildren();
+  const W = Math.max(240, Math.round(gauge.getBoundingClientRect().width) || 340);
+  const H = 116;
+  const L = 12;
+  const R = 18;
+  const axis = 66;
+  const GAP = 12;
+  gauge.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const B = L + 0.8 * (W - L - R); // where the axis breaks, at 91%
+  const X = (x) => {
+    const v = Math.min(1, Math.max(LO, x));
+    return v <= HI ? L + ((v - LO) / (HI - LO)) * (B - L) : B + GAP + ((v - HI) / (1 - HI)) * (W - R - B - GAP);
+  };
+  // every label is kept inside the gauge
+  const text = (str, x, y, cls) => {
+    const t = make("text", { x, y, class: cls }, gauge);
+    t.textContent = str;
+    const b = t.getBBox();
+    if (b.width && b.x < 2) t.setAttribute("x", x + 2 - b.x);
+    else if (b.width && b.x + b.width > W - 2) t.setAttribute("x", x - (b.x + b.width - (W - 2)));
+    return t;
+  };
+  make("rect", { x: X(LO), y: axis - 6, width: X(DELTA_OCT) - X(LO), height: 12, class: "zone" }, gauge);
+  make("line", { x1: X(LO), x2: B, y1: axis, y2: axis, class: "axis" }, gauge);
+  make("line", { x1: B + GAP, x2: X(1), y1: axis, y2: axis, class: "axis" }, gauge);
+  for (const x of [B + 2, B + GAP - 2]) make("line", { x1: x - 3, x2: x + 3, y1: axis + 5, y2: axis - 5, class: "axis" }, gauge);
+  for (const [t, label] of [
+    [0.9, "90%"],
+    [0.905, "90.5%"],
+    [0.91, "91%"],
+    [1, "100%"],
+  ]) {
+    const x = t === HI ? B : X(t);
+    make("line", { x1: x, x2: x, y1: axis + 6, y2: axis + 10, class: "tick-mark" }, gauge);
+    text(label, x, axis + 24, "tick");
+  }
+  // each label sits left of its own leader, and the leaders to its right start higher
+  for (const [x, name, cls, y] of [
+    [DELTA_DISK, "disk 90.69%", "disk", 14],
+    [DELTA_REGULAR_OCTAGON, "regular octagon 90.62%", "reg", 31],
+    [DELTA_OCT, "smoothed octagon", "oct", 48],
+  ]) {
+    make("line", { x1: X(x), x2: X(x), y1: y - 5, y2: axis + 6, class: `mark ${cls}` }, gauge);
+    text(name, X(x) - 4, y, `mark-label ${cls}`);
+  }
+  text("← packs worse, the goal", X(LO), axis + 40, "hint-label start");
+  make("circle", { cx: X(d), cy: axis, r: 7, class: "you" }, gauge);
+}
 
 export function initBeat() {
   const svg = $("beat-board");
@@ -56,19 +107,12 @@ export function initBeat() {
   let sel = null; // the corner pair the keys move
   let drag = null;
   let result = null;
-  let lowest = load(STORE);
-  if (!lowest || typeof lowest.density !== "number" || !Array.isArray(lowest.half)) lowest = null;
 
   const verts = (h = H) => symmetricPolygon(h);
   const valid = (h) => h.length >= MIN_PAIRS && h.every((p) => norm(p) <= MAX_R) && isConvex(symmetricPolygon(h), EPS);
 
   function compute() {
     result = densestLattice(polygonShape(verts()));
-    // only shapes the reader made count, not the starting shapes
-    if (preset === null && H.length > 3 && (!lowest || result.density < lowest.density - 1e-9)) {
-      lowest = { density: result.density, half: H.map((p) => [...p]) };
-      save(STORE, lowest);
-    }
   }
 
   // Moves corner i (and its opposite) towards the target as far as the shape
@@ -203,43 +247,6 @@ export function initBeat() {
     readout();
   }
 
-  function drawGauge(d) {
-    gauge.replaceChildren();
-    const W = Math.max(260, Math.round(gauge.getBoundingClientRect().width) || 340);
-    const L = 10;
-    const R = 14;
-    const axis = 66;
-    gauge.setAttribute("viewBox", `0 0 ${W} 108`);
-    const X = (x) => L + ((Math.min(HI, Math.max(LO, x)) - LO) / (HI - LO)) * (W - L - R);
-    make("rect", { x: X(LO), y: axis - 6, width: X(DELTA_OCT) - X(LO), height: 12, class: "zone" }, gauge);
-    make("line", { x1: X(LO), x2: X(HI), y1: axis, y2: axis, class: "axis" }, gauge);
-    for (const [t, label, cls] of [
-      [0.9, "90%", ""],
-      [0.905, "90.5%", ""],
-      [0.91, "91%", " end"],
-    ]) {
-      make("line", { x1: X(t), x2: X(t), y1: axis + 6, y2: axis + 10, class: "tick-mark" }, gauge);
-      const tx = make("text", { x: X(t), y: axis + 24, class: `tick${cls}` }, gauge);
-      tx.textContent = label;
-    }
-    // each label sits left of its own leader, and the leaders to its right start higher
-    for (const [x, name, cls, y] of [
-      [DELTA_DISK, "disk 90.69%", "disk", 14],
-      [DELTA_REGULAR_OCTAGON, "regular octagon 90.62%", "reg", 31],
-      [DELTA_OCT, "smoothed octagon", "oct", 48],
-    ]) {
-      make("line", { x1: X(x), x2: X(x), y1: y - 5, y2: axis + 6, class: `mark ${cls}` }, gauge);
-      const tx = make("text", { x: X(x) - 4, y, class: `mark-label ${cls}` }, gauge);
-      tx.textContent = name;
-    }
-    const hint = make("text", { x: X(LO), y: axis + 40, class: "hint-label start" }, gauge);
-    hint.textContent = "← packs worse, the goal";
-    if (lowest) make("path", { d: `M${X(lowest.density)} ${axis + 7}l-5 8h10z`, class: "best-mark" }, gauge);
-    const cx = X(d);
-    make("circle", { cx, cy: axis, r: 7, class: "you" }, gauge);
-    if (d > HI) make("path", { d: `M${cx + 9} ${axis - 5}l6 5l-6 5`, class: "off" }, gauge);
-  }
-
   function readout() {
     const d = result.density;
     $("beat-density").textContent = pct(d, 3);
@@ -247,11 +254,8 @@ export function initBeat() {
     $("beat-count").textContent = `${2 * H.length} corners`;
     $("beat-fewer").disabled = H.length <= MIN_PAIRS;
     $("beat-more").disabled = H.length >= MAX_PAIRS;
-    $("beat-lowest").textContent = lowest ? pct(lowest.density, 3) : "none yet";
-    $("beat-show-lowest").disabled = !lowest;
-    $("beat-forget").disabled = !lowest;
     for (const b of document.querySelectorAll("#beat-presets .mode")) b.setAttribute("aria-pressed", String(b.dataset.key === preset));
-    drawGauge(d);
+    drawGauge(gauge, d);
     const status = $("beat-status");
     status.classList.remove("good");
     const n = 2 * H.length;
@@ -397,19 +401,7 @@ export function initBeat() {
     sel = null;
     update();
   });
-  $("beat-show-lowest").addEventListener("click", () => {
-    if (!lowest) return;
-    H = lowest.half.map((p) => [...p]);
-    preset = null;
-    sel = null;
-    update();
-  });
-  $("beat-forget").addEventListener("click", () => {
-    lowest = null;
-    save(STORE, null);
-    draw();
-  });
-  new ResizeObserver(() => result && drawGauge(result.density)).observe(gauge);
+  new ResizeObserver(() => result && drawGauge(gauge, result.density)).observe(gauge);
 
   usePreset(PRESETS[2]);
 }
