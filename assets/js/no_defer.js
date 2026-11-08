@@ -19,7 +19,18 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (!insideExcludedParent) {
       table.classList.add("table", "table-hover");
-      table.parentElement?.classList.add("table-responsive");
+      // Make only the table scroll sideways. If the table shares its parent with
+      // other content (a Markdown table sits directly in <article>), wrap it
+      // instead of turning the whole parent into a horizontal scroll box.
+      const parent = table.parentElement;
+      if (parent && parent.children.length === 1) {
+        parent.classList.add("table-responsive");
+      } else if (parent && !parent.classList.contains("table-responsive")) {
+        const wrapper = document.createElement("div");
+        wrapper.className = "table-responsive";
+        parent.insertBefore(wrapper, table);
+        wrapper.appendChild(table);
+      }
 
       if (compatBootstrap) {
         table.setAttribute("data-toggle", "table");
