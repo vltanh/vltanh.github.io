@@ -77,7 +77,7 @@ The proof has five stages. The foundations show that the conjecture is equivalen
 
 ## Verification
 
-Lean's kernel checks every proof, and no person has checked them. Nothing is assumed beyond Lean's three standard axioms, `propext`, `Classical.choice` and `Quot.sound`. The three theorems are stated in a Challenge file, and the root of the library restates them word for word and proves them, with no hypothesis and no `sorry`. An audit checks that all 8,295 declarations of the library depend only on the standard axioms, and Comparator, the checker of the [Palomar registry](https://palomar-registry.org), confirms that the proof establishes exactly the Challenge's statements, under Lean's kernel and the independent NanoDa kernel.
+Lean's kernel checks every proof. Nothing is assumed beyond Lean's three standard axioms, `propext`, `Classical.choice` and `Quot.sound`. The three theorems are stated in a Challenge file, and the root of the library restates them word for word and proves them, with no hypothesis and no `sorry`. An audit checks that all 8,295 declarations of the library depend only on the standard axioms, and Comparator, the checker of the [Palomar registry](https://palomar-registry.org), confirms that the proof establishes exactly the Challenge's statements, under Lean's kernel and the independent NanoDa kernel.
 
 The scalar estimates of the proof are inequalities, polynomial identities, monotonicity and convexity arguments; a few polynomial signs are checked by explicit Bernstein expansions. A full build takes about 18 minutes on 20 cores.
 

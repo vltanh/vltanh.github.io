@@ -62,7 +62,7 @@ const ENTRIES = [
   {
     year: "2026",
     who: "Lean 4",
-    text: "The conjecture is proved in Lean 4, with its equality case. ChatGPT Pro found the proof, building on Hales’s control problem and Hales and Vajjha’s book, and replaced by hand arguments six of the seven interval computations it first relied on. Claude Opus 5.5 wrote the Lean proof, on Lean formalizations of results of the book and of the Pontryagin maximum principle; Lean’s kernel checks the seventh computation itself. No person has checked the proofs; Lean’s kernel checks all of them.",
+    text: "The conjecture is proved in Lean 4, with its equality case, building on Hales’s control problem and Hales and Vajjha’s book. ChatGPT Pro drafted the argument, and Claude Opus 5.5 wrote the Lean proof, on Lean formalizations of results of the book and of the Pontryagin maximum principle. Lean’s kernel checks every step.",
     floor: DELTA_OCT,
     lean: true,
   },
