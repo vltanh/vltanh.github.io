@@ -171,11 +171,6 @@ function caughtAt(run, theta) {
 }
 const BEST_COST = DATA.costs.minimum;
 
-/* ---------------------------------------------------------------- what the visitor tried, for part 5 */
-const TRIED = { p: [], m: [] };
-let refreshSqueeze = () => {};
-function remember(side, name, v) { const list = TRIED[side], i = list.findIndex((e) => e.name === name); if (i >= 0) list.splice(i, 1); list.push({ name, v, you: true }); if (list.length > 8) list.shift(); refreshSqueeze(); }
-
 /* ---------------------------------------------------------------- a board in space and time: position across, time up */
 class Board {
   constructor(svg, { tmax = 2.5, aspect = 1.1, xr = [-1, 1], onResize } = {}) {
@@ -222,7 +217,7 @@ function shadeImage(board) {                     // where the princess tends to 
 /* ================================================================ 1. hide from the monster */
 (() => {
   const svg = $("hide-board"), H = 1 / (2 * PN), SPEED = 0.32;     // time step of the round; game time per second
-  const S = { phase: "ready", x0: 0.35, xs: [0.35], target: 0.35, monster: null, caughtAt: null, demo: null, rounds: [], raf: 0, last: 0, keys: { l: false, r: false } };
+  const S = { phase: "ready", x0: 0.35, xs: [0.35], target: 0.35, monster: null, caughtAt: null, demo: null, raf: 0, last: 0, keys: { l: false, r: false } };
   const board = new Board(svg, { tmax: 3, aspect: 1.15, onResize: draw });
   const now = () => (S.xs.length - 1) * H;
   function draw() {
@@ -260,8 +255,6 @@ function shadeImage(board) {                     // where the princess tends to 
       status.textContent = S.caughtAt > PB ? "A lucky round: longer than any path's average can be." : "Sooner than the best possible average.";
       btn.textContent = "Play again";
     }
-    const n = S.rounds.length;
-    $("hide-tally").textContent = n ? `${n} round${n > 1 ? "s" : ""} played; on average they lasted ${(S.rounds.reduce((s, v) => s + v, 0) / n).toFixed(2)}.` : "";
   }
   function showPlan() {
     let ext;
@@ -272,7 +265,6 @@ function shadeImage(board) {                     // where the princess tends to 
     $("hide-plan-least").textContent = S.demo
       ? `This path was traced by the program behind the ceiling. It averages ${f5(avg)}; no path can do better than ${f5(PB)}.`
       : `Counting the rest of your time as standing still. No path can do better than ${f5(PB)}${PB - avg < 0.003 ? ", and you came close." : "."}`;
-    remember("p", S.demo ? "A best path, traced by the program" : `Your round ${S.rounds.length}`, avg);
   }
   function start(demo = null) {
     cancelAnimationFrame(S.raf);
@@ -283,7 +275,7 @@ function shadeImage(board) {                     // where the princess tends to 
     draw(); panel(); S.raf = requestAnimationFrame(tick);
   }
   function finish() {
-    S.phase = "caught"; S.rounds.push(S.caughtAt); cancelAnimationFrame(S.raf); draw(); panel();
+    S.phase = "caught"; cancelAnimationFrame(S.raf); draw(); panel();
     $("hide-plan").hidden = false; $("hide-plan-big").textContent = "…"; $("hide-plan-least").textContent = "Working out the average over all of his paths.";
     setTimeout(showPlan, 30);
   }
@@ -329,9 +321,6 @@ function shadeImage(board) {                     // where the princess tends to 
 })();
 
 /* ================================================================ 2. catch the princess */
-const describeM = (kind, a, b) => kind === "P"
-  ? (Math.abs(a - 1) < 1e-9 && Math.abs(b - 1) < 1e-9 ? "Sweep from an end" : `Start ${a.toFixed(2)}, turn at t + x = ${b.toFixed(2)}`)
-  : `Start ${a.toFixed(2)}, turns at t + x = ${b.toFixed(2)} and t − x = 1`;
 (() => {
   const svg = $("hunt-board"), S = { kind: "P", a: 0.3, b: 1.0, run: null, phase: "ready", tau: 0, hunt: null, shade: false, hunts: [] };
   let shade = "", shadeKey = "", raf = 0;
@@ -385,23 +374,17 @@ const describeM = (kind, a, b) => kind === "P"
     $("hunt-two").setAttribute("aria-pressed", String(S.kind === "T"));
     $("hunt-shade").setAttribute("aria-pressed", String(S.shade));
   }
-  function triedList() {
-    const list = TRIED.m.slice(-6).reverse();
-    $("hunt-tried").innerHTML = list.map((e) => `<li><span>${e.name}</span><span>${f4(e.v)}</span></li>`).join("");
-    $("hunt-tried-note").hidden = list.length > 0;
-  }
   function changed() { cancelAnimationFrame(raf); clampAB(); S.run = latticeRun(S.kind, S.a, S.b); S.phase = "ready"; S.hunt = null; S.hunts = []; draw(); panel(); }
   function pickHunt() { const q = Math.floor(Math.random() * NQ), s = Math.random() < 0.5 ? 1 : -1; return { q, s, tc: caughtAt(S.run, 0.5 * (1 + s * RK.q[q])) }; }
-  function record() { remember("m", describeM(S.kind, S.a, S.b), S.run.cost); triedList(); }
   function hunt() {
-    cancelAnimationFrame(raf); S.hunt = pickHunt(); record();
+    cancelAnimationFrame(raf); S.hunt = pickHunt();
     if (reduced()) { S.phase = "caught"; S.hunts.push(S.hunt.tc); draw(); panel(); return; }
     S.phase = "running"; S.tau = 0; let last = 0;
     const step = (ts) => { const dt = last ? (ts - last) / 1000 : 0; last = ts; S.tau = Math.min(S.hunt.tc, S.tau + 0.9 * dt); if (S.tau >= S.hunt.tc) { S.phase = "caught"; S.hunts.push(S.hunt.tc); draw(); panel(); return; } draw(); panel(); raf = requestAnimationFrame(step); };
     raf = requestAnimationFrame(step);
   }
   $("hunt-go").addEventListener("click", hunt);
-  $("hunt-ten").addEventListener("click", () => { cancelAnimationFrame(raf); for (let i = 0; i < 10; i++) { S.hunt = pickHunt(); S.hunts.push(S.hunt.tc); } record(); S.phase = "caught"; draw(); panel(); });
+  $("hunt-ten").addEventListener("click", () => { cancelAnimationFrame(raf); for (let i = 0; i < 10; i++) { S.hunt = pickHunt(); S.hunts.push(S.hunt.tc); } S.phase = "caught"; draw(); panel(); });
   let drag = null;
   svg.addEventListener("pointerdown", (e) => { const h = e.target.closest(".handle"); if (!h) return; drag = h.dataset.k; svg.setPointerCapture(e.pointerId); e.preventDefault(); });
   svg.addEventListener("pointermove", (e) => {
@@ -422,7 +405,7 @@ const describeM = (kind, a, b) => kind === "P"
   $("hunt-two").addEventListener("click", () => { S.kind = S.kind === "P" ? "T" : "P"; if (S.kind === "T") { S.a = Math.max(-0.5, Math.min(0.5, S.a)); S.b = Math.min(S.b, 0.92); } changed(); });
   $("hunt-shade").addEventListener("click", () => { S.shade = !S.shade; draw(); panel(); });
   $("hunt-best-inline").textContent = f4(BEST_COST);
-  changed(); triedList();
+  changed();
 })();
 
 /* ================================================================ 3. the monster's plan, one side */
@@ -542,7 +525,7 @@ const describeM = (kind, a, b) => kind === "P"
   const base = { p: [], m: PRESETS_M.map(([name, kind, a, b]) => ({ name, v: latticeRun(kind, a, b).cost })) };
   let pending = PRESETS_P.length + 1;
   function draw() {
-    const svg = $("squeeze-line"), all = { p: base.p.concat(TRIED.p), m: base.m.concat(TRIED.m) };
+    const svg = $("squeeze-line"), all = base;
     let s = `<rect x="${X(B.lower_dec)}" y="22" width="${X(B.upper_dec) - X(B.lower_dec)}" height="190" class="bandr"/>`;
     s += `<line x1="${X(lo)}" x2="${X(hi)}" y1="117" y2="117" class="axisl"/>`;
     for (let i = 0; i <= 5; i++) { const v = lo + 0.001 * i; if (Math.min(Math.abs(X(v) - X(B.lower_dec)), Math.abs(X(v) - X(B.upper_dec))) < 24) continue; s += `<line x1="${X(v)}" x2="${X(v)}" y1="112" y2="122" class="axisl"/><text x="${X(v)}" y="138" class="t">${v.toFixed(4)}</text>`; }
@@ -557,12 +540,12 @@ const describeM = (kind, a, b) => kind === "P"
         const y = y0 + dir * 14 * (lvl % 5), col = cls === "dp" ? "--princess" : "--monster";
         if (e.v < lo) s += `<text x="${X(lo) - 10}" y="${y + 4}" class="off" text-anchor="end" style="fill:var(${col})">${e.v.toFixed(2)} ←</text>`;
         if (e.v > hi) s += `<text x="${X(hi) + 10}" y="${y + 4}" class="off" style="fill:var(${col})">→ ${e.v.toFixed(2)}</text>`;
-        s += `<circle id="sq-${cls}-${i}" cx="${x}" cy="${y}" r="6" class="${cls}${e.you ? " you" : ""}"/>`;
+        s += `<circle id="sq-${cls}-${i}" cx="${x}" cy="${y}" r="6" class="${cls}"/>`;
       });
     };
     place(all.p, "dp", 98, -1); place(all.m, "dm", 156, 1);
     svg.innerHTML = s;
-    const row = (cls, c, e, i) => `<li tabindex="0" data-dot="sq-${cls}-${i}"><span class="dot${e.you ? " you" : ""}" style="--c:var(${c})"></span><span>${e.name}${e.you ? " (you)" : ""}</span><span class="v">${f4(e.v)}</span></li>`;
+    const row = (cls, c, e, i) => `<li tabindex="0" data-dot="sq-${cls}-${i}"><span class="dot" style="--c:var(${c})"></span><span>${e.name}</span><span class="v">${f4(e.v)}</span></li>`;
     const ranked = (list, desc) => list.map((e, i) => [e, i]).sort((a, b) => (desc ? b[0].v - a[0].v : a[0].v - b[0].v));
     $("squeeze-p").innerHTML = ranked(all.p, true).map(([e, i]) => row("dp", "--princess", e, i)).join("") + (pending > 0 ? `<li class="wait"><span></span><span>Working out a few more…</span><span></span></li>` : "");
     $("squeeze-m").innerHTML = ranked(all.m, false).map(([e, i]) => row("dm", "--monster", e, i)).join("");
@@ -572,7 +555,6 @@ const describeM = (kind, a, b) => kind === "P"
       li.addEventListener("mouseenter", on); li.addEventListener("mouseleave", off); li.addEventListener("focus", on); li.addEventListener("blur", off);
     }
   }
-  refreshSqueeze = draw;
   const facts = [
     ["--princess", `<strong>Her floor, ${f5(B.lower_dec)}.</strong> Her plan, refined, proves that no monster can be sure of catching her faster than this on average. Two separate programs agree on it; a third, independent check has not been finished.`],
     ["--monster", `<strong>His ceiling, ${f5(B.upper_dec)}.</strong> His plan, on a fine grid, proves that no princess can be sure of hiding longer than this on average. The proof is written out and the computation is exact, done by two separate programs, but no one else has checked it yet.`],
