@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Heilbronn's Triangle Problem Playground</title>
+    <meta
+      name="description"
+      content="Move nine points in a square and watch the smallest triangle they make. Its largest possible area, (9√65 − 55)/320, and the one configuration that reaches it are proved in Lean 4."
+    />
+    <meta property="og:title" content="Heilbronn's Triangle Problem Playground" />
+    <meta
+      property="og:description"
+      content="How large can the smallest triangle of nine points in a square be? Move the points, watch the smallest triangle, and compare it with the value proved in Lean 4."
+    />
+    <meta property="og:image" content="https://vltanh.me/assets/img/lean4-heilbronn/front-optimal.png" />
+    <meta property="og:url" content="https://vltanh.me/heilbronn/" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2.5' y='2.5' width='27' height='27' fill='%23fbf8f1' stroke='%231f2937' stroke-width='1.6'/%3E%3Cpolygon points='2.5,19 10,29.5 27,24' fill='%23dbeafe' stroke='%232563eb' stroke-width='1.5' stroke-linejoin='round'/%3E%3Ccircle cx='2.5' cy='19' r='2.6' fill='%231f2937'/%3E%3Ccircle cx='10' cy='29.5' r='2.6' fill='%231f2937'/%3E%3Ccircle cx='27' cy='24' r='2.6' fill='%231f2937'/%3E%3Ccircle cx='19' cy='11' r='2.6' fill='%231f2937'/%3E%3C/svg%3E"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..700;1,6..72,300..700&display=swap" rel="stylesheet" />
+    <script>
+      // The colour theme stored by vltanh.me, applied before the page is drawn.
+      try {
+        const t = localStorage.getItem("theme");
+        if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+    <link rel="stylesheet" href="style.css" />
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="top">
+        <a href="https://github.com/vltanh/lean4-heilbronn">&larr; The project</a>
+        <span class="top-end">
+          <a href="https://github.com/vltanh/lean4-heilbronn/blob/main/README.md#results">The Lean proof</a>
+          <button type="button" class="theme" id="theme" aria-label="Colour theme"></button>
+        </span>
+      </header>
+
+      <section class="intro">
+        <p class="kicker">Playground</p>
+        <h1>Heilbronn's Triangle Problem</h1>
+        <p class="lede">
+          Put <i>n</i> points in a square of side 1, and look at the triangles with corners at three of them. How large can the smallest of these
+          triangles be? For nine points, Lean proves that the answer is <i>H</i><sub>9</sub> = (9√65 − 55)/320 ≈ 0.0548760, and that only one
+          configuration reaches it, up to the symmetries of the square. Here you can move the points and watch the smallest triangle. Its area never
+          gets above <i>H</i><sub>9</sub>.
+        </p>
+      </section>
+
+      <nav class="cases" id="cases" aria-label="Number of points" hidden></nav>
+
+      <section class="play">
+        <div class="board-wrap">
+          <div class="board-box">
+            <svg id="board" role="application" tabindex="0" aria-describedby="hint" xmlns="http://www.w3.org/2000/svg">
+              <rect class="square-fill" />
+              <g class="grid"></g>
+              <g class="near"></g>
+              <g class="tight"></g>
+              <g class="lines"></g>
+              <g class="focus"></g>
+              <rect class="square" />
+              <g class="points"></g>
+            </svg>
+            <p class="board-readout" aria-hidden="true">
+              Smallest triangle <span id="board-least"></span> <span class="extra" id="board-pct"></span>
+            </p>
+          </div>
+        </div>
+
+        <aside class="panel">
+          <section class="readout">
+            <p class="cap">Area of the smallest triangle</p>
+            <p class="big" id="least">0</p>
+            <div class="meter" aria-hidden="true"><span id="meter"></span></div>
+            <p class="least"><span id="pct"></span> of the largest possible, proved in Lean: <span class="formula" id="value"></span></p>
+            <p class="status" id="status" aria-live="polite"></p>
+            <svg class="climb" id="climb" aria-hidden="true" hidden></svg>
+          </section>
+
+          <section class="controls">
+            <div class="actions">
+              <button type="button" id="reset">Reset</button>
+              <button type="button" id="shuffle">Shuffle</button>
+              <button type="button" id="improve" aria-pressed="false">Improve</button>
+              <button type="button" id="optimal">Optimal</button>
+            </div>
+          </section>
+
+          <section class="images">
+            <h3>The optimal configuration</h3>
+            <div class="thumbs" id="images" role="group" aria-label="The optimal point sets"></div>
+            <p class="note" id="images-note"></p>
+          </section>
+
+          <section class="triangles">
+            <h3>The smallest triangles</h3>
+            <p class="note" id="tri-count"></p>
+            <ul class="chips" id="chips" aria-label="The triangles of least area, and those near it"></ul>
+            <label class="slider">
+              <span>Also within</span>
+              <input type="range" id="margin" min="0" max="25" step="0.5" value="5" />
+              <output id="margin-out" for="margin"></output>
+            </label>
+            <p class="note">of the least area, dashed.</p>
+          </section>
+
+          <section class="points">
+            <h3 id="sel-name">The points</h3>
+            <p class="note" id="where"></p>
+            <div class="selected none" id="selected">
+              <p class="note when-none">Click a point to see its coordinates, or to type them.</p>
+              <div class="fields when-some">
+                <label>
+                  <span><i>x</i></span>
+                  <input id="sel-x" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" />
+                </label>
+                <label>
+                  <span><i>y</i></span>
+                  <input id="sel-y" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" />
+                </label>
+              </div>
+              <p class="note when-some" id="sel-role"></p>
+              <p class="note clamped" id="sel-clamped" hidden>Points stay in the square, so the coordinate was cut to the range 0 to 1.</p>
+            </div>
+          </section>
+        </aside>
+      </section>
+
+      <section class="notes">
+        <div class="case-info">
+          <h2 id="case-name"></h2>
+          <div id="case-note"></div>
+          <details class="more" id="case-more" hidden>
+            <summary id="case-more-title"></summary>
+            <div id="case-more-body"></div>
+          </details>
+          <h3 class="proved-title">What is proved</h3>
+          <div id="case-proved"></div>
+        </div>
+        <div class="how">
+          <h3>How to play</h3>
+          <p class="hint" id="hint">
+            Drag a point to move it. Points stay in the square: drag one past a side and it slides along the side. The triangles of least area are
+            shaded, and those a little larger are dashed. Three points on a line make a triangle of area 0, drawn as a red line.
+          </p>
+          <p class="hint">
+            Improve is a local search. Step by step it moves all the points to make the smallest triangle larger, and it stops where no small move
+            helps. That is usually a local maximum below the proved value, as the problem has many. Place the optimal configuration, drag a point a
+            little way, and Improve brings it back.
+          </p>
+          <p class="hint">Click a point to type its coordinates; fractions like 1/3 work.</p>
+          <p class="hint keys">
+            Keys, on the board: Enter picks a point, the arrows move it, Shift takes bigger steps, and <kbd>Esc</kbd> lets it go.
+          </p>
+        </div>
+      </section>
+
+      <footer>
+        <p>
+          The value, the configuration and its eleven triangles are those of the Lean library
+          <a href="https://github.com/vltanh/lean4-heilbronn">lean4-heilbronn</a>, whose
+          <a href="https://github.com/vltanh/lean4-heilbronn/blob/main/README.md">README</a> states the definitions and the theorems, and Lean's
+          kernel checks every step of the proof. The configuration is from F. Comellas and J. L. A. Yebra,
+          <a href="https://www.combinatorics.org/ojs/index.php/eljc/article/download/v9i1r6/pdf">New lower bounds for Heilbronn numbers</a>, Electron.
+          J. Combin. 9 (2002), R6.
+        </p>
+      </footer>
+    </div>
+  </body>
+</html>
