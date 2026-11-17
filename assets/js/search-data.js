@@ -229,7 +229,12 @@ ninja.data = [{
           section: "News",},{id: "news-i-have-passed-my-preliminary-exam-and-am-now-officially-a-phd-candidate",
           title: 'I have passed my Preliminary Exam and am now officially a PhD candidate!...',
           description: "",
-          section: "News",},{id: "projects-chess-monte-carlo-simulation",
+          section: "News",},{id: "projects-heilbronn-39-s-triangle-problem-in-lean-4",
+          title: 'Heilbronn&amp;#39;s triangle problem in Lean 4',
+          description: "A Lean 4 proof of how large the smallest triangle of nine points in the unit square can be, and that only one configuration reaches it, up to the symmetries of the square.",
+          section: "Projects",handler: () => {
+              window.location.href = "/projects/lean4-heilbronn/";
+            },},{id: "projects-chess-monte-carlo-simulation",
           title: 'Chess Monte Carlo Simulation',
           description: "Tracking the 2026 Candidates with dynamic player strength, one million simulated tournaments per round.",
           section: "Projects",handler: () => {
