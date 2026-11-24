@@ -1,0 +1,867 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Morrey's Problem, Explained</title>
+    <meta
+      name="description"
+      content="Can you tell, by testing only layerings, whether any pattern of ripples could ever lower the energy of an elastic sheet? Morrey's problem, open in the plane since 1952, explained with live pictures, and a theorem proved in Lean 4 that answers it for isotropic, homogeneous energies."
+    />
+    <meta property="og:title" content="Morrey's Problem, Explained" />
+    <meta
+      property="og:description"
+      content="Layers, ripples and energy: Morrey's problem on 2 × 2 matrices, open since 1952, explained with live pictures, and a theorem proved in Lean 4 for isotropic, homogeneous energies."
+    />
+    <meta property="og:image" content="https://vltanh.me/assets/img/lean4-morrey/front.png" />
+    <meta property="og:url" content="https://vltanh.me/morrey/" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M4 6h10l4 5H8z' fill='%23d9d2c1' stroke='%231f2937' stroke-width='1.3' stroke-linejoin='round'/%3E%3Cpath d='M8 11h10l-4 5H4z' fill='%23fbf8f1' stroke='%231f2937' stroke-width='1.3' stroke-linejoin='round'/%3E%3Cpath d='M4 16h10l4 5H8z' fill='%23d9d2c1' stroke='%231f2937' stroke-width='1.3' stroke-linejoin='round'/%3E%3Cpath d='M8 21h10l-4 5H4z' fill='%23fbf8f1' stroke='%231f2937' stroke-width='1.3' stroke-linejoin='round'/%3E%3Cpath d='M8 11h10M4 16h10M8 21h10' stroke='%232563eb' stroke-width='1.8'/%3E%3C/svg%3E"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..700;1,6..72,300..700&display=swap" rel="stylesheet" />
+    <script>
+      // The colour theme stored by vltanh.me, applied before the page is drawn.
+      try {
+        const t = localStorage.getItem("theme");
+        if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+    <link rel="stylesheet" href="style.css" />
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <div class="flow">
+      <header class="top wide">
+        <a href="/projects/lean4-morrey/">&larr; The project</a>
+        <span class="top-end">
+          <a href="https://github.com/vltanh/lean4-morrey/blob/main/docs/HomogeneousIsotropic/README.md">The Lean proof</a>
+          <button type="button" class="theme" id="theme" aria-label="Colour theme"></button>
+        </span>
+      </header>
+
+      <section class="intro wide">
+        <h1>Morrey's problem</h1>
+        <div class="intro-text">
+          <p class="lede">
+            Stretch an elastic material, a sheet of rubber or a crystal, and it may find a cheaper shape by rippling, or by splitting into fine
+            layers. Can you tell, by testing layerings alone, whether any pattern of ripples, however complicated, could ever save energy?
+          </p>
+          <p class="lede">
+            Layerings are easy to test, one straight line at a time. In 1952 Charles Morrey asked whether they are enough, and for a sheet that
+            deforms within its own plane the question is still open, more than seventy years later.
+          </p>
+        </div>
+      </section>
+
+      <figure class="hero wide" aria-labelledby="hero-cap">
+        <div class="hero-grid">
+          <div class="lam-box">
+            <svg id="lam" class="board lam" role="img" aria-labelledby="lam-label" xmlns="http://www.w3.org/2000/svg">
+              <title id="lam-label">A sheet split into layers that alternate between the deformations A and C</title>
+            </svg>
+          </div>
+          <div class="hero-side">
+            <div class="mats">
+              <div class="mat">
+                <svg id="matA" class="board small" xmlns="http://www.w3.org/2000/svg" aria-describedby="drag-hint"></svg>
+                <p class="mat-name"><i>A</i></p>
+              </div>
+              <div class="mat">
+                <svg id="matC" class="board small" xmlns="http://www.w3.org/2000/svg" aria-describedby="drag-hint"></svg>
+                <p class="mat-name"><i>C</i></p>
+              </div>
+            </div>
+            <div class="diff">
+              <div class="mat">
+                <svg
+                  id="matD"
+                  class="board small"
+                  role="img"
+                  aria-label="The difference C minus A, applied to a square"
+                  xmlns="http://www.w3.org/2000/svg"
+                ></svg>
+                <p class="mat-name"><i>C</i> − <i>A</i></p>
+              </div>
+              <p class="status" id="lam-status" aria-live="polite"></p>
+            </div>
+            <div class="actions">
+              <button type="button" id="lam-fit">Fit the layers</button>
+              <button type="button" id="lam-other">Try another <i>C</i></button>
+            </div>
+            <label class="slider">
+              <span>Layers</span>
+              <input type="range" id="lam-count" min="2" max="24" step="2" value="8" />
+              <output id="lam-count-out" for="lam-count"></output>
+            </label>
+          </div>
+        </div>
+        <figcaption id="hero-cap">
+          Two deformations, <i>A</i> and <i>C</i>, side by side in alternating layers. Drag the arrow tips of <i>C</i> (or of <i>A</i>). The layers
+          meet without a gap only when the difference <i>C</i> − <i>A</i> squashes a square flat onto a segment; otherwise every interface opens a
+          crack at one end and overlaps at the other.
+        </figcaption>
+      </figure>
+      <p class="hint" id="drag-hint">
+        Drag an arrow tip, or press <kbd>Tab</kbd> to reach it and move it with the arrow keys (<kbd>Shift</kbd> for bigger steps).
+      </p>
+
+      <p>
+        This page explains that picture, the question behind it, and why it matters to elasticity, to crystals and to complex analysis. At the end
+        comes a theorem, proved in the proof assistant Lean, that answers the question for a large family of energies with two natural symmetries.
+      </p>
+
+      <!-- ------------------------------------------------------------ a matrix is a deformed square -->
+
+      <h2 id="square">A deformation, one small square at a time</h2>
+      <p>
+        Draw a small square on a rubber sheet, then stretch the sheet. If the square is small enough, it becomes a parallelogram: its bottom side
+        becomes one arrow and its left side another. These two arrows, four numbers in all, make a 2 × 2 matrix <i>A</i>.
+      </p>
+
+      <figure class="pair mid">
+        <svg id="sq" class="board medium" xmlns="http://www.w3.org/2000/svg" aria-describedby="drag-hint"></svg>
+        <div class="pair-side">
+          <div class="matrix" id="sq-matrix" aria-live="off"></div>
+          <p class="readout" id="sq-area"></p>
+          <p class="readout note" id="sq-note" aria-live="polite"></p>
+          <div class="presets" role="group" aria-label="Examples">
+            <button type="button" data-m="1,0,0,1">Rest</button>
+            <button type="button" data-m="1.6,0,0,0.75">Stretch</button>
+            <button type="button" data-m="1,0.7,0,1">Shear</button>
+            <button type="button" data-m="0.71,-0.71,0.71,0.71">Turn</button>
+            <button type="button" data-m="-1,0,0,1">Mirror</button>
+            <button type="button" data-m="1.2,0.6,0.4,0.2">Flatten</button>
+          </div>
+        </div>
+        <figcaption>
+          The dashed square is the sheet at rest. Drag the tips of the two arrows: the first column of <i>A</i> is where the bottom side goes, the
+          second where the left side goes.
+        </figcaption>
+      </figure>
+
+      <p>
+        The area of the parallelogram, divided by that of the square, is the <em>area factor</em> of <i>A</i>, its determinant det <i>A</i>. It is
+        negative when the square is turned over, as in a mirror. When the two arrows lie along one line, the square is squashed flat onto a segment
+        and its area factor is zero. A matrix that squashes the square flat, without crushing it to a point, has <em>rank one</em>, and rank one is
+        what decides whether the layers at the top fit.
+      </p>
+      <details class="formula">
+        <summary>The formula</summary>
+        <p>
+          <i>A</i> = [<i>a</i> <i>b</i>; <i>c</i> <i>d</i>] sends the point (<i>x</i>, <i>y</i>) to (<i>ax</i> + <i>by</i>, <i>cx</i> + <i>dy</i>).
+          The bottom side goes to the arrow (<i>a</i>, <i>c</i>), the left side to (<i>b</i>, <i>d</i>), and det <i>A</i> = <i>ad</i> − <i>bc</i>.
+          <i>A</i> has rank one when det <i>A</i> = 0 and <i>A</i> ≠ 0.
+        </p>
+      </details>
+
+      <!-- ------------------------------------------------------------ energy -->
+
+      <h2 id="energy">Energy</h2>
+      <p>
+        An elastic material resists being deformed. An <em>energy</em> is a rule <i>F</i> that gives each deformed small square a cost
+        <i>F</i>(<i>A</i>). Here the cost is the stretch energy: the squared lengths of the two arrows, added together.
+      </p>
+      <p>
+        A whole sheet, deformed by a map <i>u</i>, is made of many small squares, each with its own matrix: the gradient ∇<i>u</i> at that place. The
+        total energy of the sheet adds up their costs.
+      </p>
+
+      <figure class="pair mid">
+        <svg id="en" class="board medium" role="application" tabindex="0" aria-describedby="en-hint" xmlns="http://www.w3.org/2000/svg"></svg>
+        <div class="pair-side">
+          <svg
+            id="en-zoom"
+            class="board small"
+            role="img"
+            aria-label="The small square under the cursor, deformed"
+            xmlns="http://www.w3.org/2000/svg"
+          ></svg>
+          <p class="readout" id="en-cost"></p>
+          <label class="slider">
+            <span>Bend</span>
+            <input type="range" id="en-bend" min="0" max="1.5" step="0.01" value="1" />
+            <output id="en-bend-out" for="en-bend"></output>
+          </label>
+          <p class="readout" id="en-total"></p>
+        </div>
+        <figcaption id="en-hint">
+          A deformed sheet; darker squares cost more. Point at a square, or use the arrow keys on the sheet, to see its matrix.
+        </figcaption>
+      </figure>
+      <details class="formula">
+        <summary>The formula</summary>
+        <p>
+          The total energy of a deformation <i>u</i> of the unit square is <i>E</i>(<i>u</i>) = ∫ <i>F</i>(∇<i>u</i>(<i>x</i>)) <i>dx</i>. Here
+          <i>F</i>(<i>A</i>) = ‖<i>A</i>‖² = <i>a</i>² + <i>b</i>² + <i>c</i>² + <i>d</i>², the Euclidean norm squared.
+        </p>
+      </details>
+      <p>
+        A material settles where its total energy is least. Whether such a best shape exists depends on <i>F</i>, and the next four sections describe
+        four kinds of energy, starting with the simplest.
+      </p>
+
+      <!-- ------------------------------------------------------------ convex -->
+
+      <h2 id="convex">Convex: a bowl along every line</h2>
+      <p>
+        Between two deformations there is a straight path, <i>A</i> + <i>tB</i>, along which the arrows move at steady speed as <i>t</i> runs. An
+        energy is <em>convex</em> if along every such path its graph curves upward, like a bowl, and never bends down.
+      </p>
+
+      <figure class="probe mid" id="probe-convex"></figure>
+
+      <p>
+        Convex energies are the easy case: no ripple can ever lower them. But convexity asks too much. Switch the picture to (det <i>A</i>)², the
+        square of the area factor. It cares only about area, and it bends down: stretching one way while squeezing the other passes through two
+        flattened squares, where the area factor and the energy are zero.
+      </p>
+      <p>
+        In a sheet, though, the deformation cannot change from place to place along just any path, because the pieces of the sheet must stay joined.
+        The layers at the top show which paths it can follow.
+      </p>
+
+      <!-- ------------------------------------------------------------ rank one -->
+
+      <h2 id="layers">Layers that fit</h2>
+      <p>
+        Go back to the picture at the top. A sheet can be deformed by <i>A</i> in some layers and by <i>C</i> in the others only if neighbouring
+        layers still meet along their common edge. That edge is a line, and <i>A</i> and <i>C</i> must move it the same way. This happens exactly when
+        the difference <i>C</i> − <i>A</i> has rank one: it squashes a square flat onto a segment. The interfaces then run along the one direction
+        that the difference crushes to nothing.
+      </p>
+      <details class="formula">
+        <summary>The formula</summary>
+        <p>
+          A matrix of rank one is <i>a</i> ⊗ <i>n</i>, the map <i>x</i> ↦ (<i>n</i> · <i>x</i>) <i>a</i>, with <i>n</i> a unit vector. If <i>C</i> −
+          <i>A</i> = <i>a</i> ⊗ <i>n</i>, the two deformations agree on every line perpendicular to <i>n</i>, up to a shift by a multiple of <i>a</i>,
+          so layers bounded by such lines fit. If <i>C</i> − <i>A</i> has rank two, no direction works: along an interface in the direction of a unit
+          vector <i>τ</i>, the two sides drift apart by |(<i>C</i> − <i>A</i>)<i>τ</i>| per unit of length, which is never zero. The picture chooses
+          the direction with the least drift, the smaller singular value of <i>C</i> − <i>A</i>.
+        </p>
+      </details>
+      <p>
+        This is the only way two uniform deformations can meet along a straight interface without tearing, and crystals use it. In shape-memory alloys
+        such as copper-aluminium-nickel, the crystal often splits into <em>twins</em>: fine alternating bands of two deformations whose difference has
+        rank one, laminates of the kind drawn above. In three dimensions the rule is the same, with planes in place of lines.
+      </p>
+      <p>
+        An energy is <em>rank-one convex</em> if it never bends down along a path <i>A</i> + <i>tB</i> whose direction <i>B</i> has rank one. These
+        are the paths that layers can follow. If an energy bent down along one, the sheet could lower its energy by splitting into fine layers of two
+        deformations on it.
+      </p>
+
+      <figure class="probe mid" id="probe-rank"></figure>
+
+      <p>
+        Testing a line means testing a function of one number. A computer checks thousands of lines in the blink of an eye, as the button shows, and
+        for many energies a mathematician can check every line by hand. Layers, however, are only one kind of pattern, and a sheet can ripple in
+        infinitely many other ways.
+      </p>
+
+      <!-- ------------------------------------------------------------ quasiconvex -->
+
+      <h2 id="ripples">Ripples, and quasiconvexity</h2>
+      <p>
+        Hold the edge of the sheet in a uniform deformation <i>A</i>, like a drum skin stretched over a frame shaped like the parallelogram. Inside,
+        the sheet may ripple in any way that does not tear it. An energy is <em>quasiconvex</em> if no ripple saves energy: every deformation with the
+        same edge costs at least as much as the uniform one.
+      </p>
+
+      <figure class="ripple wide" id="qc">
+        <div class="ripple-grid">
+          <svg
+            id="qc-sheet"
+            class="board sheet"
+            role="img"
+            aria-label="The rippled sheet, shaded by the cost of each small square"
+            xmlns="http://www.w3.org/2000/svg"
+          ></svg>
+          <div class="ripple-side">
+            <fieldset class="seg" id="qc-energy">
+              <legend>Energy</legend>
+            </fieldset>
+            <fieldset class="seg" id="qc-shape">
+              <legend>Ripple</legend>
+            </fieldset>
+            <fieldset class="seg" id="qc-frame">
+              <legend>Frame</legend>
+            </fieldset>
+            <label class="slider">
+              <span>Amplitude</span>
+              <input type="range" id="qc-amp" min="0" max="1.5" step="0.01" value="1" />
+              <output id="qc-amp-out" for="qc-amp"></output>
+            </label>
+            <svg
+              id="qc-plot"
+              class="plot small-plot"
+              role="img"
+              aria-label="The average energy against the amplitude of the ripple"
+              xmlns="http://www.w3.org/2000/svg"
+            ></svg>
+            <p class="status" id="qc-status" aria-live="polite"></p>
+          </div>
+        </div>
+        <figcaption>
+          The edge stays where the uniform deformation puts it. Darker squares cost more. The plot shows the average cost over the sheet as the ripple
+          grows; the dashed line is the cost of the uniform sheet.
+        </figcaption>
+      </figure>
+      <details class="formula">
+        <summary>The formula</summary>
+        <p>
+          <i>F</i> is quasiconvex if ∫<sub>(0,1)²</sub> <i>F</i>(<i>A</i> + ∇<i>φ</i>(<i>x</i>)) <i>dx</i> ≥ <i>F</i>(<i>A</i>) for every matrix
+          <i>A</i> and every Lipschitz map <i>φ</i> that vanishes on the edge of the unit square. The ripples here are such maps: each is affine on
+          the small triangles of the drawing, so the averages shown are exact integrals.
+        </p>
+      </details>
+      <p>
+        Now choose the crystal, an energy with two preferred shapes that differ by a shear of rank one, and the layers. Held at rest, the crystal pays
+        everywhere. Split into layers, almost all of it sits in one of its preferred shapes, and only a thin band at the frame pays; finer layers
+        would make that band thinner still. So this energy is not quasiconvex.
+      </p>
+      <p>
+        Morrey proved in 1952 that quasiconvexity is exactly what stops the total energy from dropping in the limit of ever finer ripples. With it,
+        and enough growth, the direct method of the calculus of variations finds a shape of least energy: an equilibrium. Without it, the energy can
+        keep falling as the pattern gets finer, no best shape exists, and the material forms microstructure instead, as the crystal does.
+      </p>
+      <p>
+        The trouble is that quasiconvexity is a statement about every possible ripple, an infinite-dimensional family, while rank-one convexity is a
+        statement about lines. One more kind of energy comes before the question: it gives a way to prove quasiconvexity in practice, and it rests on
+        a striking fact about area.
+      </p>
+
+      <!-- ------------------------------------------------------------ polyconvex -->
+
+      <h2 id="area">The area never changes</h2>
+      <p>
+        Ripple the sheet in any way, keeping its edge fixed, and average the area factor of its small squares. The average is always the area factor
+        of the frame, det <i>A</i>, whatever the ripple. Push the amplitude until the sheet folds over itself:
+      </p>
+
+      <figure class="ripple wide" id="pc">
+        <div class="ripple-grid">
+          <svg
+            id="pc-sheet"
+            class="board sheet"
+            role="img"
+            aria-label="The rippled sheet, with the folded parts in red"
+            xmlns="http://www.w3.org/2000/svg"
+          ></svg>
+          <div class="ripple-side">
+            <fieldset class="seg" id="pc-shape">
+              <legend>Ripple</legend>
+            </fieldset>
+            <fieldset class="seg" id="pc-frame">
+              <legend>Frame</legend>
+            </fieldset>
+            <label class="slider">
+              <span>Amplitude</span>
+              <input type="range" id="pc-amp" min="0" max="1.8" step="0.01" value="0.7" />
+              <output id="pc-amp-out" for="pc-amp"></output>
+            </label>
+            <dl class="figures" id="pc-figures"></dl>
+          </div>
+        </div>
+        <figcaption>
+          Where the sheet is turned over, its squares have negative area factor and are drawn in red. The average area factor stays equal to det
+          <i>A</i>; the average stretch does not.
+        </figcaption>
+      </figure>
+      <p>
+        The reason is geometric: the rippled sheet still covers the parallelogram of its frame, so area gained in one place is lost in another, and
+        where the sheet folds over itself, the folded part counts as negative. Quantities like this, whose total depends only on the edge, are called
+        <em>null Lagrangians</em>.
+      </p>
+      <p>
+        An energy is <em>polyconvex</em> if it is a convex function of the deformation and of its area factor. Such an energy is quasiconvex, for a
+        short reason: the averages of the deformation and of the area factor over a rippled sheet are those of the frame, and a convex function of an
+        average is never more than the average of the function. The energy (det <i>A</i>)² is polyconvex, though not convex. John Ball introduced
+        polyconvexity in 1977 and used it to prove that equilibria exist in nonlinear elasticity, for energies that need not be convex.
+      </p>
+      <details class="formula">
+        <summary>The formula</summary>
+        <p>
+          ∫ det(<i>A</i> + ∇<i>φ</i>) = det <i>A</i> when <i>φ</i> vanishes on the edge. <i>F</i> is polyconvex if <i>F</i>(<i>A</i>) =
+          <i>g</i>(<i>A</i>, det <i>A</i>) with <i>g</i> convex; then, by Jensen's inequality, ∫ <i>F</i>(<i>A</i> + ∇<i>φ</i>) ≥ <i>g</i>(∫ (<i>A</i>
+          + ∇<i>φ</i>), ∫ det(<i>A</i> + ∇<i>φ</i>)) = <i>g</i>(<i>A</i>, det <i>A</i>) = <i>F</i>(<i>A</i>).
+        </p>
+      </details>
+
+      <!-- ------------------------------------------------------------ the order -->
+
+      <h2 id="order">Four kinds, one inside another</h2>
+      <p>Each kind of energy is a special case of the next:</p>
+      <p class="chain">convex ⇒ polyconvex ⇒ quasiconvex ⇒ rank-one convex</p>
+
+      <figure class="mid nest-fig">
+        <svg id="nest" class="nest" viewBox="0 0 720 430" role="img" aria-labelledby="nest-title" xmlns="http://www.w3.org/2000/svg">
+          <title id="nest-title">
+            Nested regions: convex inside polyconvex inside quasiconvex inside rank-one convex. Examples: the stretch energy is convex; the area
+            factor squared is polyconvex and not convex; the energy of Dacorogna and Marcellini with gamma between 1 and 2 over root 3 is quasiconvex
+            and not polyconvex. The ring between quasiconvex and rank-one convex holds a question mark: for 2 by 2 matrices nobody knows whether it is
+            empty.
+          </title>
+          <rect class="n4" x="10" y="10" width="700" height="410" rx="34" />
+          <rect class="n3" x="40" y="62" width="520" height="340" rx="28" />
+          <rect class="n2" x="66" y="112" width="370" height="270" rx="22" />
+          <rect class="n1" x="92" y="162" width="200" height="200" rx="18" />
+          <text class="lab" x="34" y="44">rank-one convex</text>
+          <text class="lab" x="64" y="94">quasiconvex</text>
+          <text class="lab" x="90" y="144">polyconvex</text>
+          <text class="lab" x="116" y="194">convex</text>
+          <text class="ex" x="192" y="280" text-anchor="middle">‖A‖²</text>
+          <text class="ex" x="364" y="250" text-anchor="middle">(det A)²</text>
+          <text class="ex" x="498" y="196" text-anchor="middle">
+            f
+            <tspan class="sub" dy="6">γ</tspan>
+          </text>
+          <text class="ex-sub" x="498" y="222" text-anchor="middle">1 &lt; γ ≤ 2/√3</text>
+          <text class="ask" x="636" y="232" text-anchor="middle">?</text>
+          <text class="ex-sub" x="636" y="270" text-anchor="middle">empty in</text>
+          <text class="ex-sub" x="636" y="292" text-anchor="middle">2 × 2?</text>
+        </svg>
+        <figcaption>
+          The outer ring holds the energies that are rank-one convex and not quasiconvex. For maps of the plane to space, 3 × 2 matrices, Šverák found
+          one in 1992. For 2 × 2 matrices nobody knows whether the ring is empty.
+        </figcaption>
+      </figure>
+      <p>
+        Convex and polyconvex energies are the ones you can check, and rank-one convexity is the easy test, but quasiconvexity is the property that
+        matters. The question is whether the easy test is enough.
+      </p>
+
+      <!-- ------------------------------------------------------------ the question -->
+
+      <h2 id="question">Morrey's question</h2>
+      <p class="question">Is every rank-one convex energy quasiconvex?</p>
+      <p>
+        In words: if no layering can lower the energy, can any ripple? Morrey asked in 1952, and expected the answer to be no; Ball asked again in
+        print in 1987. A yes would turn an infinite-dimensional test into a test on lines, and the answer matters in at least three fields.
+      </p>
+      <ul class="why">
+        <li>
+          <strong>Elasticity.</strong> Equilibria of elastic bodies are found by minimizing energy, and Morrey's theorem says quasiconvexity is what
+          the minimization needs. A yes would mean that the test on lines decides it.
+        </li>
+        <li>
+          <strong>Crystals.</strong> Fine microstructure, like the twins of shape-memory alloys, is how materials lower energies that are not
+          quasiconvex. A yes in 2 × 2 would mean that the least energy a planar material can reach with any fine pattern is already reached by layers,
+          and layers within layers.
+        </li>
+        <li>
+          <strong>Complex analysis.</strong> Astala, Iwaniec, Prause and Saksman connected the problem in 2012 to Iwaniec's conjecture of 1982 on the
+          size of the Beurling-Ahlfors transform, a basic operator of complex analysis in the plane. A yes in 2 × 2 would prove that conjecture. A
+          2026 preprint of twenty authors claims a proof of Iwaniec's conjecture, through the quasiconvexity of the Burkholder function, and the
+          preprint has been audited with a Lean formalization. A proof of the conjecture would not settle Morrey's problem, since the conjecture is
+          not known to imply a yes.
+        </li>
+      </ul>
+
+      <!-- ------------------------------------------------------------ the state -->
+
+      <h2 id="state">Where the problem stands</h2>
+      <p>
+        The answer depends on the size of the matrices: <i>d</i> rows, the number of components of the map, and <i>m</i> columns, the number of
+        variables. A sheet that stays in its plane has 2 × 2 matrices; a sheet that moves in space has 3 × 2. A yes in one size gives a yes in every
+        smaller size, and a no in every larger one.
+      </p>
+
+      <figure class="mid sizes-fig">
+        <table class="sizes" aria-describedby="sizes-cap">
+          <thead>
+            <tr>
+              <th scope="col"><span class="vh">Components d, variables m</span></th>
+              <th scope="col"><i>m</i> = 1</th>
+              <th scope="col"><i>m</i> = 2</th>
+              <th scope="col"><i>m</i> = 3</th>
+              <th scope="col"><i>m</i> ≥ 4</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row"><i>d</i> = 1</th>
+              <td class="yes">yes</td>
+              <td class="yes">yes</td>
+              <td class="yes">yes</td>
+              <td class="yes">yes</td>
+            </tr>
+            <tr>
+              <th scope="row"><i>d</i> = 2</th>
+              <td class="yes">yes</td>
+              <td class="open">open</td>
+              <td class="claimed">no, claimed</td>
+              <td class="claimed">no, claimed</td>
+            </tr>
+            <tr>
+              <th scope="row"><i>d</i> = 3</th>
+              <td class="yes">yes</td>
+              <td class="no">no</td>
+              <td class="no">no</td>
+              <td class="no">no</td>
+            </tr>
+            <tr>
+              <th scope="row"><i>d</i> ≥ 4</th>
+              <td class="yes">yes</td>
+              <td class="no">no</td>
+              <td class="no">no</td>
+              <td class="no">no</td>
+            </tr>
+          </tbody>
+        </table>
+        <figcaption id="sizes-cap">
+          Does rank-one convexity imply quasiconvexity for <i>d</i> × <i>m</i> matrices? With one row or one column both notions are convexity.
+          Šverák's 1992 example settles every other size with three or more rows. For two rows and three or more columns, preprints of 2026 claim a
+          no. The 2 × 2 case is open.
+        </figcaption>
+      </figure>
+
+      <ol class="timeline">
+        <li>
+          <span class="year">1952</span>
+          <span>Morrey introduces quasiconvexity, proves that it is what the minimization of energy needs, and asks the question.</span>
+        </li>
+        <li>
+          <span class="year">1977</span>
+          <span>Ball introduces polyconvexity and proves that equilibria exist in nonlinear elasticity.</span>
+        </li>
+        <li>
+          <span class="year">1988</span>
+          <span
+            >Dacorogna and Marcellini study the energies <i>f<sub>γ</sub></i
+            >, a test case ever since.</span
+          >
+        </li>
+        <li>
+          <span class="year">1992</span>
+          <span
+            >Šverák answers no for 3 × 2 matrices and larger, with an explicit energy. Alibert and Dacorogna find an <i>f<sub>γ</sub></i> that is
+            quasiconvex and not polyconvex.</span
+          >
+        </li>
+        <li>
+          <span class="year">2012</span>
+          <span>Astala, Iwaniec, Prause and Saksman link the 2 × 2 case to Iwaniec's conjecture.</span>
+        </li>
+        <li>
+          <span class="year">2019</span>
+          <span
+            >Pedregal claims a proof for 2 × 2 (arXiv:1905.06571, revised up to 2026). It fails at its Corollary 7.2, which the repository refutes
+            with an explicit counterexample checked in Lean.</span
+          >
+        </li>
+        <li>
+          <span class="year">2022</span>
+          <span
+            >Guerra and Kristensen study nonnegative isotropic homogeneous energies, and ask whether those with <i>p</i> ≥ 2 are polyconvex
+            everywhere.</span
+          >
+        </li>
+        <li>
+          <span class="year">2026</span>
+          <span
+            >Cassese's preprint claims a no for 2 × <i>m</i>, <i>m</i> ≥ 3; the repository audits it with a Lean formalization that covers every
+            result the preprint proves. A preprint of Agazzi and coauthors claims proofs of Iwaniec's conjecture and of the quasiconvexity of the
+            truncated determinant. The repository proves Theorem A, below.</span
+          >
+        </li>
+      </ol>
+
+      <!-- ------------------------------------------------------------ the theorem -->
+
+      <h2 id="theorem">A theorem for symmetric energies</h2>
+      <p>
+        The repository <a href="https://github.com/vltanh/lean4-morrey">lean4-morrey</a> answers the question for 2 × 2 matrices when the energy has
+        two symmetries. Three properties of an energy <i>F</i> go into the theorem, and a fourth, its sign, shows where the difficulty lay.
+      </p>
+
+      <h3 id="iso">Isotropy: turning does not matter</h3>
+      <p>
+        Turn the sheet before deforming it, or turn the result afterwards: an isotropic energy charges the same. In symbols,
+        <i>F</i>(<i>QAR</i>) = <i>F</i>(<i>A</i>) for all rotations <i>Q</i> and <i>R</i>.
+      </p>
+      <figure class="pair mid">
+        <svg
+          id="iso-sq"
+          class="board medium"
+          role="img"
+          aria-label="The square, turned first by R, deformed by A, then turned by Q"
+          xmlns="http://www.w3.org/2000/svg"
+        ></svg>
+        <div class="pair-side">
+          <label class="slider">
+            <span>Turn first</span>
+            <input type="range" id="iso-r" min="-180" max="180" step="1" value="35" />
+            <output id="iso-r-out" for="iso-r"></output>
+          </label>
+          <label class="slider">
+            <span>Turn after</span>
+            <input type="range" id="iso-q" min="-180" max="180" step="1" value="-20" />
+            <output id="iso-q-out" for="iso-q"></output>
+          </label>
+          <dl class="figures" id="iso-figures"></dl>
+        </div>
+        <figcaption>
+          The dashed square is turned first, then deformed by a fixed <i>A</i>, then turned again. The energy <i>f</i><sub>1.1</sub> of Dacorogna and
+          Marcellini (below) is isotropic; the stretch of the bottom side alone is not.
+        </figcaption>
+      </figure>
+
+      <h3 id="hom">Homogeneity: stretching scales the energy</h3>
+      <p>
+        Scale the whole deformation by a factor <i>λ</i> &gt; 0: a positively <i>p</i>-homogeneous energy is multiplied by <i>λ</i><sup><i>p</i></sup
+        >. In symbols, <i>F</i>(<i>λA</i>) = <i>λ</i><sup><i>p</i></sup> <i>F</i>(<i>A</i>).
+      </p>
+      <figure class="pair mid">
+        <svg
+          id="hom-plot"
+          class="board medium"
+          role="img"
+          aria-label="The energy of the scaled deformation against the scale factor"
+          xmlns="http://www.w3.org/2000/svg"
+        ></svg>
+        <div class="pair-side">
+          <label class="slider">
+            <span><i>λ</i></span>
+            <input type="range" id="hom-l" min="0.2" max="2" step="0.01" value="1.5" />
+            <output id="hom-l-out" for="hom-l"></output>
+          </label>
+          <label class="slider">
+            <span><i>p</i></span>
+            <input type="range" id="hom-p" min="0.5" max="5" step="0.1" value="4" />
+            <output id="hom-p-out" for="hom-p"></output>
+          </label>
+          <p class="readout" id="hom-read"></p>
+        </div>
+        <figcaption>
+          The energy ‖<i>A</i>‖<sup><i>p</i></sup
+          >, the stretch to the power <i>p</i>/2, is isotropic and <i>p</i>-homogeneous. The squares are <i>A</i> (dashed) and <i>λA</i>.
+        </figcaption>
+      </figure>
+
+      <h3 id="roc">Rank-one convexity</h3>
+      <p>The energy never bends down along a path that layers can follow, as defined above. The figure tests <i>f</i><sub>1.1</sub>:</p>
+      <figure class="probe mid" id="probe-h3"></figure>
+
+      <h3 id="sign">The sign</h3>
+      <p>
+        Some energies with these three properties are never negative. When <i>p</i> ≥ 2, such an energy is already polyconvex (a result of the
+        repository, in the table below), so it is quasiconvex by the short argument of the area factor. The energies whose quasiconvexity was in
+        question are therefore those that are negative somewhere, among them the Burkholder function and the energies <i>f<sub>γ</sub></i> below with
+        1 &lt; |<i>γ</i>| ≤ 2/√3. The energy <i>f</i><sub>1.1</sub> is one of them: it is negative near the turns of the square, the rest shape
+        included.
+      </p>
+      <figure class="pair mid">
+        <svg id="sign-sq" class="board medium" xmlns="http://www.w3.org/2000/svg" aria-describedby="drag-hint"></svg>
+        <div class="pair-side">
+          <p class="readout" id="sign-read" aria-live="polite"></p>
+          <div class="presets" role="group" aria-label="Examples">
+            <button type="button" data-m="1,0,0,1">Rest</button>
+            <button type="button" data-m="0.71,-0.71,0.71,0.71">Turn</button>
+            <button type="button" data-m="1,0,0,-1">Mirror</button>
+            <button type="button" data-m="1.6,0,0,0.4">Stretch</button>
+          </div>
+        </div>
+        <figcaption>Drag the arrow tips. The energy is <i>f</i><sub>1.1</sub>.</figcaption>
+      </figure>
+
+      <div class="theorem" role="note" aria-labelledby="thm-a">
+        <p class="theorem-head" id="thm-a">Theorem A</p>
+        <p>Let <i>p</i> &gt; 0. Every isotropic, positively <i>p</i>-homogeneous, rank-one convex energy on 2 × 2 matrices is quasiconvex.</p>
+      </div>
+      <p>So for these energies the easy test is enough. Lean's kernel checks every step of the proof, and the Lean statement reads:</p>
+      <pre class="lean"><code>theorem quasiconvex_of_rankOneConvex_of_isotropic
+    (hp : 0 &lt; p) (hiso : IsIsotropic F)
+    (hhom : IsPosHomogeneous p F) (hrc : RankOneConvex F) :
+    Quasiconvex F</code></pre>
+
+      <!-- ------------------------------------------------------------ what is proved -->
+
+      <h2 id="proved">What is proved, exponent by exponent</h2>
+      <p>
+        The theorem holds for every <i>p</i> &gt; 0, and some exponents give more. Here "symmetric" means isotropic and positively
+        <i>p</i>-homogeneous, and <i>J</i> is the mirror diag(1, −1). Move <i>p</i> to light up the rows that apply.
+      </p>
+      <label class="slider mid-slider">
+        <span><i>p</i></span>
+        <input type="range" id="tab-p" min="0.1" max="4" step="0.05" value="3" />
+        <output id="tab-p-out" for="tab-p"></output>
+      </label>
+      <figure class="mid table-fig">
+        <table class="results" id="results">
+          <thead>
+            <tr>
+              <th scope="col">Exponent</th>
+              <th scope="col">If <i>F</i> is</th>
+              <th scope="col">then</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr data-lo="0" data-hi="1" data-open="both">
+              <td>0 &lt; <i>p</i> &lt; 1</td>
+              <td>homogeneous and rank-one convex</td>
+              <td><i>F</i> = 0</td>
+            </tr>
+            <tr data-lo="1" data-hi="1">
+              <td><i>p</i> = 1</td>
+              <td>symmetric and rank-one convex</td>
+              <td><i>F</i> ≥ 0, and <i>F</i> is convex (Dacorogna 1995)</td>
+            </tr>
+            <tr data-lo="1" data-hi="2" data-open="both">
+              <td>1 &lt; <i>p</i> &lt; 2</td>
+              <td>symmetric and rank-one convex</td>
+              <td><i>F</i> is quasiconvex</td>
+            </tr>
+            <tr data-lo="1" data-hi="2" data-open="both">
+              <td>1 &lt; <i>p</i> &lt; 2</td>
+              <td>symmetric, rank-one convex and <i>F</i> ≥ 0</td>
+              <td>
+                at every matrix, <i>F</i> has a touching minorant <i>α B<sub>p</sub></i
+                >(<i>A</i>) + <i>β B<sub>p</sub></i
+                >(<i>JA</i>), <i>α</i>, <i>β</i> ≥ 0
+              </td>
+            </tr>
+            <tr data-lo="2" data-hi="2">
+              <td><i>p</i> = 2</td>
+              <td>symmetric and rank-one convex</td>
+              <td><i>F</i> is polyconvex</td>
+            </tr>
+            <tr data-lo="2" data-hi="Infinity" data-open="both">
+              <td><i>p</i> &gt; 2</td>
+              <td>symmetric and rank-one convex</td>
+              <td><i>F</i> is quasiconvex</td>
+            </tr>
+            <tr data-lo="2" data-hi="Infinity" data-open="both">
+              <td><i>p</i> &gt; 2</td>
+              <td>symmetric, rank-one convex and <i>F</i> ≥ 0</td>
+              <td><i>F</i> is polyconvex, with an explicit support at every matrix</td>
+            </tr>
+            <tr data-lo="2" data-hi="Infinity" data-open="both">
+              <td><i>p</i> &gt; 2</td>
+              <td>symmetric, and <i>F</i> &lt; 0 somewhere</td>
+              <td><i>F</i> is not polyconvex</td>
+            </tr>
+            <tr data-lo="0" data-hi="Infinity" data-open="lo" class="thm-row">
+              <td>every <i>p</i> &gt; 0</td>
+              <td>symmetric and rank-one convex</td>
+              <td><i>F</i> is quasiconvex (Theorem A)</td>
+            </tr>
+          </tbody>
+        </table>
+        <figcaption>
+          Every row is a theorem of the repository, proved in Lean. <i>B<sub>p</sub></i> is the Burkholder function, the energy behind Iwaniec's
+          conjecture.
+        </figcaption>
+      </figure>
+      <p>
+        The polyconvexity of nonnegative energies for <i>p</i> ≥ 2, with a support given by a formula at every matrix, answers the question of Guerra
+        and Kristensen (2022), who had proved it at the multiples of rotations and mirrors. For <i>p</i> &gt; 2, nonnegativity is exactly what
+        polyconvexity needs.
+      </p>
+      <p>
+        The proof uses one result from outside: the quasiconvexity of the <em>truncated determinant</em>, claimed as Theorem 1 of the 2026 preprint of
+        Agazzi and coauthors (<a href="https://arxiv.org/abs/2609.28311">arXiv:2609.28311</a>). That preprint was audited with a Lean formalization,
+        <a href="https://github.com/vltanh/lean4-iwaniec">lean4-iwaniec</a>, and the repository takes the result from that formalization, so the Lean
+        proof assumes nothing beyond Lean's standard axioms.
+      </p>
+
+      <!-- ------------------------------------------------------------ Dacorogna–Marcellini -->
+
+      <h2 id="family">A test case since 1988</h2>
+      <p>
+        Dacorogna and Marcellini studied the energies <i>f<sub>γ</sub></i
+        >(<i>A</i>) = ‖<i>A</i>‖²(‖<i>A</i>‖² − 2<i>γ</i> det <i>A</i>), where ‖<i>A</i>‖² is the stretch, the squared lengths of the two arrows
+        added. One number, <i>γ</i>, tunes how much the energy rewards area. They are isotropic and positively 4-homogeneous, so Theorem A applies.
+        Move <i>γ</i>:
+      </p>
+
+      <figure class="dm wide" id="dm">
+        <div class="dm-top">
+          <label class="slider gamma">
+            <span><i>γ</i></span>
+            <input type="range" id="gamma" min="0" max="1.4" step="0.005" value="1.1" />
+            <output id="gamma-out" for="gamma"></output>
+          </label>
+          <svg id="gamma-line" class="gamma-line" role="img" aria-label="The thresholds of gamma" xmlns="http://www.w3.org/2000/svg"></svg>
+        </div>
+        <div class="dm-grid">
+          <ul class="props" id="dm-props" aria-live="polite"></ul>
+          <div class="dm-plot">
+            <svg id="dm-profile" class="plot" role="img" aria-label="The profile of f gamma" xmlns="http://www.w3.org/2000/svg"></svg>
+            <p class="plot-cap">
+              The energy of the rectangles diag(1, <i>s</i>), −1 ≤ <i>s</i> ≤ 1: by symmetry, these determine <i>f<sub>γ</sub></i
+              >.
+            </p>
+          </div>
+          <div class="dm-plot">
+            <svg
+              id="dm-r1"
+              class="plot"
+              role="img"
+              aria-label="f gamma along the rank-one line where it bends most"
+              xmlns="http://www.w3.org/2000/svg"
+            ></svg>
+            <p class="plot-cap">
+              Along the rank-one line where <i>f<sub>γ</sub></i> bends most.
+            </p>
+          </div>
+          <div class="dm-plot">
+            <svg id="dm-gen" class="plot" role="img" aria-label="f gamma along the line where it bends most" xmlns="http://www.w3.org/2000/svg"></svg>
+            <p class="plot-cap">Along the line, of any direction, where it bends most.</p>
+          </div>
+        </div>
+        <figcaption id="dm-cap">
+          Red marks where the energy bends down or is negative. Only |<i>γ</i>| matters: <i>f</i><sub>−<i>γ</i></sub> is the mirror image of
+          <i>f<sub>γ</sub></i
+          >.
+        </figcaption>
+      </figure>
+
+      <p>
+        Dacorogna's book lists the thresholds: <i>f<sub>γ</sub></i> is convex exactly when |<i>γ</i>| ≤ 2√2/3 ≈ 0.943, polyconvex exactly when
+        |<i>γ</i>| ≤ 1, and rank-one convex exactly when |<i>γ</i>| ≤ 2/√3 ≈ 1.155. It is nonnegative exactly when |<i>γ</i>| ≤ 1. Alibert and
+        Dacorogna proved in 1992 that it is quasiconvex for some <i>γ</i> above 1, so the quasiconvex range ends at a threshold between 1 and 2/√3.
+        The book said in 2008 that the exact threshold was not known.
+      </p>
+      <p>
+        By Theorem A, the threshold is 2/√3: <i>f<sub>γ</sub></i> is quasiconvex exactly when it is rank-one convex. For 1 &lt; |<i>γ</i>| ≤ 2/√3 it
+        takes negative values, it is quasiconvex, and it is not polyconvex. A 2026 preprint of Bruno and Pasqualotto claims the same for this family.
+        <span id="dm-computed"></span>
+      </p>
+
+      <!-- ------------------------------------------------------------ open -->
+
+      <h2 id="open">What remains open</h2>
+      <p>
+        Theorem A covers only energies with both symmetries. For energies that are not isotropic, or not homogeneous, Morrey's problem on 2 × 2
+        matrices is still open, and it remains the target.
+      </p>
+      <p>
+        The special case still counts: it is the class in which Guerra and Kristensen asked their question, now answered, and it contains the
+        Burkholder function, the energy behind Iwaniec's conjecture. Theorem A also settles the family of Dacorogna and Marcellini, a test case since
+        1988.
+      </p>
+
+      <footer class="foot">
+        <p>
+          The definitions and the theorems are those of the Lean repository
+          <a href="https://github.com/vltanh/lean4-morrey">lean4-morrey</a>; its
+          <a href="https://github.com/vltanh/lean4-morrey/blob/main/docs/HomogeneousIsotropic/README.md">README for Theorem A</a> lists them with the
+          paper, and Lean's kernel checks every step. The repository also formalizes Šverák's paper of 1992 and audits Pedregal's claimed proof
+          (arXiv:1905.06571v5) and Cassese's preprint (arXiv:2608.03488v3). More on the project:
+          <a href="/projects/lean4-morrey/">Morrey's problem in Lean 4</a>.
+        </p>
+        <p>
+          Sources: C. B. Morrey, Pacific J. Math. 2 (1952); J. M. Ball, Arch. Rational Mech. Anal. 63 (1977); B. Dacorogna,
+          <i>Direct Methods in the Calculus of Variations</i>, 2nd ed., Springer 2008, Theorem 5.51 (the thresholds of <i>f<sub>γ</sub></i
+          >); J.-J. Alibert and B. Dacorogna, Arch. Rational Mech. Anal. 117 (1992); V. Šverák, Proc. Roy. Soc. Edinburgh 120A (1992); S. Müller,
+          <i>Variational models for microstructure and phase transitions</i>, Lecture Notes in Math. 1713 (1999) (twins in Cu-Al-Ni); K. Astala, T.
+          Iwaniec, I. Prause and E. Saksman, J. Amer. Math. Soc. 25 (2012); A. Guerra and J. Kristensen, Arch. Ration. Mech. Anal. 245 (2022). Every
+          number on this page is computed in your browser.
+        </p>
+      </footer>
+    </div>
+  </body>
+</html>
