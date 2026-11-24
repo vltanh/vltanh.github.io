@@ -52,7 +52,7 @@ theorem quasiconvex_of_rankOneConvex_of_isotropic (hp : 0 < p) (hiso : IsIsotrop
     (hhom : IsPosHomogeneous p F) (hrc : RankOneConvex F) : Quasiconvex F
 ```
 
-For $$p \ge 2$$, an energy with the three properties that is never negative is even polyconvex, a convex function of the matrix and its determinant, and so quasiconvex by the classical argument. This answers Question 1.7 of André Guerra and Jan Kristensen (2022). For $$p > 2$$ an energy that is negative somewhere is not polyconvex, so the energies whose quasiconvexity was in question take negative values somewhere. Among them are the Burkholder function, whose quasiconvexity implies Iwaniec's conjecture, and the energies $$f_\gamma$$ of Dacorogna and Marcellini with $$1 < \lvert\gamma\rvert \le 2/\sqrt3$$, whose quasiconvexity Dacorogna's book left open. By Theorem A these $$f_\gamma$$ are quasiconvex, as a 2026 preprint of Bruno and Pasqualotto also claims. The [explainer](/morrey/) has more on these energies and the results for each range of $$p$$.
+For $$p \ge 2$$, an energy with the three properties that is never negative is even polyconvex, a convex function of the matrix and its determinant, and so quasiconvex by the classical argument. This answers Question 1.7 of André Guerra and Jan Kristensen (2022). For $$p > 2$$ an energy that is negative somewhere is not polyconvex. Among such energies are the Burkholder function, whose quasiconvexity implies Iwaniec's conjecture, and the energies $$f_\gamma$$ of Dacorogna and Marcellini with $$1 < \lvert\gamma\rvert \le 2/\sqrt3$$, whose quasiconvexity Dacorogna's book left open. By Theorem A these $$f_\gamma$$ are quasiconvex, as a 2026 preprint of Bruno and Pasqualotto also claims. The [explainer](/morrey/) has more on these energies and the results for each range of $$p$$.
 
 The proof uses one result from outside, the quasiconvexity of the truncated determinant, claimed as Theorem 1 of the preprint of Agazzi et al. on Iwaniec's conjecture and audited with a Lean formalization, [lean4-iwaniec](https://github.com/vltanh/lean4-iwaniec). A [paper](https://github.com/vltanh/lean4-morrey/blob/main/docs/HomogeneousIsotropic/paper/main.pdf) in the repository writes up the proof.
 
@@ -62,7 +62,7 @@ Lean's kernel checks every proof, with Lean and Mathlib `v4.36.0-rc2`, and an au
 
 ## What's next
 
-Theorem A needs both symmetries, and the general $$2 \times 2$$ case, still open, remains the target. The paper on Theorem A, rewritten after an AI agent reviewed it, has not been refereed again.
+Theorem A needs both symmetries, and the general $$2 \times 2$$ case, still open, remains the target.
 
 ## Contributors
 
