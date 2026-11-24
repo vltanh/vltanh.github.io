@@ -236,7 +236,7 @@ ninja.data = [{
               window.location.href = "/projects/lean4-heilbronn/";
             },},{id: "projects-morrey-39-s-problem-in-lean-4",
           title: 'Morrey&amp;#39;s problem in Lean 4',
-          description: "Lean 4 formalizations of three papers on Morrey&#39;s problem, whether rank-one convexity implies quasiconvexity, and a proof that it does for isotropic, positively homogeneous energies on 2 × 2 matrices.",
+          description: "Lean 4 formalizations of papers on Morrey&#39;s problem, whether rank-one convexity implies quasiconvexity, and a proof that it does for isotropic, positively homogeneous energies on 2 × 2 matrices.",
           section: "Projects",handler: () => {
               window.location.href = "/projects/lean4-morrey/";
             },},{id: "projects-chess-monte-carlo-simulation",
