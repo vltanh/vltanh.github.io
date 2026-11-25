@@ -3,7 +3,7 @@ layout: page
 title: Formal Phylogenetics
 permalink: /projects/formal-phylogenetics/
 description: Lean 4 formalizations of papers on phylogenetics, each audited against the paper, grown as a tree of repositories, from a shared root library through hubs of inference and of theory to the papers.
-img: assets/img/formal-phylogenetics/overview.png
+img: assets/img/formal-phylogenetics/tree.png
 og_image: /assets/img/formal-phylogenetics/og.png
 importance: 12
 category: work
@@ -20,7 +20,7 @@ Phylogenetics reconstructs evolutionary history from the DNA of living species. 
 
 <div class="row justify-content-center">
   <div class="col-sm-12 mt-3 mt-md-0">
-    {% include figure.liquid path="assets/img/formal-phylogenetics/overview.png" class="img-fluid" alt="The catalogue page. At the top, the title and, beside it, the collection drawn as a fan-shaped tree from its root, lean4-phylogenetics: the hubs of theory on the left (combinatorics, algebraic, statistics, geometry) and the hubs of inference on the right (alignment, gene tree, species tree, network), each a coloured wedge whose branches end in a tip for each entry of its catalog. Below, a timeline of the entries, one row per hub and time from left to right, with ASTRAL pinned: the papers it cites are joined to it in ink, and the papers that cite it in amber." caption="The catalogue: the collection as a tree, theory on the left and inference on the right, and the timeline of its papers with ASTRAL pinned, what it cites in ink and what cites it in amber." %}
+    {% include figure.liquid path="assets/img/formal-phylogenetics/tree.png" class="img-fluid" alt="The collection drawn as a fan-shaped tree from its root, lean4-phylogenetics: the hubs of theory on the left (combinatorics, algebraic, statistics, geometry) and the hubs of inference on the right (alignment, gene tree, species tree, network). Each hub is a coloured wedge whose branches split into families and end in a tip for each entry of its catalog; the formalized entries end in a bud." caption="The collection as a tree: the root, the hubs of theory on the left and of inference on the right, their families, and a tip for each entry of their catalogs. The tips that end in a bud are formalized." %}
   </div>
 </div>
 
