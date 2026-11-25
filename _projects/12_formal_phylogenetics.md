@@ -24,7 +24,7 @@ Phylogenetics reconstructs evolutionary history from the DNA of living species. 
   </div>
 </div>
 
-<p style="text-align:center; margin-top:1rem;"><a href="https://formal-phylogenetics.github.io/">open the catalogue at formal-phylogenetics.github.io &rarr;</a></p>
+<p style="text-align:center; margin-top:1rem;"><a href="https://formal-phylogenetics.vltanh.me/">open the catalogue at formal-phylogenetics.vltanh.me &rarr;</a></p>
 
 ## The structure
 
@@ -37,7 +37,7 @@ The repositories form a tree, and each node holds what the repositories below it
 
 A definition or a result lives at the lowest node above every repository that uses it: in a paper's repository when only that paper uses it, in a hub's library when several of its papers do, and in the root when papers of several hubs do. Each repository requires the libraries above it at fixed commits, the same for the whole collection, so every formalization keeps building while the libraries grow.
 
-The [catalogue](https://formal-phylogenetics.github.io/) reads the hubs' catalogs and shows every method, piece of software and theorem in them along time, with the citations between them.
+The [catalogue](https://formal-phylogenetics.vltanh.me/) reads the hubs' catalogs and shows every method, piece of software and theorem in them along time, with the citations between them.
 
 ## Verification
 
