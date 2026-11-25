@@ -239,6 +239,11 @@ ninja.data = [{
           description: "Lean 4 formalizations of papers on Morrey&#39;s problem, whether rank-one convexity implies quasiconvexity, and a proof that it does for isotropic, positively homogeneous energies on 2 × 2 matrices.",
           section: "Projects",handler: () => {
               window.location.href = "/projects/lean4-morrey/";
+            },},{id: "projects-formal-phylogenetics",
+          title: 'Formal Phylogenetics',
+          description: "Lean 4 formalizations of papers on phylogenetics, each audited against the paper, grown as a tree of repositories, from a shared root library through hubs of inference and of theory to the papers.",
+          section: "Projects",handler: () => {
+              window.location.href = "/projects/formal-phylogenetics/";
             },},{id: "projects-chess-monte-carlo-simulation",
           title: 'Chess Monte Carlo Simulation',
           description: "Tracking the 2026 Candidates with dynamic player strength, one million simulated tournaments per round.",
