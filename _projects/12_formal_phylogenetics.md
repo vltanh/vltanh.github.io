@@ -3,7 +3,7 @@ layout: page
 title: Formal Phylogenetics
 permalink: /projects/formal-phylogenetics/
 description: Lean 4 formalizations of papers on phylogenetics, each audited against the paper, grown as a tree of repositories, from a shared root library through hubs of inference and of theory to the papers.
-img: assets/img/formal-phylogenetics/tree.png
+img: assets/img/formal-phylogenetics/tree.svg
 og_image: /assets/img/formal-phylogenetics/og.png
 importance: 12
 category: work
@@ -20,7 +20,7 @@ Phylogenetics reconstructs evolutionary history from the DNA of living species. 
 
 <div class="row justify-content-center">
   <div class="col-sm-12 mt-3 mt-md-0">
-    {% include figure.liquid path="assets/img/formal-phylogenetics/tree.png" class="img-fluid" alt="The collection drawn as a fan-shaped tree from its root, lean4-phylogenetics: the hubs of theory on the left (combinatorics, algebraic, statistics, geometry) and the hubs of inference on the right (alignment, gene tree, species tree, network). Each hub is a coloured wedge whose branches split into families and end in a tip for each entry of its catalog; the formalized entries end in a bud." caption="The collection as a tree: the root, the hubs of theory on the left and of inference on the right, their families, and a tip for each entry of their catalogs. The tips that end in a bud are formalized." %}
+    {% include figure.liquid path="assets/img/formal-phylogenetics/tree.svg" class="img-fluid" alt="A phylogenetic tree drawn as a fan from its root, its two sides unequal: theory on the left, in warm colours, and inference on the right, in cool ones." caption="The collection as a tree: the root, the hubs of theory on the left and of inference on the right, their families, and a tip for each entry of their catalogs. The tips that end in a bud are formalized." %}
   </div>
 </div>
 
